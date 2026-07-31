@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ticket-Prompts · Smartlife Sales-Chatbot</title>
+    <style>
+        :root {
+            --bg: #0f1115;
+            --panel: #171a21;
+            --panel-2: #1e222b;
+            --border: #2a2f3a;
+            --text: #e6e8ec;
+            --muted: #9aa3b2;
+            --accent: #10a37f;
+            --accent-hover: #0c8a6c;
+            --danger: #ff6b6b;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            margin: 0;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.5;
+            color: var(--text);
+            background: var(--bg);
+        }
+
+        header {
+            display: flex;
+            gap: 12px;
+            align-items: baseline;
+            padding: 18px 24px;
+            border-bottom: 1px solid var(--border);
+            flex-wrap: wrap;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 650;
+        }
+
+        header .sub {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .page {
+            display: grid;
+            gap: 16px;
+            width: min(1180px, 100%);
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .selector,
+        .prompt-card {
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: var(--panel);
+        }
+
+        .selector {
+            padding: 16px;
+        }
+
+        .selector__label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+        }
+
+        .selector__row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        select {
+            min-height: 42px;
+            padding: 9px 40px 9px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            background: var(--panel-2);
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .ticket-select {
+            width: min(560px, 100%);
+        }
+
+        .status-select {
+            width: 170px;
+        }
+
+        .selector__status-label {
+            color: var(--muted);
+            font-size: 13px;
+            font-weight: 650;
+        }
+
+        select:hover {
+            border-color: var(--accent);
+        }
+
+        select:focus {
+            border-color: var(--accent);
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        select:focus:not(:focus-visible) {
+            outline: none;
+        }
+
+        select:disabled {
+            cursor: default;
+            opacity: .55;
+        }
+
+        button {
+            min-height: 40px;
+            border-radius: 8px;
+            padding: 9px 14px;
+            font-size: 14px;
+            font-weight: 650;
+            cursor: pointer;
+        }
+
+        button.action {
+            border: 0;
+            color: #04130d;
+            background: var(--accent);
+        }
+
+        button.action:hover {
+            background: var(--accent-hover);
+        }
+
+        button.ghost {
+            border: 1px solid var(--border);
+            color: var(--text);
+            background: transparent;
+        }
+
+        button.ghost:hover {
+            border-color: var(--accent);
+        }
+
+        button:disabled,
+        button:disabled:hover {
+            cursor: default;
+            opacity: .45;
+        }
+
+        .current {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .status {
+            margin-left: auto;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .status.ok {
+            color: var(--accent);
+        }
+
+        .status.err {
+            color: var(--danger);
+        }
+
+        .setup-hint {
+            width: 100%;
+            margin: 4px 0 0;
+            padding: 10px 12px;
+            border: 1px solid #5a3d3d;
+            border-radius: 8px;
+            color: #ffd0d0;
+            background: #25191b;
+            font-size: 13px;
+        }
+
+        .setup-hint[hidden] {
+            display: none;
+        }
+
+        .setup-hint code {
+            padding: 2px 5px;
+            border-radius: 4px;
+            color: var(--text);
+            background: #0b0d11;
+        }
+
+        .setup-hint a {
+            color: #7ce8ca;
+        }
+
+        .prompt-card {
+            overflow: hidden;
+        }
+
+        .prompt-card__head {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+            background: var(--panel-2);
+        }
+
+        .prompt-card__title {
+            margin: 0;
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        .prompt-card__description {
+            margin: 2px 0 0;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        textarea {
+            display: block;
+            width: 100%;
+            min-height: 160px;
+            resize: vertical;
+            padding: 16px;
+            border: 0;
+            color: var(--text);
+            background: #0b0d11;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.55;
+            tab-size: 4;
+        }
+
+        textarea:focus {
+            outline: 2px solid var(--accent);
+            outline-offset: -2px;
+        }
+
+        textarea::placeholder {
+            color: #687181;
+        }
+
+        .prompt-card--implementation textarea {
+            min-height: 420px;
+        }
+
+        .prompt-card--review textarea {
+            min-height: 360px;
+        }
+
+        .prompt-card--fix textarea {
+            min-height: 92px;
+        }
+
+        @media (max-width: 700px) {
+            header,
+            .page {
+                padding-right: 14px;
+                padding-left: 14px;
+            }
+
+            .selector__row {
+                align-items: stretch;
+            }
+
+            select,
+            .selector__row button {
+                width: 100%;
+            }
+
+            .status {
+                width: 100%;
+                margin-left: 0;
+            }
+
+            .prompt-card__head {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .prompt-card__head button {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Ticket-Prompts</h1>
+        <span class="sub">Implementierung, Review und Fix · Smartlife Sales-Chatbot</span>
+    </header>
+
+    <main class="page">
+        <section class="selector" aria-labelledby="ticket-label">
+            <label class="selector__label" id="ticket-label" for="ticketSelect">Ticket auswählen</label>
+            <div class="selector__row">
+                <select class="ticket-select" id="ticketSelect" disabled>
+                    <option value="">Lade Tickets…</option>
+                </select>
+                <label class="selector__status-label" for="ticketStatusSelect">Status</label>
+                <select class="status-select" id="ticketStatusSelect" disabled>
+                    <option value="todo">todo</option>
+                    <option value="in_progress">in_progress</option>
+                    <option value="review">review</option>
+                    <option value="done">done</option>
+                    <option value="reserved">reserved</option>
+                </select>
+                <button class="action" id="statusSaveBtn" type="button" disabled>Status speichern</button>
+                <button class="ghost" id="nextBtn" type="button" disabled>Nächstes Ticket →</button>
+                <span class="current" id="current">Kein Ticket gewählt</span>
+                <span class="status" id="status" role="status" aria-live="polite"></span>
+                <p class="setup-hint" id="setupHint" hidden>
+                    Diese Seite benötigt einen PHP-Webserver. Starte im Repository-Root
+                    <code>php -S 127.0.0.1:8000</code> und öffne danach
+                    <a href="http://127.0.0.1:8000/ticket-prompt/">http://127.0.0.1:8000/ticket-prompt/</a>.
+                </p>
+            </div>
+        </section>
+
+        <section class="prompt-card prompt-card--implementation">
+            <div class="prompt-card__head">
+                <div>
+                    <h2 class="prompt-card__title">Implementierungs-Prompt</h2>
+                    <p class="prompt-card__description">Master-Template mit dem vollständigen Inhalt des ausgewählten Tickets.</p>
+                </div>
+                <button class="action" id="implementationCopyBtn" type="button" aria-label="Implementierungs-Prompt kopieren" disabled>Prompt kopieren</button>
+            </div>
+            <textarea id="implementationOutput" readonly spellcheck="false" aria-label="Implementierungs-Prompt" placeholder="Der fertige Prompt erscheint hier, sobald du ein Ticket auswählst."></textarea>
+        </section>
+
+        <section class="prompt-card prompt-card--review">
+            <div class="prompt-card__head">
+                <div>
+                    <h2 class="prompt-card__title">Review-Prompt</h2>
+                    <p class="prompt-card__description">Die Ticket-ID wird an beiden benötigten Stellen eingesetzt.</p>
+                </div>
+                <button class="action" id="reviewCopyBtn" type="button" aria-label="Review-Prompt kopieren" disabled>Prompt kopieren</button>
+            </div>
+            <textarea id="reviewOutput" readonly spellcheck="false" aria-label="Review-Prompt" placeholder="Wähle ein Ticket aus, um den Review-Prompt zu erzeugen."></textarea>
+        </section>
+
+        <section class="prompt-card prompt-card--fix">
+            <div class="prompt-card__head">
+                <div>
+                    <h2 class="prompt-card__title">Fix-Prompt</h2>
+                    <p class="prompt-card__description">Statischer Folge-Prompt für die gefundenen Review-Punkte.</p>
+                </div>
+                <button class="action" id="fixCopyBtn" type="button" aria-label="Fix-Prompt kopieren">Prompt kopieren</button>
+            </div>
+            <textarea id="fixOutput" readonly spellcheck="false" aria-label="Fix-Prompt">Fixe die von dir gefundenen Punkte (auch außerhalb des Ticket-Scopes), setzte das Ticket auf "done" und passe bei Bedarf die `AGENTS.md` an.</textarea>
+        </section>
+    </main>
+
+    <script>
+        const ticketSelect = document.getElementById('ticketSelect');
+        const ticketStatusSelect = document.getElementById('ticketStatusSelect');
+        const statusSaveBtn = document.getElementById('statusSaveBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        const currentEl = document.getElementById('current');
+        const statusEl = document.getElementById('status');
+        const setupHint = document.getElementById('setupHint');
+        const implementationOutput = document.getElementById('implementationOutput');
+        const implementationCopyBtn = document.getElementById('implementationCopyBtn');
+        const reviewOutput = document.getElementById('reviewOutput');
+        const reviewCopyBtn = document.getElementById('reviewCopyBtn');
+        const fixOutput = document.getElementById('fixOutput');
+        const fixCopyBtn = document.getElementById('fixCopyBtn');
+
+        let tickets = [];
+        let activeId = null;
+        let promptRequest = 0;
+        let statusRequestPending = false;
+
+        function setStatus(message, kind) {
+            statusEl.textContent = message || '';
+            statusEl.className = 'status' + (kind ? ' ' + kind : '');
+        }
+
+        function createReviewPrompt(ticketId) {
+            return [
+                'Prüfe die Umsetzung von `tickets/' + ticketId + '.md` im Review-Modus.',
+                '',
+                'Aufgaben:',
+                '1. Lies `AGENTS.md`, `tickets/' + ticketId + '.md` und alle dort genannten `spec_refs`.',
+                '2. Lies in `tickets/' + ticketId + '.md` den Abschnitt „## Umsetzungshinweise für die Review-KI",',
+                '   sofern vorhanden. Er ist die Selbstauskunft der Implementierungs-KI (Auslegungsentscheidungen,',
+                '   bewusste Abweichungen, Stellen mit erhöhtem Prüfbedarf) und nicht Teil der ursprünglichen',
+                '   Ticket-Anforderungen. Nutze ihn als Wegweiser, übernimm aber keine Bewertung ungeprüft, sondern',
+                '   verifiziere jeden Punkt selbst am Diff.',
+                '3. Prüfe den Code-Diff gegen Ticket-Scope, Akzeptanzkriterien, Specs und bestehende Projektregeln;',
+                '   widme den in Schritt 2 genannten Stellen besondere Aufmerksamkeit, aber beschränke dich nicht',
+                '   darauf.',
+                '4. Berichte zuerst Review-Findings mit Datei/Zeile, Schweregrad und Begründung.',
+                '5. Prüfe danach, ob aus diesem Ticket dauerhaft nützliche Instruktions-Updates für `AGENTS.md` entstanden sind.',
+                '6. Gib am Ende deiner Chat-Antwort eine kopierfertige Fix-Liste aus (siehe unten).',
+                '',
+                'Fix-Liste (Format):',
+                '- Beginne mit einer Zeile mit genau `### Fix-Liste` und schließe die Liste danach ohne weiteren Text ab.',
+                '- Wenn nichts zu beheben ist, schreibe darunter genau eine Zeile: `Nichts zu fixen.`',
+                '- Andernfalls je Punkt eine nummerierte Zeile im Format:',
+                '  `1. [Schweregrad] Datei:Zeile — konkret zu behebendes Problem und erwartetes Zielverhalten`.',
+                '- Nach Schweregrad absteigend sortieren (Blocker/Hoch vor Mittel vor Niedrig).',
+                '- Jeder Punkt ist eigenständig verständlich und ohne diesen Chatverlauf umsetzbar; nenne betroffene',
+                '  Datei/Zeile und, falls hilfreich, den Ticketbezug. Keine offenen Fragen, keine Sammelpunkte.',
+                '- Nimm nur tatsächlich zu behebende Punkte auf; reine Bestätigungen oder Lob gehören nicht hinein.',
+                '',
+                'Wichtig:',
+                '- Ändere keine Code-Dateien.',
+                '- Behandle den Abschnitt „Umsetzungshinweise für die Review-KI" als Anhaltspunkt, nicht als Beweis;',
+                '  fehlt er, führe die Prüfung unverändert allein anhand von Ticket, Specs und Diff durch.',
+                '- Ändere `AGENTS.md` nur, wenn die Ergänzung wiederverwendbar, knapp und nicht bereits enthalten ist.',
+                '- Keine Ticketdetails, keine einmaligen Workarounds, keine Duplikate aufnehmen.',
+                '- Wenn kein Update nötig ist, schreibe ausdrücklich: `AGENTS.md: kein Update nötig`.',
+                '- Halte `AGENTS.md` kurz, lesbar für Menschen und LLMs.',
+                '- Füge höchstens 3 kurze Bulletpoints oder einen kurzen Abschnitt hinzu.',
+            ].join('\n');
+        }
+
+        async function loadTickets() {
+            if (window.location.protocol === 'file:') {
+                ticketSelect.replaceChildren(new Option('PHP-Webserver erforderlich', ''));
+                ticketSelect.disabled = true;
+                setupHint.hidden = false;
+                setStatus('Direkter Datei-Aufruf nicht möglich.', 'err');
+
+                return;
+            }
+
+            try {
+                const response = await fetch('api.php?action=list');
+                const data = await response.json();
+
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.error || 'Unbekannter Fehler');
+                }
+
+                tickets = data.tickets;
+                renderTicketOptions();
+                setStatus(tickets.length + ' Tickets geladen', 'ok');
+            } catch (error) {
+                ticketSelect.replaceChildren(new Option('Ticket-API nicht erreichbar', ''));
+                ticketSelect.disabled = true;
+                setupHint.hidden = false;
+                setStatus('Fehler: ' + error.message, 'err');
+            }
+        }
+
+        function renderTicketOptions() {
+            const placeholder = new Option('Ticket auswählen…', '');
+            placeholder.disabled = true;
+            placeholder.selected = !activeId;
+            ticketSelect.replaceChildren(placeholder);
+
+            tickets.forEach(function (ticket) {
+                const meta = ticket.meta ? ' · ' + ticket.meta : '';
+                const drift = ticket.status_consistent === false ? ' · Statusabweichung' : '';
+                const workflowStatus = ticket.status
+                    ? ' · Status: ' + ticket.status + drift
+                    : ' · Status unbekannt';
+                const option = new Option(ticketLabel(ticket) + meta + workflowStatus, ticket.id);
+                ticketSelect.appendChild(option);
+            });
+
+            ticketSelect.disabled = tickets.length === 0;
+
+            if (activeId && tickets.some(function (ticket) { return ticket.id === activeId; })) {
+                ticketSelect.value = activeId;
+            }
+
+            if (tickets.length === 0) {
+                ticketSelect.replaceChildren(new Option('Keine Tickets gefunden', ''));
+            }
+        }
+
+        function ticketLabel(ticket) {
+            const title = ticket.title.replace(/^#\s*/, '');
+
+            return title.startsWith(ticket.id) ? title : ticket.id + ' — ' + title;
+        }
+
+        function updateNextButton() {
+            const currentIndex = tickets.findIndex(function (ticket) {
+                return ticket.id === activeId;
+            });
+            const nextTicket = currentIndex >= 0 ? tickets[currentIndex + 1] : null;
+
+            nextBtn.disabled = !nextTicket;
+            nextBtn.setAttribute(
+                'aria-label',
+                nextTicket ? 'Nächstes Ticket auswählen: ' + nextTicket.id : 'Kein höheres Ticket verfügbar'
+            );
+        }
+
+        function updateStatusControls(ticket, synchronizeValue) {
+            const knownStatus = ticket && Array.from(ticketStatusSelect.options).some(function (option) {
+                return option.value === ticket.status;
+            });
+
+            ticketStatusSelect.disabled = !knownStatus || statusRequestPending;
+            if (knownStatus && synchronizeValue) {
+                ticketStatusSelect.value = ticket.status;
+            }
+            const alreadySynchronized = ticket
+                && ticket.status_consistent !== false
+                && ticketStatusSelect.value === ticket.status;
+            statusSaveBtn.disabled = !knownStatus || statusRequestPending || alreadySynchronized;
+        }
+
+        async function selectTicket(id) {
+            const ticket = tickets.find(function (candidate) {
+                return candidate.id === id;
+            });
+
+            if (!ticket) {
+                return;
+            }
+
+            activeId = id;
+            ticketSelect.value = id;
+            currentEl.textContent = ticketLabel(ticket)
+                + (ticket.status ? ' · Status: ' + ticket.status : '')
+                + (ticket.status_consistent === false ? ' · Abweichung erkannt' : '');
+            reviewOutput.value = createReviewPrompt(id);
+            reviewCopyBtn.disabled = false;
+            updateNextButton();
+            updateStatusControls(ticket, true);
+
+            await loadImplementationPrompt(id, 'Alle Prompts bereit');
+        }
+
+        async function loadImplementationPrompt(id, successMessage) {
+
+            const requestId = ++promptRequest;
+            implementationOutput.value = '';
+            implementationCopyBtn.disabled = true;
+            setStatus('Erzeuge Implementierungs-Prompt…');
+
+            try {
+                const response = await fetch('api.php?action=prompt&id=' + encodeURIComponent(id));
+                const data = await response.json();
+
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.error || 'Unbekannter Fehler');
+                }
+
+                if (requestId !== promptRequest) {
+                    return;
+                }
+
+                implementationOutput.value = data.prompt;
+                implementationCopyBtn.disabled = false;
+                if (successMessage) {
+                    setStatus(successMessage, 'ok');
+                }
+
+                return true;
+            } catch (error) {
+                if (requestId === promptRequest) {
+                    setStatus('Fehler: ' + error.message, 'err');
+                }
+
+                return false;
+            }
+        }
+
+        async function saveTicketStatus() {
+            const ticket = tickets.find(function (candidate) {
+                return candidate.id === activeId;
+            });
+            const newStatus = ticketStatusSelect.value;
+
+            const alreadySynchronized = ticket
+                && ticket.status_consistent !== false
+                && newStatus === ticket.status;
+            if (!ticket || !newStatus || alreadySynchronized || statusRequestPending) {
+                return;
+            }
+
+            const actionQuestion = ticket.status_consistent === false
+                ? 'Die Statuswerte von ' + ticket.id + ' weichen zwischen den Dateien ab. Alle auf "'
+                    + newStatus + '" vereinheitlichen?'
+                : 'Status von ' + ticket.id + ' von "' + ticket.status + '" auf "' + newStatus + '" ändern?';
+            const confirmed = window.confirm(actionQuestion + '\n\n'
+                + 'Geändert werden die Ticketdatei und alle vorhandenen Inventardateien.');
+            if (!confirmed) {
+                ticketStatusSelect.value = ticket.status;
+                updateStatusControls(ticket, true);
+
+                return;
+            }
+
+            statusRequestPending = true;
+            updateStatusControls(ticket, false);
+            setStatus('Prüfe und speichere Status…');
+
+            try {
+                const response = await fetch('api.php?action=status', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Ticket-Prompt-Request': 'status-update'
+                    },
+                    body: JSON.stringify({id: ticket.id, status: newStatus})
+                });
+                const data = await response.json();
+
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.error || 'Unbekannter Fehler');
+                }
+
+                ticket.status = data.status;
+                ticket.status_consistent = true;
+                statusRequestPending = false;
+                renderTicketOptions();
+                currentEl.textContent = ticketLabel(ticket) + ' · Status: ' + ticket.status;
+                updateStatusControls(ticket, true);
+
+                const promptRefreshed = await loadImplementationPrompt(ticket.id, '');
+                if (promptRefreshed) {
+                    const updatedFileCount = Array.isArray(data.updated_files) ? data.updated_files.length : 1;
+                    const fileLabel = updatedFileCount === 1 ? 'Datei' : 'Dateien';
+                    let successMessage = 'Status in ' + updatedFileCount + ' vorhandenen ' + fileLabel + ' gespeichert';
+                    if (data.validator_clean === false) {
+                        successMessage += '; ' + data.remaining_validator_errors
+                            + ' bereits vorhandene Validatorabweichung(en) bleiben';
+                    } else if (data.validator_clean === true) {
+                        successMessage += ' und validiert ✓';
+                    }
+                    setStatus(
+                        data.changed
+                            ? successMessage
+                            : 'Status war bereits synchron',
+                        'ok'
+                    );
+                }
+            } catch (error) {
+                statusRequestPending = false;
+                ticketStatusSelect.value = ticket.status;
+                updateStatusControls(ticket, true);
+                setStatus('Status nicht geändert: ' + error.message, 'err');
+            }
+        }
+
+        async function copyPrompt(output, successMessage) {
+            if (!output.value) {
+                return;
+            }
+
+            try {
+                await writeToClipboard(output);
+                setStatus(successMessage, 'ok');
+            } catch (error) {
+                setStatus('Kopieren fehlgeschlagen: ' + error.message, 'err');
+            }
+        }
+
+        async function writeToClipboard(output) {
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                try {
+                    await navigator.clipboard.writeText(output.value);
+
+                    return;
+                } catch (error) {
+                    // Eingebettete oder restriktive Browser können die API trotz Verfügbarkeit ablehnen.
+                }
+            }
+
+            output.focus();
+            output.select();
+            output.setSelectionRange(0, output.value.length);
+
+            if (!document.execCommand('copy')) {
+                throw new Error('Kopieren wird von diesem Browser nicht unterstützt.');
+            }
+        }
+
+        ticketSelect.addEventListener('change', function () {
+            if (ticketSelect.value) {
+                selectTicket(ticketSelect.value);
+            }
+        });
+
+        ticketStatusSelect.addEventListener('change', function () {
+            const ticket = tickets.find(function (candidate) {
+                return candidate.id === activeId;
+            });
+            updateStatusControls(ticket, false);
+        });
+
+        statusSaveBtn.addEventListener('click', saveTicketStatus);
+
+        nextBtn.addEventListener('click', function () {
+            const currentIndex = tickets.findIndex(function (ticket) {
+                return ticket.id === activeId;
+            });
+            const nextTicket = currentIndex >= 0 ? tickets[currentIndex + 1] : null;
+
+            if (nextTicket) {
+                selectTicket(nextTicket.id);
+            }
+        });
+
+        implementationCopyBtn.addEventListener('click', function () {
+            copyPrompt(implementationOutput, 'Implementierungs-Prompt kopiert ✓');
+        });
+
+        reviewCopyBtn.addEventListener('click', function () {
+            copyPrompt(reviewOutput, 'Review-Prompt kopiert ✓');
+        });
+
+        fixCopyBtn.addEventListener('click', function () {
+            copyPrompt(fixOutput, 'Fix-Prompt kopiert ✓');
+        });
+
+        loadTickets();
+    </script>
+</body>
+</html>

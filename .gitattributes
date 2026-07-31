@@ -1,0 +1,40 @@
+# Zeilenenden deterministisch halten.
+#
+# AI6 bindet Approvals und Runs an Git-Blob-SHAs und an den kanonischen
+# ticket_contract_sha256 (TKT-006, TKT-009). Der Contract-Hash normalisiert
+# Zeilenenden nach Plan Abschnitt 5.2 und bleibt bei CRLF/LF-Drift gleich;
+# der Blob-SHA aendert sich dagegen und erzeugt Konflikte, die fachlich
+# keine sind. Genau deshalb wird die Drift hier ausgeschlossen. Textdateien
+# einschliesslich Markdown werden deshalb mit LF gespeichert und ausgecheckt,
+# unabhaengig von der lokalen core.autocrlf-Einstellung.
+
+* text=auto eol=lf
+
+# Explizit fuer die Dateitypen dieses Projekts
+*.md     text eol=lf
+*.php    text eol=lf
+*.yaml   text eol=lf
+*.yml    text eol=lf
+*.json   text eol=lf
+*.neon   text eol=lf
+*.xml    text eol=lf
+*.sh     text eol=lf
+*.blade.php text eol=lf
+Dockerfile  text eol=lf
+
+# Explizite Ausnahme: native Windows-Skripte werden mit CRLF ausgecheckt
+*.bat    text eol=crlf
+*.cmd    text eol=crlf
+*.ps1    text eol=crlf
+
+# Binaerdateien nie konvertieren
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.webp   binary
+*.pdf    binary
+*.zip    binary
+*.sqlite binary
+*.db     binary
