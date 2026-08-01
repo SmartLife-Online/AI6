@@ -1,0 +1,7 @@
+{
+    "preset": "laravel",
+    "exclude": [
+        "ticket-prompt",
+        "tools"
+    ]
+}

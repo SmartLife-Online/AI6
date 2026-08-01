@@ -1,0 +1,14 @@
+{
+    "name": "ai6/incompatible-lock-fixture",
+    "description": "Controlled lock fixture requiring PHP above the supported platform.",
+    "license": "proprietary",
+    "require": {
+        "php": "^8.6",
+        "symfony/string": "^8.0"
+    },
+    "config": {
+        "platform": {
+            "php": "8.6.0"
+        }
+    }
+}

@@ -1,0 +1,357 @@
+schema: ai6.ticket-manifest.v1
+source: docs/AI6_IMPLEMENTATION_PLAN.md
+plan_revision: "V1.6.21"
+blueprint_count: 44
+blueprints:
+  - id: "AI6-001"
+    title: "Laravel-Grundgerüst und Qualitätsbaseline"
+    milestone: "M0"
+    initial_status: "todo"
+    risk: "low"
+    kind: "chore"
+    depends_on: []
+    requirement_refs: ["OPS-004", "OPS-006", "OPS-007", "OPS-008"]
+  - id: "AI6-002"
+    title: "Docker-Compose-Laufzeit, SQLite-Queue und Scheduler"
+    milestone: "M0"
+    initial_status: "todo"
+    risk: "medium"
+    kind: "chore"
+    depends_on: ["AI6-001"]
+    requirement_refs: ["PROD-002", "OPS-001", "OPS-002", "OPS-004", "OPS-008"]
+  - id: "AI6-003"
+    title: "Typed Config und zentrale SecurityPolicy"
+    milestone: "M0"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-001", "AI6-002"]
+    requirement_refs: ["CFG-001", "SEC-001", "SEC-004", "SEC-007", "OPS-003"]
+  - id: "AI6-004"
+    title: "Benutzer, Projektrollen und Basis-Authentifizierung"
+    milestone: "M0"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-002", "AI6-003"]
+    requirement_refs: ["SEC-002", "SEC-004", "PROD-001"]
+  - id: "AI6-005A"
+    title: "Starke Primärauthentifizierung und E-Mail-Barriere"
+    milestone: "M0"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-003", "AI6-004"]
+    requirement_refs: ["SEC-002", "SEC-003", "HUM-003"]
+  - id: "AI6-005B"
+    title: "Session- und HTTP-Härtung, CSP und sichere Markdown-Basispolitik"
+    milestone: "M0"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-003", "AI6-004", "AI6-005A"]
+    requirement_refs: ["SEC-004", "SEC-007"]
+  - id: "AI6-006A"
+    title: "ControlProcessRunner und gehärtete Git-Ausführung"
+    milestone: "M1"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-002", "AI6-003"]
+    requirement_refs: ["GIT-001", "AGT-006", "SEC-006"]
+  - id: "AI6-006B"
+    title: "Projektregistrierung und vertrauenswürdige Projektmetadaten"
+    milestone: "M1"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-004", "AI6-006A"]
+    requirement_refs: ["PROD-001", "GIT-001"]
+  - id: "AI6-006C"
+    title: "Control-Operation-Kern, Operationssperre und Deploy-Key-Provisionierung"
+    milestone: "M1"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-005A", "AI6-006A", "AI6-006B"]
+    requirement_refs: ["GIT-009", "RUN-004", "RUN-005", "SEC-002"]
+  - id: "AI6-006D"
+    title: "Managed-Clone, Clone und Fetch"
+    milestone: "M1"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-006C"]
+    requirement_refs: ["GIT-001", "GIT-009"]
+  - id: "AI6-006E"
+    title: "Control-Branch-Wechsel und Invalidierungsgeneration"
+    milestone: "M1"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-005A", "AI6-006D"]
+    requirement_refs: ["GIT-001", "GIT-009"]
+  - id: "AI6-006F"
+    title: "Blobgebundene Read Models und Einzelpfad-Refresh"
+    milestone: "M1"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-006E"]
+    requirement_refs: ["GIT-001", "GIT-009", "SEC-007"]
+  - id: "AI6-007"
+    title: "Ticketparser V1, Legacy-Leser und Validator"
+    milestone: "M1"
+    initial_status: "todo"
+    risk: "medium"
+    kind: "feature"
+    depends_on: ["AI6-006F"]
+    requirement_refs: ["TKT-001", "TKT-002", "TKT-003", "TKT-004", "TKT-008", "TKT-009", "TKT-010", "TKT-011"]
+  - id: "AI6-008"
+    title: "Responsive Ticketübersicht und Ticketdetail"
+    milestone: "M1"
+    initial_status: "todo"
+    risk: "medium"
+    kind: "feature"
+    depends_on: ["AI6-004", "AI6-007"]
+    requirement_refs: ["UI-001", "UI-002", "TKT-008", "GIT-009"]
+  - id: "AI6-009"
+    title: "Ticketbearbeitung, Statusübergänge und Git-Persistenz"
+    milestone: "M1"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-006F", "AI6-007", "AI6-008"]
+    requirement_refs: ["TKT-005", "TKT-006", "TKT-009", "GIT-001", "GIT-008", "GIT-009", "RUN-004"]
+  - id: "AI6-010"
+    title: "Projektkonfiguration und freigegebene Config-Snapshots"
+    milestone: "M1"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-003", "AI6-006F", "AI6-007", "AI6-009"]
+    requirement_refs: ["CFG-002", "CFG-003", "SEC-004", "TKT-007", "TKT-011", "GIT-001"]
+  - id: "AI6-011"
+    title: "Agentenprofil-, Capability- und Promptkatalog"
+    milestone: "M2"
+    initial_status: "todo"
+    risk: "medium"
+    kind: "feature"
+    depends_on: ["AI6-003", "AI6-004"]
+    requirement_refs: ["CFG-001", "AGT-001", "AGT-002", "AGT-008", "AGT-009", "RUN-006"]
+  - id: "AI6-012"
+    title: "Ticketprüfung, Approval-Snapshot und Multi-Reviewer-Auswahl"
+    milestone: "M2"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-008", "AI6-009", "AI6-010", "AI6-011"]
+    requirement_refs: ["RUN-002", "RUN-006", "RUN-008", "REV-001", "UI-003", "AGT-002", "AGT-008", "AGT-009", "GIT-001", "GIT-007", "TKT-009"]
+  - id: "AI6-013"
+    title: "Run-State-Machine, Persistenz und Projektsperre"
+    milestone: "M2"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-004", "AI6-012"]
+    requirement_refs: ["GIT-001", "GIT-002", "GIT-008", "RUN-001", "RUN-002", "RUN-005", "RUN-007", "TKT-009"]
+  - id: "AI6-014"
+    title: "Run-Branch, Worktree, Checkpoint und Diff-Service"
+    milestone: "M2"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-006D", "AI6-013"]
+    requirement_refs: ["GIT-002", "GIT-003", "GIT-004", "GIT-010"]
+  - id: "AI6-015"
+    title: "ProcessRunner, ExecutionMailbox und Prozessgrenzen"
+    milestone: "M2"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-002", "AI6-003", "AI6-006A", "AI6-013", "AI6-014"]
+    requirement_refs: ["AGT-006", "AGT-007", "AGT-009", "GIT-010", "RUN-004", "RUN-006", "SEC-005", "OPS-004"]
+  - id: "AI6-016"
+    title: "JSON-Verträge und FakeAgent"
+    milestone: "M2"
+    initial_status: "todo"
+    risk: "medium"
+    kind: "feature"
+    depends_on: ["AI6-011", "AI6-015"]
+    requirement_refs: ["AGT-001", "AGT-004", "AGT-005", "AGT-008", "AGT-009", "REV-003", "HUM-001"]
+  - id: "AI6-017"
+    title: "Basisschritt-Orchestrator und Run-Timeline"
+    milestone: "M2"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-013", "AI6-014", "AI6-015", "AI6-016"]
+    requirement_refs: ["RUN-001", "RUN-003", "RUN-005", "UI-004"]
+  - id: "AI6-018"
+    title: "Human Requests, E-Mail, Attention-Inbox und Resume"
+    milestone: "M3"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-005A", "AI6-017"]
+    requirement_refs: ["HUM-001", "HUM-002", "HUM-003", "HUM-004", "UI-001", "UI-005"]
+  - id: "AI6-019"
+    title: "Implementierungsagent-Turn und sicherer Diff-Import"
+    milestone: "M3"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-014", "AI6-016", "AI6-017", "AI6-018"]
+    requirement_refs: ["AGT-003", "AGT-004", "AGT-008", "AGT-009", "GIT-003", "GIT-010", "RUN-003", "RUN-006", "UI-004"]
+  - id: "AI6-020"
+    title: "Adaptive Scope- und Vertragsänderungen"
+    milestone: "M3"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-009", "AI6-018", "AI6-019"]
+    requirement_refs: ["TKT-007", "CFG-002", "AGT-009", "HUM-004", "HUM-005", "REV-005", "RUN-006", "RUN-007"]
+  - id: "AI6-021"
+    title: "Checkprofile und credentialfreier Checker"
+    milestone: "M3"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-010", "AI6-015", "AI6-017"]
+    requirement_refs: ["CFG-003", "AGT-007", "GIT-010", "SEC-005", "SEC-007", "RUN-003"]
+  - id: "AI6-022"
+    title: "Pre-Review-Verifikation und Checkpoint-Bereitschaft"
+    milestone: "M3"
+    initial_status: "todo"
+    risk: "medium"
+    kind: "feature"
+    depends_on: ["AI6-019", "AI6-020", "AI6-021"]
+    requirement_refs: ["RUN-003", "RUN-007", "RUN-009", "GIT-003", "GIT-004", "TKT-007"]
+  - id: "AI6-023"
+    title: "Read-only Review-Workspaces und Multi-Reviewer-Ausführung"
+    milestone: "M4"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-012", "AI6-016", "AI6-022"]
+    requirement_refs: ["REV-001", "REV-002", "AGT-003", "AGT-009", "GIT-004", "GIT-010"]
+  - id: "AI6-024"
+    title: "Findings, AC-Abdeckung und Reviewdarstellung"
+    milestone: "M4"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-023"]
+    requirement_refs: ["REV-002", "REV-003", "REV-004", "REV-006", "REV-009", "UI-004"]
+  - id: "AI6-025"
+    title: "Fixturn und vollständige Re-Review-Schleife"
+    milestone: "M4"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-019", "AI6-020", "AI6-022", "AI6-024"]
+    requirement_refs: ["REV-005", "REV-006", "RUN-003"]
+  - id: "AI6-026"
+    title: "Reviewlimits, Stall-Erkennung und Interventionsaktionen"
+    milestone: "M4"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-018", "AI6-025"]
+    requirement_refs: ["RUN-006", "REV-007", "HUM-005", "UI-005"]
+  - id: "AI6-027"
+    title: "Finalchecks, Publish-Kandidat und deterministische Provenienz"
+    milestone: "M5"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-021", "AI6-025", "AI6-026"]
+    requirement_refs: ["GIT-005", "GIT-006", "REV-008", "SEC-009", "RUN-003", "RUN-007", "RUN-009"]
+  - id: "AI6-028"
+    title: "Optionales LLM-Sicherheitsgate"
+    milestone: "M5"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-003", "AI6-016", "AI6-018", "AI6-024", "AI6-027"]
+    requirement_refs: ["REV-008", "SEC-008", "SEC-009", "AGT-009", "GIT-010", "HUM-001", "HUM-002"]
+  - id: "AI6-029"
+    title: "Finaler Commit, Ticketstatus, Push, Drift und Cleanup"
+    milestone: "M5"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-009", "AI6-014", "AI6-027", "AI6-028"]
+    requirement_refs: ["GIT-005", "GIT-006", "GIT-007", "GIT-008", "TKT-005", "RUN-005", "RUN-009"]
+  - id: "AI6-030"
+    title: "Projektqueue und abhängigkeitssicherer Auto-Start"
+    milestone: "M5"
+    initial_status: "todo"
+    risk: "medium"
+    kind: "feature"
+    depends_on: ["AI6-008", "AI6-012", "AI6-013", "AI6-029"]
+    requirement_refs: ["RUN-008", "UI-006", "TKT-008", "RUN-005", "GIT-001"]
+  - id: "AI6-031"
+    title: "Vollständige Runbeobachtung und mobile Bedienung"
+    milestone: "M5"
+    initial_status: "todo"
+    risk: "medium"
+    kind: "feature"
+    depends_on: ["AI6-008", "AI6-018", "AI6-024", "AI6-026", "AI6-029", "AI6-030"]
+    requirement_refs: ["UI-001", "UI-004", "SEC-007", "SEC-011"]
+  - id: "AI6-032"
+    title: "Vollständiger FakeAgent-End-to-End- und Recovery-Test"
+    milestone: "M5"
+    initial_status: "todo"
+    risk: "high"
+    kind: "chore"
+    depends_on: ["AI6-026", "AI6-028", "AI6-029", "AI6-030", "AI6-031"]
+    requirement_refs: ["AGT-005", "AGT-009", "GIT-010", "RUN-005", "RUN-006", "RUN-009", "REV-005", "HUM-004", "SEC-008"]
+  - id: "AI6-033"
+    title: "Codex-CLI-Adapter"
+    milestone: "M6"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032"]
+    requirement_refs: ["AGT-001", "AGT-002", "AGT-003", "AGT-004", "AGT-007", "AGT-009", "GIT-010", "RUN-006", "SEC-005"]
+  - id: "AI6-034"
+    title: "Claude-CLI-Adapter"
+    milestone: "M6"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032"]
+    requirement_refs: ["AGT-001", "AGT-002", "AGT-003", "AGT-004", "AGT-007", "AGT-009", "GIT-010", "RUN-006", "SEC-005"]
+  - id: "AI6-035"
+    title: "Provider-Onboarding, Credential-Setup und Capability-Doctor"
+    milestone: "M6"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-003", "AI6-005A", "AI6-033", "AI6-034"]
+    requirement_refs: ["AGT-002", "AGT-007", "OPS-003", "SEC-005"]
+  - id: "AI6-036"
+    title: "Installation, Backup/Restore und Security-Release-Gate"
+    milestone: "M7"
+    initial_status: "todo"
+    risk: "high"
+    kind: "chore"
+    depends_on: ["AI6-002", "AI6-003", "AI6-005A", "AI6-005B", "AI6-015", "AI6-035", "AI6-029", "AI6-031", "AI6-032"]
+    requirement_refs: ["OPS-001", "OPS-003", "OPS-006", "SEC-010", "SEC-011", "PROD-002"]
+  - id: "AI6-037"
+    title: "Migration des bisherigen Ticket-Prompt-Tools"
+    milestone: "M7"
+    initial_status: "todo"
+    risk: "medium"
+    kind: "chore"
+    depends_on: ["AI6-007", "AI6-008", "AI6-009", "AI6-016", "AI6-032"]
+    requirement_refs: ["TKT-003", "TKT-005", "TKT-011", "OPS-005"]
+  - id: "AI6-038"
+    title: "Realer M169-Pilot und MVP-Abnahme"
+    milestone: "M7"
+    initial_status: "todo"
+    risk: "high"
+    kind: "spike"
+    depends_on: ["AI6-032", "AI6-035", "AI6-036", "AI6-037"]
+    requirement_refs: ["PROD-001", "AGT-001", "REV-001", "HUM-002", "RUN-009", "OPS-005"]

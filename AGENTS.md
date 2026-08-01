@@ -14,8 +14,11 @@ AI6/
 ├── AGENTS.md                        this file
 ├── CLAUDE.md                        imports AGENTS.md only
 ├── README.md
+├── composer.json / composer.lock    Laravel 13 dependency baseline on PHP 8.5
+├── artisan, app/, bootstrap/ ...    AI6-001 Laravel scaffold implementation in the worktree
+├── tests/                            PHPUnit feature, structure, provenance and locked-install tests
 ├── docs/
-│   ├── AI6_IMPLEMENTATION_PLAN.md   normative source, revision V1.6.20, German
+│   ├── AI6_IMPLEMENTATION_PLAN.md   normative source, revision V1.6.21, German
 │   └── AI6_TICKET_TEMPLATE_V1.md    ticket generation and implementation contract, German
 └── tickets/
     ├── README.md                    backlog overview; a view, never a status source
@@ -25,16 +28,18 @@ AI6/
     └── AI6-006A.md … AI6-006F.md    status todo — derived ahead of their dependencies (§8.1)
 ```
 
-What does **not** exist yet: Laravel application, `composer.json`, `vendor/`, tests, Laravel/PHP toolchain, `.ai6/`.
+The worktree contains the not-yet-integrated implementation of `AI6-001`: Laravel 13, `composer.json`, the committed-lock candidate, `vendor/`, PHPUnit, Pint, PHPStan, the manifest generator and the eleven empty module roots. `AI6-001` still has `status: todo`; its manual gates remain open, and no commit or ticket-status transition is implied by the presence of these files.
+
+What does **not** exist yet: the Docker/SQLite runtime from `AI6-002`, later application modules and `.ai6/`.
 
 Of the 44 planned tickets twelve exist as files. The other 32 are blueprints in plan §15 — `tickets/AI6-007.md` and everything after it cannot be opened. Plan revisions V1.6.2, V1.6.5, V1.6.7 and V1.6.10 progressively split the former `AI6-005` and `AI6-006`, so M0 ends with `AI6-005A`/`AI6-005B` and the M1 chain is now `AI6-006A` … `AI6-006F`. The IDs `AI6-005` and `AI6-006` no longer exist.
 
 Consequences for you:
 
-- The Laravel/PHP toolchain commands in §4 cannot run today; `git diff --check` is already available. Never claim you ran tests or linters.
-- Verify every path with Glob or `ls` before naming it. This repository is nearly empty — whatever you "remember" about a Laravel layout is not here.
-- `AI6-001` creates the application. Until then, every code task is a ticket task, not an ad-hoc edit.
-- Every generated ticket except `AI6-001` names paths, classes, commands and tests that do not exist yet. Their `— existing` markers describe the state their dependencies will produce, not today's. They carry a rebase obligation (§8.1); never read them as evidence that a seam already exists.
+- The Laravel/PHP toolchain commands in §4 are available in the current worktree and must be run when relevant. The external locked-install suite additionally requires the explicit PHP 8.5 and Composer paths documented in `README.md`.
+- Verify every path with `rg --files` or `ls` before naming it. The scaffold exists now, but later module contracts still do not.
+- `AI6-001` is implemented only in the worktree and remains a ticket task until its gates and integration are complete; do not infer completion or change its status.
+- Every generated ticket except `AI6-001` was derived ahead of dependencies. Its `— existing` markers describe the state its dependencies must produce, not evidence that every named seam exists today. The rebase obligation in §8.1 remains binding.
 
 When this section goes stale, it must be updated — but only when explicitly asked (§10).
 
@@ -69,7 +74,7 @@ Entry points in the plan: §3 requirements · §4 architecture · §5 ticket for
 
 ### 3.1 The ticket language boundary
 
-Tickets are deliberately bilingual: **English structure, German prose.** The current plan revision V1.6.20 §5.1 and template §7.5 define the split; it was introduced in revision V1.5.1. Drifting in either direction is an error — an English-thinking model tends to translate the prose, a German-thinking model tends to translate the structure.
+Tickets are deliberately bilingual: **English structure, German prose.** The current plan revision V1.6.21 §5.1 and template §7.5 define the split; it was introduced in revision V1.5.1. Drifting in either direction is an error — an English-thinking model tends to translate the prose, a German-thinking model tends to translate the structure.
 
 **English — everything the validator matches literally:**
 
@@ -100,11 +105,19 @@ Two details that get normalized by accident: the separator in `spec_refs` and in
 
 ## 4. Commands
 
-The Laravel/PHP toolchain is decided but does not exist until `AI6-001` lands. Until then the Artisan, Pint and PHPStan commands below fail — that is expected, not a defect for you to fix. `git diff --check` is available now.
+The Laravel/PHP toolchain exists in the current worktree. The regular suite is self-contained; the external locked-install proof is intentionally separate because it requires explicit runtime paths and a clean dependency installation.
 
 ```bash
 php artisan test
 ```
+
+The regular suite must pass without `AI6_PHP85_BINARY` or `AI6_COMPOSER_PHAR`.
+
+```bash
+AI6_PHP85_BINARY=/path/to/php8.5 AI6_COMPOSER_PHAR=/path/to/composer.phar php vendor/bin/phpunit tests/Unit/LockedInstallTest.php
+```
+
+The external suite never falls back to the current PHP binary and is never reported as passed when it was not run.
 
 ```bash
 php artisan test --filter=<TestName>
@@ -128,7 +141,7 @@ git diff --check
 
 Decided: **PHPUnit** as test runner (via `php artisan test`), **Pint** as formatter, **PHPStan** for static analysis. `AI6-001` sets them up and documents level and configuration; this section gets tightened afterwards.
 
-Before `AI6-001`, run `git diff --check` for repository changes and report that the Laravel/PHP checks are unavailable. Afterwards, before reporting an implementation ticket as done, run the tests, `pint --test`, `phpstan` and `git diff --check` (plan §12.2). Red is red — report the result with its output instead of routing around it.
+Before reporting an implementation ticket as done, run the applicable regular tests, `pint --test`, PHPStan, manifest and Composer checks, and `git diff --check` (plan §12.2). Run the external locked-install suite when dependency, lockfile, platform or installation behavior is in scope. Red is red — report the result with its output instead of routing around it.
 
 ---
 

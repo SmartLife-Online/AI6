@@ -5,7 +5,7 @@
     "description": "Git-native software ticket orchestration for human-reviewed LLM workflows.",
     "license": "proprietary",
     "require": {
-        "php": "^8.3",
+        "php": "^8.5",
         "laravel/framework": "^13.8"
     },
     "require-dev": {
@@ -42,7 +42,7 @@
         "allow-plugins": {},
         "optimize-autoloader": true,
         "platform": {
-            "php": "8.3.0"
+            "php": "8.5.0"
         },
         "preferred-install": "dist",
         "sort-packages": true

@@ -1,6 +1,8 @@
-# AI6 – Implementierungsplan V1.6.20 – Ticket-Ready, Lean & Secure
+# AI6 – Implementierungsplan V1.6.21 – Ticket-Ready, Lean & Secure
 
-**Stand:** 30. Juli 2026
+**Stand:** 31. Juli 2026
+
+**Revision V1.6.21:** Die Laufzeitbaseline wird vor der Integration von `AI6-001` einmalig auf PHP 8.5, Laravel 13 und SQLite 3.53 korrigiert; die Blueprintanzahl bleibt bei 44. `OPS-007` und `AI6-001` verwenden nun `php: ^8.5`, Composer-`config.platform.php: 8.5.0` und den realen Locked-Install-Nachweis unter PHP 8.5. Laravel bleibt auf der Major-Linie 13; die konkrete Paketauflösung bleibt im committed `composer.lock` sichtbar. `AI6-002` baut auf PHP 8.5 und muss zur Laufzeit SQLite `3.53.x` nachweisen sowie die konkrete Image- und Paketauflösung reproduzierbar binden. Das neue `OPS-008` und §13.8 verbieten schwebende „latest“-Auflösungen und beiläufige Versionswechsel: Jede spätere Änderung der gebundenen PHP-, Laravel- oder SQLite-Version beziehungsweise ihrer konkreten Patchauflösung benötigt ein eigenes Upgrade-Ticket mit Kompatibilitäts-, Installations-, Migrations- und Rollbacknachweis. Die bereits veröffentlichten Detailtickets `AI6-001` und `AI6-002` werden als ausdrücklich genehmigte einmalige Baselinekorrektur auf diese Revision nachgezogen; ihre IDs sowie AC-, TC- und Gate-IDs bleiben unverändert. Das ahead-derived Rebase-Gate von `AI6-002` nach §13.6 bleibt davon unberührt und weiterhin offen.
 
 **Revision V1.6.20:** Ein Befund wird geschlossen; die Blueprintanzahl bleibt bei 44. Die mit V1.6.19 eingeführte HTTPS-/Private-Access-Maßnahme nannte den zulässigen Klartextpfad nur als „Loopback-gebundenen Private-Access-Pfad", ohne prüfbares Prädikat: Weder erlaubte Quelladressen noch das Verhalten hinter einem vertrauenswürdigen Proxy waren festgelegt, sodass Implementierung und Test denselben Begriff verschieden hätten auslegen können — und eine großzügige Auslegung, etwa jede private Adresse, hätte die Maßnahme faktisch aufgehoben. §10.2 definiert Private Access jetzt abschließend über die unmittelbare Gegenstelle der Verbindung und die daraus abgeleitete Clientadresse, ausschließlich für `127.0.0.0/8` und `::1`, mit dem Trusted-Proxy-Fall als einziger Ableitung und einer ausdrücklichen Abgrenzung gegen sonstige private Adressbereiche. Requirement-Texte, Requirement-Refs, Meilensteine, Ziele, Abhängigkeiten, §14.1 und die Traceability aus §16 sind unverändert. Das Detailticket `AI6-005B` ist auf diese Revision rebased; sein ahead-derived Rebase-Gate nach §13.6 bleibt davon unberührt und weiterhin offen. Unabhängig von dieser Revision sind drei Detailtickets gegen den unveränderten Plan berichtigt worden: `AI6-005B` behandelte jedes `custom` mit irgendeiner Reduktion wie `development`, obwohl ausschließlich der Zustand der HTTPS-Maßnahme selbst zählt; `AI6-004` führte das Löschen von Benutzern in `AC-04` und in den Tests, aber nicht in Aufgabe 6 und `AC-06`, und fasste seine global gebundenen Aktionen zu fünf Gruppen statt sie atomar aufzuzählen; und `AI6-005A` ließ offen, ob die Registrierung von Recovery-Codes allein den Enrollment-Zustand beendet.
 
@@ -279,7 +281,8 @@ Die IDs sind stabil. Detaillierte Tickets referenzieren diese IDs unter `spec_re
 - **OPS-004** – Architektur bleibt modularer Monolith ohne Redis, Kubernetes, Microservices, CQRS oder Event Sourcing im MVP.
 - **OPS-005** – Legacy-Tickets und das bisherige Prompt-Tool werden kontrolliert migriert; Statusindizes bleiben danach nicht autoritativ. Nach dem erfolgreichen M169-Pilot wird der Legacy-Leser im selben Release abgeschaltet beziehungsweise entfernt und der migrierte V1-Bestand neu validiert.
 - **OPS-006** – Ein repositorylokaler deterministischer Generator exportiert Blueprint-Metadaten und Requirement-Zuordnungen aus diesem Plan nach `docs/AI6_TICKET_MANIFEST.yaml`; ein Driftcheck schlägt bei fehlendem oder abweichendem Export fehl.
-- **OPS-007** – Das Bootstrap verwendet ausschließlich `laravel/laravel` Tag `v13.8.0` am verifizierten Commit `e196bfdfc96903f2e10219749fcbca7c0aefe99f` als immutable Scaffoldquelle. Es wird außerhalb des Repositorys ohne Composer-Skriptausführung bezogen; nur eine explizite Backend-Allowlist darf importiert werden. Bestehende Repositorydateien bleiben erhalten, Default-Fachartefakte und implizite SQLite-/Migrate-/Queue-Skripte werden nicht übernommen. Die zugesagte Mindestlaufzeit PHP 8.3 wird durch `config.platform.php: 8.3.0` bei der Lockauflösung sowie einen sauberen Locked Install und `composer check-platform-reqs` unter einer realen PHP-8.3-Laufzeit nachgewiesen.
+- **OPS-007** – Das Bootstrap verwendet ausschließlich `laravel/laravel` Tag `v13.8.0` am verifizierten Commit `e196bfdfc96903f2e10219749fcbca7c0aefe99f` als immutable Scaffoldquelle. Es wird außerhalb des Repositorys ohne Composer-Skriptausführung bezogen; nur eine explizite Backend-Allowlist darf importiert werden. Bestehende Repositorydateien bleiben erhalten, Default-Fachartefakte und implizite SQLite-/Migrate-/Queue-Skripte werden nicht übernommen. Die zugesagte Mindestlaufzeit PHP 8.5 wird durch `config.platform.php: 8.5.0` bei der Lockauflösung sowie einen sauberen Locked Install und `composer check-platform-reqs` unter einer realen PHP-8.5-Laufzeit nachgewiesen.
+- **OPS-008** – Die freigegebenen Laufzeitlinien sind PHP 8.5, Laravel 13 und SQLite 3.53. Composer-Lockfile, Containerimage und Betriebspakete binden ihre konkrete Auflösung reproduzierbar; Produktion und Prüfungen beziehen niemals eine schwebende `latest`-Version. Jede spätere Änderung einer gebundenen Major-, Minor- oder Patchversion von PHP, Laravel oder SQLite erfolgt ausschließlich in einem eigenen Upgrade-Ticket. Dieses Ticket weist mindestens Kompatibilität, saubere Installation aus den gebundenen Artefakten, erforderliche Migrationen oder deren Abwesenheit, aktualisierte Versionsprüfungen und einen ausführbaren Rollback nach; eine andere Fachimplementierung darf den Versionswechsel nicht beiläufig mitführen.
 
 
 ---
@@ -1119,6 +1122,12 @@ Sobald der Stand eines Artefakts erstmals committed ist, gilt für dieses Artefa
 
 Eine externe Bindung kann vor dem ersten Commit entstehen — etwa eine menschliche Reviewnotiz, die ein Kriterium bei seiner damaligen Nummer nennt. Sie begründet keine Stabilitätszusage, macht aber die Revisionshistorie zur Pflicht: Verschiebt ein Entwurfsschritt eine ID, benennt der zugehörige Revisionseintrag beziehungsweise `## Notes` die alte und die neue Bezeichnung, damit eine ältere Referenz auflösbar bleibt.
 
+### 13.8 Versionsupgrades
+
+Die in `OPS-008` freigegebenen PHP-, Laravel- und SQLite-Versionen sind ein geprüfter Vertrag, keine Empfehlung an einen Paketmanager, beim nächsten Lauf selbständig die neueste Version zu wählen. Lockfile, Containerimage und Betriebspakete halten die konkrete Auflösung reproduzierbar fest; die dokumentierte Versionslinie und die tatsächlich ausgeführte Version werden automatisiert geprüft.
+
+Erscheint eine neuere Major-, Minor- oder Patchversion einer dieser drei Laufzeitkomponenten, entsteht für ihre Übernahme ein eigenes Upgrade-Ticket. Dieses Ticket wird gegen den realen Repositorystand abgeleitet, nennt alte und neue Auflösung, prüft Framework- und Erweiterungskompatibilität, aktualisiert Lock-, Image-, Dokumentations- und Versionsnachweise gemeinsam, entscheidet Migrationen ausdrücklich und beschreibt einen ausführbaren Rollback. Eine regelmäßige Versionsprüfung darf ein solches Ticket vorschlagen, aber weder Plan noch Lockfile noch Image automatisch verändern. Fach- und Sicherheitstickets dürfen eine Laufzeitversion nur ändern, wenn sie selbst ausdrücklich dieses Upgrade-Outcome tragen; ein beiläufiger Versionssprung ist ein Scopebefund.
+
 ---
 
 ## 14. Meilensteine und Integrations-Gates
@@ -1199,7 +1208,7 @@ Die folgenden Blueprints sind die verbindliche Quelle für die späteren Detailt
 - **Risiko:** `low`
 - **Kind:** `chore`
 - **Depends on:** keine
-- **Requirement-Refs:** `OPS-004`, `OPS-006`, `OPS-007`
+- **Requirement-Refs:** `OPS-004`, `OPS-006`, `OPS-007`, `OPS-008`
 - **Erwartete Module:** `Shared`
 
 **Ziel**
@@ -1210,8 +1219,8 @@ Ein minimales, testbares Laravel-Repository schaffen, auf dem alle folgenden Tic
 
 - Immutable Scaffoldquelle `laravel/laravel` Tag `v13.8.0`, verifiziert gegen Commit `e196bfdfc96903f2e10219749fcbca7c0aefe99f`; Bezug ausschließlich außerhalb des Repositorys beziehungsweise in einem temporären Verzeichnis und ohne Composer-Skriptausführung.
 - Explizite Backend-Allowlist für die Übernahme aus dem Scaffold; kein Root-Installer und kein rekursives Kopieren über den bestehenden Repositoryinhalt.
-- Laravel-13-Anwendung mit `php: ^8.3`, Composer-`config.platform.php: 8.3.0`, `laravel/framework: ^13.8`, `phpunit/phpunit: ^12.5.12` und klarer app/AI6-Modulwurzel.
-- Committed `composer.lock` als unter der PHP-8.3.0-Plattform aufgelöste, reproduzierbare Abhängigkeits- und Toolbaseline; Änderungen daran sind im Review sichtbar.
+- Laravel-13-Anwendung mit `php: ^8.5`, Composer-`config.platform.php: 8.5.0`, `laravel/framework: ^13.8`, `phpunit/phpunit: ^12.5.12` und klarer app/AI6-Modulwurzel.
+- Committed `composer.lock` als unter der PHP-8.5.0-Plattform aufgelöste, reproduzierbare Abhängigkeits- und Toolbaseline; Änderungen daran sind im Review sichtbar.
 - PHPUnit über `php artisan test`, Pint über `vendor/bin/pint` und PHPStan über `vendor/bin/phpstan analyse` mit repositorylokaler Konfiguration und dokumentiertem Analyselevel.
 - Health-Endpunkt und kurze Entwickler-README.
 - Verbindliche Konventionen für Actions, Services und DTOs ohne BaseService-Hierarchien.
@@ -1221,7 +1230,7 @@ Ein minimales, testbares Laravel-Repository schaffen, auf dem alle folgenden Tic
 
 - Anwendung startet lokal.
 - Basis-Test und Health-Test sind grün.
-- Eine saubere Installation aus dem committed `composer.lock` unter realem PHP 8.3 ist reproduzierbar; `composer validate --strict` und `composer check-platform-reqs` sind dort grün, ohne dass `composer update` benötigt wird.
+- Eine saubere Installation aus dem committed `composer.lock` unter realem PHP 8.5 ist reproduzierbar; `composer validate --strict` und `composer check-platform-reqs` sind dort grün, ohne dass `composer update` benötigt wird.
 - Tests, `vendor/bin/pint --test`, `vendor/bin/phpstan analyse` und der Manifest-Driftcheck sind grün.
 - Der Generator bildet Blueprint-Metadaten und Requirement-Zuordnungen aus diesem Plan deterministisch und ohne handgepflegte zweite Wahrheit ab.
 - `.gitattributes`, `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/` und `tickets/` werden nicht durch Scaffolddateien überschrieben.
@@ -1233,7 +1242,7 @@ Ein minimales, testbares Laravel-Repository schaffen, auf dem alle folgenden Tic
 - Featuretest für Health-Endpunkt.
 - Unit-Smoke-Test für Modul-Autoloading.
 - CI-/lokale Befehle für PHPUnit, Pint und PHPStan.
-- Locked-install-/`composer validate --strict`-/`composer check-platform-reqs`-Test unter realem PHP 8.3 samt Negativkontrolle gegen eine unter höherer Plattform unbemerkt inkompatibel aufgelöste Lockdatei sowie Manifest-Generate-/Drifttest.
+- Locked-install-/`composer validate --strict`-/`composer check-platform-reqs`-Test unter realem PHP 8.5 samt Negativkontrolle gegen eine unter höherer Plattform unbemerkt inkompatibel aufgelöste Lockdatei sowie Manifest-Generate-/Drifttest.
 - Herkunftsprüfung auf Tag und Commit, Allowlist-/Unexpected-File-Test und Negativtest gegen Überschreiben geschützter Bestandsdateien.
 - Negativtest auf Defaultmigrationen, User-Artefakte, Welcome-UI und Composer-Skripte mit Datenbank-/Queue-Seiteneffekt.
 
@@ -1250,7 +1259,7 @@ Ein minimales, testbares Laravel-Repository schaffen, auf dem alle folgenden Tic
 - **Risiko:** `medium`
 - **Kind:** `chore`
 - **Depends on:** `AI6-001`
-- **Requirement-Refs:** `PROD-002`, `OPS-001`, `OPS-002`, `OPS-004`
+- **Requirement-Refs:** `PROD-002`, `OPS-001`, `OPS-002`, `OPS-004`, `OPS-008`
 - **Erwartete Module:** `Shared`
 
 **Ziel**
@@ -1259,9 +1268,9 @@ AI6 mit einem Befehl lokal beziehungsweise auf einem Linux-Server als eine Codeb
 
 **Deliverables**
 
-- Ein Dockerimage für app, worker, agent, checker und scheduler sowie den einmaligen Startschritt `init` nach §4.1.
+- Ein reproduzierbar gebundenes Dockerimage auf PHP 8.5 für app, worker, agent, checker und scheduler sowie den einmaligen Startschritt `init` nach §4.1.
 - Caddy/Loopback-Referenzprofil.
-- SQLite mit WAL, Database Queue und Scheduler.
+- SQLite `3.53.x` mit WAL, Database Queue und Scheduler; Laufzeittest auf die Versionslinie und sichtbare konkrete Paketauflösung.
 - Persistente Volumes und Healthchecks.
 - Keine eingehenden Ports für worker, agent, checker und scheduler.
 
@@ -1272,6 +1281,7 @@ AI6 mit einem Befehl lokal beziehungsweise auf einem Linux-Server als eine Codeb
 - Scheduler führt einen Testtask aus.
 - agent und checker haben keinen veröffentlichten Port.
 - Default-Binding ist nicht öffentlich.
+- Die Laufzeit meldet PHP `8.5.x` und SQLite `3.53.x`; ein abweichender Minor-Stand lässt den Versionsnachweis fehlschlagen.
 
 **Mindestens zu erzeugende Testfälle**
 
@@ -1279,6 +1289,7 @@ AI6 mit einem Befehl lokal beziehungsweise auf einem Linux-Server als eine Codeb
 - Queue-Retry-Test.
 - Volume-/Dateirechte-Test.
 - Healthcheck-Test.
+- Laufzeitversionstest für PHP und SQLite samt negativer Kontrolle gegen eine abweichende Minor-Version.
 
 **Nicht Teil dieses Tickets**
 
@@ -3433,6 +3444,7 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `OPS-005` | `AI6-037`, `AI6-038` |
 | `OPS-006` | `AI6-001`, `AI6-036` |
 | `OPS-007` | `AI6-001` |
+| `OPS-008` | `AI6-001`, `AI6-002` |
 
 
 ---
