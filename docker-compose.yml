@@ -1,0 +1,219 @@
+{
+  "name": "ai6",
+  "services": {
+    "caddy": {
+      "image": "caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d",
+      "depends_on": {
+        "init": { "condition": "service_completed_successfully" },
+        "app": { "condition": "service_healthy" }
+      },
+      "ports": ["127.0.0.1:${AI6_HTTP_PORT:-8080}:8080"],
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "./deploy/Caddyfile",
+          "target": "/etc/caddy/Caddyfile",
+          "read_only": true
+        }
+      ],
+      "healthcheck": {
+        "test": ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8080/health"],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 6,
+        "start_period": "10s"
+      },
+      "restart": "unless-stopped"
+    },
+    "init": {
+      "image": "ai6-runtime:php-8.5.5_sqlite-3.53.4",
+      "build": { "context": ".", "dockerfile": "Dockerfile" },
+      "command": ["init"],
+      "user": "0:0",
+      "read_only": true,
+      "environment": {
+        "APP_DEBUG": "false",
+        "APP_ENV": "production",
+        "DB_BUSY_TIMEOUT": "${DB_BUSY_TIMEOUT:-5000}",
+        "DB_CONNECTION": "sqlite",
+        "DB_DATABASE": "/var/lib/ai6/database/database.sqlite",
+        "DB_FOREIGN_KEYS": "true",
+        "DB_JOURNAL_MODE": "WAL",
+        "DB_SYNCHRONOUS": "NORMAL"
+      },
+      "volumes": [
+        { "type": "volume", "source": "ai6_database", "target": "/var/lib/ai6/database" },
+        { "type": "volume", "source": "ai6_storage", "target": "/opt/ai6/storage" },
+        { "type": "tmpfs", "target": "/tmp", "tmpfs": { "mode": 1023, "size": 67108864 } }
+      ],
+      "restart": "no"
+    },
+    "app": {
+      "image": "ai6-runtime:php-8.5.5_sqlite-3.53.4",
+      "build": { "context": ".", "dockerfile": "Dockerfile" },
+      "command": ["app"],
+      "depends_on": { "init": { "condition": "service_completed_successfully" } },
+      "read_only": true,
+      "environment": {
+        "APP_DEBUG": "false",
+        "APP_ENV": "production",
+        "APP_KEY": "${APP_KEY:-}",
+        "APP_URL": "http://127.0.0.1:${AI6_HTTP_PORT:-8080}",
+        "CACHE_STORE": "file",
+        "DB_BUSY_TIMEOUT": "${DB_BUSY_TIMEOUT:-5000}",
+        "DB_CONNECTION": "sqlite",
+        "DB_DATABASE": "/var/lib/ai6/database/database.sqlite",
+        "DB_FOREIGN_KEYS": "true",
+        "DB_JOURNAL_MODE": "WAL",
+        "DB_SYNCHRONOUS": "NORMAL",
+        "LOG_CHANNEL": "stderr",
+        "QUEUE_CONNECTION": "database",
+        "SESSION_DRIVER": "file"
+      },
+      "volumes": [
+        { "type": "volume", "source": "ai6_database", "target": "/var/lib/ai6/database" },
+        { "type": "volume", "source": "ai6_storage", "target": "/opt/ai6/storage" },
+        { "type": "volume", "source": "ai6_executions", "target": "/var/lib/ai6/executions", "read_only": true },
+        { "type": "tmpfs", "target": "/tmp", "tmpfs": { "mode": 1023, "size": 67108864 } }
+      ],
+      "healthcheck": {
+        "test": ["CMD", "/opt/ai6/docker/healthcheck.sh", "app"],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 6,
+        "start_period": "15s"
+      },
+      "restart": "unless-stopped"
+    },
+    "worker": {
+      "image": "ai6-runtime:php-8.5.5_sqlite-3.53.4",
+      "build": { "context": ".", "dockerfile": "Dockerfile" },
+      "command": ["worker"],
+      "depends_on": { "init": { "condition": "service_completed_successfully" } },
+      "read_only": true,
+      "environment": {
+        "AI6_EXECUTION_DIRECTORY": "/var/lib/ai6/executions",
+        "AI6_HEARTBEAT_DIRECTORY": "/run/ai6/heartbeat/worker",
+        "AI6_HEARTBEAT_MAX_AGE": "${AI6_WORKER_HEARTBEAT_MAX_AGE:-75}",
+        "AI6_WORKER_TIMEOUT": "${AI6_WORKER_TIMEOUT:-60}",
+        "APP_DEBUG": "false",
+        "APP_ENV": "production",
+        "CACHE_STORE": "file",
+        "DB_BUSY_TIMEOUT": "${DB_BUSY_TIMEOUT:-5000}",
+        "DB_CONNECTION": "sqlite",
+        "DB_DATABASE": "/var/lib/ai6/database/database.sqlite",
+        "DB_FOREIGN_KEYS": "true",
+        "DB_JOURNAL_MODE": "WAL",
+        "DB_QUEUE_RETRY_AFTER": "${DB_QUEUE_RETRY_AFTER:-90}",
+        "DB_SYNCHRONOUS": "NORMAL",
+        "LOG_CHANNEL": "stderr",
+        "QUEUE_CONNECTION": "database"
+      },
+      "volumes": [
+        { "type": "volume", "source": "ai6_database", "target": "/var/lib/ai6/database" },
+        { "type": "volume", "source": "ai6_storage", "target": "/opt/ai6/storage" },
+        { "type": "volume", "source": "ai6_executions", "target": "/var/lib/ai6/executions" },
+        { "type": "tmpfs", "target": "/run/ai6/heartbeat/worker", "tmpfs": { "mode": 511, "size": 1048576 } },
+        { "type": "tmpfs", "target": "/tmp", "tmpfs": { "mode": 1023, "size": 67108864 } }
+      ],
+      "healthcheck": {
+        "test": ["CMD", "/opt/ai6/docker/healthcheck.sh", "worker"],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 6,
+        "start_period": "15s"
+      },
+      "restart": "unless-stopped"
+    },
+    "scheduler": {
+      "image": "ai6-runtime:php-8.5.5_sqlite-3.53.4",
+      "build": { "context": ".", "dockerfile": "Dockerfile" },
+      "command": ["scheduler"],
+      "depends_on": { "init": { "condition": "service_completed_successfully" } },
+      "read_only": true,
+      "environment": {
+        "AI6_HEARTBEAT_DIRECTORY": "/run/ai6/heartbeat/scheduler",
+        "AI6_HEARTBEAT_MAX_AGE": "${AI6_SCHEDULER_HEARTBEAT_MAX_AGE:-25}",
+        "APP_DEBUG": "false",
+        "APP_ENV": "production",
+        "CACHE_STORE": "file",
+        "DB_BUSY_TIMEOUT": "${DB_BUSY_TIMEOUT:-5000}",
+        "DB_CONNECTION": "sqlite",
+        "DB_DATABASE": "/var/lib/ai6/database/database.sqlite",
+        "DB_FOREIGN_KEYS": "true",
+        "DB_JOURNAL_MODE": "WAL",
+        "DB_QUEUE_RETRY_AFTER": "${DB_QUEUE_RETRY_AFTER:-90}",
+        "DB_SYNCHRONOUS": "NORMAL",
+        "LOG_CHANNEL": "stderr",
+        "QUEUE_CONNECTION": "database"
+      },
+      "volumes": [
+        { "type": "volume", "source": "ai6_database", "target": "/var/lib/ai6/database" },
+        { "type": "volume", "source": "ai6_storage", "target": "/opt/ai6/storage" },
+        { "type": "tmpfs", "target": "/run/ai6/heartbeat/scheduler", "tmpfs": { "mode": 511, "size": 1048576 } },
+        { "type": "tmpfs", "target": "/tmp", "tmpfs": { "mode": 1023, "size": 67108864 } }
+      ],
+      "healthcheck": {
+        "test": ["CMD", "/opt/ai6/docker/healthcheck.sh", "scheduler"],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 6,
+        "start_period": "15s"
+      },
+      "restart": "unless-stopped"
+    },
+    "agent": {
+      "image": "ai6-runtime:php-8.5.5_sqlite-3.53.4",
+      "build": { "context": ".", "dockerfile": "Dockerfile" },
+      "command": ["agent"],
+      "depends_on": { "init": { "condition": "service_completed_successfully" } },
+      "read_only": true,
+      "environment": {
+        "AI6_HEARTBEAT_DIRECTORY": "/run/ai6/heartbeat/agent",
+        "AI6_HEARTBEAT_INTERVAL": "${AI6_IDLE_HEARTBEAT_INTERVAL:-5}",
+        "AI6_HEARTBEAT_MAX_AGE": "${AI6_AGENT_HEARTBEAT_MAX_AGE:-15}"
+      },
+      "volumes": [
+        { "type": "tmpfs", "target": "/run/ai6/heartbeat/agent", "tmpfs": { "mode": 511, "size": 1048576 } },
+        { "type": "tmpfs", "target": "/tmp", "tmpfs": { "mode": 1023, "size": 67108864 } }
+      ],
+      "healthcheck": {
+        "test": ["CMD", "/opt/ai6/docker/healthcheck.sh", "agent"],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 6,
+        "start_period": "10s"
+      },
+      "restart": "unless-stopped"
+    },
+    "checker": {
+      "image": "ai6-runtime:php-8.5.5_sqlite-3.53.4",
+      "build": { "context": ".", "dockerfile": "Dockerfile" },
+      "command": ["checker"],
+      "depends_on": { "init": { "condition": "service_completed_successfully" } },
+      "read_only": true,
+      "environment": {
+        "AI6_HEARTBEAT_DIRECTORY": "/run/ai6/heartbeat/checker",
+        "AI6_HEARTBEAT_INTERVAL": "${AI6_IDLE_HEARTBEAT_INTERVAL:-5}",
+        "AI6_HEARTBEAT_MAX_AGE": "${AI6_CHECKER_HEARTBEAT_MAX_AGE:-15}"
+      },
+      "volumes": [
+        { "type": "tmpfs", "target": "/run/ai6/heartbeat/checker", "tmpfs": { "mode": 511, "size": 1048576 } },
+        { "type": "tmpfs", "target": "/tmp", "tmpfs": { "mode": 1023, "size": 67108864 } }
+      ],
+      "healthcheck": {
+        "test": ["CMD", "/opt/ai6/docker/healthcheck.sh", "checker"],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 6,
+        "start_period": "10s"
+      },
+      "restart": "unless-stopped"
+    }
+  },
+  "volumes": {
+    "ai6_database": {},
+    "ai6_storage": {},
+    "ai6_executions": {}
+  }
+}

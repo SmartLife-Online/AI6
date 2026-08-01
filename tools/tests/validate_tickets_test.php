@@ -1,506 +1,408 @@
-#!/usr/bin/env php
 <?php
 
 declare(strict_types=1);
 
-/**
- * Abhängigkeitsfreie Regressionstests für tools/validate_tickets.php.
- *
- * Jeder Fall arbeitet auf einer eigenen temporären Kopie der Tickets. Der echte Arbeitsbaum wird
- * nur gelesen und nach dem Lauf zusätzlich per Inhalts-Hash auf unveränderten Zustand geprüft.
- */
+$validatorSource = dirname(__DIR__) . '/validate_tickets.php';
+$tests = [
+    'akzeptiert ein kanonisches AI6-Ticket' => static function (string $root): void {
+        createTicketFixture($root);
+        assertValidatorPasses($root);
+    },
+    'akzeptiert alle Workflowstatus' => static function (string $root): void {
+        foreach (['todo', 'ready', 'in_progress', 'blocked', 'review', 'done', 'cancelled'] as $status) {
+            createTicketFixture($root, status: $status);
+            assertValidatorPasses($root);
+        }
+    },
+    'akzeptiert einen explizit leeren Dateiscope' => static function (string $root): void {
+        createTicketFixture($root);
+        replaceInTicket($root, "files:\n  - \"app/Test.php\"", 'files: []');
+        replaceInTicket($root, '- `app/Test.php` — new', 'None.');
+        assertValidatorPasses($root);
+    },
+    'akzeptiert kanonische CommonMark-Code-Spans für Backticks im Pfad' => static function (string $root): void {
+        createTicketFixture($root);
+        replaceInTicket($root, '"app/Test.php"', '"app/T`est.php"');
+        replaceInTicket($root, '`app/Test.php`', '``app/T`est.php``');
+        assertValidatorPasses($root);
+    },
+    'verlangt die Flow-Sequenz für depends_on' => static function (string $root): void {
+        createTicketFixture($root);
+        replaceInTicket($root, 'depends_on: []', "depends_on:\n  - AI6-899");
+        assertValidatorFails($root, '`depends_on` muss als Flow-Sequenz serialisiert sein');
+    },
+    'lehnt den entfernten Altstatus reserved ab' => static function (string $root): void {
+        createTicketFixture($root, status: 'reserved');
+        assertValidatorFails($root, '`status` muss einer dieser Werte sein');
+    },
+    'verlangt mindestens eine AI6-Ticketdatei' => static function (string $root): void {
+        createBaseFixture($root);
+        assertValidatorFails($root, 'Keine Ticketdateien unter tickets/AI6-*.md gefunden.');
+    },
+    'verlangt kanonische Frontmatter-Reihenfolge' => static function (string $root): void {
+        createTicketFixture($root);
+        replaceInTicket($root, "schema: ai6.ticket.v1\nid: AI6-900", "id: AI6-900\nschema: ai6.ticket.v1");
+        assertValidatorFails($root, 'Frontmatter-Schlüssel müssen vollständig und in kanonischer Reihenfolge stehen');
+    },
+    'lehnt unbekannte Frontmatter-Schlüssel ab' => static function (string $root): void {
+        createTicketFixture($root);
+        replaceInTicket($root, "risk: low\nfiles:", "risk: low\npriority: P1\nfiles:");
+        assertValidatorFails($root, 'unbekannter Frontmatter-Schlüssel `priority`');
+    },
+    'bindet ID an den Dateinamen' => static function (string $root): void {
+        createTicketFixture($root);
+        replaceInTicket($root, 'id: AI6-900', 'id: AI6-901');
+        assertValidatorFails($root, 'stimmt nicht mit dem Dateinamen `AI6-900` überein');
+    },
+    'bindet Titel und Goal an den aktuellen Blueprint' => static function (string $root): void {
+        createTicketFixture($root);
+        replaceInTicket($root, 'title: "Validatortest"', 'title: "Abweichender Titel"');
+        replaceInTicket($root, '# AI6-900 — Validatortest', '# AI6-900 — Abweichender Titel');
+        replaceInTicket($root, 'Erster Zielabsatz.', 'Abweichendes Ziel.');
+        assertValidatorFails($root, '`title` weicht vom aktuellen Blueprint `AI6-900` ab');
+        assertValidatorFails($root, 'der erste Goal-Absatz weicht vom Blueprint-Ziel `AI6-900` ab');
+    },
+    'lehnt unbekannte Abhängigkeiten ab' => static function (string $root): void {
+        createTicketFixture($root, ['AI6-899']);
+        assertValidatorFails($root, 'unbekannte Abhängigkeit `AI6-899`');
+    },
+    'erkennt Abhängigkeitszyklen' => static function (string $root): void {
+        createTicketFixture($root, ['AI6-901']);
+        writeFixtureFile($root . '/tickets/AI6-901.md', validTicket('AI6-901', ['AI6-900'], 'Zweites Ticket'));
+        assertValidatorFails($root, 'Abhängigkeitszyklus:');
+    },
+    'verlangt alle zwölf Abschnitte in Reihenfolge' => static function (string $root): void {
+        createTicketFixture($root);
+        replaceInTicket($root, "## Review Focus\n\n- Kanonische Serialisierung.\n\n", '');
+        assertValidatorFails($root, 'die zwölf Pflichtabschnitte müssen genau einmal');
+    },
+    'verlangt genau zwei Goal-Absätze' => static function (string $root): void {
+        createTicketFixture($root);
+        replaceInTicket($root, "Erster Zielabsatz.\n\nZweiter Zielabsatz.", 'Nur ein Zielabsatz.');
+        assertValidatorFails($root, '`Goal` muss genau zwei nichtleere Absätze enthalten');
+    },
+    'verlangt lückenlos nummerierte Aufgaben' => static function (string $root): void {
+        createTicketFixture($root);
+        replaceInTicket($root, '1. Den Validator prüfen.', '2. Den Validator prüfen.');
+        assertValidatorFails($root, 'Aufgaben müssen ab 1 lückenlos nummeriert');
+    },
+    'lehnt unbekannte Coverage-Nachweise ab' => static function (string $root): void {
+        createTicketFixture($root);
+        replaceInTicket($root, '| AC-01 | TC-01 |', '| AC-01 | TC-99 |');
+        assertValidatorFails($root, 'nicht deklarierten Nachweis `TC-99`');
+    },
+    'lehnt doppelte Evidence in einer Coverage-Zeile ab' => static function (string $root): void {
+        createTicketFixture($root);
+        replaceInTicket($root, '| AC-01 | TC-01 |', '| AC-01 | TC-01, TC-01 |');
+        assertValidatorFails($root, 'enthält doppelte Evidence-IDs');
+    },
+    'verlangt Coverage für jede AC' => static function (string $root): void {
+        createTicketFixture($root);
+        replaceInTicket($root, "| AC-01 | TC-01 |\n", '');
+        assertValidatorFails($root, 'jede AC-ID muss genau einmal');
+    },
+    'bindet files an den erwarteten Scope' => static function (string $root): void {
+        createTicketFixture($root);
+        replaceInTicket($root, '- `app/Test.php` — new', '- `app/Other.php` — new');
+        assertValidatorFails($root, '`files` und `Expected initial scope` müssen dieselben Pfade');
+    },
+    'lehnt Pfadtraversal ab' => static function (string $root): void {
+        createTicketFixture($root);
+        replaceInTicket($root, '"app/Test.php"', '"../Test.php"');
+        replaceInTicket($root, '`app/Test.php`', '`../Test.php`');
+        assertValidatorFails($root, 'nichtkanonischer Repositorypfad');
+    },
+    'verlangt existierende Requirement-IDs' => static function (string $root): void {
+        createTicketFixture($root);
+        replaceInTicket($root, 'TKT-001', 'TKT-999');
+        assertValidatorFails($root, 'unbekannte Requirement-ID `TKT-999`');
+    },
+    'verlangt die drei Notes-Boilerplatezeilen' => static function (string $root): void {
+        createTicketFixture($root);
+        replaceInTicket($root, 'Ticket status, approval and run metadata are owned by AI6.', 'Status wird extern gepflegt.');
+        assertValidatorFails($root, 'Notes-Boilerplate Zeile 2 fehlt oder ist verändert');
+    },
+    'lehnt CRLF-Serialisierung ab' => static function (string $root): void {
+        createTicketFixture($root);
+        $path = $root . '/tickets/AI6-900.md';
+        writeFixtureFile($path, str_replace("\n", "\r\n", readFixtureFile($path)));
+        assertValidatorFails($root, 'nur LF-Zeilenenden sind erlaubt');
+    },
+    'verlangt genau einen abschließenden LF' => static function (string $root): void {
+        createTicketFixture($root);
+        $path = $root . '/tickets/AI6-900.md';
+        writeFixtureFile($path, readFixtureFile($path) . "\n");
+        assertValidatorFails($root, 'genau ein abschließender LF-Zeilenumbruch');
+    },
+];
 
-$repositoryRoot = realpath(dirname(__DIR__, 2));
-if ($repositoryRoot === false) {
-    fwrite(STDERR, "Repository-Root konnte nicht bestimmt werden.\n");
-    exit(1);
-}
-
-$workingTreeHash = fixture_source_hash($repositoryRoot);
-$temporaryRoot = create_temporary_directory('smartlife-ticket-validator-');
-$baseFixture = $temporaryRoot.'/base';
-$passed = 0;
-
-try {
-    copy_fixture_source($repositoryRoot, $baseFixture);
-
-    run_case('grüner Gesamtbestand und topologische Kerngarantien', $baseFixture, static function (string $fixture): void {
-        $result = run_validator($fixture);
-        assert_same(0, $result['exit'], $result['output']);
-        $expectedTickets = count(glob($fixture.'/tickets/M*.md') ?: []);
-        assert_contains('Tickets gefunden: '.$expectedTickets, $result['output']);
-        assert_before($result['output'], 'M03', 'M05');
-        assert_before($result['output'], 'M10', 'M11');
-        assert_before($result['output'], 'M46', 'M49');
-        assert_before($result['output'], 'M51', 'M21');
-    });
-    $passed++;
-
-    run_case('Root-Argument als getrennte Argumente', $baseFixture, static function (string $fixture): void {
-        $result = run_validator($fixture, true);
-        assert_same(0, $result['exit'], $result['output']);
-    });
-    $passed++;
-
-    run_case('unbekanntes Kommandozeilenargument', $baseFixture, static function (string $fixture): void {
-        $result = run_validator($fixture, false, ['--falsch']);
-        assert_true($result['exit'] !== 0, 'Unbekanntes Argument hätte abgelehnt werden müssen.');
-        assert_contains("Unbekanntes Argument '--falsch'", $result['output']);
-    });
-    $passed++;
-
-    run_case('unbekanntes Dependency-Ziel', $baseFixture, static function (string $fixture): void {
-        set_dependencies($fixture, 'M01', ['M999']);
-        assert_validator_fails($fixture, "unbekanntes Ticket 'M999'");
-    });
-    $passed++;
-
-    run_case('doppelte Ticket-ID', $baseFixture, static function (string $fixture): void {
-        replace_regex($fixture.'/tickets/M02.md', '/^id:\s*M02$/m', 'id: M01');
-        assert_validator_fails($fixture, "doppelte Ticket-ID 'M01'");
-    });
-    $passed++;
-
-    run_case('Dateinamens-/ID-Abweichung', $baseFixture, static function (string $fixture): void {
-        replace_regex($fixture.'/tickets/M01.md', '/^id:\s*M01$/m', 'id: M99');
-        assert_validator_fails($fixture, "Dateiname erwartet id 'M01', YAML enthält 'M99'");
-    });
-    $passed++;
-
-    run_case('ungültige YAML-ID', $baseFixture, static function (string $fixture): void {
-        replace_regex($fixture.'/tickets/M01.md', '/^id:\s*M01$/m', 'id: ungueltig');
-        assert_validator_fails($fixture, "YAML-Feld 'id' fehlt oder ist ungültig");
-    });
-    $passed++;
-
-    run_case('fehlender YAML-Block', $baseFixture, static function (string $fixture): void {
-        replace_regex($fixture.'/tickets/M01.md', '/^```yaml\R.*?^```\R/ms', '');
-        assert_validator_fails($fixture, 'erwartet genau einen YAML-Metadatenblock, gefunden: 0');
-    });
-    $passed++;
-
-    run_case('zweiter YAML-Block', $baseFixture, static function (string $fixture): void {
-        append_file($fixture.'/tickets/M01.md', "\n```yaml\nid: M999\n```\n");
-        assert_validator_fails($fixture, 'erwartet genau einen YAML-Metadatenblock, gefunden: 2');
-    });
-    $passed++;
-
-    run_case('doppeltes YAML-Feld', $baseFixture, static function (string $fixture): void {
-        replace_regex($fixture.'/tickets/M01.md', '/^status:\s*in_progress$/m', "status: in_progress\nstatus: todo");
-        assert_validator_fails($fixture, "doppeltes YAML-Feld 'status'");
-    });
-    $passed++;
-
-    run_case('fremdes YAML-Feld', $baseFixture, static function (string $fixture): void {
-        replace_regex($fixture.'/tickets/M01.md', '/^status:\s*in_progress$/m', "status: in_progress\nspec_refs: []");
-        assert_validator_fails($fixture, "unbekanntes YAML-Feld 'spec_refs'");
-    });
-    $passed++;
-
-    run_case('fehlendes Pflichtfeld', $baseFixture, static function (string $fixture): void {
-        replace_regex($fixture.'/tickets/M01.md', '/^titel:.*\R/m', '');
-        assert_validator_fails($fixture, 'Pflichtfeld fehlt: titel');
-    });
-    $passed++;
-
-    run_case('Listenfeld als Skalar', $baseFixture, static function (string $fixture): void {
-        replace_regex($fixture.'/tickets/M01.md', '/^depends_on:\s*\[\]$/m', 'depends_on: M03');
-        assert_validator_fails($fixture, "Feld 'depends_on' muss eine Liste sein");
-    });
-    $passed++;
-
-    run_case('ungültiger Status', $baseFixture, static function (string $fixture): void {
-        replace_regex($fixture.'/tickets/M01.md', '/^status:\s*in_progress$/m', 'status: fertig');
-        assert_validator_fails($fixture, "ungültiger status 'fertig'");
-    });
-    $passed++;
-
-    run_case('ungültige Priorität', $baseFixture, static function (string $fixture): void {
-        replace_regex($fixture.'/tickets/M01.md', '/^prio:\s*P0$/m', 'prio: P9');
-        assert_validator_fails($fixture, "ungültige prio 'P9'");
-    });
-    $passed++;
-
-    run_case('ungültige Phase', $baseFixture, static function (string $fixture): void {
-        replace_regex($fixture.'/tickets/M01.md', '/^phase:\s*"0"$/m', 'phase: "eins"');
-        assert_validator_fails($fixture, "ungültige phase 'eins'");
-    });
-    $passed++;
-
-    run_case('reserved erfordert P3', $baseFixture, static function (string $fixture): void {
-        replace_regex($fixture.'/tickets/M01.md', '/^status:\s*in_progress$/m', 'status: reserved');
-        assert_validator_fails($fixture, "status 'reserved' erfordert prio 'P3'");
-    });
-    $passed++;
-
-    run_case('doppelte Dependency', $baseFixture, static function (string $fixture): void {
-        set_dependencies($fixture, 'M11', ['M04', 'M10', 'M10']);
-        assert_validator_fails($fixture, 'depends_on enthält Duplikate');
-    });
-    $passed++;
-
-    run_case('Selbstabhängigkeit', $baseFixture, static function (string $fixture): void {
-        set_dependencies($fixture, 'M01', ['M01']);
-        assert_validator_fails($fixture, 'Ticket hängt von sich selbst ab');
-    });
-    $passed++;
-
-    run_case('echter Zyklus mit geschlossenem Zykluspfad', $baseFixture, static function (string $fixture): void {
-        set_dependencies($fixture, 'M03', ['M05']);
-        assert_validator_fails($fixture, 'M03 -> M05 -> M03');
-    });
-    $passed++;
-
-    run_case('Abhängigkeit aus späterer Phase', $baseFixture, static function (string $fixture): void {
-        set_dependencies($fixture, 'M01', ['M22']);
-        assert_validator_fails($fixture, 'Phase 0 darf nicht von M22 aus der späteren Phase 1.5 abhängen');
-    });
-    $passed++;
-
-    $titleMutations = [
-        'abweichender Kurztitel' => '**M31 — Abweichender Titel** · P1 · Phase 1.8',
-        'abweichende Prio' => '**M31 — Veraltete jQuery-Registrierungsseiten stilllegen** · P2 · Phase 1.8',
-        'abweichende Phase' => '**M31 — Veraltete jQuery-Registrierungsseiten stilllegen** · P1 · Phase 1.9',
-        'Mittelpunkt im Kurztitel' => '**M31 — jQuery · Registrierung** · P1 · Phase 1.8',
-    ];
-    foreach ($titleMutations as $label => $titleLine) {
-        run_case("Payload-Titelzeile: $label", $baseFixture, static function (string $fixture) use ($titleLine): void {
-            replace_first_line($fixture.'/tickets/M31.md', $titleLine);
-            assert_validator_fails($fixture, 'Titelzeile');
-        });
-        $passed++;
-    }
-
-    run_case('Inhalt vor Payload-Titelzeile', $baseFixture, static function (string $fixture): void {
-        prepend_file($fixture.'/tickets/M01.md', "Vorspann\n");
-        assert_validator_fails($fixture, 'muss die erste nichtleere Zeile sein');
-    });
-    $passed++;
-
-    run_case('fehlender Pflichtabschnitt', $baseFixture, static function (string $fixture): void {
-        replace_regex($fixture.'/tickets/M01.md', '/^## Ziel$/m', '## Absicht');
-        assert_validator_fails($fixture, "Abschnitt '## Ziel' muss genau einmal vorhanden sein, gefunden: 0");
-    });
-    $passed++;
-
-    run_case('doppelter Pflichtabschnitt', $baseFixture, static function (string $fixture): void {
-        append_file($fixture.'/tickets/M01.md', "\n## Hinweise\n\nDoppelt.\n");
-        assert_validator_fails($fixture, "Abschnitt '## Hinweise' muss genau einmal vorhanden sein, gefunden: 2");
-    });
-    $passed++;
-
-    run_case('leere files-Liste', $baseFixture, static function (string $fixture): void {
-        set_files($fixture, 'M01', []);
-        assert_validator_fails($fixture, 'files-Liste darf nicht leer sein');
-    });
-    $passed++;
-
-    run_case('doppelter files-Pfad', $baseFixture, static function (string $fixture): void {
-        set_files($fixture, 'M01', ['backend/example.php', 'backend/example.php']);
-        assert_validator_fails($fixture, 'files enthält Duplikate');
-    });
-    $passed++;
-
-    $unsafePaths = [
-        'Traversal' => '../ausserhalb.php',
-        'absoluter Pfad' => '/etc/passwd',
-        'URI' => 'https://example.test/datei.php',
-        'Backslash' => 'backend\\datei.php',
-        'leeres Segment' => 'backend//datei.php',
-    ];
-    foreach ($unsafePaths as $label => $path) {
-        run_case("unsicherer files-Pfad: $label", $baseFixture, static function (string $fixture) use ($path): void {
-            set_files($fixture, 'M01', [$path]);
-            assert_validator_fails($fixture, 'files');
-        });
-        $passed++;
-    }
-
-    run_case('ungeordnete exakte Scope-Überlappung', $baseFixture, static function (string $fixture): void {
-        set_files($fixture, 'M01', ['.github/workflows/security-tests.yml']);
-        assert_validator_fails($fixture, 'M01 und M03: ungeordnete Scope-Überlappung');
-    });
-    $passed++;
-
-    run_case('ungeordnete Verzeichnis-Scope-Überlappung', $baseFixture, static function (string $fixture): void {
-        set_files($fixture, 'M01', ['tests/security/']);
-        assert_validator_fails($fixture, "'tests/security/' und 'tests/security/bootstrap.php'");
-    });
-    $passed++;
-
-    run_case('additive .gitignore-Ausnahme ohne Dependency', $baseFixture, static function (string $fixture): void {
-        set_files($fixture, 'M01', ['.gitignore']);
-        set_files($fixture, 'M03', ['.gitignore']);
-        $result = run_validator($fixture);
-        assert_same(0, $result['exit'], $result['output']);
-    });
-    $passed++;
-
-    run_case('künftiges Ticket und neue numerische Phase werden dynamisch erkannt', $baseFixture, static function (string $fixture): void {
-        $ticket = read_file($fixture.'/tickets/M55.md');
-        $ticket = str_replace('M55', 'M999', $ticket);
-        write_file($fixture.'/tickets/M999.md', $ticket);
-        replace_regex($fixture.'/tickets/M999.md', '/Phase 2/', 'Phase 4.2');
-        replace_regex($fixture.'/tickets/M999.md', '/^phase:\s*"2"$/m', 'phase: "4.2"');
-        set_dependencies($fixture, 'M999', ['M55']);
-        set_files($fixture, 'M999', ['future/M999.php']);
-
-        $result = run_validator($fixture);
-        assert_same(0, $result['exit'], $result['output']);
-        assert_contains('Tickets gefunden: 56', $result['output']);
-        assert_before($result['output'], 'M55', 'M999');
-    });
-    $passed++;
-
-    run_case('ungültig benannte M-Datei wird entdeckt', $baseFixture, static function (string $fixture): void {
-        copy_file($fixture.'/tickets/M01.md', $fixture.'/tickets/Mfalsch.md');
-        assert_validator_fails($fixture, 'Dateiname muss M<ID>.md mit mindestens zwei Ziffern entsprechen');
-    });
-    $passed++;
-
-    assert_same($workingTreeHash, fixture_source_hash($repositoryRoot), 'Der echte Arbeitsbaum wurde verändert.');
-    echo "OK: $passed Validator-Regressionsfälle bestanden; der Arbeitsbaum blieb unverändert.\n";
-} catch (Throwable $exception) {
-    fwrite(STDERR, 'FEHLER: '.$exception->getMessage().PHP_EOL);
-    exit(1);
-} finally {
-    remove_tree($temporaryRoot);
-}
-
-exit(0);
-
-function run_case(string $label, string $baseFixture, callable $test): void
-{
-    static $number = 0;
-    $number++;
-    $fixture = dirname($baseFixture).'/case-'.str_pad((string) $number, 2, '0', STR_PAD_LEFT);
-    copy_tree($baseFixture, $fixture);
-
+$failures = [];
+foreach ($tests as $name => $test) {
+    $root = createTemporaryDirectory();
     try {
-        $test($fixture);
-        echo "PASS: $label\n";
+        copyValidator($validatorSource, $root);
+        $test($root);
+        echo "PASS: $name\n";
+    } catch (Throwable $throwable) {
+        $failures[] = "$name: {$throwable->getMessage()}";
+        echo "FAIL: $name\n";
     } finally {
-        remove_tree($fixture);
+        removeFixture($root);
     }
 }
 
-/** @return array{exit: int, output: string} */
-function run_validator(string $fixture, bool $separateRootArgument = false, array $extraArguments = []): array
-{
-    $rootArguments = $separateRootArgument ? ['--root', $fixture] : ['--root='.$fixture];
-    $command = array_merge([PHP_BINARY, $fixture.'/tools/validate_tickets.php'], $rootArguments, $extraArguments);
-    $descriptors = [
-        0 => ['pipe', 'r'],
-        1 => ['pipe', 'w'],
-        2 => ['pipe', 'w'],
-    ];
-    $process = proc_open($command, $descriptors, $pipes);
-    if (!is_resource($process)) {
-        throw new RuntimeException('Validator-Prozess konnte nicht gestartet werden.');
-    }
-
-    fclose($pipes[0]);
-    $stdout = stream_get_contents($pipes[1]);
-    $stderr = stream_get_contents($pipes[2]);
-    fclose($pipes[1]);
-    fclose($pipes[2]);
-    $exit = proc_close($process);
-
-    return [
-        'exit' => $exit,
-        'output' => (string) $stdout.(string) $stderr,
-    ];
+if ($failures !== []) {
+    fwrite(STDERR, "\n" . implode("\n", $failures) . "\n");
+    exit(1);
 }
 
-function assert_validator_fails(string $fixture, string $messageFragment): void
-{
-    $result = run_validator($fixture);
-    assert_true($result['exit'] !== 0, 'Validator hätte fehlschlagen müssen. Ausgabe: '.$result['output']);
-    assert_contains($messageFragment, $result['output']);
-}
+echo "\n" . count($tests) . " Validator-Regressionstests erfolgreich.\n";
 
-function copy_fixture_source(string $sourceRoot, string $fixtureRoot): void
+function createBaseFixture(string $root): void
 {
-    create_directory($fixtureRoot.'/tickets');
-    create_directory($fixtureRoot.'/tools');
-
-    foreach (glob($sourceRoot.'/tickets/M*.md') ?: [] as $file) {
-        copy_file($file, $fixtureRoot.'/tickets/'.basename($file));
-    }
-    copy_file($sourceRoot.'/tools/validate_tickets.php', $fixtureRoot.'/tools/validate_tickets.php');
-}
-
-function copy_tree(string $source, string $target): void
-{
-    create_directory($target);
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($source, FilesystemIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::SELF_FIRST,
+    writeFixtureFile(
+        $root . '/docs/AI6_IMPLEMENTATION_PLAN.md',
+        implode("\n", [
+            '# Testplan',
+            '',
+            '## 3. Normativer Anforderungskatalog',
+            '',
+            '- **TKT-001** Testanforderung.',
+            '',
+            '## 4. Zielarchitektur',
+            '',
+            '## 15. Ticket-Blueprints',
+            '',
+            '## 15.1 M0 – Test',
+            '',
+            '### AI6-900 — Validatortest',
+            '',
+            '- **Initialstatus des späteren Detailtickets:** `todo`',
+            '- **Risiko:** `low`',
+            '- **Kind:** `chore`',
+            '- **Depends on:** keine',
+            '- **Requirement-Refs:** `TKT-001`',
+            '- **Erwartete Module:** `Shared`',
+            '',
+            '**Ziel**',
+            '',
+            'Erster Zielabsatz.',
+            '',
+            '**Deliverables**',
+            '',
+            '- Fixture.',
+            '',
+            '### AI6-901 — Zweites Ticket',
+            '',
+            '- **Initialstatus des späteren Detailtickets:** `todo`',
+            '- **Risiko:** `low`',
+            '- **Kind:** `chore`',
+            '- **Depends on:** `AI6-900`',
+            '- **Requirement-Refs:** `TKT-001`',
+            '- **Erwartete Module:** `Shared`',
+            '',
+            '**Ziel**',
+            '',
+            'Erster Zielabsatz.',
+            '',
+            '**Deliverables**',
+            '',
+            '- Fixture.',
+            '',
+            '## 16. Requirement-Traceability',
+            '',
+        ]),
     );
+}
 
-    foreach ($iterator as $item) {
-        $relative = substr($item->getPathname(), strlen($source) + 1);
-        $destination = $target.'/'.$relative;
-        if ($item->isDir()) {
-            create_directory($destination);
-        } else {
-            copy_file($item->getPathname(), $destination);
-        }
+/** @param list<string> $dependencies */
+function createTicketFixture(string $root, array $dependencies = [], string $status = 'todo'): void
+{
+    createBaseFixture($root);
+    writeFixtureFile($root . '/tickets/AI6-900.md', validTicket('AI6-900', $dependencies, 'Validatortest', $status));
+}
+
+/** @param list<string> $dependencies */
+function validTicket(string $id, array $dependencies = [], string $title = 'Validatortest', string $status = 'todo'): string
+{
+    $dependsOn = $dependencies === [] ? '[]' : '[' . implode(', ', $dependencies) . ']';
+
+    return implode("\n", [
+        '---',
+        'schema: ai6.ticket.v1',
+        "id: $id",
+        'title: ' . json_encode($title, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        "status: $status",
+        "depends_on: $dependsOn",
+        'kind: chore',
+        'milestone: M0',
+        'risk: low',
+        'files:',
+        '  - "app/Test.php"',
+        'spec_refs:',
+        '  - "docs/AI6_IMPLEMENTATION_PLAN.md — TKT-001"',
+        '---',
+        '',
+        "# $id — $title",
+        '',
+        '## Goal',
+        '',
+        'Erster Zielabsatz.',
+        '',
+        'Zweiter Zielabsatz.',
+        '',
+        '## Context',
+        '',
+        'Das Fixture bildet das kanonische Ticketformat ab.',
+        '',
+        '## Tasks',
+        '',
+        '1. Den Validator prüfen.',
+        '',
+        '## Acceptance Criteria',
+        '',
+        '- [ ] **AC-01** Das Ticket wird als gültig erkannt.',
+        '',
+        '## Test Cases',
+        '',
+        '- **TC-01** Der Validator endet mit Exitcode 0.',
+        '',
+        '## AC Coverage',
+        '',
+        '| AC | Evidence |',
+        '|---|---|',
+        '| AC-01 | TC-01 |',
+        '',
+        '## Initial Scope and Sensitive Paths',
+        '',
+        '**Expected initial scope:**',
+        '',
+        '- `app/Test.php` — new',
+        '',
+        '**Sensitive paths:**',
+        '',
+        'None.',
+        '',
+        '## Do Not Change',
+        '',
+        'None.',
+        '',
+        '## Out of Scope',
+        '',
+        '- Produktivcode außerhalb des Fixtures.',
+        '',
+        '## Manual and External Gates',
+        '',
+        'None.',
+        '',
+        '## Review Focus',
+        '',
+        '- Kanonische Serialisierung.',
+        '',
+        '## Notes',
+        '',
+        '- Definition of Done: `docs/AI6_IMPLEMENTATION_PLAN.md` §12.2.',
+        '- Ticket status, approval and run metadata are owned by AI6. The implementation agent never changes them.',
+        '- Necessary deviations are reported as `needs_human` or as a scope/contract request, never applied silently.',
+        '',
+    ]);
+}
+
+function replaceInTicket(string $root, string $search, string $replace): void
+{
+    $path = $root . '/tickets/AI6-900.md';
+    $contents = readFixtureFile($path);
+    $updated = str_replace($search, $replace, $contents, $count);
+    if ($count === 0) {
+        throw new RuntimeException("Fixture-Fundstelle nicht gefunden: $search");
+    }
+    writeFixtureFile($path, $updated);
+}
+
+function assertValidatorPasses(string $root): void
+{
+    $result = runValidator($root);
+    if ($result['exit_code'] !== 0) {
+        throw new RuntimeException("Validator sollte erfolgreich sein:\n" . implode("\n", $result['output']));
     }
 }
 
-function copy_file(string $source, string $target): void
+function assertValidatorFails(string $root, string $fragment): void
 {
-    create_directory(dirname($target));
+    $result = runValidator($root);
+    if ($result['exit_code'] === 0 || !str_contains(implode("\n", $result['output']), $fragment)) {
+        throw new RuntimeException("Erwarteter Fehler fehlt: $fragment\n" . implode("\n", $result['output']));
+    }
+}
+
+/** @return array{exit_code: int, output: list<string>} */
+function runValidator(string $root): array
+{
+    $command = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($root . '/tools/validate_tickets.php')
+        . ' --root=' . escapeshellarg($root) . ' 2>&1';
+    $output = [];
+    $exitCode = 1;
+    exec($command, $output, $exitCode);
+
+    return ['exit_code' => $exitCode, 'output' => $output];
+}
+
+function copyValidator(string $source, string $root): void
+{
+    $target = $root . '/tools/validate_tickets.php';
+    if (!is_dir(dirname($target)) && !mkdir(dirname($target), 0700, true)) {
+        throw new RuntimeException('Tool-Verzeichnis konnte nicht erstellt werden.');
+    }
     if (!copy($source, $target)) {
-        throw new RuntimeException("Kopieren fehlgeschlagen: $source");
+        throw new RuntimeException('Validator konnte nicht kopiert werden.');
     }
 }
 
-function create_temporary_directory(string $prefix): string
+function createTemporaryDirectory(): string
 {
-    $path = rtrim(sys_get_temp_dir(), "/\\").'/'.$prefix.bin2hex(random_bytes(8));
-    create_directory($path);
+    $root = rtrim(sys_get_temp_dir(), "/\\") . '/ai6_validator_' . bin2hex(random_bytes(8));
+    if (!mkdir($root, 0700, true)) {
+        throw new RuntimeException('Temporäres Verzeichnis konnte nicht erstellt werden.');
+    }
 
-    return $path;
+    return $root;
 }
 
-function create_directory(string $path): void
+function writeFixtureFile(string $path, string $contents): void
 {
-    if (!is_dir($path) && !mkdir($path, 0777, true) && !is_dir($path)) {
-        throw new RuntimeException("Verzeichnis konnte nicht angelegt werden: $path");
+    if (!is_dir(dirname($path)) && !mkdir(dirname($path), 0700, true)) {
+        throw new RuntimeException("Verzeichnis konnte nicht erstellt werden: $path");
+    }
+    if (file_put_contents($path, $contents) === false) {
+        throw new RuntimeException("Datei konnte nicht geschrieben werden: $path");
     }
 }
 
-function remove_tree(string $path): void
+function readFixtureFile(string $path): string
 {
-    if (!is_dir($path)) {
-        return;
-    }
-
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::CHILD_FIRST,
-    );
-    foreach ($iterator as $item) {
-        if ($item->isDir()) {
-            rmdir($item->getPathname());
-        } else {
-            unlink($item->getPathname());
-        }
-    }
-    rmdir($path);
-}
-
-function set_dependencies(string $fixture, string $id, array $dependencies): void
-{
-    $value = '['.implode(', ', $dependencies).']';
-    replace_regex($fixture.'/tickets/'.$id.'.md', '/^depends_on:\s*\[[^\]]*\]$/m', 'depends_on: '.$value);
-}
-
-function set_files(string $fixture, string $id, array $files): void
-{
-    $replacement = 'files:';
-    if ($files === []) {
-        $replacement .= ' []'."\n";
-    } else {
-        $replacement .= "\n";
-        foreach ($files as $file) {
-            $replacement .= '  - '.$file."\n";
-        }
-    }
-
-    replace_regex(
-        $fixture.'/tickets/'.$id.'.md',
-        '/^files:\s*(?:\[\])?\R(?:  -[^\r\n]*\R)*/m',
-        $replacement,
-    );
-}
-
-function replace_regex(string $file, string $pattern, string $replacement): void
-{
-    $contents = read_file($file);
-    $updated = preg_replace($pattern, $replacement, $contents, 1, $count);
-    if ($updated === null || $count !== 1) {
-        throw new RuntimeException("Regex-Ersetzung in $file erwartete genau einen Treffer, gefunden: $count.");
-    }
-    write_file($file, $updated);
-}
-
-function replace_first_line(string $file, string $replacement): void
-{
-    replace_regex($file, '/\A[^\r\n]*/', $replacement);
-}
-
-function prepend_file(string $file, string $prefix): void
-{
-    write_file($file, $prefix.read_file($file));
-}
-
-function append_file(string $file, string $suffix): void
-{
-    write_file($file, read_file($file).$suffix);
-}
-
-function read_file(string $file): string
-{
-    $contents = file_get_contents($file);
+    $contents = file_get_contents($path);
     if ($contents === false) {
-        throw new RuntimeException("Datei konnte nicht gelesen werden: $file");
+        throw new RuntimeException("Datei konnte nicht gelesen werden: $path");
     }
 
     return $contents;
 }
 
-function write_file(string $file, string $contents): void
+function removeFixture(string $root): void
 {
-    if (file_put_contents($file, $contents) === false) {
-        throw new RuntimeException("Datei konnte nicht geschrieben werden: $file");
+    if (!is_dir($root)) {
+        return;
     }
-}
-
-function fixture_source_hash(string $root): string
-{
-    $files = array_merge(
-        glob($root.'/tickets/M*.md') ?: [],
-        [$root.'/tools/validate_tickets.php', $root.'/tools/tests/validate_tickets_test.php'],
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST,
     );
-    sort($files);
-    $context = hash_init('sha256');
-
-    foreach ($files as $file) {
-        hash_update($context, str_replace('\\', '/', substr($file, strlen($root)))."\0");
-        hash_update_file($context, $file);
+    foreach ($iterator as $item) {
+        if ($item->isDir() && !$item->isLink()) {
+            rmdir($item->getPathname());
+        } else {
+            unlink($item->getPathname());
+        }
     }
-
-    return hash_final($context);
-}
-
-function assert_contains(string $needle, string $haystack): void
-{
-    assert_true(str_contains($haystack, $needle), "Erwarteter Text fehlt: $needle\nAusgabe:\n$haystack");
-}
-
-function assert_before(string $haystack, string $first, string $second): void
-{
-    $firstPosition = strpos($haystack, $first);
-    $secondPosition = strpos($haystack, $second);
-    assert_true(
-        $firstPosition !== false && $secondPosition !== false && $firstPosition < $secondPosition,
-        "Erwartete Reihenfolge fehlt: $first vor $second.",
-    );
-}
-
-function assert_same(mixed $expected, mixed $actual, string $message = ''): void
-{
-    if ($expected !== $actual) {
-        throw new RuntimeException($message !== '' ? $message : 'Werte sind nicht identisch.');
-    }
-}
-
-function assert_true(bool $condition, string $message): void
-{
-    if (!$condition) {
-        throw new RuntimeException($message);
-    }
+    rmdir($root);
 }

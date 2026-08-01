@@ -13,6 +13,9 @@
 /.vscode
 /.zed
 /auth.json
+/database/*.sqlite
+/database/*.sqlite-shm
+/database/*.sqlite-wal
 /node_modules
 /public/build
 /public/hot

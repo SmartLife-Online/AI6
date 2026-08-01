@@ -8,7 +8,7 @@ declare(strict_types=1);
  * Liefert drei Aktionen als JSON:
  *   ?action=list              → alle Tickets aus dem tickets/-Ordner
  *   ?action=prompt&id=AI6-001 → Master-Prompt mit eingesetztem Ticketinhalt
- *   ?action=status            → Status in Ticketdatei und vorhandenen Indizes synchronisieren (POST)
+ *   ?action=status            → Status im kanonischen Ticket-Frontmatter ändern (POST)
  *
  * Aufruf lokal z. B. aus dem Repository-Wurzelverzeichnis:
  *   php -S localhost:8000
@@ -17,7 +17,16 @@ declare(strict_types=1);
 
 const TICKET_ID_PATTERN = '/^AI6-\d{3}[A-Z]?$/';
 const TICKET_PLACEHOLDER = '[TICKET HIER EINFÜGEN';
-const TICKET_STATUSES = ['todo', 'in_progress', 'review', 'done', 'reserved'];
+const TICKET_STATUSES = ['todo', 'ready', 'in_progress', 'blocked', 'review', 'done', 'cancelled'];
+const TICKET_STATUS_TRANSITIONS = [
+    'todo' => ['ready', 'blocked', 'cancelled'],
+    'ready' => ['todo', 'in_progress', 'blocked', 'cancelled'],
+    'in_progress' => ['review', 'todo', 'blocked', 'cancelled'],
+    'blocked' => ['todo', 'cancelled'],
+    'review' => ['done', 'todo', 'cancelled'],
+    'done' => [],
+    'cancelled' => [],
+];
 const STATUS_REQUEST_HEADER = 'status-update';
 
 final class TicketPromptHttpException extends RuntimeException
@@ -55,11 +64,7 @@ function runApi(string $repoRoot): never
 
     try {
         match ($action) {
-            'list' => respond(['ok' => true, 'tickets' => listTickets(
-                $ticketsDir,
-                $repoRoot . '/tickets/README.md',
-                $repoRoot . '/docs/04_TICKETS.md',
-            )]),
+            'list' => respond(['ok' => true, 'tickets' => listTickets($ticketsDir)]),
             'prompt' => respond(buildPromptResponse($ticketsDir, $masterPromptPath, (string) ($_GET['id'] ?? ''))),
             'status' => respond(buildStatusResponse($repoRoot, readStatusRequest())),
             default => fail('Unbekannte Aktion.', 400),
@@ -99,11 +104,11 @@ function fail(string $message, int $status, array $headers = []): never
 }
 
 /**
- * Liest alle AI6-Ticketdateien (AI6-*.md) und liefert ID + Anzeigetitel + Phase/Prio.
+ * Liest alle AI6-Ticketdateien (AI6-*.md) und liefert kanonische Frontmatter-Metadaten.
  *
- * @return list<array{id: string, title: string, meta: string, status: string, status_consistent: bool}>
+ * @return list<array{id: string, title: string, meta: string, status: string, status_consistent: bool, allowed_statuses: list<string>}>
  */
-function listTickets(string $dir, ?string $readmePath = null, ?string $docsPath = null): array
+function listTickets(string $dir): array
 {
     if (!is_dir($dir)) {
         return [];
@@ -111,71 +116,71 @@ function listTickets(string $dir, ?string $readmePath = null, ?string $docsPath 
 
     $files = glob($dir . '/AI6-*.md') ?: [];
     sort($files, SORT_NATURAL);
-    $readmeExists = $readmePath !== null && is_file($readmePath);
-    $docsExists = $docsPath !== null && is_file($docsPath);
-    $readmeStatuses = indexStatusesForTicketList($readmePath);
-    $docsStatuses = indexStatusesForTicketList($docsPath);
-
     $tickets = [];
     foreach ($files as $file) {
         $id = basename($file, '.md');
-        $headline = firstNonEmptyLine($file);
         $content = file_get_contents($file);
-        $status = $content === false ? '' : statusForTicketList($content, $id);
+        $metadata = $content === false ? null : ticketMetadataForList($content, $id);
         $tickets[] = [
             'id' => $id,
-            'title' => cleanTitle($headline),
-            'meta' => extractMeta($headline),
-            'status' => $status,
-            'status_consistent' => $status !== ''
-                && (!$readmeExists || ($readmeStatuses[$id] ?? null) === $status)
-                && (!$docsExists || ($docsStatuses[$id] ?? null) === $status),
+            'title' => $metadata['title'] ?? $id,
+            'meta' => $metadata === null
+                ? ''
+                : implode(' · ', [$metadata['milestone'], $metadata['risk'], $metadata['kind']]),
+            'status' => $metadata['status'] ?? '',
+            'status_consistent' => $metadata !== null,
+            'allowed_statuses' => $metadata === null
+                ? []
+                : TICKET_STATUS_TRANSITIONS[$metadata['status']],
         ];
     }
 
     return $tickets;
 }
 
-/** Erste nicht-leere Zeile einer Datei (für Titel/Meta). */
-function firstNonEmptyLine(string $file): string
+/** @return array{title: string, status: string, milestone: string, risk: string, kind: string}|null */
+function ticketMetadataForList(string $contents, string $id): ?array
 {
-    $handle = fopen($file, 'rb');
-    if ($handle === false) {
-        return '';
+    $normalized = str_replace(["\r\n", "\r"], "\n", $contents);
+    if (preg_match('/\A---\n(.*?)\n---\n/s', $normalized, $match) !== 1) {
+        return null;
     }
 
-    $result = '';
-    while (($line = fgets($handle)) !== false) {
-        $line = trim($line);
-        if ($line !== '') {
-            $result = $line;
-            break;
+    $block = $match[1];
+    $values = [];
+    foreach (['schema', 'id', 'title', 'status', 'milestone', 'risk', 'kind'] as $key) {
+        if (preg_match_all('/^' . preg_quote($key, '/') . ':[ \t]*(.+)[ \t]*$/m', $block, $field) !== 1) {
+            return null;
         }
+        $values[$key] = trim($field[1][0]);
     }
-    fclose($handle);
-
-    return $result;
-}
-
-/** Entfernt Markdown-Auszeichnung und den Meta-Teil hinter dem ersten "·". */
-function cleanTitle(string $headline): string
-{
-    $title = str_replace('*', '', $headline);
-    $title = explode('·', $title)[0];
-
-    return trim($title);
-}
-
-/** Liefert den Meta-Teil (z. B. "P0 · Phase 0") aus der Kopfzeile, falls vorhanden. */
-function extractMeta(string $headline): string
-{
-    $plain = trim(str_replace('*', '', $headline));
-    $pos = mb_strpos($plain, '·');
-    if ($pos === false) {
-        return '';
+    if ($values['schema'] !== 'ai6.ticket.v1'
+        || $values['id'] !== $id
+        || !in_array($values['status'], TICKET_STATUSES, true)) {
+        return null;
+    }
+    if (!in_array($values['milestone'], ['M0', 'M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7'], true)
+        || !in_array($values['risk'], ['low', 'medium', 'high'], true)
+        || !in_array($values['kind'], ['feature', 'chore', 'fix', 'spike'], true)) {
+        return null;
     }
 
-    return trim(mb_substr($plain, $pos + mb_strlen('·')));
+    try {
+        $title = json_decode($values['title'], true, 8, JSON_THROW_ON_ERROR);
+    } catch (JsonException) {
+        return null;
+    }
+    if (!is_string($title) || trim($title) === '') {
+        return null;
+    }
+
+    return [
+        'title' => $title,
+        'status' => $values['status'],
+        'milestone' => $values['milestone'],
+        'risk' => $values['risk'],
+        'kind' => $values['kind'],
+    ];
 }
 
 /**
@@ -303,8 +308,8 @@ function buildStatusResponse(string $repoRoot, array $payload): array
 }
 
 /**
- * Ändert den Workflowstatus in der Ticketdatei und allen vorhandenen Inventardateien. Fundstellen werden vorab
- * eindeutig geprüft; Schreib- oder Validatorfehler stellen die Originalinhalte wieder her.
+ * Ändert den Workflowstatus ausschließlich im kanonischen Ticket-Frontmatter. Fundstellen werden vorab
+ * eindeutig geprüft; Schreib- oder Validatorfehler stellen den Originalinhalt wieder her.
  *
  * @param (callable(resource, string, string): void)|null $writer Nur für Fehlerfalltests.
  * @param (callable(string): void)|null $validator Nur für isolierte Fixture-Tests.
@@ -316,6 +321,7 @@ function buildStatusResponse(string $repoRoot, array $payload): array
  *   changed: bool,
  *   validator_clean: bool|null,
  *   remaining_validator_errors: int,
+ *   allowed_statuses: list<string>,
  *   updated_files: list<string>
  * }
  */
@@ -356,12 +362,6 @@ function updateTicketStatus(
         }
 
         $edits = ['ticket' => editTicketYamlStatus($originals['ticket'], $id, $newStatus)];
-        if (isset($originals['readme'])) {
-            $edits['readme'] = editIndexStatus($originals['readme'], $id, $newStatus, 'tickets/README.md');
-        }
-        if (isset($originals['docs'])) {
-            $edits['docs'] = editIndexStatus($originals['docs'], $id, $newStatus, 'docs/04_TICKETS.md');
-        }
 
         $previousStatuses = [];
         foreach ($edits as $key => $edit) {
@@ -369,6 +369,7 @@ function updateTicketStatus(
         }
         $uniquePreviousStatuses = array_values(array_unique($previousStatuses));
         $previousStatus = $previousStatuses['ticket'];
+        assertTicketStatusTransitionAllowed($previousStatus, $newStatus);
         $updatedFiles = statusFileLabels($id, array_keys($paths));
         if (count($uniquePreviousStatuses) === 1 && $previousStatus === $newStatus) {
             return [
@@ -379,6 +380,7 @@ function updateTicketStatus(
                 'changed' => false,
                 'validator_clean' => null,
                 'remaining_validator_errors' => 0,
+                'allowed_statuses' => TICKET_STATUS_TRANSITIONS[$newStatus],
                 'updated_files' => $updatedFiles,
             ];
         }
@@ -391,7 +393,7 @@ function updateTicketStatus(
             writeLockedContents($handle, $contents, $key);
         };
 
-        if ($validator === null && is_file($root . '/tools/validate_tickets.php')) {
+        if ($validator === null) {
             $validationResult = validateTicketStatusCandidate($root, $id, $originals, $updates);
         }
 
@@ -419,6 +421,7 @@ function updateTicketStatus(
             'changed' => true,
             'validator_clean' => $validationResult['clean'],
             'remaining_validator_errors' => $validationResult['remaining_errors'],
+            'allowed_statuses' => TICKET_STATUS_TRANSITIONS[$newStatus],
             'updated_files' => $updatedFiles,
         ];
     } catch (Throwable $e) {
@@ -464,18 +467,20 @@ function assertValidTicketStatusInput(string $id, string $status): void
     }
 }
 
+function assertTicketStatusTransitionAllowed(string $previousStatus, string $newStatus): void
+{
+    if ($previousStatus === $newStatus) {
+        return;
+    }
+    if (!in_array($newStatus, TICKET_STATUS_TRANSITIONS[$previousStatus] ?? [], true)) {
+        throw new TicketStatusConflict("Unzulässiger Ticketstatus-Übergang: $previousStatus → $newStatus.");
+    }
+}
+
 /** @return array<string, string> */
 function statusFilePaths(string $root, string $id): array
 {
-    $paths = ['ticket' => $root . '/tickets/' . $id . '.md'];
-    if (is_file($root . '/tickets/README.md')) {
-        $paths['readme'] = $root . '/tickets/README.md';
-    }
-    if (is_file($root . '/docs/04_TICKETS.md')) {
-        $paths['docs'] = $root . '/docs/04_TICKETS.md';
-    }
-
-    return $paths;
+    return ['ticket' => $root . '/tickets/' . $id . '.md'];
 }
 
 /** @param list<string> $keys @return list<string> */
@@ -483,8 +488,6 @@ function statusFileLabels(string $id, array $keys): array
 {
     $labels = [
         'ticket' => 'tickets/' . $id . '.md',
-        'readme' => 'tickets/README.md',
-        'docs' => 'docs/04_TICKETS.md',
     ];
 
     return array_values(array_map(
@@ -574,20 +577,20 @@ function rollbackStatusFiles(array $handles, array $originals): array
 function editTicketYamlStatus(string $contents, string $id, string $newStatus): array
 {
     $blockCount = preg_match_all(
-        '/^```yaml[ \t]*\r?\n(.*?)^```[ \t]*\r?$/msu',
+        '/\A---\r?\n(.*?)\r?\n---(?:\r?\n|\z)/su',
         $contents,
         $blocks,
         PREG_OFFSET_CAPTURE,
     );
     if ($blockCount !== 1) {
-        throw new TicketStatusConflict("$id: genau ein YAML-Metadatenblock erwartet, gefunden: " . (int) $blockCount . '.');
+        throw new TicketStatusConflict("$id: genau ein Frontmatter am Dateianfang erwartet, gefunden: " . (int) $blockCount . '.');
     }
 
     $block = $blocks[1][0][0];
     $blockOffset = $blocks[1][0][1];
     $idCount = preg_match_all('/^id:[ \t]*(AI6-\d{3}[A-Z]?)[ \t]*\r?$/mu', $block, $idMatches);
     if ($idCount !== 1 || $idMatches[1][0] !== $id) {
-        throw new TicketStatusConflict("$id: YAML-ID fehlt oder stimmt nicht mit dem Dateinamen überein.");
+        throw new TicketStatusConflict("$id: Frontmatter-ID fehlt oder stimmt nicht mit dem Dateinamen überein.");
     }
 
     $statusCount = preg_match_all(
@@ -597,65 +600,15 @@ function editTicketYamlStatus(string $contents, string $id, string $newStatus): 
         PREG_OFFSET_CAPTURE,
     );
     if ($statusCount !== 1) {
-        throw new TicketStatusConflict("$id: genau ein YAML-Statusfeld erwartet, gefunden: " . (int) $statusCount . '.');
+        throw new TicketStatusConflict("$id: genau ein Frontmatter-Statusfeld erwartet, gefunden: " . (int) $statusCount . '.');
     }
 
     $previousStatus = $statusMatches[2][0][0];
-    assertExistingStatusAllowed($previousStatus, "$id YAML");
+    assertExistingStatusAllowed($previousStatus, "$id Frontmatter");
     $offset = $blockOffset + $statusMatches[2][0][1];
     $updated = substr_replace($contents, $newStatus, $offset, strlen($previousStatus));
 
     return ['previous_status' => $previousStatus, 'contents' => $updated];
-}
-
-/** @return array{previous_status: string, contents: string} */
-function editIndexStatus(string $contents, string $id, string $newStatus, string $label): array
-{
-    $lines = linesWithOffsets($contents);
-    $statusColumn = null;
-    $matches = [];
-
-    foreach ($lines as $lineEntry) {
-        $line = rtrim($lineEntry['line'], "\r\n");
-        $cells = markdownTableCells($line);
-        if ($cells === null) {
-            $statusColumn = null;
-            continue;
-        }
-
-        $firstValue = $cells[0]['value'] ?? '';
-        if (strcasecmp($firstValue, 'ID') === 0) {
-            $statusColumn = null;
-            foreach ($cells as $index => $cell) {
-                if (strcasecmp($cell['value'], 'Status') === 0) {
-                    $statusColumn = $index;
-                    break;
-                }
-            }
-            continue;
-        }
-
-        if ($statusColumn === null || $firstValue !== $id || !isset($cells[$statusColumn])) {
-            continue;
-        }
-
-        $statusCell = $cells[$statusColumn];
-        assertExistingStatusAllowed($statusCell['value'], "$label $id");
-        $matches[] = [
-            'previous_status' => $statusCell['value'],
-            'offset' => $lineEntry['offset'] + $statusCell['value_offset'],
-            'length' => strlen($statusCell['value']),
-        ];
-    }
-
-    if (count($matches) !== 1) {
-        throw new TicketStatusConflict("$label: genau eine Inventarzeile für $id erwartet, gefunden: " . count($matches) . '.');
-    }
-
-    $match = $matches[0];
-    $updated = substr_replace($contents, $newStatus, $match['offset'], $match['length']);
-
-    return ['previous_status' => $match['previous_status'], 'contents' => $updated];
 }
 
 function assertExistingStatusAllowed(string $status, string $label): void
@@ -663,125 +616,6 @@ function assertExistingStatusAllowed(string $status, string $label): void
     if (!in_array($status, TICKET_STATUSES, true)) {
         throw new TicketStatusConflict("$label enthält einen unbekannten Status '$status'.");
     }
-}
-
-/** @return list<array{line: string, offset: int}> */
-function linesWithOffsets(string $contents): array
-{
-    preg_match_all('/[^\r\n]*(?:\r\n|\n|\r|$)/', $contents, $matches, PREG_OFFSET_CAPTURE);
-    $lines = [];
-    foreach ($matches[0] as [$line, $offset]) {
-        if ($line === '') {
-            continue;
-        }
-        $lines[] = ['line' => $line, 'offset' => $offset];
-    }
-
-    return $lines;
-}
-
-/**
- * @return list<array{value: string, value_offset: int}>|null
- */
-function markdownTableCells(string $line): ?array
-{
-    $leftTrimmed = ltrim($line, " \t");
-    $trimmed = rtrim($leftTrimmed, " \t");
-    if (!str_starts_with($trimmed, '|') || !str_ends_with($trimmed, '|')) {
-        return null;
-    }
-
-    $lineStart = strlen($line) - strlen($leftTrimmed);
-    $bars = [];
-    for ($position = 0; $position < strlen($trimmed); $position++) {
-        if ($trimmed[$position] === '|') {
-            $bars[] = $position;
-        }
-    }
-    if (count($bars) < 2) {
-        return null;
-    }
-
-    $cells = [];
-    for ($index = 0; $index < count($bars) - 1; $index++) {
-        $rawStart = $bars[$index] + 1;
-        $rawLength = $bars[$index + 1] - $rawStart;
-        $raw = substr($trimmed, $rawStart, $rawLength);
-        $leading = strlen($raw) - strlen(ltrim($raw, " \t"));
-        $value = trim($raw, " \t");
-        $cells[] = [
-            'value' => $value,
-            'value_offset' => $lineStart + $rawStart + $leading,
-        ];
-    }
-
-    return $cells;
-}
-
-function statusForTicketList(string $contents, string $id): string
-{
-    try {
-        return editTicketYamlStatus($contents, $id, 'todo')['previous_status'];
-    } catch (Throwable) {
-        return '';
-    }
-}
-
-/** @return array<string, string> */
-function indexStatusesForTicketList(?string $path): array
-{
-    if ($path === null || !is_file($path)) {
-        return [];
-    }
-
-    $contents = file_get_contents($path);
-    if ($contents === false) {
-        return [];
-    }
-
-    $statusColumn = null;
-    $collected = [];
-    foreach (linesWithOffsets($contents) as $lineEntry) {
-        $line = rtrim($lineEntry['line'], "\r\n");
-        $cells = markdownTableCells($line);
-        if ($cells === null) {
-            $statusColumn = null;
-            continue;
-        }
-
-        $firstValue = $cells[0]['value'] ?? '';
-        if (strcasecmp($firstValue, 'ID') === 0) {
-            $statusColumn = null;
-            foreach ($cells as $index => $cell) {
-                if (strcasecmp($cell['value'], 'Status') === 0) {
-                    $statusColumn = $index;
-                    break;
-                }
-            }
-            continue;
-        }
-
-        if ($statusColumn === null
-            || preg_match(TICKET_ID_PATTERN, $firstValue) !== 1
-            || !isset($cells[$statusColumn])) {
-            continue;
-        }
-
-        $status = $cells[$statusColumn]['value'];
-        if (in_array($status, TICKET_STATUSES, true)) {
-            $collected[$firstValue][] = $status;
-        }
-    }
-
-    $statuses = [];
-    foreach ($collected as $id => $values) {
-        $unique = array_values(array_unique($values));
-        if (count($unique) === 1 && count($values) === 1) {
-            $statuses[$id] = $unique[0];
-        }
-    }
-
-    return $statuses;
 }
 
 function runCanonicalTicketValidator(string $repoRoot): void
@@ -850,11 +684,7 @@ function validateTicketStatusCandidate(string $repoRoot, string $id, array $orig
     $fixture = createStatusValidationFixture();
 
     try {
-        $relativePaths = [
-            'ticket' => 'tickets/' . $id . '.md',
-            'readme' => 'tickets/README.md',
-            'docs' => 'docs/04_TICKETS.md',
-        ];
+        $relativePaths = ['ticket' => 'tickets/' . $id . '.md'];
         $excludedPaths = [];
         $candidateFiles = [];
         foreach (array_keys($updates) as $key) {
@@ -872,11 +702,6 @@ function validateTicketStatusCandidate(string $repoRoot, string $id, array $orig
         );
 
         foreach ($candidateFiles as $key => $path) {
-            writeStatusValidationFile($path, $originals[$key]);
-        }
-        $baseline = canonicalTicketValidatorResult($fixture);
-
-        foreach ($candidateFiles as $key => $path) {
             writeStatusValidationFile($path, $updates[$key]);
         }
         $candidate = canonicalTicketValidatorResult($fixture);
@@ -885,12 +710,7 @@ function validateTicketStatusCandidate(string $repoRoot, string $id, array $orig
             return ['clean' => true, 'remaining_errors' => 0];
         }
 
-        $newErrors = array_values(array_diff($candidate['errors'], $baseline['errors']));
-        if ($baseline['exit_code'] === 0 || $candidate['errors'] === [] || $newErrors !== []) {
-            throw new TicketStatusConflict(validatorRejectionMessage($candidate['output']));
-        }
-
-        return ['clean' => false, 'remaining_errors' => count($candidate['errors'])];
+        throw new TicketStatusConflict(validatorRejectionMessage($candidate['output']));
     } finally {
         removeStatusValidationFixture($fixture);
     }

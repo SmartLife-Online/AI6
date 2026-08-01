@@ -10,6 +10,8 @@ final class HealthTest extends TestCase
     {
         $sessionDirectory = sys_get_temp_dir().'/ai6-health-sessions-'.bin2hex(random_bytes(8));
         $this->assertTrue(mkdir($sessionDirectory));
+        $migrationsBefore = $this->migrationSnapshot();
+        $this->assertNotSame([], $migrationsBefore);
         config([
             'session.driver' => 'file',
             'session.files' => $sessionDirectory,
@@ -25,9 +27,25 @@ final class HealthTest extends TestCase
             $response->assertExactJson(['status' => 'ok']);
             $this->assertSame(['.', '..'], scandir($sessionDirectory));
             $this->assertFileDoesNotExist(database_path('database.sqlite'));
-            $this->assertDirectoryDoesNotExist(database_path('migrations'));
+            $this->assertSame($migrationsBefore, $this->migrationSnapshot());
         } finally {
             rmdir($sessionDirectory);
         }
+    }
+
+    /** @return array<string, string> */
+    private function migrationSnapshot(): array
+    {
+        $snapshot = [];
+
+        foreach (glob(database_path('migrations/*.php')) ?: [] as $migration) {
+            $digest = hash_file('sha256', $migration);
+            $this->assertIsString($digest);
+            $snapshot[basename($migration)] = $digest;
+        }
+
+        ksort($snapshot);
+
+        return $snapshot;
     }
 }

@@ -65,7 +65,11 @@ final class LockedInstallTest extends TestCase
         self::assertFileExists($copy.'/vendor/autoload.php');
         self::assertFileDoesNotExist($copy.'/.env');
         self::assertFileDoesNotExist($copy.'/database/database.sqlite');
-        self::assertDirectoryDoesNotExist($copy.'/database/migrations');
+        self::assertDirectoryExists($copy.'/database/migrations');
+        self::assertFileExists($copy.'/database/migrations/2026_08_01_000000_create_jobs_table.php');
+        self::assertFileExists($copy.'/database/migrations/2026_08_01_000001_create_job_batches_table.php');
+        self::assertFileExists($copy.'/database/migrations/2026_08_01_000002_create_failed_jobs_table.php');
+        self::assertFileDoesNotExist($copy.'/database/database.sqlite');
         self::assertDirectoryDoesNotExist($copy.'/storage/framework/cache/phpstan');
 
         $composer = json_decode((string) file_get_contents($copy.'/composer.json'), true, 512, JSON_THROW_ON_ERROR);

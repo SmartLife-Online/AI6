@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_marker_and_gitkeep_files(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_002(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -67,6 +67,11 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Reviews/.gitkeep',
             'app/AI6/Runs/.gitkeep',
             'app/AI6/Shared/AI6Marker.php',
+            'app/AI6/Shared/Runtime/RuntimeExecutionMark.php',
+            'app/AI6/Shared/Runtime/RuntimeHealthCommand.php',
+            'app/AI6/Shared/Runtime/RuntimeHeartbeat.php',
+            'app/AI6/Shared/Runtime/RuntimeSelfTestCommand.php',
+            'app/AI6/Shared/Runtime/RuntimeSelfTestJob.php',
             'app/AI6/Tickets/.gitkeep',
         ], $files);
     }
@@ -85,7 +90,6 @@ final class ScaffoldStructureTest extends TestCase
             'app/Models/User.php',
             'database/database.sqlite',
             'database/factories',
-            'database/migrations',
             'database/seeders',
             'package.json',
             'package-lock.json',
@@ -125,7 +129,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertTrue($this->composerScriptsHaveImplicitSideEffects($scripts));
     }
 
-    public function test_environment_example_defines_migration_free_defaults(): void
+    public function test_environment_example_preserves_file_session_and_cache_with_database_queue(): void
     {
         $lines = file($this->path('.env.example'), FILE_IGNORE_NEW_LINES);
         self::assertIsArray($lines);
@@ -133,17 +137,28 @@ final class ScaffoldStructureTest extends TestCase
         foreach ([
             'SESSION_DRIVER=file',
             'CACHE_STORE=file',
-            'QUEUE_CONNECTION=sync',
+            'QUEUE_CONNECTION=database',
+            'AI6_WORKER_HEARTBEAT_MAX_AGE=75',
         ] as $default) {
             self::assertContains($default, $lines);
         }
+
+        self::assertNotContains('DB_DATABASE=/var/lib/ai6/database/database.sqlite', $lines);
+        self::assertNotContains('AI6_EXECUTION_DIRECTORY=/var/lib/ai6/executions', $lines);
     }
 
     public function test_framework_runtime_files_are_ignored(): void
     {
-        $process = new Process(['git', 'check-ignore', '--quiet', 'storage/framework/maintenance.php'], $this->path());
-
-        self::assertSame(0, $process->run(), $process->getErrorOutput());
+        foreach ([
+            'storage/framework/maintenance.php',
+            'storage/app/ai6-local.sqlite',
+            'database/database.sqlite',
+            'database/database.sqlite-shm',
+            'database/database.sqlite-wal',
+        ] as $path) {
+            $process = new Process(['git', 'check-ignore', '--quiet', $path], $this->path());
+            self::assertSame(0, $process->run(), $path.': '.$process->getErrorOutput());
+        }
     }
 
     public function test_provenance_binds_source_allowlist_exclusions_and_protected_files(): void
@@ -186,13 +201,20 @@ final class ScaffoldStructureTest extends TestCase
             );
         }
 
+        $approvedLaterPaths = [
+            'config/database.php',
+            'config/queue.php',
+        ];
         $unexpectedFiles = [];
         foreach ($scaffoldPaths as $path) {
             if (! is_file($this->path($path))) {
                 continue;
             }
 
-            if (! in_array($path, $importedPaths, true) && ! in_array($path, $protectedPaths, true)) {
+            if (! in_array($path, $importedPaths, true)
+                && ! in_array($path, $protectedPaths, true)
+                && ! in_array($path, $approvedLaterPaths, true)
+            ) {
                 $unexpectedFiles[] = $path;
             }
         }
@@ -254,6 +276,7 @@ final class ScaffoldStructureTest extends TestCase
             'SESSION_DRIVER=file',
             'CACHE_STORE=file',
             'QUEUE_CONNECTION=sync',
+            'QUEUE_CONNECTION=database',
             'AI6_PHP85_BINARY',
             'AI6_COMPOSER_PHAR',
             '`app/`, `bootstrap/`, `routes/`, `scripts/` und `tests/`',
@@ -272,6 +295,21 @@ final class ScaffoldStructureTest extends TestCase
             self::assertStringNotContainsString('abstract class', $example);
             self::assertStringNotContainsString('interface ', $example);
         }
+    }
+
+    public function test_ai6_002_adds_only_the_queue_migrations(): void
+    {
+        $migrations = glob($this->path('database/migrations/*.php'));
+        self::assertIsArray($migrations);
+
+        $migrations = array_map('basename', $migrations);
+        sort($migrations);
+
+        self::assertSame([
+            '2026_08_01_000000_create_jobs_table.php',
+            '2026_08_01_000001_create_job_batches_table.php',
+            '2026_08_01_000002_create_failed_jobs_table.php',
+        ], $migrations);
     }
 
     /** @return array<string, mixed> */

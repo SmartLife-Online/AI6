@@ -15,31 +15,36 @@ AI6/
 ├── CLAUDE.md                        imports AGENTS.md only
 ├── README.md
 ├── composer.json / composer.lock    Laravel 13 dependency baseline on PHP 8.5
-├── artisan, app/, bootstrap/ ...    AI6-001 Laravel scaffold implementation in the worktree
-├── tests/                            PHPUnit feature, structure, provenance and locked-install tests
+├── artisan, app/, bootstrap/ ...    integrated AI6-001 Laravel scaffold plus AI6-002 worktree changes
+├── Dockerfile, docker-compose.yml    AI6-002 runtime implementation in the worktree
+├── docker/, deploy/                  AI6-002 role scripts and reverse-proxy profile in the worktree
+├── tests/                            PHPUnit baseline and AI6-002 runtime tests
 ├── docs/
 │   ├── AI6_IMPLEMENTATION_PLAN.md   normative source, revision V1.6.21, German
 │   └── AI6_TICKET_TEMPLATE_V1.md    ticket generation and implementation contract, German
 └── tickets/
     ├── README.md                    backlog overview; a view, never a status source
-    ├── AI6-001.md                   status todo — derived from the real repository state
-    ├── AI6-002.md … AI6-004.md      status todo — derived ahead of their dependencies (§8.1)
+    ├── AI6-001.md                   status done — integrated as commit 264cf2f
+    ├── AI6-002.md                   status todo — rebased against the integrated AI6-001 state
+    ├── AI6-003.md, AI6-004.md       status todo — derived ahead of their dependencies (§8.1)
     ├── AI6-005A.md, AI6-005B.md     status todo — derived ahead of their dependencies (§8.1)
     └── AI6-006A.md … AI6-006F.md    status todo — derived ahead of their dependencies (§8.1)
 ```
 
-The worktree contains the not-yet-integrated implementation of `AI6-001`: Laravel 13, `composer.json`, the committed-lock candidate, `vendor/`, PHPUnit, Pint, PHPStan, the manifest generator and the eleven empty module roots. `AI6-001` still has `status: todo`; its manual gates remain open, and no commit or ticket-status transition is implied by the presence of these files.
+Commit `264cf2f` integrates `AI6-001`: Laravel 13, `composer.json`, the committed lockfile, PHPUnit, Pint, PHPStan, the manifest generator and the eleven module roots. Its ticket has `status: done`.
 
-What does **not** exist yet: the Docker/SQLite runtime from `AI6-002`, later application modules and `.ai6/`.
+The worktree contains the not-yet-integrated implementation of `AI6-002`: the single Docker image, Compose process roles, SQLite Database Queue, scheduler, runtime heartbeats and their automated tests. `AI6-002` has been rebased against the real `AI6-001` base but still has `status: todo`; its manual gates remain open, and no commit or ticket-status transition is implied by these files.
+
+What does **not** exist yet: application modules after `AI6-002` and `.ai6/`.
 
 Of the 44 planned tickets twelve exist as files. The other 32 are blueprints in plan §15 — `tickets/AI6-007.md` and everything after it cannot be opened. Plan revisions V1.6.2, V1.6.5, V1.6.7 and V1.6.10 progressively split the former `AI6-005` and `AI6-006`, so M0 ends with `AI6-005A`/`AI6-005B` and the M1 chain is now `AI6-006A` … `AI6-006F`. The IDs `AI6-005` and `AI6-006` no longer exist.
 
 Consequences for you:
 
 - The Laravel/PHP toolchain commands in §4 are available in the current worktree and must be run when relevant. The external locked-install suite additionally requires the explicit PHP 8.5 and Composer paths documented in `README.md`.
-- Verify every path with `rg --files` or `ls` before naming it. The scaffold exists now, but later module contracts still do not.
-- `AI6-001` is implemented only in the worktree and remains a ticket task until its gates and integration are complete; do not infer completion or change its status.
-- Every generated ticket except `AI6-001` was derived ahead of dependencies. Its `— existing` markers describe the state its dependencies must produce, not evidence that every named seam exists today. The rebase obligation in §8.1 remains binding.
+- Verify every path with `rg --files` or `ls` before naming it. The `AI6-001` scaffold exists, the `AI6-002` runtime exists only in the worktree, and later module contracts still do not exist.
+- `AI6-002` remains a ticket task until its gates and integration are complete; do not infer completion or change its status from the presence of the implementation.
+- `AI6-003` through `AI6-006F` were derived ahead of dependencies. Their `— existing` markers describe the state their dependencies must produce, not evidence that every named seam exists today. The rebase obligation in §8.1 remains binding for them.
 
 When this section goes stale, it must be updated — but only when explicitly asked (§10).
 
@@ -139,7 +144,7 @@ vendor/bin/phpstan analyse
 git diff --check
 ```
 
-Decided: **PHPUnit** as test runner (via `php artisan test`), **Pint** as formatter, **PHPStan** for static analysis. `AI6-001` sets them up and documents level and configuration; this section gets tightened afterwards.
+Decided: **PHPUnit** as test runner (via `php artisan test`), **Pint** as formatter, **PHPStan** for static analysis. `AI6-001` set them up and documented their level and configuration.
 
 Before reporting an implementation ticket as done, run the applicable regular tests, `pint --test`, PHPStan, manifest and Composer checks, and `git diff --check` (plan §12.2). Run the external locked-install suite when dependency, lockfile, platform or installation behavior is in scope. Red is red — report the result with its output instead of routing around it.
 
@@ -239,7 +244,7 @@ This does not weaken template §5, C07 or C12. It records that their snapshot is
 
 Plan §13.7 fixes the moment: a blueprint or ticket revision is **published** once its state exists as a commit in this repository. Everything before that — including a fully worked-out file revised several times in one session — is an unpublished draft.
 
-What counts is the commit of the artifact itself, not the age of the repository. This repository has an initial commit containing only `README.md`; neither the plan, nor the template, nor any ticket file is committed. Every blueprint and ticket produced so far is therefore a draft, which is what allowed the read-model blueprint to travel from `AI6-006C` through `AI6-006D` and `AI6-006E` to `AI6-006F`. Do not read that history as permission: once an artifact's state is committed, and without exception,
+What counts is the commit of the artifact itself, not the age of the repository. Commit `1aeb20e` (`Planung`) published `AGENTS.md`, the plan, the template and the twelve existing ticket files for the first time. Every blueprint ID in that published plan state and every `AC-`, `TC-`, `MG-` and `EXT-` ID in those published tickets has therefore been immutable since `1aeb20e`. Later uncommitted wording revisions are drafts only as revisions; they never make an already published ID mutable or reusable. The earlier pre-publication movement of the read-model blueprint from `AI6-006C` through `AI6-006D` and `AI6-006E` to `AI6-006F` remains historical context, not permission to repeat such reassignment. From the first publication onward, and without exception,
 
 - a blueprint ID names the same contract forever — a split keeps the existing ID for the existing part and gives only the new part the next never-used ID;
 - `AC-`, `TC-`, `MG-` and `EXT-` are never renumbered and never reused. Append new entries; never insert one between existing ones, because that shifts every later ID and breaks the `criterion_refs` binding of any review (template §7.1, `REV-004`).

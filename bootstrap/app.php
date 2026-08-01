@@ -1,9 +1,16 @@
 <?php
 
+use App\AI6\Shared\Runtime\RuntimeHealthCommand;
+use App\AI6\Shared\Runtime\RuntimeHeartbeat;
+use App\AI6\Shared\Runtime\RuntimeSelfTestCommand;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Queue\Events\Looping;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
+
+$workerHeartbeatService = 'ai6.runtime.heartbeat.worker';
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -13,9 +20,31 @@ return Application::configure(basePath: dirname(__DIR__))
             Route::get('/health', static fn () => response()->json(['status' => 'ok']));
         },
     )
+    ->withCommands([
+        RuntimeHealthCommand::class,
+        RuntimeSelfTestCommand::class,
+    ])
+    ->withSingletons([
+        $workerHeartbeatService => static fn (): RuntimeHeartbeat => new RuntimeHeartbeat(RuntimeHeartbeat::WORKER_DIRECTORY),
+    ])
+    ->withEvents(discover: false)
     ->withMiddleware(function (Middleware $middleware): void {
         //
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
-    })->create();
+    })
+    ->booted(static function () use ($workerHeartbeatService): void {
+        Event::listen(Looping::class, static function () use ($workerHeartbeatService): void {
+            $directory = getenv('AI6_HEARTBEAT_DIRECTORY');
+
+            if ($directory !== RuntimeHeartbeat::WORKER_DIRECTORY) {
+                return;
+            }
+
+            /** @var RuntimeHeartbeat $heartbeat */
+            $heartbeat = app($workerHeartbeatService);
+            $heartbeat->write('worker');
+        });
+    })
+    ->create();

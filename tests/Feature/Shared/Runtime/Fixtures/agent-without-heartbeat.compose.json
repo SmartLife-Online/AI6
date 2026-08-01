@@ -1,0 +1,12 @@
+{
+  "services": {
+    "agent": {
+      "entrypoint": [
+        "/bin/sh",
+        "-c",
+        "set -eu\ndirectory=\"/run/ai6/heartbeat/agent\"\ntest \"$${AI6_HEARTBEAT_DIRECTORY:-}\" = \"$$directory\"\ntest -d \"$$directory\"\numask 0077\nboot_id=\"$$(od -An -N16 -tx1 /dev/urandom | tr -d ' \\n')\"\nprintf '%s\\n' \"$$boot_id\" > \"$$directory/boot-id\"\nexec sleep infinity"
+      ],
+      "command": []
+    }
+  }
+}

@@ -1,740 +1,903 @@
-#!/usr/bin/env php
 <?php
 
 declare(strict_types=1);
 
-/**
- * Validiert den vollständigen Ticketbestand ohne externe Abhängigkeiten.
- *
- * Normaler Aufruf: php tools/validate_tickets.php
- * Testaufruf:      php tools/validate_tickets.php --root=/pfad/zum/fixture
- * Exit:            0 = alles konsistent, 1 = Fehler gefunden
- */
-
-const REQUIRED_FIELDS = ['id', 'titel', 'phase', 'prio', 'status', 'depends_on', 'files'];
-const LIST_FIELDS = ['depends_on', 'files'];
-const ALLOWED_STATUS = ['todo', 'in_progress', 'review', 'done', 'reserved'];
-const ALLOWED_PRIO = ['P0', 'P1', 'P2', 'P3'];
-const REQUIRED_SECTIONS = [
-    'Ziel',
-    'Aufgaben',
-    'Akzeptanzkriterien',
-    'Testfälle',
-    'Nicht ändern (Out of Scope)',
-    'Hinweise',
-    'Umsetzungshinweise für die Review-KI',
+const AI6_TICKET_FIELDS = [
+    'schema',
+    'id',
+    'title',
+    'status',
+    'depends_on',
+    'kind',
+    'milestone',
+    'risk',
+    'files',
+    'spec_refs',
 ];
 
-$argumentErrors = [];
-$root = validator_root($argv, $argumentErrors);
+const AI6_TICKET_SECTIONS = [
+    'Goal',
+    'Context',
+    'Tasks',
+    'Acceptance Criteria',
+    'Test Cases',
+    'AC Coverage',
+    'Initial Scope and Sensitive Paths',
+    'Do Not Change',
+    'Out of Scope',
+    'Manual and External Gates',
+    'Review Focus',
+    'Notes',
+];
 
-if ($argumentErrors !== []) {
-    print_errors($argumentErrors);
-    exit(1);
+const AI6_TICKET_STATUSES = ['todo', 'ready', 'in_progress', 'blocked', 'review', 'done', 'cancelled'];
+const AI6_TICKET_KINDS = ['feature', 'chore', 'fix', 'spike'];
+const AI6_TICKET_MILESTONES = ['M0', 'M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7'];
+const AI6_TICKET_RISKS = ['low', 'medium', 'high'];
+
+const AI6_NOTES_BOILERPLATE = [
+    '- Definition of Done: `docs/AI6_IMPLEMENTATION_PLAN.md` §12.2.',
+    '- Ticket status, approval and run metadata are owned by AI6. The implementation agent never changes them.',
+    '- Necessary deviations are reported as `needs_human` or as a scope/contract request, never applied silently.',
+];
+
+/** @return never */
+function ai6_validator_main(array $arguments): void
+{
+    $root = ai6_validator_root($arguments);
+    $errors = [];
+    $tickets = [];
+    $ticketFiles = glob($root . '/tickets/AI6-*.md') ?: [];
+    sort($ticketFiles, SORT_NATURAL);
+
+    if ($ticketFiles === []) {
+        $errors[] = 'Keine Ticketdateien unter tickets/AI6-*.md gefunden.';
+    }
+
+    $requirements = ai6_plan_requirement_ids($root, $errors);
+    $blueprints = ai6_plan_blueprints($root, $errors);
+    foreach ($ticketFiles as $path) {
+        $relativePath = 'tickets/' . basename($path);
+        $ticket = ai6_parse_ticket($path, $relativePath, $requirements, $blueprints, $errors);
+        if ($ticket !== null) {
+            $tickets[$ticket['id']] = $ticket;
+        }
+    }
+
+    ai6_validate_ticket_set($tickets, $blueprints, $errors);
+    $errors = array_values(array_unique($errors));
+    sort($errors, SORT_STRING);
+
+    echo "Ticket-Validator (ai6.ticket.v1)\n";
+    echo 'Root: ' . $root . "\n";
+    echo "Geprüft: tickets/AI6-*.md\n";
+    echo 'Gefunden: ' . count($ticketFiles) . "\n";
+
+    if ($errors !== []) {
+        foreach ($errors as $error) {
+            echo '  - FEHLER: ' . $error . "\n";
+        }
+        echo 'Ergebnis: ' . count($errors) . " Fehler.\n";
+        exit(1);
+    }
+
+    $order = ai6_topological_order($tickets);
+    echo 'Topologische Reihenfolge: ' . implode(' -> ', $order) . "\n";
+    echo "Ergebnis: gültig.\n";
+    exit(0);
 }
 
-$errors = [];
-$ticketFiles = discover_ticket_files($root, $errors);
-[$tickets, $ticketOrder] = parse_ticket_files($ticketFiles, $root, $errors);
-
-validate_metadata_set($tickets, $errors);
-validate_dependency_phases($tickets, $errors);
-$topologicalOrder = topological_order($tickets, $ticketOrder, $errors);
-
-if (count($topologicalOrder) === count($tickets)) {
-    validate_scope_overlaps($tickets, $ticketOrder, $errors);
-}
-
-echo 'Geprüft: tickets/M*.md'.PHP_EOL;
-echo 'Tickets gefunden: '.count($tickets).PHP_EOL;
-
-if ($errors !== []) {
-    print_errors($errors);
-    echo PHP_EOL.'Ergebnis: FEHLGESCHLAGEN'.PHP_EOL;
-    exit(1);
-}
-
-echo PHP_EOL.'Vorgeschlagene Bearbeitungsreihenfolge (topologisch):'.PHP_EOL;
-echo '  '.implode(' -> ', $topologicalOrder).PHP_EOL;
-echo PHP_EOL.'Ergebnis: OK - alle Prüfungen bestanden.'.PHP_EOL;
-exit(0);
-
-/** @param list<string> $errors */
-function validator_root(array $arguments, array &$errors): string
+/** @param list<string> $arguments */
+function ai6_validator_root(array $arguments): string
 {
     $root = dirname(__DIR__);
-
-    for ($index = 1; $index < count($arguments); $index++) {
-        $argument = (string) $arguments[$index];
-
+    foreach (array_slice($arguments, 1) as $index => $argument) {
         if (str_starts_with($argument, '--root=')) {
             $root = substr($argument, strlen('--root='));
             continue;
         }
-
-        if ($argument === '--root' && isset($arguments[$index + 1])) {
-            $root = (string) $arguments[++$index];
-            continue;
+        if ($argument === '--root' && isset($arguments[$index + 2])) {
+            $root = $arguments[$index + 2];
         }
-
-        $errors[] = "Unbekanntes Argument '$argument'.";
     }
 
     $resolved = realpath($root);
     if ($resolved === false || !is_dir($resolved)) {
-        $errors[] = "Validator-Root '$root' ist kein vorhandenes Verzeichnis.";
-
-        return $root;
+        fwrite(STDERR, "Repository-Wurzel nicht gefunden: $root\n");
+        exit(2);
     }
 
     return rtrim($resolved, "/\\");
 }
 
-/** @return list<string> */
-function discover_ticket_files(string $root, array &$errors): array
+/** @param list<string> $errors @return array<string, true> */
+function ai6_plan_requirement_ids(string $root, array &$errors): array
 {
-    $ticketDirectory = $root.'/tickets';
-    if (!is_dir($ticketDirectory)) {
-        $errors[] = 'tickets: erforderliches Verzeichnis fehlt.';
+    $path = $root . '/docs/AI6_IMPLEMENTATION_PLAN.md';
+    $contents = @file_get_contents($path);
+    if ($contents === false) {
+        $errors[] = 'docs/AI6_IMPLEMENTATION_PLAN.md kann nicht gelesen werden.';
 
         return [];
     }
 
-    $files = glob($ticketDirectory.'/M*.md');
-    if ($files === false || $files === []) {
-        $errors[] = 'tickets/M*.md: keine Ticketdateien gefunden.';
+    if (preg_match('/^## 3\.[^\n]*\n(.*?)^## 4\./ms', $contents, $section) !== 1) {
+        $errors[] = 'docs/AI6_IMPLEMENTATION_PLAN.md enthält keinen eindeutig abgrenzbaren §3-Anforderungskatalog.';
 
         return [];
     }
 
-    usort($files, static function (string $left, string $right): int {
-        $leftName = basename($left);
-        $rightName = basename($right);
-        preg_match('/^M(\d+)\.md$/', $leftName, $leftMatch);
-        preg_match('/^M(\d+)\.md$/', $rightName, $rightMatch);
+    preg_match_all('/\b([A-Z]+-\d{3})\b/', $section[1], $matches);
 
-        if (isset($leftMatch[1], $rightMatch[1])) {
-            return ((int) $leftMatch[1] <=> (int) $rightMatch[1])
-                ?: strcmp($leftName, $rightName);
-        }
-
-        return strnatcasecmp($leftName, $rightName);
-    });
-
-    return array_values($files);
+    return array_fill_keys(array_values(array_unique($matches[1])), true);
 }
 
 /**
- * @param list<string> $files
- * @return array{0: array<string, array<string, mixed>>, 1: list<string>}
+ * @param list<string> $errors
+ * @return array<string, array{title: string, milestone: string, risk: string, kind: string, depends_on: list<string>, requirement_refs: list<string>, goal: string}>
  */
-function parse_ticket_files(array $files, string $root, array &$errors): array
+function ai6_plan_blueprints(string $root, array &$errors): array
 {
-    $tickets = [];
-    $order = [];
+    $path = $root . '/docs/AI6_IMPLEMENTATION_PLAN.md';
+    $contents = @file_get_contents($path);
+    if ($contents === false
+        || preg_match('/^## 15\.[^\n]*\n(.*?)^## 16\./ms', $contents, $section) !== 1) {
+        $errors[] = 'docs/AI6_IMPLEMENTATION_PLAN.md enthält keinen eindeutig abgrenzbaren §15-Blueprintkatalog.';
 
-    foreach ($files as $file) {
-        $relative = relative_path($root, $file);
-        $filename = basename($file);
-
-        if (!preg_match('/^(M\d{2,})\.md$/', $filename, $filenameMatch)) {
-            $errors[] = "$relative: Dateiname muss M<ID>.md mit mindestens zwei Ziffern entsprechen.";
-            continue;
-        }
-
-        $expectedId = $filenameMatch[1];
-        $contents = file_get_contents($file);
-        if ($contents === false) {
-            $errors[] = "$relative: Datei konnte nicht gelesen werden.";
-            continue;
-        }
-
-        $blocks = yaml_blocks($contents);
-        if (count($blocks) !== 1) {
-            $errors[] = "$relative: erwartet genau einen YAML-Metadatenblock, gefunden: ".count($blocks).'.';
-            continue;
-        }
-
-        $meta = parse_yaml_block($blocks[0], $relative, $errors);
-        $id = $meta['id'] ?? null;
-
-        validate_payload_title($contents, $meta, $relative, $errors);
-        validate_required_sections($contents, $relative, $errors);
-
-        if (!is_string($id) || !preg_match('/^M\d{2,}$/', $id)) {
-            $errors[] = "$relative: YAML-Feld 'id' fehlt oder ist ungültig.";
-            continue;
-        }
-
-        if ($id !== $expectedId) {
-            $errors[] = "$relative: Dateiname erwartet id '$expectedId', YAML enthält '$id'.";
-        }
-
-        if (isset($tickets[$id])) {
-            $errors[] = "$relative: doppelte Ticket-ID '$id'.";
-            continue;
-        }
-
-        $meta['_source'] = $relative;
-        $tickets[$id] = $meta;
-        $order[] = $id;
-    }
-
-    return [$tickets, $order];
-}
-
-/** @return list<string> */
-function yaml_blocks(string $contents): array
-{
-    preg_match_all('/^```ya?ml[ \t]*\r?\n(.*?)^```[ \t]*\r?$/ms', $contents, $matches);
-
-    return array_values($matches[1] ?? []);
-}
-
-/** @return array<string, mixed> */
-function parse_yaml_block(string $block, string $source, array &$errors): array
-{
-    $result = [];
-    $currentKey = null;
-    $lines = preg_split('/\R/', $block) ?: [];
-
-    foreach ($lines as $lineNumber => $rawLine) {
-        if (trim($rawLine) === '' || str_starts_with(ltrim($rawLine), '#')) {
-            continue;
-        }
-
-        if (preg_match('/^([a-z_]+):\s*(.*)$/i', $rawLine, $fieldMatch)) {
-            $key = $fieldMatch[1];
-            if (array_key_exists($key, $result)) {
-                $errors[] = "$source: doppeltes YAML-Feld '$key'.";
-            }
-
-            $value = trim(strip_inline_comment($fieldMatch[2]));
-            $currentKey = $key;
-
-            if ($value === '') {
-                $result[$key] = [];
-            } elseif (preg_match('/^\[(.*)\]$/s', $value, $listMatch)) {
-                $result[$key] = parse_inline_list($listMatch[1]);
-            } else {
-                $result[$key] = strip_quotes($value);
-            }
-            continue;
-        }
-
-        if (preg_match('/^\s{2}-\s+(.*)$/', $rawLine, $listItemMatch) && $currentKey !== null) {
-            if (!isset($result[$currentKey]) || !is_array($result[$currentKey])) {
-                $errors[] = "$source: Block-Liste für '$currentKey' folgt auf einen Skalar.";
-                $result[$currentKey] = [];
-            }
-
-            $value = trim(strip_inline_comment($listItemMatch[1]));
-            $result[$currentKey][] = strip_quotes($value);
-            continue;
-        }
-
-        $line = $lineNumber + 1;
-        $errors[] = "$source: nicht unterstützte YAML-Syntax in Blockzeile $line.";
-    }
-
-    return $result;
-}
-
-function strip_inline_comment(string $value): string
-{
-    $quote = null;
-    $length = strlen($value);
-
-    for ($index = 0; $index < $length; $index++) {
-        $character = $value[$index];
-        if (($character === '"' || $character === "'") && ($index === 0 || $value[$index - 1] !== '\\')) {
-            if ($quote === null) {
-                $quote = $character;
-            } elseif ($quote === $character) {
-                $quote = null;
-            }
-            continue;
-        }
-
-        if ($character === '#' && $quote === null && ($index === 0 || ctype_space($value[$index - 1]))) {
-            return rtrim(substr($value, 0, $index));
-        }
-    }
-
-    return $value;
-}
-
-/** @return list<string> */
-function parse_inline_list(string $contents): array
-{
-    if (trim($contents) === '') {
         return [];
     }
 
-    $items = array_map('trim', explode(',', $contents));
+    preg_match_all('/^## 15\.\d+ (M[0-7])\b[^\n]*$/m', $section[1], $milestoneMatches, PREG_OFFSET_CAPTURE);
+    preg_match_all(
+        '/^### (AI6-\d{3}[A-Z]?) — ([^\n]+)\n(.*?)(?=^### AI6-|^## 15\.\d+|\z)/msu',
+        $section[1],
+        $matches,
+        PREG_OFFSET_CAPTURE,
+    );
 
-    return array_values(array_map('strip_quotes', $items));
-}
-
-function strip_quotes(string $value): string
-{
-    $value = trim($value);
-    if (strlen($value) < 2) {
-        return $value;
-    }
-
-    $first = $value[0];
-    $last = substr($value, -1);
-    if (($first === '"' && $last === '"') || ($first === "'" && $last === "'")) {
-        return substr($value, 1, -1);
-    }
-
-    return $value;
-}
-
-/** @param array<string, mixed> $meta */
-function validate_payload_title(string $contents, array $meta, string $source, array &$errors): void
-{
-    $lines = preg_split('/\R/', $contents) ?: [];
-    $firstNonEmpty = '';
-
-    foreach ($lines as $line) {
-        if (trim($line) !== '') {
-            $firstNonEmpty = trim($line);
-            break;
+    $blueprints = [];
+    foreach ($matches[1] as $index => $idMatch) {
+        $id = $idMatch[0];
+        $offset = $matches[0][$index][1];
+        $block = $matches[3][$index][0];
+        $milestone = '';
+        foreach ($milestoneMatches[1] as $milestoneIndex => $candidate) {
+            if ($milestoneMatches[0][$milestoneIndex][1] > $offset) {
+                break;
+            }
+            $milestone = $candidate[0];
         }
-    }
-
-    if (!str_starts_with($firstNonEmpty, '**M')) {
-        if (preg_match('/^\*\*M\d+/m', $contents)) {
-            $errors[] = "$source: die kanonische Payload-Titelzeile muss die erste nichtleere Zeile sein.";
-        } else {
-            $errors[] = "$source: kanonische Payload-Titelzeile fehlt.";
+        if (isset($blueprints[$id])) {
+            $errors[] = "docs/AI6_IMPLEMENTATION_PLAN.md: Blueprint `$id` ist doppelt vorhanden.";
+            continue;
         }
 
-        return;
+        $risk = ai6_blueprint_scalar($block, 'Risiko');
+        $kind = ai6_blueprint_scalar($block, 'Kind');
+        $dependsRaw = ai6_blueprint_raw_value($block, 'Depends on');
+        $requirementsRaw = ai6_blueprint_raw_value($block, 'Requirement-Refs');
+        preg_match_all('/`(AI6-\d{3}[A-Z]?)`/', $dependsRaw, $dependsMatches);
+        preg_match_all('/`([A-Z]+-\d{3})`/', $requirementsRaw, $requirementMatches);
+        $dependsOn = trim($dependsRaw) === 'keine' ? [] : $dependsMatches[1];
+        $goal = preg_match('/^\*\*Ziel\*\*\n\n([^\n]+)$/m', $block, $goalMatch) === 1
+            ? $goalMatch[1]
+            : '';
+
+        if ($milestone === '' || $risk === '' || $kind === '' || $requirementsRaw === '' || $goal === '') {
+            $errors[] = "docs/AI6_IMPLEMENTATION_PLAN.md: Blueprint `$id` ist nicht vollständig parsbar.";
+        }
+        $blueprints[$id] = [
+            'title' => $matches[2][$index][0],
+            'milestone' => $milestone,
+            'risk' => $risk,
+            'kind' => $kind,
+            'depends_on' => $dependsOn,
+            'requirement_refs' => $requirementMatches[1],
+            'goal' => $goal,
+        ];
+    }
+    if ($blueprints === []) {
+        $errors[] = 'docs/AI6_IMPLEMENTATION_PLAN.md: keine Ticket-Blueprints in §15 gefunden.';
     }
 
-    $phasePattern = '(?:0|[1-9]\d*)(?:\.\d+)?';
-    $pattern = '/^\*\*(M\d{2,}) — (.+)\*\* · (P[0-3]) · Phase ('.$phasePattern.')$/u';
-    if (!preg_match($pattern, $firstNonEmpty, $match)) {
-        $errors[] = "$source: ungültige kanonische Payload-Titelzeile.";
+    return $blueprints;
+}
 
-        return;
+function ai6_blueprint_scalar(string $block, string $label): string
+{
+    $value = ai6_blueprint_raw_value($block, $label);
+
+    return preg_match('/^`([^`]+)`$/', trim($value), $match) === 1 ? $match[1] : '';
+}
+
+function ai6_blueprint_raw_value(string $block, string $label): string
+{
+    return preg_match('/^- \*\*' . preg_quote($label, '/') . ':\*\* (.+)$/m', $block, $match) === 1
+        ? trim($match[1])
+        : '';
+}
+
+/**
+ * @param array<string, true> $requirements
+ * @param array<string, array{title: string, milestone: string, risk: string, kind: string, depends_on: list<string>, requirement_refs: list<string>, goal: string}> $blueprints
+ * @param list<string> $errors
+ * @return array{id: string, path: string, depends_on: list<string>}|null
+ */
+function ai6_parse_ticket(
+    string $path,
+    string $relativePath,
+    array $requirements,
+    array $blueprints,
+    array &$errors,
+): ?array
+{
+    $contents = @file_get_contents($path);
+    if ($contents === false) {
+        $errors[] = "$relativePath: Datei kann nicht gelesen werden.";
+
+        return null;
     }
 
-    $title = trim($match[2]);
-    if ($title === '' || str_contains($title, ' · ') || str_contains($title, '**')) {
-        $errors[] = "$source: Kurztitel der Payload-Titelzeile ist leer oder enthält ein Format-Trennzeichen.";
+    ai6_validate_serialization($contents, $relativePath, $errors);
+    $normalized = str_replace(["\r\n", "\r"], "\n", ltrim($contents, "\xEF\xBB\xBF"));
+    if (preg_match('/\A---\n(.*?)\n---\n\n(.*)\z/s', $normalized, $match) !== 1) {
+        $errors[] = "$relativePath: genau ein Frontmatter-Block am Dateianfang mit anschließender Leerzeile erwartet.";
+
+        return null;
     }
 
-    $expected = [
-        'id' => $match[1],
-        'titel' => $title,
-        'prio' => $match[3],
-        'phase' => $match[4],
+    $metadata = ai6_parse_frontmatter($match[1], $relativePath, $errors);
+    if ($metadata === null) {
+        return null;
+    }
+
+    $filenameId = basename($path, '.md');
+    $id = is_string($metadata['id'] ?? null) ? $metadata['id'] : $filenameId;
+    ai6_validate_metadata($metadata, $filenameId, $relativePath, $requirements, $errors);
+    ai6_validate_body($match[2], $metadata, $relativePath, $errors);
+    ai6_validate_blueprint_fidelity($match[2], $metadata, $blueprints, $relativePath, $errors);
+
+    if (preg_match('/^AI6-\d{3}[A-Z]?$/', $id) !== 1) {
+        return null;
+    }
+
+    return [
+        'id' => $id,
+        'path' => $relativePath,
+        'depends_on' => is_array($metadata['depends_on'] ?? null) ? $metadata['depends_on'] : [],
     ];
-
-    foreach ($expected as $field => $titleValue) {
-        $yamlValue = $meta[$field] ?? null;
-        if (!is_string($yamlValue) || $yamlValue !== $titleValue) {
-            $errors[] = "$source: Titelzeile und YAML-Feld '$field' weichen voneinander ab.";
-        }
-    }
-}
-
-function validate_required_sections(string $contents, string $source, array &$errors): void
-{
-    $previousPosition = -1;
-
-    foreach (REQUIRED_SECTIONS as $section) {
-        $count = preg_match_all('/^## '.preg_quote($section, '/').'[ \t]*$/m', $contents, $matches, PREG_OFFSET_CAPTURE);
-        if ($count !== 1) {
-            $errors[] = "$source: Abschnitt '## $section' muss genau einmal vorhanden sein, gefunden: $count.";
-            continue;
-        }
-
-        $position = $matches[0][0][1];
-        if ($position < $previousPosition) {
-            $errors[] = "$source: Abschnitt '## $section' steht nicht in der Reihenfolge der Ticketvorlage.";
-        }
-        $previousPosition = $position;
-    }
-}
-
-/** @param array<string, array<string, mixed>> $tickets */
-function validate_metadata_set(array $tickets, array &$errors): void
-{
-    foreach ($tickets as $id => $meta) {
-        $source = ticket_source($id, $meta);
-
-        foreach (REQUIRED_FIELDS as $field) {
-            if (!array_key_exists($field, $meta)) {
-                $errors[] = "$source: Pflichtfeld fehlt: $field.";
-            }
-        }
-
-        foreach ($meta as $field => $_value) {
-            if ($field !== '_source' && !in_array($field, REQUIRED_FIELDS, true)) {
-                $errors[] = "$source: unbekanntes YAML-Feld '$field'.";
-            }
-        }
-
-        foreach (['id', 'titel', 'phase', 'prio', 'status'] as $field) {
-            if (array_key_exists($field, $meta) && !is_string($meta[$field])) {
-                $errors[] = "$source: Feld '$field' muss ein Skalar sein.";
-            }
-        }
-
-        foreach (LIST_FIELDS as $field) {
-            if (array_key_exists($field, $meta) && !is_array($meta[$field])) {
-                $errors[] = "$source: Feld '$field' muss eine Liste sein.";
-            }
-        }
-
-        $title = $meta['titel'] ?? null;
-        if (is_string($title) && trim($title) === '') {
-            $errors[] = "$source: Feld 'titel' darf nicht leer sein.";
-        }
-
-        $status = $meta['status'] ?? null;
-        if (is_string($status) && !in_array($status, ALLOWED_STATUS, true)) {
-            $errors[] = "$source: ungültiger status '$status'.";
-        }
-
-        $priority = $meta['prio'] ?? null;
-        if (is_string($priority) && !in_array($priority, ALLOWED_PRIO, true)) {
-            $errors[] = "$source: ungültige prio '$priority'.";
-        }
-
-        if ($status === 'reserved' && $priority !== 'P3') {
-            $errors[] = "$source: status 'reserved' erfordert prio 'P3'.";
-        }
-
-        $phase = $meta['phase'] ?? null;
-        if (is_string($phase) && !preg_match('/^(?:0|[1-9]\d*)(?:\.\d+)?$/', $phase)) {
-            $errors[] = "$source: ungültige phase '$phase'.";
-        }
-
-        validate_dependencies($id, $meta, $tickets, $source, $errors);
-        validate_files($meta, $source, $errors);
-    }
 }
 
 /**
- * @param array<string, mixed> $meta
- * @param array<string, array<string, mixed>> $tickets
+ * @param array<string, string|list<string>> $metadata
+ * @param array<string, array{title: string, milestone: string, risk: string, kind: string, depends_on: list<string>, requirement_refs: list<string>, goal: string}> $blueprints
+ * @param list<string> $errors
  */
-function validate_dependencies(string $id, array $meta, array $tickets, string $source, array &$errors): void
-{
-    $dependencies = is_array($meta['depends_on'] ?? null) ? $meta['depends_on'] : [];
-    if (count($dependencies) !== count(array_unique($dependencies))) {
-        $errors[] = "$source: depends_on enthält Duplikate.";
-    }
-
-    foreach ($dependencies as $dependency) {
-        if (!is_string($dependency) || !preg_match('/^M\d{2,}$/', $dependency)) {
-            $errors[] = "$source: ungültige Dependency-ID.";
-        } elseif ($dependency === $id) {
-            $errors[] = "$source: Ticket hängt von sich selbst ab.";
-        } elseif (!isset($tickets[$dependency])) {
-            $errors[] = "$source: depends_on verweist auf unbekanntes Ticket '$dependency'.";
-        }
-    }
-}
-
-/** @param array<string, mixed> $meta */
-function validate_files(array $meta, string $source, array &$errors): void
-{
-    $files = is_array($meta['files'] ?? null) ? $meta['files'] : [];
-    if ($files === []) {
-        $errors[] = "$source: files-Liste darf nicht leer sein.";
+function ai6_validate_blueprint_fidelity(
+    string $body,
+    array $metadata,
+    array $blueprints,
+    string $path,
+    array &$errors,
+): void {
+    $id = is_string($metadata['id'] ?? null) ? $metadata['id'] : '';
+    if (!isset($blueprints[$id])) {
+        $errors[] = "$path: Ticket-ID `$id` besitzt keinen Blueprint im aktuellen Plan §15.";
 
         return;
     }
 
-    if (count($files) !== count(array_unique($files))) {
-        $errors[] = "$source: files enthält Duplikate.";
-    }
-
-    foreach ($files as $file) {
-        validate_file_reference($file, $source, $errors);
-    }
-}
-
-function validate_file_reference(mixed $file, string $source, array &$errors): void
-{
-    if (!is_string($file) || $file === '') {
-        $errors[] = "$source: files enthält keinen gültigen Pfad-String.";
-
-        return;
-    }
-
-    if (str_contains($file, "\0") || str_contains($file, '\\')) {
-        $errors[] = "$source: unsicherer files-Pfad '$file'.";
-
-        return;
-    }
-
-    if (str_starts_with($file, '/') || preg_match('/^[A-Za-z][A-Za-z0-9+.-]*:/', $file)) {
-        $errors[] = "$source: absoluter oder URI-files-Pfad ist unzulässig: '$file'.";
-
-        return;
-    }
-
-    $pathWithoutTrailingSlash = rtrim($file, '/');
-    if ($pathWithoutTrailingSlash === '' || $pathWithoutTrailingSlash !== trim($pathWithoutTrailingSlash)) {
-        $errors[] = "$source: ungültiger files-Pfad '$file'.";
-
-        return;
-    }
-
-    foreach (explode('/', $pathWithoutTrailingSlash) as $segment) {
-        if ($segment === '' || $segment === '.' || $segment === '..') {
-            $errors[] = "$source: Traversal-/Normalisierungssegment in files ist unzulässig: '$file'.";
-
-            return;
-        }
-    }
-}
-
-/** @param array<string, array<string, mixed>> $tickets */
-function validate_dependency_phases(array $tickets, array &$errors): void
-{
-    foreach ($tickets as $id => $meta) {
-        $phase = $meta['phase'] ?? null;
-        if (!is_string($phase) || !preg_match('/^(?:0|[1-9]\d*)(?:\.\d+)?$/', $phase)) {
-            continue;
-        }
-
-        $dependencies = is_array($meta['depends_on'] ?? null) ? $meta['depends_on'] : [];
-        foreach ($dependencies as $dependency) {
-            $dependencyPhase = $tickets[$dependency]['phase'] ?? null;
-            if (!is_string($dependencyPhase)
-                || !preg_match('/^(?:0|[1-9]\d*)(?:\.\d+)?$/', $dependencyPhase)) {
-                continue;
-            }
-
-            if (version_compare($dependencyPhase, $phase, '>')) {
-                $source = ticket_source($id, $meta);
-                $errors[] = "$source: Phase $phase darf nicht von $dependency aus der späteren Phase "
-                    .$dependencyPhase.' abhängen.';
-            }
-        }
-    }
-}
-
-/**
- * @param array<string, array<string, mixed>> $tickets
- * @param list<string> $order
- * @return list<string>
- */
-function topological_order(array $tickets, array $order, array &$errors): array
-{
-    $sorted = [];
-    $done = [];
-
-    do {
-        $progress = false;
-        foreach ($order as $id) {
-            if (isset($done[$id]) || !isset($tickets[$id])) {
-                continue;
-            }
-
-            $ready = true;
-            $dependencies = is_array($tickets[$id]['depends_on'] ?? null) ? $tickets[$id]['depends_on'] : [];
-            foreach ($dependencies as $dependency) {
-                if (isset($tickets[$dependency]) && !isset($done[$dependency])) {
-                    $ready = false;
-                    break;
-                }
-            }
-
-            if ($ready) {
-                $sorted[] = $id;
-                $done[$id] = true;
-                $progress = true;
-            }
-        }
-    } while ($progress);
-
-    if (count($sorted) < count($tickets)) {
-        $cycle = dependency_cycle($tickets, $order);
-        if ($cycle !== []) {
-            $errors[] = 'Gesamtgraph: Abhängigkeitszyklus: '.implode(' -> ', $cycle).'.';
-        } else {
-            $unresolved = array_values(array_diff(array_keys($tickets), $sorted));
-            $errors[] = 'Gesamtgraph: unauflösbare Abhängigkeiten bei '.implode(', ', $unresolved).'.';
+    $blueprint = $blueprints[$id];
+    foreach (['title', 'milestone', 'risk', 'kind', 'depends_on'] as $key) {
+        if (($metadata[$key] ?? null) !== $blueprint[$key]) {
+            $errors[] = "$path: `$key` weicht vom aktuellen Blueprint `$id` ab.";
         }
     }
 
-    return $sorted;
-}
-
-/**
- * @param array<string, array<string, mixed>> $tickets
- * @param list<string> $order
- * @return list<string>
- */
-function dependency_cycle(array $tickets, array $order): array
-{
-    $state = [];
-    $stack = [];
-
-    $visit = function (string $id) use (&$visit, &$state, &$stack, $tickets): array {
-        $state[$id] = 1;
-        $stack[] = $id;
-        $dependencies = is_array($tickets[$id]['depends_on'] ?? null) ? $tickets[$id]['depends_on'] : [];
-
-        foreach ($dependencies as $dependency) {
-            if (!is_string($dependency) || !isset($tickets[$dependency])) {
-                continue;
-            }
-
-            if (($state[$dependency] ?? 0) === 0) {
-                $cycle = $visit($dependency);
-                if ($cycle !== []) {
-                    return $cycle;
-                }
-            } elseif ($state[$dependency] === 1) {
-                $start = array_search($dependency, $stack, true);
-                if ($start !== false) {
-                    $cycle = array_slice($stack, $start);
-                    $cycle[] = $dependency;
-
-                    return $cycle;
-                }
-            }
-        }
-
-        array_pop($stack);
-        $state[$id] = 2;
-
-        return [];
-    };
-
-    foreach ($order as $id) {
-        if (isset($tickets[$id]) && ($state[$id] ?? 0) === 0) {
-            $cycle = $visit($id);
-            if ($cycle !== []) {
-                return $cycle;
-            }
+    $specRefs = is_array($metadata['spec_refs'] ?? null) ? $metadata['spec_refs'] : [];
+    $requirementRefs = [];
+    foreach ($specRefs as $reference) {
+        if (preg_match('/ — ([A-Z]+-\d{3})$/u', $reference, $match) === 1) {
+            $requirementRefs[] = $match[1];
         }
     }
-
-    return [];
-}
-
-/**
- * @param array<string, array<string, mixed>> $tickets
- * @param list<string> $order
- */
-function validate_scope_overlaps(array $tickets, array $order, array &$errors): void
-{
-    $count = count($order);
-
-    for ($leftIndex = 0; $leftIndex < $count; $leftIndex++) {
-        $leftId = $order[$leftIndex];
-        $leftFiles = valid_file_references($tickets[$leftId]);
-
-        for ($rightIndex = $leftIndex + 1; $rightIndex < $count; $rightIndex++) {
-            $rightId = $order[$rightIndex];
-            if (ticket_depends_on($leftId, $rightId, $tickets)
-                || ticket_depends_on($rightId, $leftId, $tickets)) {
-                continue;
-            }
-
-            $rightFiles = valid_file_references($tickets[$rightId]);
-            foreach ($leftFiles as $leftFile) {
-                foreach ($rightFiles as $rightFile) {
-                    if ($leftFile === '.gitignore' && $rightFile === '.gitignore') {
-                        continue;
-                    }
-
-                    if (scopes_overlap($leftFile, $rightFile)) {
-                        $errors[] = "$leftId und $rightId: ungeordnete Scope-Überlappung zwischen "
-                            ."'$leftFile' und '$rightFile'; direkte oder transitive depends_on-Ordnung fehlt.";
-                    }
-                }
-            }
-        }
+    if ($requirementRefs !== $blueprint['requirement_refs']) {
+        $errors[] = "$path: `spec_refs` weicht von den geordneten Requirement-Refs des Blueprints `$id` ab.";
     }
-}
 
-/** @param array<string, mixed> $ticket @return list<string> */
-function valid_file_references(array $ticket): array
-{
-    $files = is_array($ticket['files'] ?? null) ? $ticket['files'] : [];
-
-    return array_values(array_filter(
-        $files,
-        static fn (mixed $file): bool => is_string($file)
-            && $file !== ''
-            && !str_contains($file, "\0")
-            && !str_contains($file, '\\')
-            && !str_starts_with($file, '/')
-            && !preg_match('/^[A-Za-z][A-Za-z0-9+.-]*:/', $file),
-    ));
-}
-
-function scopes_overlap(string $left, string $right): bool
-{
-    return $left === $right
-        || (str_ends_with($left, '/') && str_starts_with($right, $left))
-        || (str_ends_with($right, '/') && str_starts_with($left, $right));
-}
-
-/** @param array<string, array<string, mixed>> $tickets */
-function ticket_depends_on(string $ticketId, string $targetId, array $tickets, array &$visited = []): bool
-{
-    if (isset($visited[$ticketId])) {
-        return false;
-    }
-    $visited[$ticketId] = true;
-
-    $dependencies = is_array($tickets[$ticketId]['depends_on'] ?? null)
-        ? $tickets[$ticketId]['depends_on']
+    [, $sections] = ai6_extract_sections($body);
+    $goalParagraphs = isset($sections['Goal'])
+        ? (preg_split('/\n{2,}/', trim($sections['Goal'])) ?: [])
         : [];
-
-    foreach ($dependencies as $dependency) {
-        if (!is_string($dependency) || !isset($tickets[$dependency])) {
-            continue;
-        }
-
-        if ($dependency === $targetId || ticket_depends_on($dependency, $targetId, $tickets, $visited)) {
-            return true;
-        }
+    if (($goalParagraphs[0] ?? null) !== $blueprint['goal']) {
+        $errors[] = "$path: der erste Goal-Absatz weicht vom Blueprint-Ziel `$id` ab.";
     }
-
-    return false;
-}
-
-/** @param array<string, mixed> $meta */
-function ticket_source(string $id, array $meta): string
-{
-    return is_string($meta['_source'] ?? null) ? $meta['_source'] : "Ticket-YAML $id";
 }
 
 /** @param list<string> $errors */
-function print_errors(array $errors): void
+function ai6_validate_serialization(string $contents, string $path, array &$errors): void
 {
-    echo PHP_EOL.'Fehler ('.count($errors).'):'.PHP_EOL;
-    foreach ($errors as $error) {
-        echo '  - FEHLER: '.$error.PHP_EOL;
+    if (str_starts_with($contents, "\xEF\xBB\xBF")) {
+        $errors[] = "$path: UTF-8-BOM ist nicht erlaubt.";
+    }
+    if (preg_match('//u', $contents) !== 1) {
+        $errors[] = "$path: Inhalt ist kein gültiges UTF-8.";
+    }
+    if (str_contains($contents, "\r")) {
+        $errors[] = "$path: nur LF-Zeilenenden sind erlaubt.";
+    }
+    if (!str_ends_with($contents, "\n") || str_ends_with($contents, "\n\n")) {
+        $errors[] = "$path: genau ein abschließender LF-Zeilenumbruch ist erforderlich.";
     }
 }
 
-function relative_path(string $root, string $path): string
+/** @param list<string> $errors @return array<string, string|list<string>>|null */
+function ai6_parse_frontmatter(string $block, string $path, array &$errors): ?array
 {
-    $normalizedRoot = rtrim(str_replace('\\', '/', $root), '/').'/';
-    $normalizedPath = str_replace('\\', '/', $path);
+    $lines = explode("\n", $block);
+    $metadata = [];
+    $keys = [];
 
-    if (str_starts_with(
-        DIRECTORY_SEPARATOR === '\\' ? strtolower($normalizedPath) : $normalizedPath,
-        DIRECTORY_SEPARATOR === '\\' ? strtolower($normalizedRoot) : $normalizedRoot,
-    )) {
-        return substr($normalizedPath, strlen($normalizedRoot));
+    for ($index = 0; $index < count($lines); $index++) {
+        $line = $lines[$index];
+        if (preg_match('/^([a-z_]+):(.*)$/', $line, $match) !== 1) {
+            $errors[] = "$path: ungültige Frontmatter-Zeile " . ($index + 2) . '. Supportet wird nur das kanonische Ticketformat.';
+            continue;
+        }
+
+        $key = $match[1];
+        $rawValue = ltrim($match[2], ' ');
+        $keys[] = $key;
+        if (array_key_exists($key, $metadata)) {
+            $errors[] = "$path: doppelter Frontmatter-Schlüssel `$key`.";
+            continue;
+        }
+        if (!in_array($key, AI6_TICKET_FIELDS, true)) {
+            $errors[] = "$path: unbekannter Frontmatter-Schlüssel `$key`.";
+        }
+
+        if (in_array($key, ['depends_on', 'files', 'spec_refs'], true)) {
+            if ($rawValue === '[]') {
+                $metadata[$key] = [];
+                continue;
+            }
+            if ($rawValue !== '') {
+                $metadata[$key] = ai6_parse_flow_list($rawValue, $path, $key, $errors);
+                continue;
+            }
+
+            $items = [];
+            while (isset($lines[$index + 1]) && str_starts_with($lines[$index + 1], '  - ')) {
+                $index++;
+                $items[] = ai6_parse_list_value(substr($lines[$index], 4), $path, $key, $errors);
+            }
+            if ($key === 'depends_on') {
+                $errors[] = "$path: `depends_on` muss als Flow-Sequenz serialisiert sein; leer exakt als `[]`.";
+            } elseif ($items === []) {
+                $errors[] = "$path: eine leere `$key`-Liste muss exakt als `$key: []` serialisiert sein.";
+            }
+            $metadata[$key] = $items;
+            continue;
+        }
+
+        $metadata[$key] = ai6_parse_scalar($rawValue, $path, $key, $errors);
     }
 
-    return $normalizedPath;
+    if ($keys !== AI6_TICKET_FIELDS) {
+        $errors[] = "$path: Frontmatter-Schlüssel müssen vollständig und in kanonischer Reihenfolge stehen: "
+            . implode(', ', AI6_TICKET_FIELDS) . '.';
+    }
+
+    return $metadata;
 }
+
+/** @param list<string> $errors */
+function ai6_parse_scalar(string $value, string $path, string $key, array &$errors): string
+{
+    if ($value === '') {
+        $errors[] = "$path: `$key` darf nicht leer sein.";
+
+        return '';
+    }
+    if ($key === 'title') {
+        return ai6_decode_quoted_string($value, $path, $key, $errors);
+    }
+    if (str_starts_with($value, '"') || str_contains($value, '#') || preg_match('/[&*!{}>|]/', $value) === 1) {
+        $errors[] = "$path: `$key` verwendet keine kanonische skalare Serialisierung.";
+    }
+
+    return $value;
+}
+
+/** @param list<string> $errors @return list<string> */
+function ai6_parse_flow_list(string $value, string $path, string $key, array &$errors): array
+{
+    if ($key !== 'depends_on' || preg_match('/^\[(.*)\]$/', $value, $match) !== 1) {
+        $errors[] = "$path: `$key` muss als kanonische Liste serialisiert sein.";
+
+        return [];
+    }
+    if (trim($match[1]) === '') {
+        return [];
+    }
+
+    $items = array_map('trim', explode(',', $match[1]));
+    foreach ($items as $item) {
+        if (preg_match('/^AI6-\d{3}[A-Z]?$/', $item) !== 1) {
+            $errors[] = "$path: ungültige Abhängigkeit `$item`.";
+        }
+    }
+    if ($value !== '[' . implode(', ', $items) . ']') {
+        $errors[] = "$path: `depends_on` ist nicht kanonisch serialisiert.";
+    }
+
+    return $items;
+}
+
+/** @param list<string> $errors */
+function ai6_parse_list_value(string $value, string $path, string $key, array &$errors): string
+{
+    if (in_array($key, ['files', 'spec_refs'], true)) {
+        return ai6_decode_quoted_string($value, $path, $key, $errors);
+    }
+    if (preg_match('/^AI6-\d{3}[A-Z]?$/', $value) !== 1) {
+        $errors[] = "$path: ungültiger Listeneintrag in `$key`: `$value`.";
+    }
+
+    return $value;
+}
+
+/** @param list<string> $errors */
+function ai6_decode_quoted_string(string $value, string $path, string $key, array &$errors): string
+{
+    if (!str_starts_with($value, '"') || !str_ends_with($value, '"')) {
+        $errors[] = "$path: Werte in `$key` müssen doppelt JSON-kompatibel quotiert sein.";
+
+        return trim($value, '"');
+    }
+
+    try {
+        $decoded = json_decode($value, true, 8, JSON_THROW_ON_ERROR);
+    } catch (JsonException) {
+        $errors[] = "$path: ungültige Zeichenkette in `$key`.";
+
+        return '';
+    }
+    if (!is_string($decoded)) {
+        $errors[] = "$path: `$key` enthält keine Zeichenkette.";
+
+        return '';
+    }
+
+    return $decoded;
+}
+
+/**
+ * @param array<string, string|list<string>> $metadata
+ * @param array<string, true> $requirements
+ * @param list<string> $errors
+ */
+function ai6_validate_metadata(array $metadata, string $filenameId, string $path, array $requirements, array &$errors): void
+{
+    ai6_expect_value($metadata, 'schema', 'ai6.ticket.v1', $path, $errors);
+    $id = $metadata['id'] ?? '';
+    if (!is_string($id) || preg_match('/^AI6-\d{3}[A-Z]?$/', $id) !== 1) {
+        $errors[] = "$path: `id` muss dem Muster AI6-NNN oder AI6-NNNA entsprechen.";
+    } elseif ($id !== $filenameId) {
+        $errors[] = "$path: `id` `$id` stimmt nicht mit dem Dateinamen `$filenameId` überein.";
+    }
+
+    $title = $metadata['title'] ?? '';
+    if (!is_string($title) || trim($title) === '' || str_contains($title, "\n")) {
+        $errors[] = "$path: `title` muss eine nichtleere einzeilige Zeichenkette sein.";
+    }
+
+    ai6_expect_enum($metadata, 'status', AI6_TICKET_STATUSES, $path, $errors);
+    ai6_expect_enum($metadata, 'kind', AI6_TICKET_KINDS, $path, $errors);
+    ai6_expect_enum($metadata, 'milestone', AI6_TICKET_MILESTONES, $path, $errors);
+    ai6_expect_enum($metadata, 'risk', AI6_TICKET_RISKS, $path, $errors);
+
+    foreach (['depends_on', 'files', 'spec_refs'] as $key) {
+        if (!isset($metadata[$key]) || !is_array($metadata[$key])) {
+            $errors[] = "$path: `$key` muss eine Liste sein.";
+        }
+    }
+
+    $files = is_array($metadata['files'] ?? null) ? $metadata['files'] : [];
+    ai6_validate_unique_values($files, $path, 'files', $errors);
+    foreach ($files as $file) {
+        ai6_validate_repo_path($file, $path, $errors);
+    }
+
+    $specRefs = is_array($metadata['spec_refs'] ?? null) ? $metadata['spec_refs'] : [];
+    if ($specRefs === []) {
+        $errors[] = "$path: `spec_refs` darf nicht leer sein.";
+    }
+    ai6_validate_unique_values($specRefs, $path, 'spec_refs', $errors);
+    foreach ($specRefs as $reference) {
+        if (preg_match('/^docs\/AI6_IMPLEMENTATION_PLAN\.md — ([A-Z]{2,}-\d{3})$/u', $reference, $match) !== 1) {
+            $errors[] = "$path: ungültige Spezifikationsreferenz `$reference`.";
+            continue;
+        }
+        if (!isset($requirements[$match[1]])) {
+            $errors[] = "$path: unbekannte Requirement-ID `{$match[1]}` in `spec_refs`.";
+        }
+    }
+}
+
+/** @param array<string, string|list<string>> $metadata @param list<string> $errors */
+function ai6_expect_value(array $metadata, string $key, string $expected, string $path, array &$errors): void
+{
+    if (($metadata[$key] ?? null) !== $expected) {
+        $errors[] = "$path: `$key` muss exakt `$expected` sein.";
+    }
+}
+
+/** @param array<string, string|list<string>> $metadata @param list<string> $allowed @param list<string> $errors */
+function ai6_expect_enum(array $metadata, string $key, array $allowed, string $path, array &$errors): void
+{
+    $value = $metadata[$key] ?? null;
+    if (!is_string($value) || !in_array($value, $allowed, true)) {
+        $errors[] = "$path: `$key` muss einer dieser Werte sein: " . implode(', ', $allowed) . '.';
+    }
+}
+
+/** @param list<string> $values @param list<string> $errors */
+function ai6_validate_unique_values(array $values, string $path, string $key, array &$errors): void
+{
+    if (count($values) !== count(array_unique($values))) {
+        $errors[] = "$path: `$key` enthält doppelte Einträge.";
+    }
+}
+
+/** @param list<string> $errors */
+function ai6_validate_repo_path(string $value, string $ticketPath, array &$errors): void
+{
+    $trimmed = rtrim($value, '/');
+    $invalid = $value === ''
+        || str_contains($value, '\\')
+        || str_starts_with($value, '/')
+        || str_starts_with($value, '//')
+        || preg_match('/^[A-Za-z]:/', $value) === 1
+        || preg_match('/^[A-Za-z][A-Za-z0-9+.-]*:\/\//', $value) === 1
+        || preg_match('/[\x00-\x1F\x7F*?\[\]{}!]/', $value) === 1
+        || str_contains($value, '//')
+        || $trimmed === '';
+    $segments = $trimmed === '' ? [] : explode('/', $trimmed);
+    if ($invalid || in_array('.', $segments, true) || in_array('..', $segments, true) || in_array('', $segments, true)) {
+        $errors[] = "$ticketPath: nichtkanonischer Repositorypfad in `files`: `$value`.";
+    }
+    if (class_exists(Normalizer::class) && Normalizer::normalize($value, Normalizer::FORM_C) !== $value) {
+        $errors[] = "$ticketPath: Repositorypfad ist nicht in Unicode-Normalform NFC: `$value`.";
+    }
+}
+
+/** @param array<string, string|list<string>> $metadata @param list<string> $errors */
+function ai6_validate_body(string $body, array $metadata, string $path, array &$errors): void
+{
+    [$intro, $sections, $sectionNames] = ai6_extract_sections($body);
+    $id = is_string($metadata['id'] ?? null) ? $metadata['id'] : '';
+    $title = is_string($metadata['title'] ?? null) ? $metadata['title'] : '';
+    if (trim($intro) !== "# $id — $title") {
+        $errors[] = "$path: H1 muss exakt `# $id — $title` entsprechen.";
+    }
+    if ($sectionNames !== AI6_TICKET_SECTIONS) {
+        $errors[] = "$path: die zwölf Pflichtabschnitte müssen genau einmal und in kanonischer Reihenfolge vorkommen.";
+
+        return;
+    }
+
+    $goalParagraphs = preg_split('/\n{2,}/', trim($sections['Goal'])) ?: [];
+    if (count(array_filter($goalParagraphs, static fn (string $value): bool => trim($value) !== '')) !== 2) {
+        $errors[] = "$path: `Goal` muss genau zwei nichtleere Absätze enthalten.";
+    }
+    if (trim($sections['Context']) === '') {
+        $errors[] = "$path: `Context` darf nicht leer sein.";
+    }
+
+    ai6_validate_tasks($sections['Tasks'], $path, $errors);
+    $acceptanceIds = ai6_validate_id_list($sections['Acceptance Criteria'], '/^- \[ \] \*\*(AC-\d{2})\*\* \S.*$/u', 'Akzeptanzkriterium', $path, $errors);
+    $testIds = ai6_validate_id_list($sections['Test Cases'], '/^- \*\*(TC-\d{2})\*\* \S.*$/u', 'Testfall', $path, $errors);
+    $gateIds = ai6_validate_gates($sections['Manual and External Gates'], $path, $errors);
+    ai6_validate_coverage($sections['AC Coverage'], $acceptanceIds, array_merge($testIds, $gateIds), $path, $errors);
+    ai6_validate_scope($sections['Initial Scope and Sensitive Paths'], $metadata, $path, $errors);
+
+    ai6_validate_optional_bullets($sections['Do Not Change'], 'Do Not Change', $path, $errors);
+    ai6_validate_required_bullets($sections['Out of Scope'], 'Out of Scope', $path, $errors);
+    ai6_validate_required_bullets($sections['Review Focus'], 'Review Focus', $path, $errors);
+    ai6_validate_notes($sections['Notes'], $path, $errors);
+}
+
+/** @return array{string, array<string, string>, list<string>} */
+function ai6_extract_sections(string $body): array
+{
+    preg_match_all('/^## ([^\n]+)\n/m', $body, $matches, PREG_OFFSET_CAPTURE);
+    $sections = [];
+    $names = [];
+    $introEnd = isset($matches[0][0]) ? $matches[0][0][1] : strlen($body);
+
+    foreach ($matches[1] as $index => $heading) {
+        $name = $heading[0];
+        $names[] = $name;
+        $contentStart = $matches[0][$index][1] + strlen($matches[0][$index][0]);
+        $contentEnd = isset($matches[0][$index + 1]) ? $matches[0][$index + 1][1] : strlen($body);
+        $sections[$name] = trim(substr($body, $contentStart, $contentEnd - $contentStart));
+    }
+
+    return [substr($body, 0, $introEnd), $sections, $names];
+}
+
+/** @param list<string> $errors */
+function ai6_validate_tasks(string $contents, string $path, array &$errors): void
+{
+    $lines = array_values(array_filter(explode("\n", trim($contents)), static fn (string $line): bool => trim($line) !== ''));
+    if ($lines === []) {
+        $errors[] = "$path: `Tasks` darf nicht leer sein.";
+
+        return;
+    }
+    foreach ($lines as $index => $line) {
+        $number = $index + 1;
+        if (preg_match('/^' . $number . '\. \S.*$/u', $line) !== 1) {
+            $errors[] = "$path: Aufgaben müssen ab 1 lückenlos nummeriert und einzeilig sein (erwartet: `$number.`).";
+            break;
+        }
+    }
+}
+
+/** @param list<string> $errors @return list<string> */
+function ai6_validate_id_list(string $contents, string $pattern, string $label, string $path, array &$errors): array
+{
+    $lines = array_values(array_filter(explode("\n", trim($contents)), static fn (string $line): bool => trim($line) !== ''));
+    $ids = [];
+    foreach ($lines as $line) {
+        if (preg_match($pattern, $line, $match) !== 1) {
+            $errors[] = "$path: ungültige $label-Zeile `$line`.";
+            continue;
+        }
+        $ids[] = $match[1];
+    }
+    if ($ids === []) {
+        $errors[] = "$path: mindestens ein $label ist erforderlich.";
+    }
+    if (count($ids) !== count(array_unique($ids))) {
+        $errors[] = "$path: doppelte IDs im Abschnitt für $label.";
+    }
+
+    return $ids;
+}
+
+/** @param list<string> $errors @return list<string> */
+function ai6_validate_gates(string $contents, string $path, array &$errors): array
+{
+    if (trim($contents) === 'None.') {
+        return [];
+    }
+
+    return ai6_validate_id_list(
+        $contents,
+        '/^- \*\*((?:MG|EXT)-\d{2})\*\* \S.*$/u',
+        'Gate',
+        $path,
+        $errors,
+    );
+}
+
+/** @param list<string> $acceptanceIds @param list<string> $evidenceIds @param list<string> $errors */
+function ai6_validate_coverage(string $contents, array $acceptanceIds, array $evidenceIds, string $path, array &$errors): void
+{
+    $lines = explode("\n", trim($contents));
+    if (($lines[0] ?? '') !== '| AC | Evidence |' || ($lines[1] ?? '') !== '|---|---|') {
+        $errors[] = "$path: `AC Coverage` benötigt den exakten Tabellenkopf `| AC | Evidence |`.";
+    }
+
+    $covered = [];
+    $usedEvidence = [];
+    foreach (array_slice($lines, 2) as $line) {
+        if (preg_match('/^\| (AC-\d{2}) \| ((?:(?:TC|MG|EXT)-\d{2})(?:, (?:(?:TC|MG|EXT)-\d{2}))*) \|$/', $line, $match) !== 1) {
+            $errors[] = "$path: ungültige AC-Coverage-Zeile `$line`.";
+            continue;
+        }
+        $covered[] = $match[1];
+        foreach (explode(', ', $match[2]) as $evidence) {
+            $usedEvidence[] = $evidence;
+            if (!in_array($evidence, $evidenceIds, true)) {
+                $errors[] = "$path: Coverage referenziert nicht deklarierten Nachweis `$evidence`.";
+            }
+        }
+        $rowEvidence = explode(', ', $match[2]);
+        if (count($rowEvidence) !== count(array_unique($rowEvidence))) {
+            $errors[] = "$path: Coverage-Zeile für `{$match[1]}` enthält doppelte Evidence-IDs.";
+        }
+    }
+    if ($covered !== $acceptanceIds) {
+        $errors[] = "$path: jede AC-ID muss genau einmal und in Deklarationsreihenfolge in `AC Coverage` stehen.";
+    }
+    foreach ($evidenceIds as $evidence) {
+        if (!in_array($evidence, $usedEvidence, true)) {
+            $errors[] = "$path: deklarierter Nachweis `$evidence` ist keiner AC zugeordnet.";
+        }
+    }
+}
+
+/** @param array<string, string|list<string>> $metadata @param list<string> $errors */
+function ai6_validate_scope(string $contents, array $metadata, string $path, array &$errors): void
+{
+    if (preg_match('/\A\*\*Expected initial scope:\*\*\n\n(.*?)\n\n\*\*Sensitive paths:\*\*\n\n(.+)\z/s', trim($contents), $match) !== 1) {
+        $errors[] = "$path: Scope-Abschnitt benötigt die exakten Labels `Expected initial scope` und `Sensitive paths`.";
+
+        return;
+    }
+
+    $files = is_array($metadata['files'] ?? null) ? $metadata['files'] : [];
+    $scopePaths = [];
+    $scopeContents = trim($match[1]);
+    if ($files === []) {
+        if ($scopeContents !== 'None.') {
+            $errors[] = "$path: bei `files: []` muss `Expected initial scope` exakt `None.` enthalten.";
+        }
+    } elseif ($scopeContents === 'None.') {
+        $errors[] = "$path: `Expected initial scope` darf bei nichtleerer `files`-Liste nicht `None.` sein.";
+    } else {
+        foreach (explode("\n", $scopeContents) as $index => $line) {
+            if (preg_match('/^- (.+) — (?:new|existing)$/u', $line, $scopeMatch) !== 1) {
+                $errors[] = "$path: ungültiger Scope-Eintrag `$line`.";
+                continue;
+            }
+            $file = $files[$index] ?? null;
+            if (!is_string($file) || $scopeMatch[1] !== ai6_markdown_code_span($file)) {
+                $errors[] = "$path: Scope-Pfad in Zeile " . ($index + 1)
+                    . ' ist nicht die kanonische CommonMark-Darstellung des zugehörigen `files`-Pfads.';
+                continue;
+            }
+            $scopePaths[] = $file;
+        }
+    }
+    if ($scopePaths !== $files) {
+        $errors[] = "$path: `files` und `Expected initial scope` müssen dieselben Pfade in derselben Reihenfolge enthalten.";
+    }
+    ai6_validate_optional_bullets($match[2], 'Sensitive paths', $path, $errors);
+}
+
+function ai6_markdown_code_span(string $value): string
+{
+    preg_match_all('/`+/', $value, $matches);
+    $longestRun = 0;
+    foreach ($matches[0] as $run) {
+        $longestRun = max($longestRun, strlen($run));
+    }
+    $delimiter = str_repeat('`', $longestRun + 1);
+    $needsPadding = str_starts_with($value, '`')
+        || str_ends_with($value, '`')
+        || str_starts_with($value, ' ')
+        || str_ends_with($value, ' ');
+    $padding = $needsPadding ? ' ' : '';
+
+    return $delimiter . $padding . $value . $padding . $delimiter;
+}
+
+/** @param list<string> $errors */
+function ai6_validate_optional_bullets(string $contents, string $section, string $path, array &$errors): void
+{
+    if (trim($contents) === 'None.') {
+        return;
+    }
+    ai6_validate_required_bullets($contents, $section, $path, $errors);
+}
+
+/** @param list<string> $errors */
+function ai6_validate_required_bullets(string $contents, string $section, string $path, array &$errors): void
+{
+    $lines = array_values(array_filter(explode("\n", trim($contents)), static fn (string $line): bool => trim($line) !== ''));
+    if ($lines === [] || trim($contents) === 'None.') {
+        $errors[] = "$path: `$section` benötigt mindestens einen Eintrag.";
+
+        return;
+    }
+    foreach ($lines as $line) {
+        if (preg_match('/^- \S.*$/u', $line) !== 1) {
+            $errors[] = "$path: ungültige Zeile in `$section`: `$line`.";
+        }
+    }
+}
+
+/** @param list<string> $errors */
+function ai6_validate_notes(string $contents, string $path, array &$errors): void
+{
+    $lines = explode("\n", trim($contents));
+    foreach (AI6_NOTES_BOILERPLATE as $index => $expected) {
+        if (($lines[$index] ?? null) !== $expected) {
+            $line = $index + 1;
+            $errors[] = "$path: Notes-Boilerplate Zeile $line fehlt oder ist verändert.";
+        }
+    }
+    foreach (array_slice($lines, count(AI6_NOTES_BOILERPLATE)) as $line) {
+        if (preg_match('/^- \S.*$/u', $line) !== 1) {
+            $errors[] = "$path: zusätzliche Notes-Hinweise müssen Listeneinträge sein: `$line`.";
+        }
+    }
+}
+
+/**
+ * @param array<string, array{id: string, path: string, depends_on: list<string>}> $tickets
+ * @param array<string, array{title: string, milestone: string, risk: string, kind: string, depends_on: list<string>, requirement_refs: list<string>, goal: string}> $blueprints
+ * @param list<string> $errors
+ */
+function ai6_validate_ticket_set(array $tickets, array $blueprints, array &$errors): void
+{
+    $seen = [];
+    foreach ($tickets as $id => $ticket) {
+        if (isset($seen[$id])) {
+            $errors[] = "Ticket-ID `$id` ist mehrfach vorhanden.";
+        }
+        $seen[$id] = true;
+        if (count($ticket['depends_on']) !== count(array_unique($ticket['depends_on']))) {
+            $errors[] = "{$ticket['path']}: `depends_on` enthält doppelte Einträge.";
+        }
+        foreach ($ticket['depends_on'] as $dependency) {
+            if ($dependency === $id) {
+                $errors[] = "{$ticket['path']}: ein Ticket darf nicht von sich selbst abhängen.";
+            } elseif (!isset($blueprints[$dependency])) {
+                $errors[] = "{$ticket['path']}: unbekannte Abhängigkeit `$dependency`.";
+            }
+        }
+    }
+
+    $visiting = [];
+    $visited = [];
+    foreach (array_keys($tickets) as $id) {
+        ai6_visit_dependency($id, $tickets, $visiting, $visited, $errors, []);
+    }
+}
+
+/**
+ * @param array<string, array{id: string, path: string, depends_on: list<string>}> $tickets
+ * @param array<string, true> $visiting
+ * @param array<string, true> $visited
+ * @param list<string> $errors
+ * @param list<string> $stack
+ */
+function ai6_visit_dependency(string $id, array $tickets, array &$visiting, array &$visited, array &$errors, array $stack): void
+{
+    if (isset($visited[$id]) || !isset($tickets[$id])) {
+        return;
+    }
+    if (isset($visiting[$id])) {
+        $stack[] = $id;
+        $errors[] = 'Abhängigkeitszyklus: ' . implode(' -> ', $stack) . '.';
+
+        return;
+    }
+
+    $visiting[$id] = true;
+    $stack[] = $id;
+    foreach ($tickets[$id]['depends_on'] as $dependency) {
+        ai6_visit_dependency($dependency, $tickets, $visiting, $visited, $errors, $stack);
+    }
+    unset($visiting[$id]);
+    $visited[$id] = true;
+}
+
+/** @param array<string, array{id: string, path: string, depends_on: list<string>}> $tickets @return list<string> */
+function ai6_topological_order(array $tickets): array
+{
+    $order = [];
+    $visited = [];
+    $visit = function (string $id) use (&$visit, &$order, &$visited, $tickets): void {
+        if (isset($visited[$id]) || !isset($tickets[$id])) {
+            return;
+        }
+        $visited[$id] = true;
+        foreach ($tickets[$id]['depends_on'] as $dependency) {
+            $visit($dependency);
+        }
+        $order[] = $id;
+    };
+    foreach (array_keys($tickets) as $id) {
+        $visit($id);
+    }
+
+    return $order;
+}
+
+ai6_validator_main($argv);
