@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_002(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_003(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -67,11 +67,42 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Reviews/.gitkeep',
             'app/AI6/Runs/.gitkeep',
             'app/AI6/Shared/AI6Marker.php',
+            'app/AI6/Shared/AI6ServiceProvider.php',
+            'app/AI6/Shared/Config/ConfigurationException.php',
+            'app/AI6/Shared/Config/ConfigurationViolation.php',
+            'app/AI6/Shared/Config/StrictBooleanParser.php',
+            'app/AI6/Shared/Config/StrictEnumParser.php',
+            'app/AI6/Shared/Doctor/DoctorCheck.php',
+            'app/AI6/Shared/Doctor/DoctorCheckResult.php',
+            'app/AI6/Shared/Doctor/DoctorCommand.php',
+            'app/AI6/Shared/Doctor/RedactionKeyringDoctorCheck.php',
+            'app/AI6/Shared/Doctor/SecurityPolicyDoctorCheck.php',
+            'app/AI6/Shared/Redaction/InvalidRedactionInputException.php',
+            'app/AI6/Shared/Redaction/RedactionContext.php',
+            'app/AI6/Shared/Redaction/RedactionFingerprint.php',
+            'app/AI6/Shared/Redaction/RedactionFingerprintGenerator.php',
+            'app/AI6/Shared/Redaction/RedactionKeyring.php',
+            'app/AI6/Shared/Redaction/RedactionKeyringFactory.php',
+            'app/AI6/Shared/Redaction/RedactionMatch.php',
+            'app/AI6/Shared/Redaction/RedactionMatchType.php',
+            'app/AI6/Shared/Redaction/RedactionPolicy.php',
+            'app/AI6/Shared/Redaction/RedactionResult.php',
+            'app/AI6/Shared/Redaction/RedactionRule.php',
+            'app/AI6/Shared/Redaction/RedactionRuleSet.php',
+            'app/AI6/Shared/Redaction/Redactor.php',
             'app/AI6/Shared/Runtime/RuntimeExecutionMark.php',
             'app/AI6/Shared/Runtime/RuntimeHealthCommand.php',
             'app/AI6/Shared/Runtime/RuntimeHeartbeat.php',
             'app/AI6/Shared/Runtime/RuntimeSelfTestCommand.php',
             'app/AI6/Shared/Runtime/RuntimeSelfTestJob.php',
+            'app/AI6/Shared/Security/CanonicalByteFrame.php',
+            'app/AI6/Shared/Security/SecurityBannerData.php',
+            'app/AI6/Shared/Security/SecurityControlGroup.php',
+            'app/AI6/Shared/Security/SecurityMeasure.php',
+            'app/AI6/Shared/Security/SecurityPolicy.php',
+            'app/AI6/Shared/Security/SecurityPolicyFactory.php',
+            'app/AI6/Shared/Security/SecurityPolicyHasher.php',
+            'app/AI6/Shared/Security/SecurityProfile.php',
             'app/AI6/Tickets/.gitkeep',
         ], $files);
     }
@@ -110,6 +141,7 @@ final class ScaffoldStructureTest extends TestCase
         $composer = $this->readJson($this->path('composer.json'));
 
         self::assertSame('^8.5', $composer['require']['php'] ?? null);
+        self::assertSame('*', $composer['require']['ext-intl'] ?? null);
         self::assertSame('^13.8', $composer['require']['laravel/framework'] ?? null);
         self::assertSame('^12.5.12', $composer['require-dev']['phpunit/phpunit'] ?? null);
         self::assertSame('8.5.0', $composer['config']['platform']['php'] ?? null);
@@ -175,7 +207,10 @@ final class ScaffoldStructureTest extends TestCase
         $allowlist = $provenance['backend_allowlist'];
         $importedPaths = $provenance['imported_paths'];
         $scaffoldPaths = $provenance['scaffold_file_paths'];
-        $adaptedPaths = $provenance['adapted_paths'];
+        $adaptedPaths = array_values(array_unique([
+            ...$provenance['adapted_paths'],
+            'bootstrap/providers.php',
+        ]));
         $protectedPaths = array_keys($provenance['protected_base_snapshot']);
 
         self::assertSame($allowlist, $importedPaths, 'The recorded import must equal the approved backend allowlist.');

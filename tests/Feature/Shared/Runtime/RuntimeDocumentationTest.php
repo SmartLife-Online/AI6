@@ -29,6 +29,9 @@ final class RuntimeDocumentationTest extends TestCase
             'ai6:runtime-health',
             'APP_KEY',
             'AI6_HEARTBEAT_DIRECTORY',
+            'AI6_RUNTIME_ROLE',
+            'SecurityPolicy-Variablen',
+            'Redaction-Keyring-Variablen',
             'Ausführungsnachweise',
             'JSON ist gültiges Compose-YAML',
             'Containerinterface',
@@ -38,6 +41,7 @@ final class RuntimeDocumentationTest extends TestCase
             'storage/app/ai6-local.sqlite',
             'DB_DATABASE="$PWD/storage/app/ai6-local.sqlite" php artisan migrate',
             '/database/*.sqlite-wal',
+            'müssen zuvor `AI6_REDACTION_ACTIVE_KEY_ID` und ein nicht leerer, versionierter `AI6_REDACTION_KEYS`-Ring gesetzt werden',
         ] as $required) {
             self::assertStringContainsString($required, $readme);
         }

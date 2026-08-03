@@ -1,5 +1,7 @@
 <?php
 
+use App\AI6\Shared\Config\ConfigurationException;
+use App\AI6\Shared\Doctor\DoctorCommand;
 use App\AI6\Shared\Runtime\RuntimeHealthCommand;
 use App\AI6\Shared\Runtime\RuntimeHeartbeat;
 use App\AI6\Shared\Runtime\RuntimeSelfTestCommand;
@@ -12,6 +14,10 @@ use Illuminate\Support\Facades\Route;
 
 $workerHeartbeatService = 'ai6.runtime.heartbeat.worker';
 
+if (ini_set('zend.exception_ignore_args', '1') === false) {
+    throw new RuntimeException('AI6 requires exception arguments to be hidden.');
+}
+
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
@@ -21,6 +27,7 @@ return Application::configure(basePath: dirname(__DIR__))
         },
     )
     ->withCommands([
+        DoctorCommand::class,
         RuntimeHealthCommand::class,
         RuntimeSelfTestCommand::class,
     ])
@@ -32,7 +39,10 @@ return Application::configure(basePath: dirname(__DIR__))
         //
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        $exceptions->render(static function (ConfigurationException $exception) {
+            return response('Interner Konfigurationsfehler.', 500)
+                ->header('Content-Type', 'text/plain; charset=UTF-8');
+        });
     })
     ->booted(static function () use ($workerHeartbeatService): void {
         Event::listen(Looping::class, static function () use ($workerHeartbeatService): void {

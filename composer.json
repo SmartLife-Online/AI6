@@ -5,6 +5,7 @@
     "description": "Git-native software ticket orchestration for human-reviewed LLM workflows.",
     "license": "proprietary",
     "require": {
+        "ext-intl": "*",
         "php": "^8.5",
         "laravel/framework": "^13.8"
     },

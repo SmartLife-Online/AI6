@@ -3,30 +3,57 @@
 namespace Tests\Unit\Shared\Runtime;
 
 use App\AI6\Shared\Runtime\RuntimeHeartbeat;
+use App\AI6\Shared\Security\SecurityMeasure;
 use PHPUnit\Framework\TestCase;
 
 final class RuntimeComposeContractTest extends TestCase
 {
+    /** @var list<string> */
+    private const SECURITY_ENVIRONMENT = [
+        'AI6_SECURITY_ACKNOWLEDGE_REDUCED_MODE',
+        'AI6_SECURITY_LOGIN_EMAIL_CONFIRMATION',
+        'AI6_SECURITY_PROFILE',
+        'AI6_SECURITY_REQUIRE_AGENT_SANDBOX',
+        'AI6_SECURITY_REQUIRE_CHECKER_NETWORK_ISOLATION',
+        'AI6_SECURITY_REQUIRE_CRITICAL_ACTION_STEP_UP',
+        'AI6_SECURITY_REQUIRE_HTTPS_OR_PRIVATE_ACCESS',
+        'AI6_SECURITY_REQUIRE_LLM_PRECOMMIT_REVIEW',
+        'AI6_SECURITY_REQUIRE_PRIVILEGED_PASSKEY',
+    ];
+
+    /** @var list<string> */
+    private const REDACTION_ENVIRONMENT = [
+        'AI6_REDACTION_ACTIVE_KEY_ID',
+        'AI6_REDACTION_KEYS',
+    ];
+
     /** @var array<string, list<string>> */
     private const ENVIRONMENT_ALLOWLIST = [
         'caddy' => [],
         'init' => [
-            'APP_DEBUG', 'APP_ENV', 'DB_BUSY_TIMEOUT', 'DB_CONNECTION', 'DB_DATABASE',
+            ...self::SECURITY_ENVIRONMENT,
+            'AI6_RUNTIME_ROLE', 'APP_DEBUG', 'APP_ENV', 'DB_BUSY_TIMEOUT', 'DB_CONNECTION', 'DB_DATABASE',
             'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE', 'DB_SYNCHRONOUS',
         ],
         'app' => [
-            'APP_DEBUG', 'APP_ENV', 'APP_KEY', 'APP_URL', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',
+            ...self::SECURITY_ENVIRONMENT,
+            ...self::REDACTION_ENVIRONMENT,
+            'AI6_RUNTIME_ROLE', 'APP_DEBUG', 'APP_ENV', 'APP_KEY', 'APP_URL', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',
             'DB_CONNECTION', 'DB_DATABASE', 'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE',
             'DB_SYNCHRONOUS', 'LOG_CHANNEL', 'QUEUE_CONNECTION', 'SESSION_DRIVER',
         ],
         'worker' => [
-            'AI6_EXECUTION_DIRECTORY', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_MAX_AGE',
+            ...self::SECURITY_ENVIRONMENT,
+            ...self::REDACTION_ENVIRONMENT,
+            'AI6_EXECUTION_DIRECTORY', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE',
             'AI6_WORKER_TIMEOUT', 'APP_DEBUG', 'APP_ENV', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',
             'DB_CONNECTION', 'DB_DATABASE', 'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE',
             'DB_QUEUE_RETRY_AFTER', 'DB_SYNCHRONOUS', 'LOG_CHANNEL', 'QUEUE_CONNECTION',
         ],
         'scheduler' => [
-            'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_MAX_AGE', 'APP_DEBUG', 'APP_ENV',
+            ...self::SECURITY_ENVIRONMENT,
+            ...self::REDACTION_ENVIRONMENT,
+            'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'APP_DEBUG', 'APP_ENV',
             'CACHE_STORE', 'DB_BUSY_TIMEOUT', 'DB_CONNECTION', 'DB_DATABASE',
             'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE', 'DB_QUEUE_RETRY_AFTER',
             'DB_SYNCHRONOUS', 'LOG_CHANNEL', 'QUEUE_CONNECTION',
@@ -148,6 +175,38 @@ final class RuntimeComposeContractTest extends TestCase
         $unknownService = $this->compose();
         $unknownService['services']['unexpected'] = [];
         self::assertNotSame([], $this->allowlistErrors($unknownService));
+    }
+
+    public function test_security_and_redaction_configuration_reaches_only_the_required_php_roles(): void
+    {
+        $services = $this->services();
+
+        foreach (['init', 'app', 'worker', 'scheduler'] as $role) {
+            $environment = $services[$role]['environment'] ?? [];
+            self::assertIsArray($environment);
+            self::assertSame($role, $environment['AI6_RUNTIME_ROLE'] ?? null);
+            self::assertSame('${AI6_SECURITY_PROFILE:-strict}', $environment['AI6_SECURITY_PROFILE'] ?? null);
+            self::assertSame(
+                '${AI6_SECURITY_ACKNOWLEDGE_REDUCED_MODE:-false}',
+                $environment['AI6_SECURITY_ACKNOWLEDGE_REDUCED_MODE'] ?? null,
+            );
+
+            foreach (SecurityMeasure::cases() as $measure) {
+                self::assertSame('${'.$measure->value.':-true}', $environment[$measure->value] ?? null);
+            }
+        }
+
+        foreach (['app', 'worker', 'scheduler'] as $role) {
+            $environment = $services[$role]['environment'] ?? [];
+            self::assertSame('${AI6_REDACTION_ACTIVE_KEY_ID:-app-key-v1}', $environment['AI6_REDACTION_ACTIVE_KEY_ID'] ?? null);
+            self::assertSame('${AI6_REDACTION_KEYS:-}', $environment['AI6_REDACTION_KEYS'] ?? null);
+        }
+
+        foreach (['init', 'agent', 'checker'] as $role) {
+            $environment = $services[$role]['environment'] ?? [];
+            self::assertArrayNotHasKey('AI6_REDACTION_ACTIVE_KEY_ID', $environment);
+            self::assertArrayNotHasKey('AI6_REDACTION_KEYS', $environment);
+        }
     }
 
     public function test_heartbeat_mounts_are_private_tmpfs_and_persistent_targets_are_named_volumes(): void

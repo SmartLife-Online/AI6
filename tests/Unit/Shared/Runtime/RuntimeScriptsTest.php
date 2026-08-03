@@ -180,12 +180,13 @@ final class RuntimeScriptsTest extends TestCase
         }
     }
 
-    public function test_composer_contract_and_installed_packages_match_the_ai6_001_base(): void
+    public function test_composer_contract_and_installed_packages_match_the_ai6_003_platform_contract(): void
     {
-        self::assertSame('3747cf196ad13ae086bc7a51c9742175e3431f09a42e1a84b7cf89a16e8691b9', hash_file('sha256', $this->path('composer.json')));
-        self::assertSame('005b303279ed4b064ed62d4d2544ee8fb64d19ff34d76f8154f1ea510b815a67', hash_file('sha256', $this->path('composer.lock')));
+        self::assertSame('30ada4e993684e2a8417b577b98b1a59f375c43cfc2d3f90a908257995e10109', hash_file('sha256', $this->path('composer.json')));
+        self::assertSame('aaa3a3b2f63434d9882ee73a76a8d0aa2bf3eca7445f5bf4b3315d6feab532fa', hash_file('sha256', $this->path('composer.lock')));
 
         $lock = $this->decodeJson($this->path('composer.lock'));
+        self::assertSame('*', $lock['platform']['ext-intl'] ?? null);
         $installed = $this->decodeJson($this->path('vendor/composer/installed.json'));
         $lockedNames = [];
 

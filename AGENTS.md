@@ -15,36 +15,39 @@ AI6/
 ├── CLAUDE.md                        imports AGENTS.md only
 ├── README.md
 ├── composer.json / composer.lock    Laravel 13 dependency baseline on PHP 8.5
-├── artisan, app/, bootstrap/ ...    integrated AI6-001 Laravel scaffold plus AI6-002 worktree changes
-├── Dockerfile, docker-compose.yml    AI6-002 runtime implementation in the worktree
-├── docker/, deploy/                  AI6-002 role scripts and reverse-proxy profile in the worktree
-├── tests/                            PHPUnit baseline and AI6-002 runtime tests
+├── artisan, app/, bootstrap/ ...    integrated AI6-001/AI6-002 plus AI6-003 worktree changes
+├── Dockerfile, docker-compose.yml    integrated AI6-002 runtime plus AI6-003 config forwarding
+├── docker/, deploy/                  integrated AI6-002 role scripts and reverse-proxy profile
+├── tests/                            PHPUnit baseline plus AI6-002/AI6-003 tests
 ├── docs/
 │   ├── AI6_IMPLEMENTATION_PLAN.md   normative source, revision V1.6.21, German
 │   └── AI6_TICKET_TEMPLATE_V1.md    ticket generation and implementation contract, German
 └── tickets/
     ├── README.md                    backlog overview; a view, never a status source
     ├── AI6-001.md                   status done — integrated as commit 264cf2f
-    ├── AI6-002.md                   status todo — rebased against the integrated AI6-001 state
-    ├── AI6-003.md, AI6-004.md       status todo — derived ahead of their dependencies (§8.1)
+    ├── AI6-002.md                   status todo — integrated as commit 29d67fa
+    ├── AI6-003.md                   status todo — rebased; implementation is in the worktree
+    ├── AI6-004.md                   status todo — derived ahead of its dependencies (§8.1)
     ├── AI6-005A.md, AI6-005B.md     status todo — derived ahead of their dependencies (§8.1)
     └── AI6-006A.md … AI6-006F.md    status todo — derived ahead of their dependencies (§8.1)
 ```
 
 Commit `264cf2f` integrates `AI6-001`: Laravel 13, `composer.json`, the committed lockfile, PHPUnit, Pint, PHPStan, the manifest generator and the eleven module roots. Its ticket has `status: done`.
 
-The worktree contains the not-yet-integrated implementation of `AI6-002`: the single Docker image, Compose process roles, SQLite Database Queue, scheduler, runtime heartbeats and their automated tests. `AI6-002` has been rebased against the real `AI6-001` base but still has `status: todo`; its manual gates remain open, and no commit or ticket-status transition is implied by these files.
+Commit `29d67fa` integrates the human-accepted `AI6-002` runtime: the single Docker image, Compose process roles, SQLite Database Queue, scheduler, runtime heartbeats and their automated tests. Its ticket file still has `status: todo`; integration and human acceptance do not authorize an agent to change that status.
 
-What does **not** exist yet: application modules after `AI6-002` and `.ai6/`.
+The worktree contains the not-yet-integrated implementation of `AI6-003`: typed instance security configuration, `SecurityPolicy`, central redaction, HMAC fingerprints, `ai6:doctor` and their automated tests. Its ticket was rebased against commit `29d67fa` with explicit human approval and still has `status: todo`.
+
+What does **not** exist yet: application modules after `AI6-003` and `.ai6/`.
 
 Of the 44 planned tickets twelve exist as files. The other 32 are blueprints in plan §15 — `tickets/AI6-007.md` and everything after it cannot be opened. Plan revisions V1.6.2, V1.6.5, V1.6.7 and V1.6.10 progressively split the former `AI6-005` and `AI6-006`, so M0 ends with `AI6-005A`/`AI6-005B` and the M1 chain is now `AI6-006A` … `AI6-006F`. The IDs `AI6-005` and `AI6-006` no longer exist.
 
 Consequences for you:
 
 - The Laravel/PHP toolchain commands in §4 are available in the current worktree and must be run when relevant. The external locked-install suite additionally requires the explicit PHP 8.5 and Composer paths documented in `README.md`.
-- Verify every path with `rg --files` or `ls` before naming it. The `AI6-001` scaffold exists, the `AI6-002` runtime exists only in the worktree, and later module contracts still do not exist.
-- `AI6-002` remains a ticket task until its gates and integration are complete; do not infer completion or change its status from the presence of the implementation.
-- `AI6-003` through `AI6-006F` were derived ahead of dependencies. Their `— existing` markers describe the state their dependencies must produce, not evidence that every named seam exists today. The rebase obligation in §8.1 remains binding for them.
+- Verify every path with `rg --files` or `ls` before naming it. The `AI6-001` scaffold and `AI6-002` runtime are integrated, `AI6-003` exists only in the worktree, and later module contracts still do not exist.
+- `AI6-003` remains a ticket task until its review and integration are complete; do not infer completion or change its status from the presence of the implementation.
+- `AI6-004` through `AI6-006F` were derived ahead of dependencies. Their `— existing` markers describe the state their dependencies must produce, not evidence that every named seam exists today. The rebase obligation in §8.1 remains binding for them.
 
 When this section goes stale, it must be updated — but only when explicitly asked (§10).
 
@@ -148,6 +151,8 @@ Decided: **PHPUnit** as test runner (via `php artisan test`), **Pint** as format
 
 Before reporting an implementation ticket as done, run the applicable regular tests, `pint --test`, PHPStan, manifest and Composer checks, and `git diff --check` (plan §12.2). Run the external locked-install suite when dependency, lockfile, platform or installation behavior is in scope. Red is red — report the result with its output instead of routing around it.
 
+Every PHP extension used directly by application code is an explicit `composer.json` platform requirement. Changing one also requires a lockfile refresh and the external locked-install proof.
+
 ---
 
 ## 5. Architecture rules
@@ -183,7 +188,10 @@ These controls have **no flag** and are never weakened — not temporarily, not 
 - Credential separation per the matrix in plan §4.2: `app` holds no Git, provider or SMTP credentials; `agent` and `checker` hold no primary database and no production `APP_KEY`.
 - Worker Git runs with isolated system/global config and no repository-triggered hooks, helpers, external filters, diff/textconv, pager, fsmonitor, signing or submodule execution (`SEC-006`).
 - Anti-replay for human requests.
-- Safe output, safe downloads, secret redaction.
+- Safe output, safe downloads, secret redaction. The central `Redactor` rejects non-UTF-8 input with a typed, value-free exception before producing output or fingerprints.
+- The `APP_KEY`-derived redaction key is a local/testing fallback only. Every other environment requires an explicit versioned `AI6_REDACTION_KEYS` ring, resolved by the first application provider; only dependency/key setup, the test runner and the fixed keyless `init` migration may precede that check.
+- "Names the key, never the value" covers direct scalar/array trace arguments and all rendered output. Laravel objects in a trace can still reference protected configuration state; `zend.exception_ignore_args=1` is therefore a mandatory output boundary, and tests distinguish that in-process reference from a rendered leak.
+- An internal exception message never becomes an HTTP response body. It goes to the log; the response stays generic. `APP_DEBUG=false` is not the control here.
 - Exported agent/checker/reviewer trees expose no reachable Git metadata; only the worker imports a validated patch (`GIT-010`).
 - Native provider instruction discovery sees only the approved, hash-bound, read-only instruction snapshot and no host or parent instructions (`AGT-009`).
 - Binding of review, publish candidate, commit and push to tree OID and diff hash.

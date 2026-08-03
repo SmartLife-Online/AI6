@@ -1,0 +1,11 @@
+{
+  "key_id": "golden-v7",
+  "version": 7,
+  "key_hex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+  "match_type": "token",
+  "context_identifier": "log",
+  "project_id": "projekt-ä",
+  "run_id": "run-42",
+  "removed_value": "sekret-e\u0301",
+  "expected_hmac_sha256": "e1e01a3a8c055ee11a42b78161cc8db082b30810660a75af98b5ffc308f91c04"
+}
