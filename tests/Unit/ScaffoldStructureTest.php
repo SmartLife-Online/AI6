@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_003(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_004(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -59,10 +59,36 @@ final class ScaffoldStructureTest extends TestCase
         self::assertSame([
             'app/AI6/Agents/.gitkeep',
             'app/AI6/Auth/.gitkeep',
+            'app/AI6/Auth/Actions/CreateUser.php',
+            'app/AI6/Auth/Actions/DeactivateUser.php',
+            'app/AI6/Auth/Actions/DeleteUser.php',
+            'app/AI6/Auth/Actions/GrantGlobalAdministrator.php',
+            'app/AI6/Auth/Actions/LastActiveAdministratorGuard.php',
+            'app/AI6/Auth/Actions/RemoveProjectMembership.php',
+            'app/AI6/Auth/Actions/RevokeGlobalAdministrator.php',
+            'app/AI6/Auth/Actions/RevokeUserSession.php',
+            'app/AI6/Auth/Actions/SetProjectMembership.php',
+            'app/AI6/Auth/CannotRemoveLastAdministrator.php',
+            'app/AI6/Auth/Config/AuthConfiguration.php',
+            'app/AI6/Auth/Config/AuthConfigurationFactory.php',
+            'app/AI6/Auth/Console/CreateAdministratorCommand.php',
+            'app/AI6/Auth/EmailNormalizer.php',
+            'app/AI6/Auth/Http/AdministrativeController.php',
+            'app/AI6/Auth/Http/EnsureActiveUser.php',
+            'app/AI6/Auth/Http/LoginController.php',
+            'app/AI6/Auth/Models/User.php',
+            'app/AI6/Auth/Models/UserSession.php',
+            'app/AI6/Auth/Policies/UserPolicy.php',
             'app/AI6/Checks/.gitkeep',
             'app/AI6/Git/.gitkeep',
             'app/AI6/HumanLoop/.gitkeep',
             'app/AI6/Projects/.gitkeep',
+            'app/AI6/Projects/Http/ProjectController.php',
+            'app/AI6/Projects/Models/Project.php',
+            'app/AI6/Projects/Models/ProjectMembership.php',
+            'app/AI6/Projects/Policies/ProjectPolicy.php',
+            'app/AI6/Projects/ProjectAction.php',
+            'app/AI6/Projects/ProjectRole.php',
             'app/AI6/Prompts/.gitkeep',
             'app/AI6/Reviews/.gitkeep',
             'app/AI6/Runs/.gitkeep',
@@ -72,6 +98,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Shared/Config/ConfigurationViolation.php',
             'app/AI6/Shared/Config/StrictBooleanParser.php',
             'app/AI6/Shared/Config/StrictEnumParser.php',
+            'app/AI6/Shared/Config/StrictPositiveIntegerParser.php',
             'app/AI6/Shared/Doctor/DoctorCheck.php',
             'app/AI6/Shared/Doctor/DoctorCheckResult.php',
             'app/AI6/Shared/Doctor/DoctorCommand.php',
@@ -161,15 +188,18 @@ final class ScaffoldStructureTest extends TestCase
         self::assertTrue($this->composerScriptsHaveImplicitSideEffects($scripts));
     }
 
-    public function test_environment_example_preserves_file_session_and_cache_with_database_queue(): void
+    public function test_environment_example_uses_database_sessions_and_queue_with_file_cache(): void
     {
         $lines = file($this->path('.env.example'), FILE_IGNORE_NEW_LINES);
         self::assertIsArray($lines);
 
         foreach ([
-            'SESSION_DRIVER=file',
+            'SESSION_DRIVER=database',
             'CACHE_STORE=file',
             'QUEUE_CONNECTION=database',
+            'AI6_AUTH_LOGIN_MAX_ATTEMPTS=5',
+            'AI6_AUTH_LOGIN_DECAY_SECONDS=60',
+            'AI6_AUTH_SESSION_LIFETIME_MINUTES=120',
             'AI6_WORKER_HEARTBEAT_MAX_AGE=75',
         ] as $default) {
             self::assertContains($default, $lines);
@@ -237,8 +267,10 @@ final class ScaffoldStructureTest extends TestCase
         }
 
         $approvedLaterPaths = [
+            'config/auth.php',
             'config/database.php',
             'config/queue.php',
+            'config/session.php',
         ];
         $unexpectedFiles = [];
         foreach ($scaffoldPaths as $path) {
@@ -332,7 +364,7 @@ final class ScaffoldStructureTest extends TestCase
         }
     }
 
-    public function test_ai6_002_adds_only_the_queue_migrations(): void
+    public function test_migrations_match_the_approved_state_through_ai6_004(): void
     {
         $migrations = glob($this->path('database/migrations/*.php'));
         self::assertIsArray($migrations);
@@ -344,6 +376,10 @@ final class ScaffoldStructureTest extends TestCase
             '2026_08_01_000000_create_jobs_table.php',
             '2026_08_01_000001_create_job_batches_table.php',
             '2026_08_01_000002_create_failed_jobs_table.php',
+            '2026_08_03_000000_create_users_table.php',
+            '2026_08_03_000001_create_projects_table.php',
+            '2026_08_03_000002_create_project_memberships_table.php',
+            '2026_08_03_000003_create_sessions_table.php',
         ], $migrations);
     }
 

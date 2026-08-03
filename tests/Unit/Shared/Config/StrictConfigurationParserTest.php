@@ -5,6 +5,7 @@ namespace Tests\Unit\Shared\Config;
 use App\AI6\Shared\Config\ConfigurationViolation;
 use App\AI6\Shared\Config\StrictBooleanParser;
 use App\AI6\Shared\Config\StrictEnumParser;
+use App\AI6\Shared\Config\StrictPositiveIntegerParser;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -76,6 +77,21 @@ final class StrictConfigurationParserTest extends TestCase
             self::assertStringContainsString('AI6_SECURITY_PROFILE', $result->message);
             self::assertStringContainsString('strict, development, custom', $result->message);
             self::assertStringNotContainsString('private-profile', $result->message);
+        }
+    }
+
+    public function test_positive_integer_parser_accepts_only_unambiguous_bounded_values(): void
+    {
+        $parser = new StrictPositiveIntegerParser;
+
+        self::assertSame(5, $parser->parse('AI6_AUTH_TEST', 5, 100));
+        self::assertSame(60, $parser->parse('AI6_AUTH_TEST', '60', 100));
+
+        foreach ([0, -1, 101, '0', '01', ' 5 ', '1.0', 1.0, null, 'private-limit'] as $invalid) {
+            $result = $parser->parse('AI6_AUTH_PRIVATE_TEST', $invalid, 100);
+            self::assertInstanceOf(ConfigurationViolation::class, $result);
+            self::assertStringContainsString('AI6_AUTH_PRIVATE_TEST', $result->message);
+            self::assertStringNotContainsString('private-limit', $result->message);
         }
     }
 }

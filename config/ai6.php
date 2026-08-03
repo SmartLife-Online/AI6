@@ -2,6 +2,11 @@
 
 return [
     'runtime_role' => env('AI6_RUNTIME_ROLE', ''),
+    'auth' => [
+        'login_max_attempts' => env('AI6_AUTH_LOGIN_MAX_ATTEMPTS', '5'),
+        'login_decay_seconds' => env('AI6_AUTH_LOGIN_DECAY_SECONDS', '60'),
+        'session_lifetime_minutes' => env('AI6_AUTH_SESSION_LIFETIME_MINUTES', '120'),
+    ],
     'security' => [
         'profile' => env('AI6_SECURITY_PROFILE', 'strict'),
         'acknowledge_reduced_mode' => env('AI6_SECURITY_ACKNOWLEDGE_REDUCED_MODE', 'false'),

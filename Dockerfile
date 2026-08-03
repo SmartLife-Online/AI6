@@ -1,29 +1,9 @@
 ARG COMPOSER_IMAGE="composer:2.10.1@sha256:7725eb4545c438629ae8bde3ef0bb9a5038ef566126ad878442a69007242d267"
 ARG PHP_IMAGE="php:8.5.5-apache-bookworm@sha256:e340b45ad8e72aa7addc22a991c2c66f424309f090695c63cdb2e005933a5c86"
 
-FROM ${COMPOSER_IMAGE} AS vendor
+FROM ${COMPOSER_IMAGE} AS composer
 
-WORKDIR /opt/ai6
-
-COPY composer.json composer.lock ./
-
-RUN composer install \
-        --no-autoloader \
-        --no-dev \
-        --no-interaction \
-        --no-progress \
-        --no-scripts \
-        --prefer-dist
-
-COPY app ./app
-
-RUN composer dump-autoload \
-        --classmap-authoritative \
-        --no-dev \
-        --no-interaction \
-        --no-scripts
-
-FROM ${PHP_IMAGE}
+FROM ${PHP_IMAGE} AS runtime
 
 ARG DEBIAN_SNAPSHOT="20260731T000000Z"
 ARG SQLITE_ARCHIVE_VERSION="3530400"
@@ -82,6 +62,37 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/* /tmp/sqlite /tmp/sqlite.tar.gz; \
     curl --version > /dev/null; \
     php -r 'if (! extension_loaded("intl")) { fwrite(STDERR, "The intl extension is missing.\n"); exit(1); }'
+
+FROM runtime AS vendor
+
+COPY --from=composer /usr/bin/composer /usr/local/bin/composer
+
+WORKDIR /opt/ai6
+
+COPY composer.json composer.lock ./
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends unzip; \
+    composer install \
+        --no-autoloader \
+        --no-dev \
+        --no-interaction \
+        --no-progress \
+        --no-scripts \
+        --prefer-dist; \
+    apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false unzip; \
+    rm -rf /var/lib/apt/lists/*
+
+COPY app ./app
+
+RUN composer dump-autoload \
+        --classmap-authoritative \
+        --no-dev \
+        --no-interaction \
+        --no-scripts
+
+FROM runtime
 
 WORKDIR /opt/ai6
 

@@ -142,13 +142,43 @@ final class RuntimeScriptsTest extends TestCase
         self::assertStringContainsString('extension_loaded("intl")', $dockerfile);
         self::assertStringContainsString('curl --version > /dev/null', $dockerfile);
         self::assertStringContainsString('composer install', $dockerfile);
-        self::assertStringContainsString('FROM ${COMPOSER_IMAGE} AS vendor', $dockerfile);
+        self::assertStringContainsString('FROM ${COMPOSER_IMAGE} AS composer', $dockerfile);
+        self::assertStringContainsString('FROM ${PHP_IMAGE} AS runtime', $dockerfile);
+        self::assertStringContainsString('FROM runtime AS vendor', $dockerfile);
+        self::assertStringContainsString('COPY --from=composer /usr/bin/composer /usr/local/bin/composer', $dockerfile);
+        self::assertStringContainsString('apt-get install -y --no-install-recommends unzip;', $dockerfile);
+        self::assertStringContainsString('apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false unzip;', $dockerfile);
         self::assertStringContainsString('COPY --from=vendor /opt/ai6/vendor ./vendor', $dockerfile);
         self::assertStringContainsString('--no-scripts', $dockerfile);
         self::assertStringContainsString('USER 10001:10001', $dockerfile);
         self::assertStringNotContainsString('composer update', $dockerfile);
-        self::assertStringNotContainsString('COPY --from=vendor /usr/bin/composer', $dockerfile);
+        self::assertStringNotContainsString('--ignore-platform-req', $dockerfile);
         self::assertStringContainsString('bootstrap/cache/*.php', $this->read('.dockerignore'));
+    }
+
+    public function test_locked_vendor_install_runs_against_the_extended_runtime_platform(): void
+    {
+        $dockerfile = $this->read('Dockerfile');
+        $runtimeStage = strpos($dockerfile, 'FROM ${PHP_IMAGE} AS runtime');
+        $extensionInstall = strpos($dockerfile, 'docker-php-ext-install -j"$(nproc)" intl pcntl;');
+        $vendorStage = strpos($dockerfile, 'FROM runtime AS vendor');
+        $composerCopy = strpos($dockerfile, 'COPY --from=composer /usr/bin/composer /usr/local/bin/composer');
+        $unzipInstall = strpos($dockerfile, 'apt-get install -y --no-install-recommends unzip;');
+        $composerInstall = strpos($dockerfile, 'composer install');
+        $unzipPurge = strpos($dockerfile, 'apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false unzip;');
+        $finalStage = strrpos($dockerfile, "\nFROM runtime\n");
+
+        foreach ([$runtimeStage, $extensionInstall, $vendorStage, $composerCopy, $unzipInstall, $composerInstall, $unzipPurge, $finalStage] as $position) {
+            self::assertIsInt($position);
+        }
+
+        self::assertLessThan($extensionInstall, $runtimeStage);
+        self::assertLessThan($vendorStage, $extensionInstall);
+        self::assertLessThan($composerCopy, $vendorStage);
+        self::assertLessThan($unzipInstall, $composerCopy);
+        self::assertLessThan($composerInstall, $unzipInstall);
+        self::assertLessThan($unzipPurge, $composerInstall);
+        self::assertLessThan($finalStage, $unzipPurge);
     }
 
     public function test_dockerignore_recursively_excludes_local_environment_files(): void

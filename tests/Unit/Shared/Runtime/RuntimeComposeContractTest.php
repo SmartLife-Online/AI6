@@ -27,6 +27,13 @@ final class RuntimeComposeContractTest extends TestCase
         'AI6_REDACTION_KEYS',
     ];
 
+    /** @var list<string> */
+    private const AUTH_ENVIRONMENT = [
+        'AI6_AUTH_LOGIN_DECAY_SECONDS',
+        'AI6_AUTH_LOGIN_MAX_ATTEMPTS',
+        'AI6_AUTH_SESSION_LIFETIME_MINUTES',
+    ];
+
     /** @var array<string, list<string>> */
     private const ENVIRONMENT_ALLOWLIST = [
         'caddy' => [],
@@ -36,6 +43,7 @@ final class RuntimeComposeContractTest extends TestCase
             'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE', 'DB_SYNCHRONOUS',
         ],
         'app' => [
+            ...self::AUTH_ENVIRONMENT,
             ...self::SECURITY_ENVIRONMENT,
             ...self::REDACTION_ENVIRONMENT,
             'AI6_RUNTIME_ROLE', 'APP_DEBUG', 'APP_ENV', 'APP_KEY', 'APP_URL', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',

@@ -65,6 +65,9 @@
       "depends_on": { "init": { "condition": "service_completed_successfully" } },
       "read_only": true,
       "environment": {
+        "AI6_AUTH_LOGIN_DECAY_SECONDS": "${AI6_AUTH_LOGIN_DECAY_SECONDS:-60}",
+        "AI6_AUTH_LOGIN_MAX_ATTEMPTS": "${AI6_AUTH_LOGIN_MAX_ATTEMPTS:-5}",
+        "AI6_AUTH_SESSION_LIFETIME_MINUTES": "${AI6_AUTH_SESSION_LIFETIME_MINUTES:-120}",
         "AI6_REDACTION_ACTIVE_KEY_ID": "${AI6_REDACTION_ACTIVE_KEY_ID:-app-key-v1}",
         "AI6_REDACTION_KEYS": "${AI6_REDACTION_KEYS:-}",
         "AI6_RUNTIME_ROLE": "app",
@@ -90,7 +93,7 @@
         "DB_SYNCHRONOUS": "NORMAL",
         "LOG_CHANNEL": "stderr",
         "QUEUE_CONNECTION": "database",
-        "SESSION_DRIVER": "file"
+        "SESSION_DRIVER": "database"
       },
       "volumes": [
         { "type": "volume", "source": "ai6_database", "target": "/var/lib/ai6/database" },

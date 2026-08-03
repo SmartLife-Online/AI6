@@ -1,5 +1,8 @@
 <?php
 
+use App\AI6\Auth\CannotRemoveLastAdministrator;
+use App\AI6\Auth\Console\CreateAdministratorCommand;
+use App\AI6\Auth\Http\EnsureActiveUser;
 use App\AI6\Shared\Config\ConfigurationException;
 use App\AI6\Shared\Doctor\DoctorCommand;
 use App\AI6\Shared\Runtime\RuntimeHealthCommand;
@@ -8,6 +11,7 @@ use App\AI6\Shared\Runtime\RuntimeSelfTestCommand;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Request;
 use Illuminate\Queue\Events\Looping;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
@@ -27,6 +31,7 @@ return Application::configure(basePath: dirname(__DIR__))
         },
     )
     ->withCommands([
+        CreateAdministratorCommand::class,
         DoctorCommand::class,
         RuntimeHealthCommand::class,
         RuntimeSelfTestCommand::class,
@@ -36,9 +41,15 @@ return Application::configure(basePath: dirname(__DIR__))
     ])
     ->withEvents(discover: false)
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        $middleware->web(append: [EnsureActiveUser::class]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        $exceptions->render(static function (
+            CannotRemoveLastAdministrator $exception,
+            Request $request,
+        ) {
+            return response()->json(['message' => 'Die Aktion kann nicht ausgeführt werden.'], 409);
+        });
         $exceptions->render(static function (ConfigurationException $exception) {
             return response('Interner Konfigurationsfehler.', 500)
                 ->header('Content-Type', 'text/plain; charset=UTF-8');

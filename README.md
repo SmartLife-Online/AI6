@@ -12,7 +12,7 @@ AI6 verwaltet Git-native Softwaretickets, lässt sie von Menschen freigeben und 
 
 Die vollständige Import-Allowlist, die Ausschlüsse und die vor der Übernahme geprüften Schutzdateien stehen maschinenlesbar in [`docs/AI6_SCAFFOLD_PROVENANCE.json`](docs/AI6_SCAFFOLD_PROVENANCE.json). Der Scaffold wurde in einem temporären Verzeichnis außerhalb dieses Repositorys bezogen; es lief dabei kein Composer-Skript und es wurde kein Scaffold rekursiv über den vorhandenen Bestand kopiert.
 
-Der Scaffoldpfad `config/` wurde bewusst nicht übernommen. AI6-001 startete deshalb migrationsfrei mit `SESSION_DRIVER=file`, `CACHE_STORE=file` und `QUEUE_CONNECTION=sync`. AI6-002 führt ausschließlich die benötigte SQLite- und Queue-Konfiguration ein; der aktuelle Laufzeitdefault ist `QUEUE_CONNECTION=database`, während Sessions und Cache dateibasiert bleiben.
+Der Scaffoldpfad `config/` wurde bewusst nicht übernommen. AI6-001 startete deshalb migrationsfrei mit `SESSION_DRIVER=file`, `CACHE_STORE=file` und `QUEUE_CONNECTION=sync`. AI6-002 führte die benötigte SQLite-Konfiguration und den Laufzeitdefault `QUEUE_CONNECTION=database` ein; Sessions und Cache blieben dabei zunächst dateibasiert. AI6-004 stellt den Anwendungsdefault für Sessions auf die Datenbank um, während der Cache dateibasiert bleibt.
 
 ## Installation und Start
 
@@ -62,7 +62,7 @@ Die Tabellenbezeichnung **SecurityPolicy-Variablen** umfasst `AI6_SECURITY_PROFI
 |---|---|---|---|
 | `caddy` | Separater Reverse Proxy; HTTP-Healthcheck | keine | ausschließlich `deploy/Caddyfile` read-only |
 | `init` | Einmaliger Migrationsschritt; kein Heartbeat | SecurityPolicy-Variablen, `AI6_RUNTIME_ROLE`, `APP_ENV`, `APP_DEBUG`, `DB_CONNECTION`, `DB_DATABASE`, `DB_FOREIGN_KEYS`, `DB_BUSY_TIMEOUT`, `DB_JOURNAL_MODE`, `DB_SYNCHRONOUS` | Datenbank und `storage/` read-write; `/tmp` als `tmpfs` |
-| `app` | Apache/PHP; kein Heartbeat, HTTP-Healthcheck | SecurityPolicy- und Redaction-Keyring-Variablen, `AI6_RUNTIME_ROLE`, `APP_ENV`, `APP_DEBUG`, `APP_KEY`, `APP_URL`, `CACHE_STORE`, `DB_CONNECTION`, `DB_DATABASE`, `DB_FOREIGN_KEYS`, `DB_BUSY_TIMEOUT`, `DB_JOURNAL_MODE`, `DB_SYNCHRONOUS`, `LOG_CHANNEL`, `QUEUE_CONNECTION`, `SESSION_DRIVER` | Datenbank und `storage/` read-write, Nachweise read-only; `/tmp` als `tmpfs` |
+| `app` | Apache/PHP; kein Heartbeat, HTTP-Healthcheck | SecurityPolicy-, Redaction-Keyring- und `AI6_AUTH_*`-Variablen, `AI6_RUNTIME_ROLE`, `APP_ENV`, `APP_DEBUG`, `APP_KEY`, `APP_URL`, `CACHE_STORE`, `DB_CONNECTION`, `DB_DATABASE`, `DB_FOREIGN_KEYS`, `DB_BUSY_TIMEOUT`, `DB_JOURNAL_MODE`, `DB_SYNCHRONOUS`, `LOG_CHANNEL`, `QUEUE_CONNECTION`, `SESSION_DRIVER` | Datenbank und `storage/` read-write, Nachweise read-only; `/tmp` als `tmpfs` |
 | `worker` | `queue:work`; `Looping`-Listener schreibt auch im Leerlauf, ausschließlich am Worker-Heartbeatziel | SecurityPolicy- und Redaction-Keyring-Variablen, `AI6_RUNTIME_ROLE`, `APP_ENV`, `APP_DEBUG`, `CACHE_STORE`, `DB_CONNECTION`, `DB_DATABASE`, `DB_FOREIGN_KEYS`, `DB_BUSY_TIMEOUT`, `DB_JOURNAL_MODE`, `DB_SYNCHRONOUS`, `DB_QUEUE_RETRY_AFTER`, `LOG_CHANNEL`, `QUEUE_CONNECTION`, `AI6_EXECUTION_DIRECTORY`, `AI6_HEARTBEAT_DIRECTORY`, `AI6_HEARTBEAT_MAX_AGE`, `AI6_WORKER_TIMEOUT` | Datenbank, `storage/` und Nachweise read-write; eigener Heartbeat und `/tmp` als `tmpfs` |
 | `scheduler` | `schedule:work`; der Zehn-Sekunden-Task schreibt den Heartbeat und verwendet einen stabilen Selbsttestschlüssel je Scheduler-Boot-ID | SecurityPolicy- und Redaction-Keyring-Variablen, `AI6_RUNTIME_ROLE`, `APP_ENV`, `APP_DEBUG`, `CACHE_STORE`, `DB_CONNECTION`, `DB_DATABASE`, `DB_FOREIGN_KEYS`, `DB_BUSY_TIMEOUT`, `DB_JOURNAL_MODE`, `DB_SYNCHRONOUS`, `DB_QUEUE_RETRY_AFTER`, `LOG_CHANNEL`, `QUEUE_CONNECTION`, `AI6_HEARTBEAT_DIRECTORY`, `AI6_HEARTBEAT_MAX_AGE` | Datenbank und `storage/` read-write; eigener Heartbeat und `/tmp` als `tmpfs` |
 | `agent` | Feste Leerlaufschleife schreibt ausschließlich den Agent-Heartbeat | `AI6_HEARTBEAT_DIRECTORY`, `AI6_HEARTBEAT_INTERVAL`, `AI6_HEARTBEAT_MAX_AGE` | ausschließlich eigener Heartbeat und `/tmp` als `tmpfs` |
@@ -173,6 +173,46 @@ Der aktuelle Zustand wird ohne Ausgabe von Secret-, Schlüssel- oder Rohkonfigur
 ```bash
 php artisan ai6:doctor
 ```
+
+## Benutzer, Projektrollen und Basislogin
+
+AI6 besitzt keine öffentliche Registrierung, Passwortzurücksetzung oder E-Mail-Verifizierung. Der erste globale Administrator wird ausschließlich über das Bootstrap-Kommando angelegt. Das Passwort wird entweder verdeckt abgefragt oder aus der ausdrücklich benannten Umgebungsvariablen gelesen und weder ausgegeben noch protokolliert:
+
+```bash
+AI6_CREATE_ADMIN_PASSWORD='<mindestens-12-zeichen>' php artisan ai6:create-admin admin@example.com --name='AI6 Administrator'
+```
+
+Nach dem ersten Benutzer verweigert das Kommando weitere Bootstrap-Aufrufe. Weitere Benutzer, globale Administratoren und Projektmitgliedschaften werden ausschließlich durch einen bereits aktiven globalen Administrator verwaltet. Der letzte aktive globale Administrator kann weder deaktiviert, gelöscht noch zum normalen Benutzer herabgestuft werden.
+
+Globale Administratorrolle und Projektrollen sind getrennte Autorisierungsgrenzen. Diese Tabelle gibt den Vertrag aus AI6-004 wieder; sie definiert ihn nicht. `Ja` bei einer Projektrolle setzt eine Mitgliedschaft im betroffenen Projekt voraus.
+
+| Aktion | Globaler Administrator | Projekt `admin` | Projekt `viewer` | Projekt `operator` | Projekt `approver` | Ohne Mitgliedschaft |
+|---|---:|---:|---:|---:|---:|---:|
+| Projekt erscheint in der Projektliste | Nein | Ja | Ja | Ja | Ja | Nein |
+| Projektdetail ansehen | Nein | Ja | Ja | Ja | Ja | Nein |
+| Benutzer anlegen | Ja | Nein | Nein | Nein | Nein | Nein |
+| Benutzer deaktivieren | Ja | Nein | Nein | Nein | Nein | Nein |
+| Benutzer löschen | Ja | Nein | Nein | Nein | Nein | Nein |
+| Globale Administratorrolle vergeben | Ja | Nein | Nein | Nein | Nein | Nein |
+| Globale Administratorrolle entziehen | Ja | Nein | Nein | Nein | Nein | Nein |
+| Projektmitgliedschaft setzen | Ja | Nein | Nein | Nein | Nein | Nein |
+| Projektmitgliedschaft entziehen | Ja | Nein | Nein | Nein | Nein | Nein |
+
+Ein globaler Administrator benötigt für die sieben Verwaltungsaktionen keine Projektmitgliedschaft, sieht ohne Mitgliedschaft aber weder ein Projekt in der Liste noch dessen Detailansicht. Die Projektrolle `admin` gewährt in diesem Ticket keine instanzweiten Verwaltungsrechte und unterscheidet sich bis zu späteren Projekttickets bei den beiden Leseentscheidungen nicht von `viewer`, `operator` und `approver`.
+
+Sessions liegen serverseitig in der Datenbank. Deaktivieren oder Löschen eines Benutzers widerruft alle seine Sessions; der gezielte Sessionwiderruf entfernt genau eine Session. Anwendungs- und Compose-Default sind `SESSION_DRIVER=database`; eine Laufzeitdefinition darf sie nicht mit einer dateibasierten Sessionablage überschreiben, weil ein sofortiger gezielter Widerruf dann nicht nachweisbar wäre. Login und Logout regenerieren beziehungsweise invalidieren die Session samt CSRF-Token.
+
+Die operativen Auth-Grenzwerte werden getrennt von der `SecurityPolicy` aufgelöst:
+
+| Schlüssel | Default | Bedeutung |
+|---|---:|---|
+| `AI6_AUTH_LOGIN_MAX_ATTEMPTS` | `5` | Fehlversuche bis zur Sperre einer normalisierten E-Mail-Kennung |
+| `AI6_AUTH_LOGIN_DECAY_SECONDS` | `60` | Dauer des Rate-Limit-Fensters in Sekunden |
+| `AI6_AUTH_SESSION_LIFETIME_MINUTES` | `120` | serverseitige Sessionlebensdauer in Minuten |
+
+E-Mail-Kennungen werden vor Login und Rate-Limit um Rand-Whitespace bereinigt und in Kleinschreibung überführt. Ein erfolgreicher Login löscht den Fehlversuchszähler. Passkeys, TOTP, Login-E-Mail-Code und Step-up folgen erst mit AI6-005A; der Basislogin ist daher noch nicht die vollständige Authentifizierungshärtung.
+
+Die sichere Prüfung auf einem Windows-Entwicklungs-PC und auf einem Docker-Compose-VPS beschreibt [`docs/AI6-004_VERIFICATION.md`](docs/AI6-004_VERIFICATION.md). Die zugehörigen Skripte verändern weder bestehende Benutzer noch Sessions oder Datenbanken.
 
 ## Ticketmanifest
 

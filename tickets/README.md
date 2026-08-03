@@ -30,16 +30,16 @@ Die Werte in den Spalten `Titel`, `Risiko` und `depends_on` sind ausschließlich
 
 | Ableitungsbasis | Tickets |
 |---|---|
-| Gegen den realen Repositoryzustand abgeleitet oder rebased | AI6-001, AI6-002, AI6-003 |
-| Gegen den erwarteten Zustand nach den Vorgängertickets abgeleitet | AI6-004, AI6-005A, AI6-005B, AI6-006A, AI6-006B, AI6-006C, AI6-006D, AI6-006E, AI6-006F |
+| Gegen den realen Repositoryzustand abgeleitet oder rebased | AI6-001, AI6-002, AI6-003, AI6-004 |
+| Gegen den erwarteten Zustand nach den Vorgängertickets abgeleitet | AI6-005A, AI6-005B, AI6-006A, AI6-006B, AI6-006C, AI6-006D, AI6-006E, AI6-006F |
 
-`AI6-001` und `AI6-002` sind im Repository integriert. `AI6-002` wurde am 1. August 2026 gegen den realen `AI6-001`-Stand rebased; `AI6-003` wurde am 2. August 2026 nach der menschlichen Abnahme beider Abhängigkeiten gegen den integrierten `AI6-002`-Stand `29d67fa` rebased. Die neun übrigen vorabgeleiteten Detailtickets benennen weiterhin Pfade, Klassen, Kommandos und Tests, die erst mit ihren Vorgängern entstehen; einzelne davon tragen bereits den Marker `— existing`, obwohl sie heute fehlen. Plan §13.6 nennt diesen Zustand `ahead-derived` und legt fest, welche Prüfungen bis zum Rebase aufgeschoben werden dürfen: die Existenzprüfung eines `existing`-Pfades, die Verifikation einer ausschließlich mit Plan-eigenen Namen benannten Naht und die Ableitung konkreter Klassen-, Kommando- und Testnamen aus realem Code. Alles andere gilt sofort.
+`AI6-001` bis `AI6-003` sind im Repository integriert. `AI6-002` wurde am 1. August 2026 gegen den realen `AI6-001`-Stand rebased; `AI6-003` wurde am 2. August 2026 nach der menschlichen Abnahme beider Abhängigkeiten gegen den integrierten `AI6-002`-Stand `29d67fa` rebased. `AI6-004` wurde am 3. August 2026 mit ausdrücklicher menschlicher Freigabe gegen den integrierten Stand `c8b99b2` neu abgeleitet; der Rebase hat seinen Status nicht verändert. Die acht übrigen vorabgeleiteten Detailtickets benennen weiterhin Pfade, Klassen, Kommandos und Tests, die erst mit ihren Vorgängern entstehen; einzelne davon tragen bereits den Marker `— existing`, obwohl sie heute fehlen. Plan §13.6 nennt diesen Zustand `ahead-derived` und legt fest, welche Prüfungen bis zum Rebase aufgeschoben werden dürfen: die Existenzprüfung eines `existing`-Pfades, die Verifikation einer ausschließlich mit Plan-eigenen Namen benannten Naht und die Ableitung konkreter Klassen-, Kommando- und Testnamen aus realem Code. Alles andere gilt sofort.
 
 Der Umgang damit ist normativ entschieden und keine offene Frage dieser Ansicht: Ein noch vorabgeleitetes Ticket bleibt auf `status: todo` und darf vor dem durchgeführten Rebase weder freigegeben noch beansprucht werden (Plan §13.6, Template §9.1, `AGENTS.md` §8.1). Ein zusätzliches Blockieren über `status: blocked` ist dafür nicht vorgesehen — dieser Wert bezeichnet nach Plan §5.2 eine dauerhafte fachliche Blockade, nicht eine ausstehende Vorabableitungsprüfung. Das Rebase-Gate leitet unmittelbar vor `status: ready` `files`, die Scope-Marker sowie alle genannten Pfade, Klassen, Kommandos und Tests gegen den dann realen Repositoryzustand neu ab; ein `— existing`-Marker bezeichnet bis dahin die Runbasis nach dem Landen der Abhängigkeiten und wird nicht auf `— new` umgeschrieben. Ob ein Ticket dieses Gate durch Rebase oder durch vollständige Neuerzeugung durchläuft, entscheidet der Mensch je Ticket; beide Wege müssen die aufgeschobenen Prüfungen vollständig nachholen. Ein abgeschlossener Rebase bewirkt selbst keine Statusänderung. Statusänderungen gehören AI6 und weder dieser Ansicht noch einem Agenten (Plan §5.2, `AGENTS.md` §10).
 
 ## 3. Backlog
 
-Stand der abgeleiteten Ansicht: 2. August 2026, abgeleitet aus Planrevision V1.6.21 und dem vorhandenen Dateibestand.
+Stand der abgeleiteten Ansicht: 3. August 2026, abgeleitet aus Planrevision V1.6.21 und dem vorhandenen Dateibestand.
 
 ### M0 — Fundament und sichere Laufzeit
 

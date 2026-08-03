@@ -13,6 +13,10 @@ final class RuntimeComposeSmokeTest extends TestCase
 
     private bool $started = false;
 
+    private string $appKey = '';
+
+    private string $redactionKeyring = '';
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -35,6 +39,13 @@ final class RuntimeComposeSmokeTest extends TestCase
 
         $this->port = (int) $port;
         $this->project = 'ai6smoke'.bin2hex(random_bytes(5));
+        $this->appKey = 'base64:'.base64_encode(random_bytes(32));
+        $this->redactionKeyring = json_encode([
+            'smoke-key-v1' => [
+                'version' => 1,
+                'key' => 'base64:'.base64_encode(random_bytes(32)),
+            ],
+        ], JSON_THROW_ON_ERROR);
     }
 
     protected function tearDown(): void
@@ -264,7 +275,12 @@ final class RuntimeComposeSmokeTest extends TestCase
         $command[] = '--project-name';
         $command[] = $this->project;
         $command = array_merge($command, $arguments);
-        $process = new Process($command, dirname(__DIR__, 4), ['AI6_HTTP_PORT' => (string) $this->port]);
+        $process = new Process($command, dirname(__DIR__, 4), [
+            'AI6_HTTP_PORT' => (string) $this->port,
+            'AI6_REDACTION_ACTIVE_KEY_ID' => 'smoke-key-v1',
+            'AI6_REDACTION_KEYS' => $this->redactionKeyring,
+            'APP_KEY' => $this->appKey,
+        ]);
         $process->setTimeout($timeout);
 
         return $process;
