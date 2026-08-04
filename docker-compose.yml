@@ -8,6 +8,7 @@
         "app": { "condition": "service_healthy" }
       },
       "ports": ["127.0.0.1:${AI6_HTTP_PORT:-8080}:8080"],
+      "networks": { "default": { "ipv4_address": "172.30.60.2" } },
       "volumes": [
         {
           "type": "bind",
@@ -75,6 +76,9 @@
         "AI6_AUTH_STRONG_AUTHENTICATION_DECAY_SECONDS": "${AI6_AUTH_STRONG_AUTHENTICATION_DECAY_SECONDS:-300}",
         "AI6_AUTH_STRONG_AUTHENTICATION_MAX_ATTEMPTS": "${AI6_AUTH_STRONG_AUTHENTICATION_MAX_ATTEMPTS:-5}",
         "AI6_AUTH_STEP_UP_WINDOW_SECONDS": "${AI6_AUTH_STEP_UP_WINDOW_SECONDS:-300}",
+        "AI6_HTTP_SESSION_SAME_SITE": "${AI6_HTTP_SESSION_SAME_SITE:-lax}",
+        "AI6_HTTP_TRUSTED_HOSTS": "${AI6_HTTP_TRUSTED_HOSTS:-localhost,127.0.0.1,::1}",
+        "AI6_HTTP_TRUSTED_PROXIES": "${AI6_HTTP_TRUSTED_PROXIES:-172.30.60.2}",
         "AI6_LOGIN_CONFIRMATION_EMAIL": "${AI6_LOGIN_CONFIRMATION_EMAIL:-}",
         "AI6_REDACTION_ACTIVE_KEY_ID": "${AI6_REDACTION_ACTIVE_KEY_ID:-app-key-v1}",
         "AI6_REDACTION_KEYS": "${AI6_REDACTION_KEYS:-}",
@@ -277,6 +281,11 @@
         "start_period": "10s"
       },
       "restart": "unless-stopped"
+    }
+  },
+  "networks": {
+    "default": {
+      "ipam": { "config": [{ "subnet": "172.30.60.0/24", "ip_range": "172.30.60.128/25" }] }
     }
   },
   "volumes": {

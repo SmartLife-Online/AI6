@@ -5,7 +5,7 @@ use Illuminate\Support\Str;
 return [
     'driver' => env('SESSION_DRIVER', 'database'),
     'lifetime' => 120,
-    'expire_on_close' => false,
+    'expire_on_close' => true,
     'encrypt' => env('SESSION_ENCRYPT', false),
     'files' => storage_path('framework/sessions'),
     'connection' => env('SESSION_CONNECTION'),
@@ -18,8 +18,8 @@ return [
     ),
     'path' => env('SESSION_PATH', '/'),
     'domain' => env('SESSION_DOMAIN'),
-    'secure' => env('SESSION_SECURE_COOKIE'),
-    'http_only' => env('SESSION_HTTP_ONLY', true),
-    'same_site' => env('SESSION_SAME_SITE', 'lax'),
+    'secure' => true,
+    'http_only' => true,
+    'same_site' => 'lax',
     'partitioned' => env('SESSION_PARTITIONED_COOKIE', false),
 ];

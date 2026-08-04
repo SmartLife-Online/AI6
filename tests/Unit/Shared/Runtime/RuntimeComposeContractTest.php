@@ -5,6 +5,7 @@ namespace Tests\Unit\Shared\Runtime;
 use App\AI6\Shared\Runtime\RuntimeHeartbeat;
 use App\AI6\Shared\Security\SecurityMeasure;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpFoundation\IpUtils;
 
 final class RuntimeComposeContractTest extends TestCase
 {
@@ -43,6 +44,13 @@ final class RuntimeComposeContractTest extends TestCase
     ];
 
     /** @var list<string> */
+    private const HTTP_ENVIRONMENT = [
+        'AI6_HTTP_SESSION_SAME_SITE',
+        'AI6_HTTP_TRUSTED_HOSTS',
+        'AI6_HTTP_TRUSTED_PROXIES',
+    ];
+
+    /** @var list<string> */
     private const MAIL_ENVIRONMENT = [
         'MAIL_EHLO_DOMAIN',
         'MAIL_FROM_ADDRESS',
@@ -66,6 +74,7 @@ final class RuntimeComposeContractTest extends TestCase
         ],
         'app' => [
             ...self::AUTH_ENVIRONMENT,
+            ...self::HTTP_ENVIRONMENT,
             ...self::SECURITY_ENVIRONMENT,
             ...self::REDACTION_ENVIRONMENT,
             'AI6_RUNTIME_ROLE', 'APP_DEBUG', 'APP_ENV', 'APP_KEY', 'APP_URL', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',
@@ -262,6 +271,34 @@ final class RuntimeComposeContractTest extends TestCase
                 self::assertArrayNotHasKey($key, $services[$role]['environment'] ?? []);
             }
         }
+    }
+
+    public function test_http_hardening_configuration_reaches_only_the_app_role(): void
+    {
+        $compose = $this->compose();
+        $services = $this->services();
+        $expected = [
+            'AI6_HTTP_SESSION_SAME_SITE' => '${AI6_HTTP_SESSION_SAME_SITE:-lax}',
+            'AI6_HTTP_TRUSTED_HOSTS' => '${AI6_HTTP_TRUSTED_HOSTS:-localhost,127.0.0.1,::1}',
+            'AI6_HTTP_TRUSTED_PROXIES' => '${AI6_HTTP_TRUSTED_PROXIES:-172.30.60.2}',
+        ];
+
+        foreach ($expected as $key => $value) {
+            self::assertSame($value, $services['app']['environment'][$key] ?? null);
+
+            foreach (['init', 'worker', 'scheduler', 'agent', 'checker', 'caddy'] as $role) {
+                self::assertArrayNotHasKey($key, $services[$role]['environment'] ?? []);
+            }
+        }
+
+        $caddyAddress = $services['caddy']['networks']['default']['ipv4_address'] ?? null;
+        $subnet = $compose['networks']['default']['ipam']['config'][0]['subnet'] ?? null;
+        $dynamicRange = $compose['networks']['default']['ipam']['config'][0]['ip_range'] ?? null;
+        self::assertSame('172.30.60.2', $caddyAddress);
+        self::assertSame('172.30.60.0/24', $subnet);
+        self::assertSame('172.30.60.128/25', $dynamicRange);
+        self::assertTrue(IpUtils::checkIp($caddyAddress, $subnet));
+        self::assertFalse(IpUtils::checkIp($caddyAddress, $dynamicRange));
     }
 
     public function test_heartbeat_mounts_are_private_tmpfs_and_persistent_targets_are_named_volumes(): void

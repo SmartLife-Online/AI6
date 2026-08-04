@@ -8,16 +8,22 @@ use App\AI6\Auth\Http\EnsureCompletedAuthentication;
 use App\AI6\Auth\StepUpRequiredException;
 use App\AI6\Shared\Config\ConfigurationException;
 use App\AI6\Shared\Doctor\DoctorCommand;
+use App\AI6\Shared\Http\BlockPersistentLoginCookies;
+use App\AI6\Shared\Http\ContentSecurityPolicy;
+use App\AI6\Shared\Http\EnforceHttpsOrPrivateAccess;
+use App\AI6\Shared\Http\ResolveTrustedProxies;
 use App\AI6\Shared\Runtime\RuntimeHealthCommand;
 use App\AI6\Shared\Runtime\RuntimeHeartbeat;
 use App\AI6\Shared\Runtime\RuntimeSelfTestCommand;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Request;
 use Illuminate\Queue\Events\Looping;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
+use Symfony\Component\HttpFoundation\Response;
 
 $workerHeartbeatService = 'ai6.runtime.heartbeat.worker';
 
@@ -45,6 +51,13 @@ return Application::configure(basePath: dirname(__DIR__))
     ])
     ->withEvents(discover: false)
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->replace(TrustProxies::class, ResolveTrustedProxies::class);
+        $middleware->append([
+            ContentSecurityPolicy::class,
+            EnforceHttpsOrPrivateAccess::class,
+            BlockPersistentLoginCookies::class,
+        ]);
+        $middleware->preventRequestForgery();
         $middleware->web(append: [EnsureActiveUser::class, EnsureCompletedAuthentication::class]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
@@ -65,6 +78,13 @@ return Application::configure(basePath: dirname(__DIR__))
 
             return response('Eine frische Step-up-Bestätigung ist erforderlich.', 403)
                 ->header('Content-Type', 'text/html; charset=UTF-8');
+        });
+        $exceptions->respond(static function (Response $response, Throwable $_exception, Request $request): Response {
+            try {
+                return app(ContentSecurityPolicy::class)->apply($response, $request);
+            } catch (Throwable) {
+                return ContentSecurityPolicy::applyFailurePolicy($response);
+            }
         });
     })
     ->booted(static function () use ($workerHeartbeatService): void {

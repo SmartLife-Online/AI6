@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_005a(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_005b(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -149,6 +149,14 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Shared/Doctor/DoctorCommand.php',
             'app/AI6/Shared/Doctor/RedactionKeyringDoctorCheck.php',
             'app/AI6/Shared/Doctor/SecurityPolicyDoctorCheck.php',
+            'app/AI6/Shared/Http/BlockPersistentLoginCookies.php',
+            'app/AI6/Shared/Http/ContentSecurityPolicy.php',
+            'app/AI6/Shared/Http/EnforceHttpsOrPrivateAccess.php',
+            'app/AI6/Shared/Http/HttpSecurityConfiguration.php',
+            'app/AI6/Shared/Http/HttpSecurityConfigurationFactory.php',
+            'app/AI6/Shared/Http/ResolveTrustedProxies.php',
+            'app/AI6/Shared/Markdown/AllowedHtmlPolicy.php',
+            'app/AI6/Shared/Markdown/SafeMarkdownRenderer.php',
             'app/AI6/Shared/Redaction/InvalidRedactionInputException.php',
             'app/AI6/Shared/Redaction/RedactionContext.php',
             'app/AI6/Shared/Redaction/RedactionFingerprint.php',
@@ -249,6 +257,9 @@ final class ScaffoldStructureTest extends TestCase
             'AI6_AUTH_LOGIN_MAX_ATTEMPTS=5',
             'AI6_AUTH_LOGIN_DECAY_SECONDS=60',
             'AI6_AUTH_SESSION_LIFETIME_MINUTES=120',
+            'AI6_HTTP_TRUSTED_HOSTS=localhost,127.0.0.1,::1',
+            'AI6_HTTP_TRUSTED_PROXIES=',
+            'AI6_HTTP_SESSION_SAME_SITE=lax',
             'AI6_WORKER_HEARTBEAT_MAX_AGE=75',
         ] as $default) {
             self::assertContains($default, $lines);

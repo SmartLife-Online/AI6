@@ -16,6 +16,10 @@ use App\AI6\Projects\Policies\ProjectPolicy;
 use App\AI6\Shared\Doctor\DoctorCommand;
 use App\AI6\Shared\Doctor\RedactionKeyringDoctorCheck;
 use App\AI6\Shared\Doctor\SecurityPolicyDoctorCheck;
+use App\AI6\Shared\Http\HttpSecurityConfiguration;
+use App\AI6\Shared\Http\HttpSecurityConfigurationFactory;
+use App\AI6\Shared\Markdown\AllowedHtmlPolicy;
+use App\AI6\Shared\Markdown\SafeMarkdownRenderer;
 use App\AI6\Shared\Redaction\RedactionFingerprintGenerator;
 use App\AI6\Shared\Redaction\RedactionKeyring;
 use App\AI6\Shared\Redaction\RedactionKeyringFactory;
@@ -28,6 +32,9 @@ use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Encryption\Encrypter;
 use Illuminate\Support\ServiceProvider;
+use League\CommonMark\Environment\Environment;
+use League\CommonMark\Extension\CommonMark\CommonMarkCoreExtension;
+use League\CommonMark\MarkdownConverter;
 use LogicException;
 use PragmaRX\Google2FA\Google2FA;
 
@@ -41,6 +48,13 @@ final class AI6ServiceProvider extends ServiceProvider
             static fn (Application $app): AuthConfiguration => $app->make(AuthConfigurationFactory::class)->fromConfiguredValues(),
         );
         $this->app->singleton(SecurityPolicyFactory::class);
+        $this->app->singleton(HttpSecurityConfigurationFactory::class);
+        $this->app->singleton(
+            HttpSecurityConfiguration::class,
+            static fn (Application $app): HttpSecurityConfiguration => $app
+                ->make(HttpSecurityConfigurationFactory::class)
+                ->fromConfiguredValues(),
+        );
         $this->app->singleton(Google2FA::class);
         $this->app->singleton(PasskeyRelyingPartyFactory::class);
         $this->app->singleton(
@@ -86,6 +100,29 @@ final class AI6ServiceProvider extends ServiceProvider
                 $app->make(RedactionFingerprintGenerator::class),
             ),
         );
+        $this->app->singleton(AllowedHtmlPolicy::class);
+        $this->app->singleton(
+            MarkdownConverter::class,
+            static function (): MarkdownConverter {
+                $environment = new Environment([
+                    'html_input' => 'strip',
+                    'allow_unsafe_links' => false,
+                    'max_nesting_level' => 32,
+                    'max_delimiters_per_line' => 1000,
+                ]);
+                $environment->addExtension(new CommonMarkCoreExtension);
+
+                return new MarkdownConverter($environment);
+            },
+        );
+        $this->app->singleton(
+            SafeMarkdownRenderer::class,
+            static fn (Application $app): SafeMarkdownRenderer => new SafeMarkdownRenderer(
+                $app->make(Redactor::class),
+                $app->make(MarkdownConverter::class),
+                $app->make(AllowedHtmlPolicy::class),
+            ),
+        );
         $this->app->singleton(
             DoctorCommand::class,
             static fn (Application $app): DoctorCommand => new DoctorCommand([
@@ -96,7 +133,14 @@ final class AI6ServiceProvider extends ServiceProvider
 
         $this->app->make(SecurityPolicy::class);
         $authConfiguration = $this->app->make(AuthConfiguration::class);
-        config(['session.lifetime' => $authConfiguration->sessionLifetimeMinutes]);
+        $httpConfiguration = $this->app->make(HttpSecurityConfiguration::class);
+        config([
+            'session.lifetime' => $authConfiguration->sessionLifetimeMinutes,
+            'session.expire_on_close' => true,
+            'session.secure' => true,
+            'session.http_only' => true,
+            'session.same_site' => $httpConfiguration->sessionSameSite,
+        ]);
 
         if (! $this->mayBootstrapWithoutRedactionKeyring()) {
             $this->app->make(RedactionKeyring::class);
