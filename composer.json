@@ -5,9 +5,13 @@
     "description": "Git-native software ticket orchestration for human-reviewed LLM workflows.",
     "license": "proprietary",
     "require": {
-        "ext-intl": "*",
         "php": "^8.5",
-        "laravel/framework": "^13.8"
+        "ext-intl": "*",
+        "ext-mbstring": "*",
+        "ext-openssl": "*",
+        "laravel/framework": "^13.8",
+        "lbuchs/webauthn": "~2.2.0",
+        "pragmarx/google2fa": "~9.0.0"
     },
     "require-dev": {
         "laravel/pint": "^1.27",

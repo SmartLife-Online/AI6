@@ -5,6 +5,7 @@ namespace App\AI6\Auth\Models;
 use App\AI6\Auth\EmailNormalizer;
 use App\AI6\Projects\Models\ProjectMembership;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 
 /**
@@ -47,6 +48,24 @@ final class User extends Authenticatable
     public function sessions(): HasMany
     {
         return $this->hasMany(UserSession::class);
+    }
+
+    /** @return HasMany<PasskeyCredential, $this> */
+    public function passkeyCredentials(): HasMany
+    {
+        return $this->hasMany(PasskeyCredential::class);
+    }
+
+    /** @return HasOne<TotpCredential, $this> */
+    public function totpCredential(): HasOne
+    {
+        return $this->hasOne(TotpCredential::class);
+    }
+
+    /** @return HasMany<RecoveryCode, $this> */
+    public function recoveryCodes(): HasMany
+    {
+        return $this->hasMany(RecoveryCode::class);
     }
 
     /** @return array<string, string> */

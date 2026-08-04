@@ -19,9 +19,17 @@ final class AuthConfigurationTest extends TestCase
             'login_max_attempts' => '5',
             'login_decay_seconds' => '60',
             'session_lifetime_minutes' => '120',
+            'login_confirmation_ttl_seconds' => '600',
+            'login_confirmation_max_attempts' => '5',
+            'strong_authentication_max_attempts' => '5',
+            'strong_authentication_decay_seconds' => '300',
+            'login_confirmation_resend_cooldown_seconds' => '30',
+            'step_up_window_seconds' => '300',
+            'enrollment_ttl_seconds' => '900',
+            'login_confirmation_email' => ' security@example.test ',
         ]);
 
-        self::assertEquals(new AuthConfiguration(5, 60, 120), $result);
+        self::assertEquals(new AuthConfiguration(5, 60, 120, 600, 5, 5, 300, 30, 300, 900, 'security@example.test'), $result);
         self::assertTrue((new \ReflectionClass(AuthConfiguration::class))->isReadOnly());
     }
 
@@ -36,6 +44,14 @@ final class AuthConfigurationTest extends TestCase
             'login_max_attempts' => '5',
             'login_decay_seconds' => '60',
             'session_lifetime_minutes' => '120',
+            'login_confirmation_ttl_seconds' => '600',
+            'login_confirmation_max_attempts' => '5',
+            'strong_authentication_max_attempts' => '5',
+            'strong_authentication_decay_seconds' => '300',
+            'login_confirmation_resend_cooldown_seconds' => '30',
+            'step_up_window_seconds' => '300',
+            'enrollment_ttl_seconds' => '900',
+            'login_confirmation_email' => null,
         ];
         $configuration[$key] = $value;
 
@@ -53,6 +69,8 @@ final class AuthConfigurationTest extends TestCase
     public static function invalidConfigurationProvider(): iterable
     {
         yield 'attempt typo' => ['login_max_attempts', 'five-private', 'AI6_AUTH_LOGIN_MAX_ATTEMPTS'];
+        yield 'strong attempt typo' => ['strong_authentication_max_attempts', 'five-private', 'AI6_AUTH_STRONG_AUTHENTICATION_MAX_ATTEMPTS'];
+        yield 'strong decay zero' => ['strong_authentication_decay_seconds', '0', 'AI6_AUTH_STRONG_AUTHENTICATION_DECAY_SECONDS'];
         yield 'decay zero' => ['login_decay_seconds', '0', 'AI6_AUTH_LOGIN_DECAY_SECONDS'];
         yield 'lifetime whitespace' => ['session_lifetime_minutes', ' 120 ', 'AI6_AUTH_SESSION_LIFETIME_MINUTES'];
         yield 'missing attempts' => ['login_max_attempts', null, 'AI6_AUTH_LOGIN_MAX_ATTEMPTS'];

@@ -2,9 +2,14 @@
 
 namespace App\AI6\Shared;
 
+use App\AI6\Auth\AuthenticationHmac;
 use App\AI6\Auth\Config\AuthConfiguration;
 use App\AI6\Auth\Config\AuthConfigurationFactory;
+use App\AI6\Auth\LbuchsPasskeyCeremony;
 use App\AI6\Auth\Models\User;
+use App\AI6\Auth\PasskeyCeremony;
+use App\AI6\Auth\PasskeyRelyingParty;
+use App\AI6\Auth\PasskeyRelyingPartyFactory;
 use App\AI6\Auth\Policies\UserPolicy;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Policies\ProjectPolicy;
@@ -21,7 +26,10 @@ use App\AI6\Shared\Security\SecurityPolicy;
 use App\AI6\Shared\Security\SecurityPolicyFactory;
 use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Encryption\Encrypter;
 use Illuminate\Support\ServiceProvider;
+use LogicException;
+use PragmaRX\Google2FA\Google2FA;
 
 final class AI6ServiceProvider extends ServiceProvider
 {
@@ -33,6 +41,25 @@ final class AI6ServiceProvider extends ServiceProvider
             static fn (Application $app): AuthConfiguration => $app->make(AuthConfigurationFactory::class)->fromConfiguredValues(),
         );
         $this->app->singleton(SecurityPolicyFactory::class);
+        $this->app->singleton(Google2FA::class);
+        $this->app->singleton(PasskeyRelyingPartyFactory::class);
+        $this->app->singleton(
+            PasskeyRelyingParty::class,
+            static fn (Application $app): PasskeyRelyingParty => $app->make(PasskeyRelyingPartyFactory::class)->fromConfiguredValues(),
+        );
+        $this->app->singleton(PasskeyCeremony::class, LbuchsPasskeyCeremony::class);
+        $this->app->singleton(
+            AuthenticationHmac::class,
+            static function (Application $app): AuthenticationHmac {
+                $encrypter = $app->make('encrypter');
+
+                if (! $encrypter instanceof Encrypter) {
+                    throw new LogicException('The application encrypter must expose its key for domain-separated authentication bindings.');
+                }
+
+                return new AuthenticationHmac($encrypter);
+            },
+        );
         $this->app->singleton(
             SecurityPolicy::class,
             static fn (Application $app): SecurityPolicy => $app->make(SecurityPolicyFactory::class)->fromConfiguredValues(),

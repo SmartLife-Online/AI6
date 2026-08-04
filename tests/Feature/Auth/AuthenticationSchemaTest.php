@@ -12,7 +12,17 @@ final class AuthenticationSchemaTest extends AuthFeatureTestCase
 {
     public function test_migrations_create_the_complete_authentication_schema(): void
     {
-        foreach (['users', 'projects', 'project_memberships', 'sessions'] as $table) {
+        foreach ([
+            'users',
+            'projects',
+            'project_memberships',
+            'sessions',
+            'passkey_credentials',
+            'totp_credentials',
+            'recovery_codes',
+            'login_confirmations',
+            'authentication_audit_entries',
+        ] as $table) {
             self::assertTrue(Schema::hasTable($table), $table);
         }
 
@@ -24,6 +34,33 @@ final class AuthenticationSchemaTest extends AuthFeatureTestCase
         ]));
         self::assertTrue(Schema::hasColumns('sessions', [
             'id', 'user_id', 'ip_address', 'user_agent', 'payload', 'last_activity',
+        ]));
+        self::assertTrue(Schema::hasColumns('passkey_credentials', [
+            'user_id', 'credential_id', 'credential_public_key', 'signature_counter', 'label',
+        ]));
+        self::assertTrue(Schema::hasColumns('totp_credentials', [
+            'user_id', 'encrypted_secret', 'last_used_timestep', 'confirmed_at',
+        ]));
+        self::assertTrue(Schema::hasColumns('recovery_codes', [
+            'user_id', 'code_hash', 'issued_at', 'consumed_at',
+        ]));
+        self::assertTrue(Schema::hasColumns('login_confirmations', [
+            'id',
+            'user_id',
+            'revision',
+            'code_digest',
+            'recipient_digest',
+            'session_digest',
+            'expires_at',
+            'attempt_count',
+            'delivery_status',
+            'delivery_status_changed_at',
+            'failure_key',
+            'consumed_at',
+            'invalidated_at',
+        ]));
+        self::assertTrue(Schema::hasColumns('authentication_audit_entries', [
+            'user_id', 'event', 'context', 'occurred_at',
         ]));
     }
 

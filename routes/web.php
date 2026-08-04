@@ -1,7 +1,11 @@
 <?php
 
 use App\AI6\Auth\Http\AdministrativeController;
+use App\AI6\Auth\Http\EnrollmentController;
+use App\AI6\Auth\Http\LoginConfirmationController;
 use App\AI6\Auth\Http\LoginController;
+use App\AI6\Auth\Http\PrimaryAuthenticationController;
+use App\AI6\Auth\Http\StepUpController;
 use App\AI6\Auth\Models\User;
 use App\AI6\Projects\Http\ProjectController;
 use Illuminate\Support\Facades\Auth;
@@ -18,6 +22,47 @@ Route::middleware('guest')->group(function (): void {
 
 Route::middleware('auth')->group(function (): void {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
+
+    Route::prefix('auth')->name('auth.')->group(function (): void {
+        Route::get('/factor', [PrimaryAuthenticationController::class, 'factor'])
+            ->name('primary.factor');
+        Route::post('/factor/totp', [PrimaryAuthenticationController::class, 'verifyTotp'])
+            ->name('primary.totp.verify');
+        Route::post('/factor/recovery', [PrimaryAuthenticationController::class, 'verifyRecovery'])
+            ->name('primary.recovery.verify');
+        Route::post('/factor/passkey/options', [PrimaryAuthenticationController::class, 'passkeyOptions'])
+            ->name('primary.passkey.options');
+        Route::post('/factor/passkey/verify', [PrimaryAuthenticationController::class, 'verifyPasskey'])
+            ->name('primary.passkey.verify');
+
+        Route::get('/confirmation', [LoginConfirmationController::class, 'show'])
+            ->name('confirmation.show');
+        Route::post('/confirmation', [LoginConfirmationController::class, 'verify'])
+            ->name('confirmation.verify');
+        Route::post('/confirmation/resend', [LoginConfirmationController::class, 'resend'])
+            ->name('confirmation.resend');
+
+        Route::get('/enrollment/totp', [EnrollmentController::class, 'showTotp'])
+            ->name('enrollment.totp.show');
+        Route::post('/enrollment/totp', [EnrollmentController::class, 'confirmTotp'])
+            ->name('enrollment.totp.confirm');
+        Route::get('/enrollment/passkey', [EnrollmentController::class, 'showPasskey'])
+            ->name('enrollment.passkey.show');
+        Route::post('/enrollment/passkey/options', [EnrollmentController::class, 'passkeyOptions'])
+            ->name('enrollment.passkey.options');
+        Route::post('/enrollment/passkey', [EnrollmentController::class, 'registerPasskey'])
+            ->name('enrollment.passkey.register');
+
+        Route::post('/step-up/{action}/totp', [StepUpController::class, 'verifyTotp'])
+            ->where('action', '[a-z][a-z0-9._-]{0,63}')
+            ->name('step-up.totp.verify');
+        Route::post('/step-up/{action}/passkey/options', [StepUpController::class, 'passkeyOptions'])
+            ->where('action', '[a-z][a-z0-9._-]{0,63}')
+            ->name('step-up.passkey.options');
+        Route::post('/step-up/{action}/passkey', [StepUpController::class, 'verifyPasskey'])
+            ->where('action', '[a-z][a-z0-9._-]{0,63}')
+            ->name('step-up.passkey.verify');
+    });
 
     Route::get('/projects', [ProjectController::class, 'index'])->name('projects.index');
     Route::get('/projects/{project}', [ProjectController::class, 'show'])

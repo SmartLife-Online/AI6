@@ -16,16 +16,16 @@ Der Scaffoldpfad `config/` wurde bewusst nicht übernommen. AI6-001 startete des
 
 ## Installation und Start
 
-Voraussetzungen sind PHP 8.5 mit den von Laravel verlangten Erweiterungen sowie Composer. Ein frischer Clone wird ausschließlich aus dem committed `composer.lock` installiert; `composer update` und Node-Werkzeuge sind nicht erforderlich.
+Voraussetzungen sind PHP 8.5 mit den von Laravel verlangten Erweiterungen, `ext-intl`, `ext-mbstring`, `ext-openssl` sowie Composer. Ein frischer Clone wird ausschließlich aus dem committed `composer.lock` installiert; `composer update` und Node-Werkzeuge sind nicht erforderlich.
 
 ```bash
 composer install
 cp .env.example .env
 php artisan key:generate
-php artisan serve
+php artisan serve --host=localhost --port=8000
 ```
 
-Unter Windows PowerShell ersetzt `Copy-Item .env.example .env` den `cp`-Befehl. Die Vorlage setzt bewusst keinen containergebundenen `DB_DATABASE`-Pfad; der direkte Artisan-Start würde deshalb Laravels Default `database/database.sqlite` verwenden. Der Health-Endpunkt startet ohne Datenbankvorbereitung und erzeugt diese Datei nicht. Für Queue oder Scheduler direkt außerhalb von Docker wird stattdessen ausdrücklich eine lokale Datei unter dem bereits ignorierten Laufzeitpfad `storage/app/ai6-local.sqlite` verwendet, damit die ausgeschlossene Scaffolddatei `database/database.sqlite` weiterhin fehlt:
+Unter Windows PowerShell ersetzt `Copy-Item .env.example .env` den `cp`-Befehl. `scripts/run-ai6-local.cmd` startet denselben lokalen Server mit der für WebAuthn unterstützten Adresse `http://localhost:8000`; Browseraufrufe über `127.0.0.1` sind dafür nicht gleichwertig. Die Vorlage setzt bewusst keinen containergebundenen `DB_DATABASE`-Pfad; der direkte Artisan-Start würde deshalb Laravels Default `database/database.sqlite` verwenden. Der Health-Endpunkt startet ohne Datenbankvorbereitung und erzeugt diese Datei nicht. Für Queue oder Scheduler direkt außerhalb von Docker wird stattdessen ausdrücklich eine lokale Datei unter dem bereits ignorierten Laufzeitpfad `storage/app/ai6-local.sqlite` verwendet, damit die ausgeschlossene Scaffolddatei `database/database.sqlite` weiterhin fehlt:
 
 ```bash
 touch storage/app/ai6-local.sqlite
@@ -210,7 +210,51 @@ Die operativen Auth-Grenzwerte werden getrennt von der `SecurityPolicy` aufgelö
 | `AI6_AUTH_LOGIN_DECAY_SECONDS` | `60` | Dauer des Rate-Limit-Fensters in Sekunden |
 | `AI6_AUTH_SESSION_LIFETIME_MINUTES` | `120` | serverseitige Sessionlebensdauer in Minuten |
 
-E-Mail-Kennungen werden vor Login und Rate-Limit um Rand-Whitespace bereinigt und in Kleinschreibung überführt. Ein erfolgreicher Login löscht den Fehlversuchszähler. Passkeys, TOTP, Login-E-Mail-Code und Step-up folgen erst mit AI6-005A; der Basislogin ist daher noch nicht die vollständige Authentifizierungshärtung.
+E-Mail-Kennungen werden vor Login und Rate-Limit um Rand-Whitespace bereinigt und in Kleinschreibung überführt. Ein erfolgreicher Login löscht den Fehlversuchszähler. Die nachgelagerte starke Authentifizierung und E-Mail-Barriere beschreibt der folgende Abschnitt.
+
+## Starke Anmeldung, Enrollment und E-Mail-Barriere
+
+Nach dem Passwort bleibt eine neue Websession zunächst unautorisiert. Besitzt der Benutzer noch weder Passkey noch bestätigtes TOTP-Geheimnis, entsteht genau eine kurze, an Benutzer, Passwortzustand und Browsersession gebundene Enrollment-Sitzung. Sie erreicht ausschließlich die Passkey- und TOTP-Registrierung und endet mit der ersten erfolgreichen Registrierung, bei Ablauf, Logout, Deaktivierung, Löschung oder Passwortänderung. Recovery-Codes zählen nicht als starkes Verfahren und beenden das Enrollment nicht. Nach erfolgreichem Enrollment wird abgemeldet; der Benutzer durchläuft anschließend den regulären Login erneut.
+
+Besitzt der Benutzer bereits ein starkes Verfahren, folgt auf das Passwort die Prüfung per Passkey oder TOTP; ein noch gültiger Recovery-Code ist für nicht privilegierte Benutzer der einmalig verwendbare Wiederherstellungspfad. Als privilegiert gelten globale Administratoren sowie Benutzer mit mindestens einer Projektrolle `admin`, `operator` oder `approver`; die Projektrolle `viewer` ist nicht privilegiert. Solange `AI6_SECURITY_REQUIRE_PRIVILEGED_PASSKEY=true` gilt, dürfen privilegierte Benutzer die Primärprüfung ausschließlich per Passkey oder TOTP abschließen. Ein Recovery-Code wird ihnen weder angeboten noch zur Autorisierung angenommen. Alle zugelassenen Wege laufen durch den zentralen `LoginCompletionGate`. Im `strict`-Profil erzeugt die erfolgreiche Primärprüfung nur den Vorautorisierungszustand: Ein zufälliger Code aus genau acht Ziffern wird ausschließlich an `AI6_LOGIN_CONFIRMATION_EMAIL` gesendet und muss in derselben Browsersession eingegeben werden. Die Mail enthält bewusst keinen Bestätigungslink. Digest, Empfänger- und Sessionbindung, Revision, Ablauf, Versuche und Zustellzustand liegen in der Datenbank; der Klartextcode liegt weder dort noch im Log. Der Mailjob implementiert Laravels verschlüsselte Queue-Payload, damit der Klartext auch nicht in der Database Queue steht. Fehlende Adresse, Queue- oder Transportfehler bleiben geschlossen und im Bestätigungspanel sichtbar.
+
+Die operative Konfiguration besitzt sichere Grenzwerte; die Codelänge ist absichtlich keine Konfiguration:
+
+| Schlüssel | Default | Bedeutung |
+|---|---:|---|
+| `AI6_AUTH_LOGIN_CONFIRMATION_TTL_SECONDS` | `600` | Gültigkeit einer Loginbestätigung |
+| `AI6_AUTH_LOGIN_CONFIRMATION_MAX_ATTEMPTS` | `5` | terminales Versuchslimit |
+| `AI6_AUTH_STRONG_AUTHENTICATION_MAX_ATTEMPTS` | `5` | terminales Sessionlimit je Primärprüfung beziehungsweise Step-up-Aktion und sessionunabhängiges Benutzerlimit je Verfahrensfamilie |
+| `AI6_AUTH_STRONG_AUTHENTICATION_DECAY_SECONDS` | `300` | Zeitfenster des benutzergebundenen Primär- beziehungsweise Step-up-Limits |
+| `AI6_AUTH_LOGIN_CONFIRMATION_RESEND_COOLDOWN_SECONDS` | `30` | Sperre bis zur nächsten Revision |
+| `AI6_AUTH_STEP_UP_WINDOW_SECONDS` | `300` | Gültigkeit einer frischen, aktionsgebundenen Step-up-Prüfung |
+| `AI6_AUTH_ENROLLMENT_TTL_SECONDS` | `900` | Höchstdauer der Enrollment-Sitzung |
+| `AI6_LOGIN_CONFIRMATION_EMAIL` | leer | einzelne vertrauenswürdig konfigurierte Sicherheitsadresse |
+
+Der Mailtransport verwendet die normalen Laravel-Variablen `MAIL_MAILER`, `MAIL_URL` beziehungsweise `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_SCHEME`, `MAIL_EHLO_DOMAIN`, `MAIL_FROM_ADDRESS` und `MAIL_FROM_NAME`. Die Repositoryvorlage enthält weder Empfänger noch Zugangsdaten und verwendet fail-closed `smtp`. Die nicht zustellenden Laravel-Transporttypen `log` und `array` sind für Sicherheitscodes unzulässig; der Mailjob verwirft jeden Transport außer `smtp`, bevor er den Code an Laravel Mail übergibt. Compose reicht die Bestätigungsadresse und Auth-Grenzwerte ausschließlich an `app` weiter. Nur `worker` erhält `APP_KEY` zum Entschlüsseln der Queue-Payload und die genannten Mailtransportvariablen zum Versand; keine andere Rolle erhält diese Werte. Der reale Mailtest bleibt bis zur menschlichen Evidenz aus MG-02 offen.
+
+Ein kritischer Anwendungspfad konsumiert über `StepUpGuard` einen frischen Nachweis. Dieser Nachweis entsteht erst nach erneuter Passkey- oder TOTP-Prüfung, ist an Benutzer, Session und Aktionstyp gebunden, läuft nach dem konfigurierten Fenster ab, wird genau einmal verbraucht und nach Ablauf aus der Session entfernt. Fehlversuche der Primärprüfung teilen sich pro Benutzer und Browsersession ein terminales Limit; zusätzlich überdauert ein benutzergebundenes Primärlimit Passwortanmeldung, Logout und Sessionwechsel bis zum Ablauf seines Zeitfensters oder einer erfolgreichen Primärprüfung. Step-up-Fehlversuche werden je Aktion in der Session terminal begrenzt und zugleich über alle Step-up-Aktionen desselben Benutzers in einem zweiten sessionunabhängigen Limit zusammengeführt. Nur eine erfolgreiche Step-up-Prüfung löscht dieses Benutzerlimit. Gleichzeitig gespeicherte Sessionzähler sind hart auf 16 Scopes begrenzt. Der Enrollment-Zustand erfüllt kein Step-up. Die E-Mail-Barriere, die Einschränkung privilegierter Primärverfahren und die Step-up-Maßnahme lassen sich ausschließlich über die vorhandene `SecurityPolicy` reduzieren; ein reduziertes `custom`-Profil verlangt `AI6_SECURITY_ACKNOWLEDGE_REDUCED_MODE=true` und bleibt in `ai6:doctor` sowie den Bannerdaten sichtbar.
+
+Recovery-Codes werden ausschließlich lokal für genau einen aktiven Benutzer mit bereits registriertem Passkey oder TOTP neu ausgegeben:
+
+```bash
+php artisan ai6:reissue-recovery-codes user@example.com
+```
+
+Das Kommando ersetzt den alten Satz atomar, schreibt nur Hashes und einen redigierten Auditdatensatz und gibt den neuen Klartextsatz genau einmal auf der Standardausgabe aus. Es besitzt keinen Sammelmodus, keine Dateioption, keine HTTP-Route und keinen Queue-Auslöser. Ein unbekannter, deaktivierter, gelöschter oder faktorloser Benutzer wird ohne Zustandsänderung abgewiesen. Die Autorisierungsgrenze ist der lokale Shellzugang zum Container; mangels Websession wird kein Step-up simuliert.
+
+Das WebAuthn-Browserskript liegt ohne Buildschritt unter `public/assets/ai6-passkey.js`. Auth-Ansichten laden ausschließlich dieses selbst gehostete Asset und enthalten weder Inline-Skript noch Inline-Eventhandler oder externe Skriptquelle. Der Server erzeugt und verbraucht Challenge und Sessionbindung, prüft Origin, Relying Party, Signatur und Signaturzähler und verwendet keine Laufzeit-Metadatenabfrage im Netz. Für lokale Entwicklung akzeptiert der ausgewählte WebAuthn-Verifikator Klartext-HTTP ausschließlich mit einer exakten `APP_URL` wie `http://localhost` oder `http://localhost:8000`; `http://127.0.0.1` und `http://[::1]` werden bereits beim Auflösen der Relying Party abgewiesen und benötigen wie alle anderen Hosts HTTPS. Browseraufruf und `APP_URL` müssen dieselbe Origin verwenden.
+
+### Auswahl der Kryptobibliotheken
+
+Der Base-Lockstand enthielt weder WebAuthn- noch TOTP-Verifikation; angewendet wurde deshalb Regelstufe 2 aus AI6-005A. Beide Prüfungen laufen vollständig serverseitig und ohne externen Dienst oder Laufzeit-Netzzugriff.
+
+| Fähigkeit | Gewählt und aufgelöst | Geprüfte Alternative | Entscheidung |
+|---|---|---|---|
+| WebAuthn | `lbuchs/webauthn` `v2.2.0` | `web-auth/webauthn-lib` `v5.3.5` | Beide decken serverseitige WebAuthn-Prüfung ab. `lbuchs/webauthn` besitzt im Lockstand keine Composer-Transitive und den engeren Funktionsumfang; die Alternative bringt den deutlich breiteren WebAuthn-/CBOR-/PSR-Baum mit. Der Tie-Breaker „weniger Transitive, danach engerer Umfang“ entscheidet für `lbuchs/webauthn`. Benötigt werden vorhandenes OpenSSL und zusätzlich `ext-mbstring`; das Dockerfile installiert und prüft `mbstring`. |
+| TOTP | `pragmarx/google2fa` `v9.0.0` plus `paragonie/constant_time_encoding` `v3.1.3` | `spomky-labs/otphp` `v11.5.0` | Beide arbeiten offline. `pragmarx/google2fa` stellt den für denselben Zeitraum benötigten monotonen `verifyKeyNewer`-Vertrag direkt bereit und fügt nur eine Transitive hinzu; `spomky-labs/otphp` hat den breiteren Clock-/OptionsResolver-Baum. Der Tie-Breaker entscheidet für den kleineren und engeren Baum. |
+
+`composer.json` bindet die gewählten Minor-Linien, `composer.lock` die genannten Versionen. Eine eigene WebAuthn-, Signatur- oder TOTP-Kryptoimplementierung existiert nicht.
 
 Die sichere Prüfung auf einem Windows-Entwicklungs-PC und auf einem Docker-Compose-VPS beschreibt [`docs/AI6-004_VERIFICATION.md`](docs/AI6-004_VERIFICATION.md). Die zugehörigen Skripte verändern weder bestehende Benutzer noch Sessions oder Datenbanken.
 

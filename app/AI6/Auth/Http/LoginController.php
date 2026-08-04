@@ -2,8 +2,12 @@
 
 namespace App\AI6\Auth\Http;
 
+use App\AI6\Auth\AuthenticationSession;
 use App\AI6\Auth\Config\AuthConfiguration;
 use App\AI6\Auth\EmailNormalizer;
+use App\AI6\Auth\EnrollmentSessionManager;
+use App\AI6\Auth\Models\User;
+use App\AI6\Auth\StrongFactorInventory;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Contracts\Auth\StatefulGuard;
 use Illuminate\Contracts\View\View;
@@ -26,6 +30,9 @@ final class LoginController
         RateLimiter $rateLimiter,
         AuthConfiguration $configuration,
         EmailNormalizer $normalizer,
+        AuthenticationSession $authenticationSession,
+        EnrollmentSessionManager $enrollment,
+        StrongFactorInventory $factors,
     ): RedirectResponse {
         $emailInput = $request->input('email');
 
@@ -66,11 +73,28 @@ final class LoginController
 
         $rateLimiter->clear($rateLimitKey);
 
-        return redirect()->intended(route('projects.index'));
+        $user = $request->user();
+        if (! $user instanceof User) {
+            throw new LogicException('The authenticated principal must be an AI6 user.');
+        }
+
+        if (! $factors->hasStrongFactor($user)) {
+            $enrollment->start($request, $user);
+
+            return redirect()->route('auth.enrollment.totp.show');
+        }
+
+        $authenticationSession->beginPrimaryPending($request);
+
+        return redirect()->route('auth.primary.factor');
     }
 
-    public function destroy(Request $request): RedirectResponse
+    public function destroy(Request $request, EnrollmentSessionManager $enrollment): RedirectResponse
     {
+        $user = $request->user();
+        if ($user instanceof User) {
+            $enrollment->revoke($request, $user);
+        }
         $this->guard()->logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();

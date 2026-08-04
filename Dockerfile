@@ -37,7 +37,7 @@ RUN set -eux; \
     rm -f /etc/apt/sources.list.d/debian.sources; \
     saved_apt_mark="$(apt-mark showmanual)"; \
     apt-get update; \
-    apt-get install -y --no-install-recommends curl libicu-dev $PHPIZE_DEPS; \
+    apt-get install -y --no-install-recommends curl libicu-dev libonig-dev $PHPIZE_DEPS; \
     curl --fail --location --retry 3 \
         --output /tmp/sqlite.tar.gz \
         "https://sqlite.org/2026/sqlite-autoconf-${SQLITE_ARCHIVE_VERSION}.tar.gz"; \
@@ -52,16 +52,16 @@ RUN set -eux; \
     make install; \
     ldconfig; \
     docker-php-ext-configure intl; \
-    docker-php-ext-install -j"$(nproc)" intl pcntl; \
+    docker-php-ext-install -j"$(nproc)" intl mbstring pcntl; \
     sqlite3 --version | grep -E "^${SQLITE_VERSION} "; \
     php -r '$pdo = new PDO("sqlite::memory:"); $version = $pdo->query("select sqlite_version()")?->fetchColumn(); $metadata = $pdo->query("select sqlite_compileoption_used(\"ENABLE_COLUMN_METADATA\")")?->fetchColumn(); if ($version !== $argv[1] || (int) $metadata !== 1) { fwrite(STDERR, "Unexpected SQLite runtime or compile options.\n"); exit(1); }' "${SQLITE_VERSION}"; \
     apt-mark auto '.*' > /dev/null; \
     if [ -n "${saved_apt_mark}" ]; then apt-mark manual ${saved_apt_mark}; fi; \
-    apt-mark manual curl libicu72; \
+    apt-mark manual curl libicu72 libonig5; \
     apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
     rm -rf /var/lib/apt/lists/* /tmp/sqlite /tmp/sqlite.tar.gz; \
     curl --version > /dev/null; \
-    php -r 'if (! extension_loaded("intl")) { fwrite(STDERR, "The intl extension is missing.\n"); exit(1); }'
+    php -r 'foreach (["intl", "mbstring", "openssl"] as $extension) { if (! extension_loaded($extension)) { fwrite(STDERR, "Required PHP extension is missing.\n"); exit(1); } }'
 
 FROM runtime AS vendor
 

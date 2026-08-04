@@ -2,6 +2,7 @@
 
 namespace App\AI6\Auth\Http;
 
+use App\AI6\Auth\EnrollmentSessionManager;
 use App\AI6\Auth\Models\User;
 use Closure;
 use Illuminate\Contracts\Auth\StatefulGuard;
@@ -10,13 +11,16 @@ use Illuminate\Support\Facades\Auth;
 use LogicException;
 use Symfony\Component\HttpFoundation\Response;
 
-final class EnsureActiveUser
+final readonly class EnsureActiveUser
 {
+    public function __construct(private EnrollmentSessionManager $enrollment) {}
+
     public function handle(Request $request, Closure $next): Response
     {
         $user = $request->user();
 
         if ($user instanceof User && ! $user->is_active) {
+            $this->enrollment->revoke($request, $user);
             $this->guard()->logout();
             $request->session()->invalidate();
             $request->session()->regenerateToken();

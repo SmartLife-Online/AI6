@@ -135,11 +135,12 @@ final class RuntimeScriptsTest extends TestCase
         self::assertStringContainsString('-DSQLITE_ENABLE_COLUMN_METADATA', $dockerfile);
         self::assertStringContainsString('sqlite_compileoption_used', $dockerfile);
         self::assertStringContainsString('DEBIAN_SNAPSHOT="20260731T000000Z"', $dockerfile);
-        self::assertStringContainsString('apt-get install -y --no-install-recommends curl libicu-dev $PHPIZE_DEPS;', $dockerfile);
+        self::assertStringContainsString('apt-get install -y --no-install-recommends curl libicu-dev libonig-dev $PHPIZE_DEPS;', $dockerfile);
         self::assertStringContainsString('docker-php-ext-configure intl;', $dockerfile);
-        self::assertStringContainsString('docker-php-ext-install -j"$(nproc)" intl pcntl;', $dockerfile);
-        self::assertStringContainsString('apt-mark manual curl libicu72;', $dockerfile);
-        self::assertStringContainsString('extension_loaded("intl")', $dockerfile);
+        self::assertStringContainsString('docker-php-ext-install -j"$(nproc)" intl mbstring pcntl;', $dockerfile);
+        self::assertStringContainsString('apt-mark manual curl libicu72 libonig5;', $dockerfile);
+        self::assertStringContainsString('foreach (["intl", "mbstring", "openssl"] as $extension)', $dockerfile);
+        self::assertStringContainsString('extension_loaded($extension)', $dockerfile);
         self::assertStringContainsString('curl --version > /dev/null', $dockerfile);
         self::assertStringContainsString('composer install', $dockerfile);
         self::assertStringContainsString('FROM ${COMPOSER_IMAGE} AS composer', $dockerfile);
@@ -160,7 +161,7 @@ final class RuntimeScriptsTest extends TestCase
     {
         $dockerfile = $this->read('Dockerfile');
         $runtimeStage = strpos($dockerfile, 'FROM ${PHP_IMAGE} AS runtime');
-        $extensionInstall = strpos($dockerfile, 'docker-php-ext-install -j"$(nproc)" intl pcntl;');
+        $extensionInstall = strpos($dockerfile, 'docker-php-ext-install -j"$(nproc)" intl mbstring pcntl;');
         $vendorStage = strpos($dockerfile, 'FROM runtime AS vendor');
         $composerCopy = strpos($dockerfile, 'COPY --from=composer /usr/bin/composer /usr/local/bin/composer');
         $unzipInstall = strpos($dockerfile, 'apt-get install -y --no-install-recommends unzip;');
@@ -210,21 +211,28 @@ final class RuntimeScriptsTest extends TestCase
         }
     }
 
-    public function test_composer_contract_and_installed_packages_match_the_ai6_003_platform_contract(): void
+    public function test_composer_contract_and_installed_packages_match_the_ai6_005a_platform_contract(): void
     {
-        self::assertSame('30ada4e993684e2a8417b577b98b1a59f375c43cfc2d3f90a908257995e10109', hash_file('sha256', $this->path('composer.json')));
-        self::assertSame('aaa3a3b2f63434d9882ee73a76a8d0aa2bf3eca7445f5bf4b3315d6feab532fa', hash_file('sha256', $this->path('composer.lock')));
+        self::assertSame('09d3c8abe5ae0fd01e8cab2a266ab87ecf648844ef72bd6ceeacd46348d5cea8', hash_file('sha256', $this->path('composer.json')));
+        self::assertSame('3f0ac9af6a8b47de3895ae1585e0fb95abb9827f36d55dcd2fa7d6c1c1adb312', hash_file('sha256', $this->path('composer.lock')));
 
         $lock = $this->decodeJson($this->path('composer.lock'));
         self::assertSame('*', $lock['platform']['ext-intl'] ?? null);
+        self::assertSame('*', $lock['platform']['ext-mbstring'] ?? null);
+        self::assertSame('*', $lock['platform']['ext-openssl'] ?? null);
         $installed = $this->decodeJson($this->path('vendor/composer/installed.json'));
         $lockedNames = [];
+        $lockedVersions = [];
 
         foreach (array_merge($lock['packages'] ?? [], $lock['packages-dev'] ?? []) as $package) {
             if (is_array($package) && is_string($package['name'] ?? null)) {
                 $lockedNames[] = $package['name'];
+                $lockedVersions[$package['name']] = $package['version'] ?? null;
             }
         }
+
+        self::assertSame('v2.2.0', $lockedVersions['lbuchs/webauthn'] ?? null);
+        self::assertSame('v9.0.0', $lockedVersions['pragmarx/google2fa'] ?? null);
 
         foreach ($installed['packages'] ?? [] as $package) {
             if (! is_array($package) || ! is_string($package['name'] ?? null) || $package['name'] === 'ai6/ai6') {

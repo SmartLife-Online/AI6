@@ -4,6 +4,7 @@ namespace Tests\Feature\Auth;
 
 use App\AI6\Auth\Actions\DeactivateUser;
 use App\AI6\Auth\Actions\DeleteUser;
+use App\AI6\Auth\AuthenticationSession;
 use App\AI6\Auth\Models\UserSession;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Support\Facades\Auth;
@@ -20,7 +21,7 @@ final class SessionRevocationTest extends AuthFeatureTestCase
         $this->post('/login', [
             'email' => $user->email,
             'password' => $password,
-        ])->assertRedirect(route('projects.index'));
+        ])->assertRedirect(route('auth.enrollment.totp.show'));
         $this->insertSessionRows($user->getKey(), 2);
 
         $this->app->make(DeactivateUser::class)->handle($user);
@@ -41,7 +42,7 @@ final class SessionRevocationTest extends AuthFeatureTestCase
         $this->post('/login', [
             'email' => $user->email,
             'password' => $password,
-        ])->assertRedirect(route('projects.index'));
+        ])->assertRedirect(route('auth.enrollment.totp.show'));
         $this->insertSessionRows($user->getKey(), 2);
 
         $this->app->make(DeleteUser::class)->handle($user);
@@ -104,6 +105,8 @@ final class SessionRevocationTest extends AuthFeatureTestCase
                 'user_id' => $userId,
                 'payload' => base64_encode(serialize([
                     $guardSessionKey => $userId,
+                    AuthenticationSession::STATE_KEY => AuthenticationSession::STATE_AUTHORIZED,
+                    'ai6.auth.authorized_at' => time(),
                     'index' => $index,
                 ])),
                 'last_activity' => time(),

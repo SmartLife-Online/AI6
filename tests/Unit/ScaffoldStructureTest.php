@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_004(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_005a(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -68,17 +68,62 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Auth/Actions/RevokeGlobalAdministrator.php',
             'app/AI6/Auth/Actions/RevokeUserSession.php',
             'app/AI6/Auth/Actions/SetProjectMembership.php',
+            'app/AI6/Auth/AuthenticationAudit.php',
+            'app/AI6/Auth/AuthenticationHmac.php',
+            'app/AI6/Auth/AuthenticationSession.php',
+            'app/AI6/Auth/Base64Url.php',
             'app/AI6/Auth/CannotRemoveLastAdministrator.php',
             'app/AI6/Auth/Config/AuthConfiguration.php',
             'app/AI6/Auth/Config/AuthConfigurationFactory.php',
             'app/AI6/Auth/Console/CreateAdministratorCommand.php',
+            'app/AI6/Auth/Console/ReissueRecoveryCodesCommand.php',
             'app/AI6/Auth/EmailNormalizer.php',
+            'app/AI6/Auth/EnrollmentRevocationAudit.php',
+            'app/AI6/Auth/EnrollmentSessionManager.php',
             'app/AI6/Auth/Http/AdministrativeController.php',
+            'app/AI6/Auth/Http/EnrollmentController.php',
             'app/AI6/Auth/Http/EnsureActiveUser.php',
+            'app/AI6/Auth/Http/EnsureCompletedAuthentication.php',
+            'app/AI6/Auth/Http/LoginConfirmationController.php',
             'app/AI6/Auth/Http/LoginController.php',
+            'app/AI6/Auth/Http/PrimaryAuthenticationController.php',
+            'app/AI6/Auth/Http/StepUpController.php',
+            'app/AI6/Auth/Jobs/SendLoginConfirmationMail.php',
+            'app/AI6/Auth/LbuchsPasskeyCeremony.php',
+            'app/AI6/Auth/LoginCompletionGate.php',
+            'app/AI6/Auth/LoginCompletionOutcome.php',
+            'app/AI6/Auth/LoginConfirmationDeliveryStatus.php',
+            'app/AI6/Auth/LoginConfirmationIssue.php',
+            'app/AI6/Auth/LoginConfirmationManager.php',
+            'app/AI6/Auth/LoginConfirmationUnavailableException.php',
+            'app/AI6/Auth/LoginConfirmationVerification.php',
+            'app/AI6/Auth/Mail/LoginConfirmationMail.php',
+            'app/AI6/Auth/Models/AuthenticationAuditEntry.php',
+            'app/AI6/Auth/Models/LoginConfirmation.php',
+            'app/AI6/Auth/Models/PasskeyCredential.php',
+            'app/AI6/Auth/Models/RecoveryCode.php',
+            'app/AI6/Auth/Models/TotpCredential.php',
             'app/AI6/Auth/Models/User.php',
             'app/AI6/Auth/Models/UserSession.php',
+            'app/AI6/Auth/PasskeyCeremony.php',
+            'app/AI6/Auth/PasskeyCeremonyRejectedException.php',
+            'app/AI6/Auth/PasskeyChallengeManager.php',
+            'app/AI6/Auth/PasskeyManager.php',
+            'app/AI6/Auth/PasskeyOptions.php',
+            'app/AI6/Auth/PasskeyRegistration.php',
+            'app/AI6/Auth/PasskeyRelyingParty.php',
+            'app/AI6/Auth/PasskeyRelyingPartyFactory.php',
+            'app/AI6/Auth/Policies/PrimaryAuthenticationPolicy.php',
             'app/AI6/Auth/Policies/UserPolicy.php',
+            'app/AI6/Auth/PrimaryAuthenticationMethod.php',
+            'app/AI6/Auth/RecoveryCodeManager.php',
+            'app/AI6/Auth/StepUpGuard.php',
+            'app/AI6/Auth/StepUpRequiredException.php',
+            'app/AI6/Auth/StrongAuthenticationAttemptLimiter.php',
+            'app/AI6/Auth/StrongFactorInventory.php',
+            'app/AI6/Auth/TotpManager.php',
+            'app/AI6/Auth/TotpSecretAuthenticationException.php',
+            'app/AI6/Auth/TotpSecretCipher.php',
             'app/AI6/Checks/.gitkeep',
             'app/AI6/Git/.gitkeep',
             'app/AI6/HumanLoop/.gitkeep',
@@ -169,7 +214,11 @@ final class ScaffoldStructureTest extends TestCase
 
         self::assertSame('^8.5', $composer['require']['php'] ?? null);
         self::assertSame('*', $composer['require']['ext-intl'] ?? null);
+        self::assertSame('*', $composer['require']['ext-mbstring'] ?? null);
+        self::assertSame('*', $composer['require']['ext-openssl'] ?? null);
         self::assertSame('^13.8', $composer['require']['laravel/framework'] ?? null);
+        self::assertSame('~2.2.0', $composer['require']['lbuchs/webauthn'] ?? null);
+        self::assertSame('~9.0.0', $composer['require']['pragmarx/google2fa'] ?? null);
         self::assertSame('^12.5.12', $composer['require-dev']['phpunit/phpunit'] ?? null);
         self::assertSame('8.5.0', $composer['config']['platform']['php'] ?? null);
 
@@ -269,6 +318,7 @@ final class ScaffoldStructureTest extends TestCase
         $approvedLaterPaths = [
             'config/auth.php',
             'config/database.php',
+            'config/mail.php',
             'config/queue.php',
             'config/session.php',
         ];
@@ -364,7 +414,7 @@ final class ScaffoldStructureTest extends TestCase
         }
     }
 
-    public function test_migrations_match_the_approved_state_through_ai6_004(): void
+    public function test_migrations_match_the_approved_state_through_ai6_005a(): void
     {
         $migrations = glob($this->path('database/migrations/*.php'));
         self::assertIsArray($migrations);
@@ -380,6 +430,11 @@ final class ScaffoldStructureTest extends TestCase
             '2026_08_03_000001_create_projects_table.php',
             '2026_08_03_000002_create_project_memberships_table.php',
             '2026_08_03_000003_create_sessions_table.php',
+            '2026_08_03_000004_create_passkey_credentials_table.php',
+            '2026_08_03_000005_create_totp_credentials_table.php',
+            '2026_08_03_000006_create_recovery_codes_table.php',
+            '2026_08_03_000007_create_login_confirmations_table.php',
+            '2026_08_03_000008_create_authentication_audit_entries_table.php',
         ], $migrations);
     }
 

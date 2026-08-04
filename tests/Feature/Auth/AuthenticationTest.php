@@ -29,11 +29,10 @@ final class AuthenticationTest extends AuthFeatureTestCase
             static fn ($route): ?string => $route->getName(),
             Route::getRoutes()->getRoutes(),
         )));
-        $joinedNames = implode('|', $routeNames);
-
-        foreach (['register', 'password.reset', 'password.request', 'verification'] as $forbidden) {
-            self::assertStringNotContainsString($forbidden, $joinedNames);
-        }
+        self::assertNotContains('register', $routeNames);
+        self::assertNotContains('password.reset', $routeNames);
+        self::assertNotContains('password.request', $routeNames);
+        self::assertNotContains('verification', $routeNames);
     }
 
     public function test_login_normalizes_the_identifier_rate_limits_failures_and_clears_on_success(): void
@@ -64,7 +63,7 @@ final class AuthenticationTest extends AuthFeatureTestCase
         $this->post('/login', [
             'email' => ' Rate.Limit@Example.Test ',
             'password' => $password,
-        ])->assertRedirect(route('projects.index'));
+        ])->assertRedirect(route('auth.enrollment.totp.show'));
         $this->assertAuthenticatedAs($user);
 
         $this->post('/logout')->assertRedirect(route('login'));
@@ -104,7 +103,7 @@ final class AuthenticationTest extends AuthFeatureTestCase
         $this->post('/login', [
             'email' => 'session@example.test',
             'password' => $password,
-        ])->assertRedirect(route('projects.index'));
+        ])->assertRedirect(route('auth.enrollment.totp.show'));
 
         self::assertNotSame($sessionIdBeforeLogin, $sessionStore->getId());
         $csrfTokenBeforeLogout = $sessionStore->token();

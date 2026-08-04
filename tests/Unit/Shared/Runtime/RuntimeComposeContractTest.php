@@ -29,9 +29,31 @@ final class RuntimeComposeContractTest extends TestCase
 
     /** @var list<string> */
     private const AUTH_ENVIRONMENT = [
+        'AI6_AUTH_ENROLLMENT_TTL_SECONDS',
+        'AI6_AUTH_LOGIN_CONFIRMATION_MAX_ATTEMPTS',
+        'AI6_AUTH_LOGIN_CONFIRMATION_RESEND_COOLDOWN_SECONDS',
+        'AI6_AUTH_LOGIN_CONFIRMATION_TTL_SECONDS',
         'AI6_AUTH_LOGIN_DECAY_SECONDS',
         'AI6_AUTH_LOGIN_MAX_ATTEMPTS',
         'AI6_AUTH_SESSION_LIFETIME_MINUTES',
+        'AI6_AUTH_STRONG_AUTHENTICATION_DECAY_SECONDS',
+        'AI6_AUTH_STRONG_AUTHENTICATION_MAX_ATTEMPTS',
+        'AI6_AUTH_STEP_UP_WINDOW_SECONDS',
+        'AI6_LOGIN_CONFIRMATION_EMAIL',
+    ];
+
+    /** @var list<string> */
+    private const MAIL_ENVIRONMENT = [
+        'MAIL_EHLO_DOMAIN',
+        'MAIL_FROM_ADDRESS',
+        'MAIL_FROM_NAME',
+        'MAIL_HOST',
+        'MAIL_MAILER',
+        'MAIL_PASSWORD',
+        'MAIL_PORT',
+        'MAIL_SCHEME',
+        'MAIL_URL',
+        'MAIL_USERNAME',
     ];
 
     /** @var array<string, list<string>> */
@@ -51,10 +73,11 @@ final class RuntimeComposeContractTest extends TestCase
             'DB_SYNCHRONOUS', 'LOG_CHANNEL', 'QUEUE_CONNECTION', 'SESSION_DRIVER',
         ],
         'worker' => [
+            ...self::MAIL_ENVIRONMENT,
             ...self::SECURITY_ENVIRONMENT,
             ...self::REDACTION_ENVIRONMENT,
             'AI6_EXECUTION_DIRECTORY', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE',
-            'AI6_WORKER_TIMEOUT', 'APP_DEBUG', 'APP_ENV', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',
+            'AI6_WORKER_TIMEOUT', 'APP_DEBUG', 'APP_ENV', 'APP_KEY', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',
             'DB_CONNECTION', 'DB_DATABASE', 'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE',
             'DB_QUEUE_RETRY_AFTER', 'DB_SYNCHRONOUS', 'LOG_CHANNEL', 'QUEUE_CONNECTION',
         ],
@@ -214,6 +237,30 @@ final class RuntimeComposeContractTest extends TestCase
             $environment = $services[$role]['environment'] ?? [];
             self::assertArrayNotHasKey('AI6_REDACTION_ACTIVE_KEY_ID', $environment);
             self::assertArrayNotHasKey('AI6_REDACTION_KEYS', $environment);
+        }
+    }
+
+    public function test_authentication_and_mail_configuration_reaches_only_the_required_roles(): void
+    {
+        $services = $this->services();
+
+        foreach (self::AUTH_ENVIRONMENT as $key) {
+            self::assertArrayHasKey($key, $services['app']['environment']);
+
+            foreach (['init', 'worker', 'scheduler', 'agent', 'checker', 'caddy'] as $role) {
+                self::assertArrayNotHasKey($key, $services[$role]['environment'] ?? []);
+            }
+        }
+
+        self::assertSame('${APP_KEY:-}', $services['worker']['environment']['APP_KEY'] ?? null);
+        self::assertSame('${MAIL_MAILER:-smtp}', $services['worker']['environment']['MAIL_MAILER'] ?? null);
+
+        foreach (self::MAIL_ENVIRONMENT as $key) {
+            self::assertArrayHasKey($key, $services['worker']['environment']);
+
+            foreach (['init', 'app', 'scheduler', 'agent', 'checker', 'caddy'] as $role) {
+                self::assertArrayNotHasKey($key, $services[$role]['environment'] ?? []);
+            }
         }
     }
 
