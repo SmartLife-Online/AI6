@@ -289,6 +289,50 @@ Die Markdown-Basispolitik verwendet die bereits über `laravel/framework` gebund
 
 Vor dem Parsen läuft der Eingabetext unverändert durch den zentralen `Redactor`; ausschließlich dessen `text`-Ergebnis wird weiterverarbeitet. Danach lässt die Presentation-Sanitization nur `p`, `br`, `hr`, `em`, `strong`, `blockquote`, `ul`, `ol`, `li`, `pre`, `code`, `a` und die sechs Überschriftsebenen sowie die eng zugeordneten Attribute `href`, `title`, `class` und `start` zu. Raw HTML, Eventhandler, Bilder und nicht allowlistete Attribute werden entfernt. Links dürfen relativ sein oder die Schemas `http`, `https` und `mailto` verwenden; insbesondere `javascript:`, `data:` und verschleierte Varianten erhalten kein aktives Ziel. Diese Allowlist ist ausschließlich eine Darstellungsgrenze und enthält keine Secret-, Token-, Credential- oder Pfadmuster. Solche Muster bleiben allein in `app/AI6/Shared/Redaction/`.
 
+## Gehärtete Control-Prozesse und Git-Ausführung
+
+Produktive Git- und Control-Prozesse laufen ausschließlich über den zentralen `ControlProcessRunner`. Sein öffentlicher Vertrag akzeptiert eine nicht leere Argumentliste, ein bereits vorhandenes Arbeitsverzeichnis und eine positive Environment-Allowlist. Nicht allowlistete Werte aus dem Elternprozess werden im Kindprozess explizit entfernt. Die serverseitigen Maxima `AI6_PROCESS_TIMEOUT_SECONDS`, `AI6_PROCESS_OUTPUT_LIMIT_BYTES` und `AI6_PROCESS_CANCEL_GRACE_MILLISECONDS` begrenzen Laufzeit, Gesamtausgabe und kontrollierten Abbruch; eine Überschreitung liefert ein benanntes Ergebnis ohne Teilausgabe. `AI6_PROCESS_WRAPPER_READY_TIMEOUT_SECONDS` begrenzt zusätzlich den Bereitschafts- und Freigabe-Handshake des blockierenden Starts. `AI6_PROCESS_SHELL_BINARY` benennt auf POSIX den kanonischen, symlinkfreien und nicht gruppen- oder fremdbeschreibbaren Interpreter für den festen Wrapper; der Image-Default ist `/usr/bin/dash`. Symfony Process ist über Laravel bereits als `symfony/process` `v7.4.13` im Lockfile vorhanden. Deshalb fügt AI6-006A keine Composer-Abhängigkeit hinzu und verändert weder `composer.json` noch `composer.lock`.
+
+Der blockierende Modus ist eine Fähigkeit desselben Startpfads. Der vertrauenswürdige Wrapper meldet seine Prozesskennung und den tatsächlichen Startzeitpunkt, hält vor jeder Zielwirkung an und wird nach der Freigabe per `exec` selbst zum Zielprogramm. Auf POSIX-Systemen erzeugt `AI6_PROCESS_SETSID_BINARY` für jeden Lauf eine eigene Prozessgruppe; bei Abbruch oder Limit signalisiert `AI6_PROCESS_GROUP_KILL_BINARY` zuerst `TERM` und nach der konfigurierten Frist immer `KILL` an die vollständige Gruppe. So bleiben auch von einem Ziel gestartete Kindprozesse nicht verwaist. Der Wrapper nimmt keine Shellkommandozeile entgegen; Ziel und Argumente bleiben getrennte Einträge der Prozessargumentliste.
+
+Der Effekt-Lock verwendet in beiden Verwendungsformen denselben `EffectLock`: direkt für einen begrenzten wirkenden Abschnitt des Aufrufers oder im blockierenden Wrapper bis zum Ende des per `exec` gestarteten Programms. Konfiguriert werden `AI6_EFFECT_LOCK_DIRECTORY`, `AI6_EFFECT_LOCK_OBJECT_COUNT`, `AI6_EFFECT_LOCK_WAIT_MILLISECONDS` und die privilegierte Eigentümer-ID `AI6_EFFECT_LOCK_OWNER_UID`. Zulässige Namen sind `lock-0001` bis zur konfigurierten Anzahl. Ein unbekannter Name wird niemals angelegt. Das Verzeichnis muss dem privilegierten Eigentümer gehören und Modus `0555` besitzen; jedes vorab bereitgestellte reguläre Lockobjekt gehört demselben Eigentümer und besitzt Modus `0444`. Die Anwendung öffnet es ausschließlich read-only, prüft Pfad, Symlinkfreiheit, Eigentümer, Modus und Inode und löscht oder ersetzt es nie. Dadurch scheitern Löschen, Umbenennen und Ersetzen bereits an der Verzeichnisgrenze. Die privilegierte idempotente Bereitstellung des realen Verzeichnisses und seiner Objekte im geteilten Workervolume folgt mit AI6-006C; bis dahin belegt AI6-006A den Mechanismus gegen gleichartig geschützte Fixtures.
+
+Der erweiterte Linux-Nachweis für TC-14/TC-15 verwendet `AI6_EFFECT_LOCK_SECURITY_FIXTURE_DIRECTORY` und `AI6_EFFECT_LOCK_SECONDARY_FIXTURE_DIRECTORY`. Er muss als nicht privilegierter Laufzeitbenutzer erfolgen und bricht unter `root` ausdrücklich ab. Das erste, privilegiert vorbereitete Fixture enthält gültige Objekte `lock-0001` und `lock-0006`, ein Symlinkobjekt `lock-0002`, ein zu weit berechtigtes `lock-0003`, ein fremdes `lock-0004` und kein `lock-0005`; das zweite liegt auf einem vom temporären Verzeichnis verschiedenen Mount und enthält ein gültiges `lock-0001`. Alle Lock- und Blocked-Control-Tests verwenden diese fremdbesessenen Objekte. Ohne die extern vorbereiteten Pfade bleiben die betreffenden Linux-Beweise als übersprungene externe Tests sichtbar.
+
+Außerhalb des gebauten Images muss die Verifikation den Immutabilitätsvertrag selbst herstellen: `app/AI6/Shared/Process/control-process-wrapper.sh` und `bin/ai6-git-ssh.sh` dürfen für die Laufzeitidentität sowie für Gruppe und andere Identitäten nicht schreibbar sein; der von Git direkt gestartete SSH-Wrapper muss zusätzlich ausführbar bleiben. Diese Vorbedingung gilt vor jedem Control-/Git-Lauf. Der vollständige Linux-Verifikationslauf erfolgt daher in dieser Reihenfolge als nicht privilegierte Laufzeitidentität; die Fixturepfade stehen beispielhaft für die zuvor privilegiert vorbereiteten, read-only eingebundenen Mounts:
+
+```bash
+chmod a-w app/AI6/Shared/Process/control-process-wrapper.sh
+chmod a+x,a-w bin/ai6-git-ssh.sh
+test ! -w app/AI6/Shared/Process/control-process-wrapper.sh
+test ! -w bin/ai6-git-ssh.sh
+test -x bin/ai6-git-ssh.sh
+AI6_EFFECT_LOCK_SECURITY_FIXTURE_DIRECTORY=/fixtures/primary \
+AI6_EFFECT_LOCK_SECONDARY_FIXTURE_DIRECTORY=/fixtures/secondary \
+php artisan test
+```
+
+Ein Checkout, in dem der ausführende Benutzer einen der beiden Wrapper weiterhin schreiben kann, ist kein gültiger Sicherheitsnachweis. Nach der Verifikation darf der Eigentümer das Schreibrecht für eine beabsichtigte Quelltextänderung wieder setzen; vor dem nächsten Lauf ist es erneut mit `chmod a-w` zu entfernen.
+
+Die Git-Laufzeit verwendet ein eigenes Home, eigenes XDG-Verzeichnis, `GIT_CONFIG_NOSYSTEM=1`, die minimale read-only Globalconfig und den leeren versiegelten Hookspfad. Git-Kommandos setzen zusätzlich `--no-pager`, deaktivieren Hooks, fsmonitor, Credentialhelper, externe Diffs, Signing und rekursive Submodule und erlauben als Transport ausschließlich SSH. Vor Checkout werden lokale Filter-, textconv- und Pagerwerte inventarisiert und neutralisiert; lokale SSH- oder Signing-Programme führen zu einem geschlossenen Fehler. Clone verwendet immer `--no-checkout` und `--no-recurse-submodules`, Fetch und Checkout ebenfalls die nicht rekursive Form.
+
+Serverseitig erforderlich sind exakte, kommaseparierte Werte:
+
+| Schlüssel | Bedeutung |
+|---|---|
+| `AI6_GIT_ALLOWED_HOSTS` | kanonische SSH-Hosts ohne Wildcards |
+| `AI6_GIT_ALLOWED_REMOTE_PATHS` | exakte Pfade wie `organisation/projekt.git` |
+| `AI6_GIT_ALLOWED_REF_PATTERNS` | erlaubte vollständige Refs, standardmäßig `refs/heads/*` |
+| `AI6_GIT_PINNED_HOST_KEYS` | je Host `host=SHA256:<Fingerprint>`, mehrere Pins mit `|` |
+| `AI6_GIT_BINARY` / `AI6_GIT_EXECUTABLE_PATH` | fester Git-Binärpfad und fester interner Suchpfad ohne Übernahme des Eltern-`PATH` |
+| `AI6_GIT_SSH_BINARY` | kanonischer, symlinkfreier SSH-Binärpfad; festes Image-Default `/usr/bin/ssh` |
+| `AI6_GIT_EXECUTION_HOME` / `AI6_GIT_XDG_CONFIG_HOME` | isolierte beschreibbare Git-Verzeichnisse |
+| `AI6_GIT_GLOBAL_CONFIG` / `AI6_GIT_HOOKS_PATH` | kontrollierte read-only Config und leerer versiegelter Hookspfad |
+
+`file://`, `git://`, `http://`, `https://`, `ext::`, unbekannte Hosts, nicht exakte Pfade, unzulässige Refs und nicht zur eigenen `known_hosts` passende Hostkeys werden vor dem operativen Git-Prozess abgelehnt. Zulässig sind ausschließlich `ssh://git@host/pfad.git` und `git@host:pfad.git` auf Port 22. Projektbezogener privater Schlüssel und `known_hosts` werden als zwei kanonische, nicht symbolische Dateien übergeben; der private Schlüssel darf keine Gruppen- oder Fremdrechte besitzen.
+
+`bin/ai6-git-ssh.sh` ist der einzige SSH-Einstieg. Git verwendet dafür die einfache SSH-Variante ohne dynamisch ergänzte SSH-Optionen; Remotes mit expliziter Portangabe sind deshalb unzulässig und der feste Standardport 22 gilt. Der Wrapper verwirft `GIT_SSH_COMMAND`, `GIT_SSH` und `SSH_AUTH_SOCK` aus seiner Umgebung und startet ausschließlich das über die positive Runner-Allowlist gesetzte `AI6_GIT_SSH_BINARY` mit dem festen Default `/usr/bin/ssh`, ohne Benutzerconfig, Passwort, interaktive Eingabe, Agent- oder Portweiterleitung, Proxykommando, DNS-Hostkeyprüfung oder Hostkeyaktualisierung. Aktiv bleiben ausschließlich der projektspezifische Schlüssel, die projektspezifische `known_hosts`, `StrictHostKeyChecking=yes` und der normale Git-SSH-Aufruf. Das manuelle Gate `AI6-006A/MG-01` bleibt offen, bis eine reale, commit- beziehungsweise diffgebundene Prozessbeobachtung Clone, Fetch und Checkout bestätigt.
+
 ## Ticketmanifest
 
 `docs/AI6_TICKET_MANIFEST.yaml` ist eine deterministisch erzeugte Ansicht der Blueprint-Metadaten und Requirement-Zuordnungen aus dem Implementierungsplan, keine zweite gepflegte Wahrheit.

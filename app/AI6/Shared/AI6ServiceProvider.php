@@ -11,6 +11,12 @@ use App\AI6\Auth\PasskeyCeremony;
 use App\AI6\Auth\PasskeyRelyingParty;
 use App\AI6\Auth\PasskeyRelyingPartyFactory;
 use App\AI6\Auth\Policies\UserPolicy;
+use App\AI6\Git\GitConfiguration;
+use App\AI6\Git\GitConfigurationFactory;
+use App\AI6\Git\GitRemotePolicy;
+use App\AI6\Git\HardenedGitEnvironment;
+use App\AI6\Git\HardenedGitRunner;
+use App\AI6\Git\KnownHostsVerifier;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Policies\ProjectPolicy;
 use App\AI6\Shared\Doctor\DoctorCommand;
@@ -20,6 +26,10 @@ use App\AI6\Shared\Http\HttpSecurityConfiguration;
 use App\AI6\Shared\Http\HttpSecurityConfigurationFactory;
 use App\AI6\Shared\Markdown\AllowedHtmlPolicy;
 use App\AI6\Shared\Markdown\SafeMarkdownRenderer;
+use App\AI6\Shared\Process\ControlProcessRunner;
+use App\AI6\Shared\Process\EffectLock;
+use App\AI6\Shared\Process\ProcessConfiguration;
+use App\AI6\Shared\Process\ProcessConfigurationFactory;
 use App\AI6\Shared\Redaction\RedactionFingerprintGenerator;
 use App\AI6\Shared\Redaction\RedactionKeyring;
 use App\AI6\Shared\Redaction\RedactionKeyringFactory;
@@ -98,6 +108,48 @@ final class AI6ServiceProvider extends ServiceProvider
             static fn (Application $app): Redactor => new Redactor(
                 $app->make(RedactionPolicy::class),
                 $app->make(RedactionFingerprintGenerator::class),
+            ),
+        );
+        $this->app->singleton(ProcessConfigurationFactory::class);
+        $this->app->singleton(
+            ProcessConfiguration::class,
+            static fn (Application $app): ProcessConfiguration => $app->make(ProcessConfigurationFactory::class)->fromConfiguredValues(),
+        );
+        $this->app->singleton(
+            EffectLock::class,
+            static fn (Application $app): EffectLock => new EffectLock($app->make(ProcessConfiguration::class)),
+        );
+        $this->app->singleton(
+            ControlProcessRunner::class,
+            static fn (Application $app): ControlProcessRunner => new ControlProcessRunner(
+                $app->make(ProcessConfiguration::class),
+                $app->make(Redactor::class),
+                $app->make(EffectLock::class),
+            ),
+        );
+        $this->app->singleton(GitConfigurationFactory::class);
+        $this->app->singleton(
+            GitConfiguration::class,
+            static fn (Application $app): GitConfiguration => $app->make(GitConfigurationFactory::class)->fromConfiguredValues(),
+        );
+        $this->app->singleton(KnownHostsVerifier::class);
+        $this->app->singleton(
+            GitRemotePolicy::class,
+            static fn (Application $app): GitRemotePolicy => new GitRemotePolicy(
+                $app->make(GitConfiguration::class),
+                $app->make(KnownHostsVerifier::class),
+            ),
+        );
+        $this->app->singleton(
+            HardenedGitEnvironment::class,
+            static fn (Application $app): HardenedGitEnvironment => new HardenedGitEnvironment($app->make(GitConfiguration::class)),
+        );
+        $this->app->singleton(
+            HardenedGitRunner::class,
+            static fn (Application $app): HardenedGitRunner => new HardenedGitRunner(
+                $app->make(ControlProcessRunner::class),
+                $app->make(GitRemotePolicy::class),
+                $app->make(HardenedGitEnvironment::class),
             ),
         );
         $this->app->singleton(AllowedHtmlPolicy::class);

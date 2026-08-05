@@ -25,6 +25,10 @@ ENV APP_ENV=production \
     APACHE_LOG_DIR=/tmp \
     APACHE_PID_FILE=/tmp/apache2.pid \
     APACHE_RUN_DIR=/tmp \
+    AI6_GIT_EXECUTION_HOME=/var/lib/ai6/git-home \
+    AI6_GIT_XDG_CONFIG_HOME=/var/lib/ai6/git-home/xdg \
+    AI6_GIT_GLOBAL_CONFIG=/opt/ai6/etc/gitconfig \
+    AI6_GIT_HOOKS_PATH=/opt/ai6/etc/git-hooks \
     LD_LIBRARY_PATH=/usr/local/lib \
     PATH=/opt/ai6/vendor/bin:${PATH}
 
@@ -38,6 +42,7 @@ RUN set -eux; \
     saved_apt_mark="$(apt-mark showmanual)"; \
     apt-get update; \
     apt-get install -y --no-install-recommends curl libicu-dev libonig-dev $PHPIZE_DEPS; \
+    apt-get install -y --no-install-recommends git openssh-client procps util-linux; \
     curl --fail --location --retry 3 \
         --output /tmp/sqlite.tar.gz \
         "https://sqlite.org/2026/sqlite-autoconf-${SQLITE_ARCHIVE_VERSION}.tar.gz"; \
@@ -58,9 +63,11 @@ RUN set -eux; \
     apt-mark auto '.*' > /dev/null; \
     if [ -n "${saved_apt_mark}" ]; then apt-mark manual ${saved_apt_mark}; fi; \
     apt-mark manual curl libicu72 libonig5; \
+    apt-mark manual git openssh-client procps util-linux; \
     apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
     rm -rf /var/lib/apt/lists/* /tmp/sqlite /tmp/sqlite.tar.gz; \
     curl --version > /dev/null; \
+    for executable in /usr/bin/git /usr/bin/ssh /usr/bin/flock /usr/bin/stat /usr/bin/setsid /usr/bin/kill /usr/bin/dash; do test -x "$executable"; test ! -L "$executable"; done; \
     php -r 'foreach (["intl", "mbstring", "openssl"] as $extension) { if (! extension_loaded($extension)) { fwrite(STDERR, "Required PHP extension is missing.\n"); exit(1); } }'
 
 FROM runtime AS vendor
@@ -116,11 +123,30 @@ RUN set -eux; \
         /opt/ai6/storage/framework/views \
         /opt/ai6/storage/logs \
         /var/lib/ai6/database \
-        /var/lib/ai6/executions; \
+        /var/lib/ai6/executions \
+        /var/lib/ai6/git-home/cache \
+        /var/lib/ai6/git-home/xdg \
+        /opt/ai6/etc/git-hooks; \
+    printf '%s\n' \
+        '[core]' \
+        '    hooksPath = /opt/ai6/etc/git-hooks' \
+        '    fsmonitor = false' \
+        '[credential]' \
+        '    helper =' \
+        '[commit]' \
+        '    gpgSign = false' \
+        '[tag]' \
+        '    gpgSign = false' \
+        '[submodule]' \
+        '    recurse = false' \
+        > /opt/ai6/etc/gitconfig; \
     chown -R ai6:ai6 /opt/ai6/storage /var/lib/ai6; \
     find /opt/ai6 -path /opt/ai6/storage -prune -o -type d -exec chmod 0555 {} +; \
     find /opt/ai6 -path /opt/ai6/storage -prune -o -type f -exec chmod 0444 {} +; \
-    chmod 0555 /opt/ai6/artisan /opt/ai6/docker/*.sh; \
+    chmod 0555 /opt/ai6/artisan /opt/ai6/docker/*.sh /opt/ai6/bin/ai6-git-ssh.sh /opt/ai6/app/AI6/Shared/Process/control-process-wrapper.sh; \
+    chmod 0555 /opt/ai6/etc /opt/ai6/etc/git-hooks; \
+    chmod 0444 /opt/ai6/etc/gitconfig; \
+    chmod 0700 /var/lib/ai6/git-home /var/lib/ai6/git-home/cache /var/lib/ai6/git-home/xdg; \
     chmod 0770 /opt/ai6/storage /var/lib/ai6/database /var/lib/ai6/executions
 
 EXPOSE 8080

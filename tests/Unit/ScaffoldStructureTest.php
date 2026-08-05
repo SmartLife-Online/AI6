@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_005b(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_006a(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -126,6 +126,14 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Auth/TotpSecretCipher.php',
             'app/AI6/Checks/.gitkeep',
             'app/AI6/Git/.gitkeep',
+            'app/AI6/Git/GitConfiguration.php',
+            'app/AI6/Git/GitConfigurationFactory.php',
+            'app/AI6/Git/GitRemotePolicy.php',
+            'app/AI6/Git/GitRemoteRejected.php',
+            'app/AI6/Git/HardenedGitEnvironment.php',
+            'app/AI6/Git/HardenedGitRunner.php',
+            'app/AI6/Git/KnownHostsVerifier.php',
+            'app/AI6/Git/ValidatedGitRemote.php',
             'app/AI6/HumanLoop/.gitkeep',
             'app/AI6/Projects/.gitkeep',
             'app/AI6/Projects/Http/ProjectController.php',
@@ -157,6 +165,23 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Shared/Http/ResolveTrustedProxies.php',
             'app/AI6/Shared/Markdown/AllowedHtmlPolicy.php',
             'app/AI6/Shared/Markdown/SafeMarkdownRenderer.php',
+            'app/AI6/Shared/Process/BlockedControlProcess.php',
+            'app/AI6/Shared/Process/BlockedProcessStartResult.php',
+            'app/AI6/Shared/Process/BlockedStartOutcome.php',
+            'app/AI6/Shared/Process/ControlProcessRunner.php',
+            'app/AI6/Shared/Process/EffectLock.php',
+            'app/AI6/Shared/Process/EffectLockAcquisition.php',
+            'app/AI6/Shared/Process/EffectLockHandle.php',
+            'app/AI6/Shared/Process/EffectLockOutcome.php',
+            'app/AI6/Shared/Process/ImmutableRuntimeFile.php',
+            'app/AI6/Shared/Process/ProcessConfiguration.php',
+            'app/AI6/Shared/Process/ProcessConfigurationFactory.php',
+            'app/AI6/Shared/Process/ProcessOutcome.php',
+            'app/AI6/Shared/Process/ProcessRequest.php',
+            'app/AI6/Shared/Process/ProcessResult.php',
+            'app/AI6/Shared/Process/RunningControlProcess.php',
+            'app/AI6/Shared/Process/ValidatedLockObject.php',
+            'app/AI6/Shared/Process/control-process-wrapper.sh',
             'app/AI6/Shared/Redaction/InvalidRedactionInputException.php',
             'app/AI6/Shared/Redaction/RedactionContext.php',
             'app/AI6/Shared/Redaction/RedactionFingerprint.php',
