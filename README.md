@@ -202,6 +202,25 @@ Globale Administratorrolle und Projektrollen sind getrennte Autorisierungsgrenze
 
 Ein globaler Administrator benötigt für die sieben Verwaltungsaktionen keine Projektmitgliedschaft, sieht ohne Mitgliedschaft aber weder ein Projekt in der Liste noch dessen Detailansicht. Die Projektrolle `admin` gewährt in diesem Ticket keine instanzweiten Verwaltungsrechte und unterscheidet sich bis zu späteren Projekttickets bei den beiden Leseentscheidungen nicht von `viewer`, `operator` und `approver`.
 
+## Projektregistrierung und vertrauenswürdige Metadaten
+
+Ein aktiver globaler Administrator registriert ein Projekt über die Weboberfläche mit Anzeigename, SSH-Remote, vollständigem Control-Branch-Ref und dem erwarteten Hostkey-Fingerprint. Projektrollen einschließlich der Projektrolle `admin` reichen für diese instanzweite Aktion nicht aus. Die Registrierung prüft Protokoll, Host, exakten Remote-Pfad, Ref und Fingerprint ausschließlich gegen die vertrauenswürdige Instanzkonfiguration aus `AI6_GIT_ALLOWED_HOSTS`, `AI6_GIT_ALLOWED_REMOTE_PATHS`, `AI6_GIT_ALLOWED_REF_PATTERNS` und `AI6_GIT_PINNED_HOST_KEYS`. Sie startet weder Git noch einen anderen Kindprozess und öffnet keine Netzwerkverbindung.
+
+Remote, Control-Branch, Hostkey-Bindung und relative Projektkennung liegen autoritativ in der Tabelle `projects`; Repositorydateien wie `.git/config`, `.gitattributes` oder als Anweisung formulierter Inhalt können keinen dieser Werte setzen oder überschreiben. Ein absoluter Managed-Path wird nicht gespeichert. Stattdessen erzeugt der Server die relative Projektkennung als `bin2hex(random_bytes(16))`: genau 32 Zeichen aus dem festen Alphabet `[0-9a-f]`. Ein clientseitiger Vorschlag wird ignoriert, und die Datenbank erzwingt Format und Eindeutigkeit zusätzlich.
+
+Projekt und Mitgliedschaft entstehen atomar. Der registrierende globale Administrator erhält in derselben Transaktion eine Mitgliedschaft mit der Projektrolle `admin`; schlägt die Mitgliedschaft fehl, wird auch das Projekt zurückgerollt. Die aktive Control-OID-Bindung und die ausstehende Bindung sind nach der Registrierung leer, `control_binding_version`, `control_generation` und der Attempt-Token der Operationssperre beginnen bei `0`.
+
+Der Provisionierungszustand besitzt genau vier Werte:
+
+| Zustand | Bedeutung |
+|---|---|
+| `not_provisioned` | Registrierung abgeschlossen, Deploy-Key-Provisionierung noch nicht gestartet |
+| `provisioning` | Eine Control Operation beansprucht die Provisionierung |
+| `provisioned` | Provisionierung terminal erfolgreich; ausschließlich jetzt wird der öffentliche Deploy-Key angezeigt |
+| `provisioning_failed` | Provisionierung fehlgeschlagen; ein neuer Versuch ist zulässig |
+
+Die Registrierung selbst schaltet den Zustand ausschließlich auf `not_provisioned`. Die weiteren Übergänge und die Erzeugung des privaten Deploy-Keys gehören zum nachfolgenden Control-Operation-Ticket; der App-Prozess erhält dabei kein privates Schlüsselmaterial.
+
 Sessions liegen serverseitig in der Datenbank. Deaktivieren oder Löschen eines Benutzers widerruft alle seine Sessions; der gezielte Sessionwiderruf entfernt genau eine Session. Anwendungs- und Compose-Default sind `SESSION_DRIVER=database`; eine Laufzeitdefinition darf sie nicht mit einer dateibasierten Sessionablage überschreiben, weil ein sofortiger gezielter Widerruf dann nicht nachweisbar wäre. Login und Logout regenerieren beziehungsweise invalidieren die Session samt CSRF-Token.
 
 Die operativen Auth-Grenzwerte werden getrennt von der `SecurityPolicy` aufgelöst:

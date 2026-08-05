@@ -137,30 +137,25 @@ final class GitConfigurationFactory
                 return new ConfigurationViolation('Configuration key AI6_GIT_PINNED_HOST_KEYS contains an empty or duplicate host.');
             }
 
+            $canonicalFingerprints = [];
             foreach ($fingerprints as $fingerprint) {
-                if (! $this->validFingerprint($fingerprint)) {
+                $parsed = HostKeyFingerprint::parse($fingerprint);
+                $hostKeyFingerprint = $parsed['fingerprint'];
+
+                if (! $hostKeyFingerprint instanceof HostKeyFingerprint) {
                     return new ConfigurationViolation('Configuration key AI6_GIT_PINNED_HOST_KEYS contains an invalid SHA256 fingerprint.');
                 }
+
+                $canonicalFingerprints[] = $hostKeyFingerprint->canonical();
             }
 
-            if (count($fingerprints) !== count(array_unique($fingerprints))) {
+            if (count($canonicalFingerprints) !== count(array_unique($canonicalFingerprints))) {
                 return new ConfigurationViolation('Configuration key AI6_GIT_PINNED_HOST_KEYS contains a duplicate fingerprint.');
             }
 
-            $pins[$host] = $fingerprints;
+            $pins[$host] = $canonicalFingerprints;
         }
 
         return $pins;
-    }
-
-    private function validFingerprint(string $fingerprint): bool
-    {
-        if (preg_match('/\ASHA256:([A-Za-z0-9+\/]{43})\z/D', $fingerprint, $matches) !== 1) {
-            return false;
-        }
-
-        $decoded = base64_decode($matches[1].'=', true);
-
-        return is_string($decoded) && strlen($decoded) === 32;
     }
 }

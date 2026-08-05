@@ -12,6 +12,48 @@ final class GitRemotePolicy
     /** @throws GitRemoteRejected */
     public function validate(string $remote, string $ref, string $knownHostsPath): ValidatedGitRemote
     {
+        $validated = $this->validateRemoteAndRef($remote, $ref);
+
+        $pins = $this->configuration->pinnedHostKeyFingerprints[$validated->host] ?? [];
+        if ($pins === [] || ! $this->knownHosts->containsPinnedHost($knownHostsPath, $validated->host, $pins)) {
+            throw new GitRemoteRejected('host_key_not_pinned');
+        }
+
+        return $validated;
+    }
+
+    /** @throws GitRemoteRejected */
+    public function validateForRegistration(string $remote, string $ref, string $fingerprint): ValidatedGitRemote
+    {
+        $validated = $this->validateRemoteAndRef($remote, $ref);
+        $parsed = HostKeyFingerprint::parse($fingerprint);
+        $candidate = $parsed['fingerprint'];
+
+        if (! $candidate instanceof HostKeyFingerprint) {
+            throw new GitRemoteRejected((string) $parsed['failure_class']);
+        }
+
+        foreach ($this->configuration->pinnedHostKeyFingerprints[$validated->host] ?? [] as $configured) {
+            $configuredFingerprint = HostKeyFingerprint::parse($configured)['fingerprint'];
+            if ($configuredFingerprint instanceof HostKeyFingerprint && $candidate->matches($configuredFingerprint)) {
+                return $validated;
+            }
+        }
+
+        throw new GitRemoteRejected('digest_mismatch');
+    }
+
+    /** @throws GitRemoteRejected */
+    public function validateRef(string $ref): void
+    {
+        if (! $this->validRef($ref)) {
+            throw new GitRemoteRejected('ref_not_allowed');
+        }
+    }
+
+    /** @throws GitRemoteRejected */
+    private function validateRemoteAndRef(string $remote, string $ref): ValidatedGitRemote
+    {
         if ($remote === '' || str_contains($remote, "\0") || preg_match('/\A(?:file|git|https?|ext)::?/i', $remote) === 1) {
             throw new GitRemoteRejected('protocol_not_allowed');
         }
@@ -27,20 +69,7 @@ final class GitRemotePolicy
 
         $this->validateRef($ref);
 
-        $pins = $this->configuration->pinnedHostKeyFingerprints[$host] ?? [];
-        if ($pins === [] || ! $this->knownHosts->containsPinnedHost($knownHostsPath, $host, $pins)) {
-            throw new GitRemoteRejected('host_key_not_pinned');
-        }
-
         return new ValidatedGitRemote($remote, $host, $path, $ref);
-    }
-
-    /** @throws GitRemoteRejected */
-    public function validateRef(string $ref): void
-    {
-        if (! $this->validRef($ref)) {
-            throw new GitRemoteRejected('ref_not_allowed');
-        }
     }
 
     /** @return array{string, string} */

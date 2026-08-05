@@ -89,6 +89,47 @@ final class GitRemotePolicyTest extends TestCase
         $this->policy()->validate('git@git.example.test:acme/project.git', 'refs/heads/main', $this->knownHosts);
     }
 
+    public function test_registration_validates_the_same_remote_contract_against_digest_bytes(): void
+    {
+        $validated = $this->policy()->validateForRegistration(
+            'git@git.example.test:acme/project.git',
+            'refs/heads/main',
+            strtolower(substr($this->fingerprint, 0, 6)).substr($this->fingerprint, 6).'=',
+        );
+
+        self::assertSame('git.example.test', $validated->host);
+        self::assertSame('acme/project.git', $validated->path);
+    }
+
+    public function test_registration_rejects_format_before_inspecting_configured_digests(): void
+    {
+        $policy = new GitRemotePolicy(new GitConfiguration(
+            'git',
+            '/usr/bin/ssh',
+            '/usr/local/bin:/usr/bin:/bin',
+            __FILE__,
+            dirname(__DIR__, 3),
+            dirname(__DIR__, 3),
+            __FILE__,
+            dirname(__DIR__, 3),
+            ['git.example.test'],
+            ['acme/project.git'],
+            ['refs/heads/*'],
+            ['git.example.test' => ['not-a-fingerprint']],
+        ), new KnownHostsVerifier);
+
+        try {
+            $policy->validateForRegistration(
+                'git@git.example.test:acme/project.git',
+                'refs/heads/main',
+                'SHA256:not-base64',
+            );
+            self::fail('The malformed fingerprint was unexpectedly accepted.');
+        } catch (GitRemoteRejected $exception) {
+            self::assertSame('format_error', $exception->reason);
+        }
+    }
+
     private function policy(): GitRemotePolicy
     {
         return new GitRemotePolicy(new GitConfiguration(

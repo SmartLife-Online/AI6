@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_006a(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_006b(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -132,15 +132,20 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Git/GitRemoteRejected.php',
             'app/AI6/Git/HardenedGitEnvironment.php',
             'app/AI6/Git/HardenedGitRunner.php',
+            'app/AI6/Git/HostKeyFingerprint.php',
             'app/AI6/Git/KnownHostsVerifier.php',
             'app/AI6/Git/ValidatedGitRemote.php',
             'app/AI6/HumanLoop/.gitkeep',
             'app/AI6/Projects/.gitkeep',
+            'app/AI6/Projects/Actions/RegisterProject.php',
             'app/AI6/Projects/Http/ProjectController.php',
             'app/AI6/Projects/Models/Project.php',
             'app/AI6/Projects/Models/ProjectMembership.php',
             'app/AI6/Projects/Policies/ProjectPolicy.php',
             'app/AI6/Projects/ProjectAction.php',
+            'app/AI6/Projects/ProjectIdentifierGenerator.php',
+            'app/AI6/Projects/ProjectProvisioningStatus.php',
+            'app/AI6/Projects/ProjectRegistrationRejected.php',
             'app/AI6/Projects/ProjectRole.php',
             'app/AI6/Prompts/.gitkeep',
             'app/AI6/Reviews/.gitkeep',
@@ -450,7 +455,7 @@ final class ScaffoldStructureTest extends TestCase
         }
     }
 
-    public function test_migrations_match_the_approved_state_through_ai6_005a(): void
+    public function test_migrations_match_the_approved_state_through_ai6_006b(): void
     {
         $migrations = glob($this->path('database/migrations/*.php'));
         self::assertIsArray($migrations);
@@ -471,6 +476,7 @@ final class ScaffoldStructureTest extends TestCase
             '2026_08_03_000006_create_recovery_codes_table.php',
             '2026_08_03_000007_create_login_confirmations_table.php',
             '2026_08_03_000008_create_authentication_audit_entries_table.php',
+            '2026_08_05_000000_add_registration_metadata_to_projects_table.php',
         ], $migrations);
     }
 

@@ -8,6 +8,7 @@ use App\AI6\Auth\Http\PrimaryAuthenticationController;
 use App\AI6\Auth\Http\StepUpController;
 use App\AI6\Auth\Models\User;
 use App\AI6\Projects\Http\ProjectController;
+use App\AI6\Projects\Models\Project;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 
@@ -65,6 +66,12 @@ Route::middleware('auth')->group(function (): void {
     });
 
     Route::get('/projects', [ProjectController::class, 'index'])->name('projects.index');
+    Route::get('/projects/create', [ProjectController::class, 'create'])
+        ->middleware('can:create,'.Project::class)
+        ->name('projects.create');
+    Route::post('/projects', [ProjectController::class, 'store'])
+        ->middleware('can:create,'.Project::class)
+        ->name('projects.store');
     Route::get('/projects/{project}', [ProjectController::class, 'show'])
         ->middleware('can:view,project')
         ->name('projects.show');

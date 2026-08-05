@@ -27,6 +27,11 @@ final class ProjectPolicy
         ],
     ];
 
+    public function create(User $user): bool
+    {
+        return $user->is_active && $user->is_global_admin;
+    }
+
     public function appearInList(User $user, Project $project): bool
     {
         return $this->decide(ProjectAction::APPEAR_IN_LIST, $user, $project);

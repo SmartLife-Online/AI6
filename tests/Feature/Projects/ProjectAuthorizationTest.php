@@ -78,14 +78,32 @@ final class ProjectAuthorizationTest extends AuthFeatureTestCase
         }
     }
 
-    public function test_ticket_registers_no_project_creation_route(): void
+    public function test_project_creation_page_and_every_mutating_project_route_are_policy_bound(): void
     {
-        $creationRoutes = array_filter(
+        $projectRoutes = array_values(array_filter(
             Route::getRoutes()->getRoutes(),
-            static fn ($route): bool => str_starts_with((string) $route->getName(), 'projects.')
-                && in_array('POST', $route->methods(), true),
-        );
+            static fn ($route): bool => str_starts_with((string) $route->getName(), 'projects.'),
+        ));
 
-        self::assertSame([], array_values($creationRoutes));
+        $creationPage = array_values(array_filter(
+            $projectRoutes,
+            static fn ($route): bool => $route->getName() === 'projects.create',
+        ));
+        self::assertCount(1, $creationPage);
+        self::assertContains('can:create,App\AI6\Projects\Models\Project', $creationPage[0]->gatherMiddleware());
+
+        $mutationRoutes = array_values(array_filter(
+            $projectRoutes,
+            static fn ($route): bool => array_intersect($route->methods(), ['POST', 'PUT', 'PATCH', 'DELETE']) !== [],
+        ));
+
+        self::assertNotSame([], $mutationRoutes);
+        foreach ($mutationRoutes as $route) {
+            $authorizationMiddleware = array_filter(
+                $route->gatherMiddleware(),
+                static fn (string $middleware): bool => str_starts_with($middleware, 'can:'),
+            );
+            self::assertNotSame([], $authorizationMiddleware, (string) $route->getName());
+        }
     }
 }
