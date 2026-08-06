@@ -1,9 +1,10 @@
 # Entscheidungsprotokoll AI6-005B / MG-01 — Browserzugriff auf den Compose-Stack
 
-Leeres Formular. Es wird ausschließlich von einem Menschen ausgefüllt. Anders als die beiden
-Gates von `AI6-006C` ist dies **kein Messprotokoll**: `MG-01` verlangt eine Entscheidung darüber,
-wie der Browserzugriff auf den mitgelieferten Compose-Stack die HTTPS-/Private-Access-Grenze
-erfüllt. Die Messungen unter Abschnitt 3 dienen nur dazu, die Entscheidung informiert zu treffen;
+Ausgefüllter Entwurf. Solange die Unterschrift unter Abschnitt 5 aussteht, schließt dieser Stand
+kein Gate; die Entscheidung wird ausschließlich von einem Menschen final bestätigt. Anders als
+die beiden Gates von `AI6-006C` ist dies **kein Messprotokoll**: `MG-01` verlangt eine
+Entscheidung darüber, wie der Browserzugriff auf den mitgelieferten Compose-Stack die
+HTTPS-/Private-Access-Grenze erfüllt. Die Messungen unter Abschnitt 3 dienen nur dazu, die Entscheidung informiert zu treffen;
 sie ersetzen sie nicht. Der Gate-Text steht in `tickets/AI6-005B.md` unter
 `## Manual and External Gates`.
 
@@ -53,7 +54,7 @@ git add -A -N && git -c core.abbrev=40 -c diff.algorithm=myers -c diff.renames=f
 PowerShell:
 
 ```
-git add -A -N; git -c core.abbrev=40 -c diff.algorithm=myers -c diff.renames=false diff --binary --no-color --no-ext-diff --unified=3 --output=..i6-checkdiff.patch HEAD; git reset -q; (Get-FileHash ..i6-checkdiff.patch -Algorithm SHA256).Hash.ToLower()
+git add -A -N; git -c core.abbrev=40 -c diff.algorithm=myers -c diff.renames=false diff --binary --no-color --no-ext-diff --unified=3 --output=..\ai6-checkdiff.patch HEAD; git reset -q; (Get-FileHash ..\ai6-checkdiff.patch -Algorithm SHA256).Hash.ToLower()
 ```
 
 Drei Details sind für die Reproduzierbarkeit zwingend und wurden in beiden Shells gegen
@@ -65,12 +66,12 @@ sonst als neue Datei erfasst und der Diff sich selbst enthielte. `git reset -q` 
 
 | Feld | Wert |
 |---|---|
-| Bindungsart | Commit / Base-Commit + Prüfdiff |
-| Commit beziehungsweise Base-Commit | |
-| SHA-256 des Prüfdiffs | |
-| Entscheider | |
-| Zeitpunkt (ISO 8601 mit Zeitzone) | |
-| Zielinstallation (Host, Netzlage, Nutzerkreis) | |
+| Bindungsart | Commit |
+| Commit beziehungsweise Base-Commit | 1f0e6b7002176195c51777f63b8c528d150e4331 |
+| SHA-256 des Prüfdiffs | Entfällt bei Commit-Bindung; der Arbeitsbaum ist gegenüber diesem Commit bis auf dieses Protokoll unverändert |
+| Entscheider | Michael Strübing — als menschlicher Entscheider vorgesehen; persönliche Bestätigung ausstehend |
+| Zeitpunkt (ISO 8601 mit Zeitzone) | 2026-08-06T23:33:22+02:00 |
+| Zielinstallation (Host, Netzlage, Nutzerkreis) | Geplanter Linux-VPS mit Docker Compose; administrativer Einzelbetrieb; keine öffentliche Erreichbarkeit im MVP; produktiver Browserzugriff erst über privates VPN und stabilen internen HTTPS-Hostnamen, eingeschränkter SSH-Tunnel nur als Fallback |
 
 ## 2. Ausgangslage
 
@@ -101,7 +102,7 @@ docker compose exec -T scheduler curl -s -o /dev/null -w '%{http_code}\n' -H 'Ho
 
 | Erwartung | Gemessener Wert | Ergebnis |
 |---|---|---|
-| Status `400` ohne Ingress-Behauptung | | bestätigt |
+| Status `400` ohne Ingress-Behauptung | 400 | bestätigt |
 
 ### 3.2 Klartext über die Loopback-Veröffentlichung wird akzeptiert
 
@@ -119,25 +120,25 @@ curl.exe -s -o NUL -w "%{http_code}`n" http://127.0.0.1:8080/health
 
 | Erwartung | Gemessener Wert | Ergebnis |
 |---|---|---|
-| Status `200` über Caddy | | bestätigt |
+| Status `200` über Caddy | 200 | bestätigt  |
 
 ### 3.3 Die beiden Verbote aus `MG-01`
 
 | Verbot aus `MG-01` | Nachzuweisen | Gemessener Wert | Ergebnis |
 |---|---|---|---|
-| Das Docker-Gateway wird nicht als Private Access eingestuft | Der Loopbackbegriff in `EnforceHttpsOrPrivateAccess::isLoopback()` ist unverändert `127.0.0.0/8` und `::1`; die Gatewayadresse erfüllt ihn nicht | | eingehalten / verletzt |
-| Die Host- oder Proxyprüfung ist nicht gelockert | `ResolveTrustedProxies` ist unverändert; `AI6_HTTP_TRUSTED_HOSTS` und `AI6_HTTP_TRUSTED_PROXIES` sind unverändert wirksam | | eingehalten / verletzt |
-| Die Clientadresse bleibt echt | `X-Forwarded-For` wird von Caddy nicht überschrieben; `getClientIp()` liefert den realen Client | | eingehalten / verletzt |
+| Das Docker-Gateway wird nicht als Private Access eingestuft | Der Loopbackbegriff in `EnforceHttpsOrPrivateAccess::isLoopback()` ist unverändert `127.0.0.0/8` und `::1`; die Gatewayadresse erfüllt ihn nicht | **Nicht am gebundenen Stand geprüft** | **Offen** |
+| Die Host- oder Proxyprüfung ist nicht gelockert | `ResolveTrustedProxies` ist unverändert; `AI6_HTTP_TRUSTED_HOSTS` und `AI6_HTTP_TRUSTED_PROXIES` sind unverändert wirksam | **Nicht am gebundenen Stand geprüft** | **Offen** |
+| Die Clientadresse bleibt echt | `X-Forwarded-For` wird von Caddy nicht überschrieben; `getClientIp()` liefert den realen Client | **Nicht am gebundenen Stand geprüft** | **Offen** |
 
 ### 3.4 Restrisiko der früheren Lösung
 
 | Eigenschaft | Wert |
 |---|---|
 | Wer erreicht den Klartextpfad? | jeder Prozess auf dem Docker-Host sowie der Dienst `app` über das Proxynetz |
-| Wirksames Sicherheitsprofil der Zielinstallation | |
-| Ist `REQUIRE_HTTPS_OR_PRIVATE_ACCESS` dort aktiv? | ja / nein |
+| Wirksames Sicherheitsprofil der Zielinstallation | `strict` als geplanter Standard |
+| Ist `REQUIRE_HTTPS_OR_PRIVATE_ACCESS` dort aktiv? | **ja** |
 | Folge für das Sessioncookie | bei aktiver Maßnahme bleibt es `Secure`, eine Klartextanmeldung funktioniert nicht |
-| Wer hat Zugang zum Docker-Host? | |
+| Wer hat Zugang zum Docker-Host? | Geplant ausschließlich der Administrator; konkrete Konten, Schlüssel und `AllowUsers`-Regeln sind vor der Produktionsabnahme nachzuweisen |
 
 ## 4. Entscheidung
 
@@ -145,9 +146,9 @@ Genau eine Option ankreuzen.
 
 | Option | Bedeutung | Gewählt |
 |---|---|---|
-| A — Gate bleibt offen | Der Klartextzugriff wird nicht freigegeben; der Browserzugriff wartet auf die HTTPS-Terminierung beziehungsweise den VPN-/SSH-Zugang aus `AI6-036`. `MG-01` bleibt blockierend. | |
-| B — frühere Lösung akzeptiert | Die Ingress-Behauptung wird für die beschriebene Zielinstallation als gleichwertig sicher entschieden. Die kompensierende Maßnahme ist unter 4.1 zu benennen; ohne sie ist die Option nicht wählbar. | |
-| C — andere Lösung | Eine abweichende Netzwerklösung wird entschieden und unter 4.1 vollständig beschrieben. | |
+| A — Gate bleibt offen | Der Klartextzugriff wird nicht freigegeben; der Browserzugriff wartet auf die HTTPS-Terminierung beziehungsweise den VPN-/SSH-Zugang aus `AI6-036`. `MG-01` bleibt blockierend. | **X** |
+| B — frühere Lösung akzeptiert | Die Ingress-Behauptung wird für die beschriebene Zielinstallation als gleichwertig sicher entschieden. Die kompensierende Maßnahme ist unter 4.1 zu benennen; ohne sie ist die Option nicht wählbar. |  |
+| C — andere Lösung | Eine abweichende Netzwerklösung wird entschieden und unter 4.1 vollständig beschrieben. |  |
 
 ### 4.1 Kompensierende Maßnahme und Begründung
 
@@ -157,19 +158,19 @@ eingeschränkter Zugriff, oder eine vorgelagerte TLS-Terminierung.
 
 | Feld | Wert |
 |---|---|
-| Kompensierende Maßnahme | |
-| Wer setzt sie durch und wie wird das überprüft? | |
-| Begründung der Gleichwertigkeit | |
-| Verbleibendes Restrisiko | |
-| Befristung beziehungsweise Ablösung durch `AI6-036` | |
+| Kompensierende Maßnahme | Entfällt bei Option A: Der Klartextpfad wird nicht als freigegebener Browserzugang akzeptiert. |
+| Wer setzt sie durch und wie wird das überprüft? | Bis zur Abnahme von `AI6-036` bleiben öffentliche Portfreigabe und produktiver Klartext-Browserzugriff untersagt. HTTPS-/Private-Access-, Trusted-Host- und Trusted-Proxy-Prüfungen werden nicht gelockert. |
+| Begründung der Gleichwertigkeit | Keine Gleichwertigkeitsentscheidung: Der Projektstandard verlangt privates VPN plus HTTPS. Außerdem bleibt das Sessioncookie bei aktiver Maßnahme `Secure`, sodass der reine Klartextpfad keinen regulären Anmeldeweg bereitstellt. |
+| Verbleibendes Restrisiko | Der technische Loopbackpfad kann weiterhin von Hostprozessen und dem Proxynetz erreicht werden, ist aber nicht als produktiver Browserzugang freigegeben. Ein vollständig kompromittierter Host bleibt außerhalb dieser Transportentscheidung. |
+| Befristung beziehungsweise Ablösung durch `AI6-036` | Neubewertung und Gate-Schließung erst nach nachgewiesener VPN-/HTTPS-Referenz oder einem eingeschränkten SSH-Tunnel mit gültigem HTTPS-Kontext im Browser. |
 
 ## 5. Ergebnis
 
 | Feld | Wert |
 |---|---|
-| Gate-Zustand nach dieser Entscheidung | offen / geschlossen |
-| Anlagen | |
-| Unterschrift | |
+| Gate-Zustand nach dieser Entscheidung | **offen** |
+| Anlagen | Ausstehend: Commitbindung; Messwerte aus 3.1 bis 3.3; späterer VPN-/HTTPS-/SSH-Zugriffsnachweis aus `AI6-036` |
+| Unterschrift | **Ausstehend — persönlich durch Michael Strübing** |
 
 ## 6. Gültigkeit
 
