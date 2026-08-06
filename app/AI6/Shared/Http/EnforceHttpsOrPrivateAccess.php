@@ -11,8 +11,18 @@ use Symfony\Component\HttpFoundation\Response;
 
 final readonly class EnforceHttpsOrPrivateAccess
 {
+    /**
+     * A trusted reverse proxy asserts with this header that the request entered
+     * through an ingress that is bound to the host loopback. The proxy never
+     * rewrites the client address for it, so auditing keeps the real client.
+     */
+    public const LOOPBACK_INGRESS_HEADER = 'X-AI6-Ingress';
+
+    public const LOOPBACK_INGRESS_VALUE = 'loopback-publication';
+
     public function __construct(
         private SecurityPolicy $securityPolicy,
+        private HttpSecurityConfiguration $httpConfiguration,
     ) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -37,7 +47,33 @@ final readonly class EnforceHttpsOrPrivateAccess
     {
         $client = $request->getClientIp();
 
-        return is_string($client) && $this->isLoopback($client);
+        if (is_string($client) && $this->isLoopback($client)) {
+            return true;
+        }
+
+        return $this->hasAssertedLoopbackIngress($request);
+    }
+
+    /**
+     * A container runtime presents a connection published on the host loopback
+     * to the reverse proxy as its bridge or gateway address. Only the proxy can
+     * distinguish that ingress, so it asserts it explicitly; the assertion is
+     * honoured exclusively when the immediate peer is a configured trusted
+     * proxy, which no untrusted client can become.
+     */
+    private function hasAssertedLoopbackIngress(Request $request): bool
+    {
+        $peer = $request->server->get('REMOTE_ADDR');
+
+        if (! is_string($peer)
+            || filter_var($peer, FILTER_VALIDATE_IP) === false
+            || ! $this->httpConfiguration->trustsProxy($peer)) {
+            return false;
+        }
+
+        $assertion = $request->headers->get(self::LOOPBACK_INGRESS_HEADER);
+
+        return is_string($assertion) && hash_equals(self::LOOPBACK_INGRESS_VALUE, $assertion);
     }
 
     private function isLoopback(string $address): bool

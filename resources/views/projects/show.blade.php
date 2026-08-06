@@ -21,4 +21,24 @@
         <h2>Öffentlicher Deploy-Key</h2>
         <pre>{{ $publicDeployKey }}</pre>
     @endif
+
+    @can('provisionDeployKey', $project)
+        @if (in_array($project->provisioning_status->value, ['not_provisioned', 'provisioning_failed'], true))
+            <h2>Deploy-Key provisionieren</h2>
+            <form method="POST" action="{{ route('projects.deploy-key.provision', $project) }}">
+                @csrf
+                <input type="hidden" name="operation_id" value="{{ $provisionOperationId }}">
+                <button type="submit">Provisionierung starten</button>
+            </form>
+        @endif
+    @endcan
+
+    @if ($latestOperation !== null)
+        <p>
+            Letzte Control-Operation:
+            <a href="{{ route('projects.operations.show', [$project, $latestOperation]) }}">
+                {{ $latestOperation->state->value }} / {{ $latestOperation->phase->value }}
+            </a>
+        </p>
+    @endif
 @endsection

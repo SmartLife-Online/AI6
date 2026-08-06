@@ -70,6 +70,9 @@ final class RuntimeComposeSmokeTest extends TestCase
             $this->waitForServiceState($service, static fn (string $state): bool => str_ends_with($state, '|healthy'), 180);
         }
 
+        $this->assertManagedEffectLocksAreImmutableAcrossInit();
+        $this->assertEffectLockSerializesAcrossWorkerInstances();
+
         foreach ([
             '/opt/ai6/AGENTS.md',
             '/opt/ai6/README.md',
@@ -93,7 +96,12 @@ final class RuntimeComposeSmokeTest extends TestCase
 
         $this->assertAgentRecreationRejectsPreviousBootHeartbeat();
 
-        $health = file_get_contents('http://127.0.0.1:'.$this->port.'/health');
+        $health = false;
+        $this->waitUntil(function () use (&$health): bool {
+            $health = @file_get_contents('http://127.0.0.1:'.$this->port.'/health');
+
+            return $health === '{"status":"ok"}';
+        }, 30, 'Der HTTP-Health-Endpunkt wurde nach der Container-Neuerstellung nicht wieder bereit.');
         self::assertSame('{"status":"ok"}', $health);
 
         $first = $this->compose(['exec', '-T', 'app', 'php', 'artisan', 'ai6:runtime-selftest', 'smoke-manual'], 30);
@@ -147,6 +155,104 @@ final class RuntimeComposeSmokeTest extends TestCase
 
             return in_array($manualDigest, $files, true) && count($files) === 2;
         }, 60, 'Genau ein Worker-Nachweis und ein bootgebundener Scheduler-Nachweis wurden nicht innerhalb der Frist sichtbar.');
+    }
+
+    private function assertManagedEffectLocksAreImmutableAcrossInit(): void
+    {
+        $directory = '/var/lib/ai6/managed/effect-locks';
+        $directoryStat = $this->compose(['exec', '-T', 'worker', 'stat', '-c', '%u|%a|%F', $directory], 30);
+        $directoryStat->mustRun();
+        self::assertSame('0|555|directory', trim($directoryStat->getOutput()));
+
+        $objects = $this->compose([
+            'exec', '-T', 'worker', 'find', $directory, '-mindepth', '1', '-maxdepth', '1', '-type', 'f', '-printf', '%f|%U|%m\n',
+        ], 30);
+        $objects->mustRun();
+        $lines = array_values(array_filter(preg_split('/\R/', trim($objects->getOutput())) ?: []));
+        sort($lines);
+        self::assertCount(64, $lines);
+        foreach ($lines as $index => $line) {
+            self::assertSame(sprintf('lock-%04d|0|444', $index + 1), $line);
+        }
+
+        $lock = $directory.'/lock-0001';
+        $inodeBefore = $this->compose(['exec', '-T', 'worker', 'stat', '-c', '%d:%i', $lock], 30);
+        $inodeBefore->mustRun();
+        foreach ([
+            ['exec', '-T', 'worker', 'rm', $lock],
+            ['exec', '-T', 'worker', 'mv', $lock, '/tmp/replaced-lock'],
+            ['exec', '-T', 'worker', 'touch', $directory.'/lock-0065'],
+        ] as $forbidden) {
+            self::assertNotSame(0, $this->compose($forbidden, 30)->run());
+        }
+
+        $rerun = $this->compose(['run', '--rm', '--no-deps', 'init'], 120);
+        $rerun->mustRun();
+        $inodeAfter = $this->compose(['exec', '-T', 'worker', 'stat', '-c', '%d:%i', $lock], 30);
+        $inodeAfter->mustRun();
+        self::assertSame(trim($inodeBefore->getOutput()), trim($inodeAfter->getOutput()));
+    }
+
+    private function assertEffectLockSerializesAcrossWorkerInstances(): void
+    {
+        $holder = $this->project.'-lock-holder';
+        $contender = $this->project.'-lock-contender';
+        $directory = '/var/lib/ai6/managed/.control-staging';
+        $holderMarker = $directory.'/tc26-holder-ready';
+        $contenderMarker = $directory.'/tc26-contender-acquired';
+        $lock = '/var/lib/ai6/managed/effect-locks/lock-0001';
+        $cleanupMarkers = $this->compose(['exec', '-T', 'worker', 'rm', '-f', $holderMarker, $contenderMarker], 30);
+        $cleanupMarkers->mustRun();
+        $inodeBefore = $this->compose(['exec', '-T', 'worker', 'stat', '-c', '%d:%i', $lock], 30);
+        $inodeBefore->mustRun();
+
+        try {
+            $holderStart = $this->compose([
+                'run', '-d', '--no-deps', '--name', $holder, '--entrypoint', 'php', 'worker', '-r',
+                '$h=fopen("'.$lock.'","r"); if($h===false||!flock($h,LOCK_EX)){exit(41);} file_put_contents("'.$holderMarker.'","ready"); sleep(300);',
+            ], 60);
+            $holderStart->mustRun();
+            $this->waitUntil(
+                fn (): bool => $this->compose(['exec', '-T', 'worker', 'test', '-f', $holderMarker], 30)->run() === 0,
+                20,
+                'Die erste Workerinstanz hat den Effekt-Lock nicht erworben.',
+            );
+
+            $contenderStart = $this->compose([
+                'run', '-d', '--no-deps', '--name', $contender, '--entrypoint', 'php', 'worker', '-r',
+                '$h=fopen("'.$lock.'","r"); if($h===false||!flock($h,LOCK_EX)){exit(42);} file_put_contents("'.$contenderMarker.'","acquired"); sleep(300);',
+            ], 60);
+            $contenderStart->mustRun();
+            usleep(500_000);
+            $blocked = $this->compose(['exec', '-T', 'worker', 'test', '!', '-e', $contenderMarker], 30);
+            $blocked->mustRun();
+
+            foreach ([$holder, $contender] as $container) {
+                $identity = new Process(['docker', 'inspect', '--format', '{{.Config.User}}', $container]);
+                $identity->setTimeout(30);
+                $identity->mustRun();
+                self::assertSame('10001:10001', trim($identity->getOutput()));
+            }
+
+            $killHolder = new Process(['docker', 'kill', $holder]);
+            $killHolder->setTimeout(30);
+            $killHolder->mustRun();
+            $this->waitUntil(
+                fn (): bool => $this->compose(['exec', '-T', 'worker', 'test', '-f', $contenderMarker], 30)->run() === 0,
+                20,
+                'Die zweite Workerinstanz erwarb den Effekt-Lock nach dem abrupten Ende nicht.',
+            );
+            $inodeAfter = $this->compose(['exec', '-T', 'worker', 'stat', '-c', '%d:%i', $lock], 30);
+            $inodeAfter->mustRun();
+            self::assertSame(trim($inodeBefore->getOutput()), trim($inodeAfter->getOutput()));
+        } finally {
+            foreach ([$holder, $contender] as $container) {
+                $remove = new Process(['docker', 'rm', '--force', $container]);
+                $remove->setTimeout(30);
+                $remove->run();
+            }
+            $this->compose(['exec', '-T', 'worker', 'rm', '-f', $holderMarker, $contenderMarker], 30)->run();
+        }
     }
 
     /** @param list<string> $environment */

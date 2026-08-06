@@ -80,6 +80,23 @@ PHP;
         self::assertStringNotContainsString('super-secret', $failed->errorOutput);
     }
 
+    public function test_wait_invokes_a_periodic_heartbeat_while_the_process_is_running(): void
+    {
+        $running = $this->runner(timeout: 5, outputLimit: 4096)->start($this->request([
+            PHP_BINARY,
+            '-r',
+            'usleep(1300000);',
+        ]));
+        $heartbeats = 0;
+
+        $result = $running->wait(function () use (&$heartbeats): void {
+            $heartbeats++;
+        }, 1);
+
+        self::assertTrue($result->succeeded());
+        self::assertGreaterThanOrEqual(1, $heartbeats);
+    }
+
     public function test_an_unconfirmed_process_group_termination_falls_back_without_hanging_and_is_named(): void
     {
         if (DIRECTORY_SEPARATOR !== '/' || ! is_file('/usr/bin/true')) {

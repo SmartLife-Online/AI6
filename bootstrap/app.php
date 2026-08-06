@@ -6,6 +6,8 @@ use App\AI6\Auth\Console\ReissueRecoveryCodesCommand;
 use App\AI6\Auth\Http\EnsureActiveUser;
 use App\AI6\Auth\Http\EnsureCompletedAuthentication;
 use App\AI6\Auth\StepUpRequiredException;
+use App\AI6\Git\ControlOperationConflict;
+use App\AI6\Git\ControlOperationRecoveryRequired;
 use App\AI6\Shared\Config\ConfigurationException;
 use App\AI6\Shared\Doctor\DoctorCommand;
 use App\AI6\Shared\Http\BlockPersistentLoginCookies;
@@ -78,6 +80,10 @@ return Application::configure(basePath: dirname(__DIR__))
 
             return response('Eine frische Step-up-Bestätigung ist erforderlich.', 403)
                 ->header('Content-Type', 'text/html; charset=UTF-8');
+        });
+        $exceptions->render(static function (ControlOperationConflict|ControlOperationRecoveryRequired $_exception) {
+            return response('Die Control-Operation kann derzeit nicht ausgeführt werden.', 409)
+                ->header('Content-Type', 'text/plain; charset=UTF-8');
         });
         $exceptions->respond(static function (Response $response, Throwable $_exception, Request $request): Response {
             try {

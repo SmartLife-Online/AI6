@@ -7,6 +7,7 @@ use App\AI6\Auth\Http\LoginController;
 use App\AI6\Auth\Http\PrimaryAuthenticationController;
 use App\AI6\Auth\Http\StepUpController;
 use App\AI6\Auth\Models\User;
+use App\AI6\Git\Http\ControlOperationController;
 use App\AI6\Projects\Http\ProjectController;
 use App\AI6\Projects\Models\Project;
 use Illuminate\Support\Facades\Auth;
@@ -75,6 +76,15 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/projects/{project}', [ProjectController::class, 'show'])
         ->middleware('can:view,project')
         ->name('projects.show');
+    Route::post('/projects/{project}/deploy-key', [ControlOperationController::class, 'provision'])
+        ->middleware('can:provisionDeployKey,project')
+        ->name('projects.deploy-key.provision');
+    Route::get('/projects/{project}/operations/{operation}', [ControlOperationController::class, 'show'])
+        ->middleware('can:view,project')
+        ->name('projects.operations.show');
+    Route::post('/projects/{project}/operations/{operation}/recovery', [ControlOperationController::class, 'recover'])
+        ->middleware('can:decideRecovery,project')
+        ->name('projects.operations.recover');
 
     Route::prefix('admin')->name('admin.')->group(function (): void {
         Route::post('/users', [AdministrativeController::class, 'createUser'])

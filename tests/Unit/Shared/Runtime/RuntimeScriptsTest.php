@@ -25,6 +25,37 @@ final class RuntimeScriptsTest extends TestCase
         }
     }
 
+    public function test_init_preprovisions_immutable_effect_locks_without_replacing_existing_objects(): void
+    {
+        $branch = $this->branch($this->read('docker/entrypoint.sh'), 'init');
+
+        self::assertStringContainsString('effect_lock_directory="${AI6_EFFECT_LOCK_DIRECTORY:-/var/lib/ai6/managed/effect-locks}"', $branch);
+        self::assertStringContainsString('effect_lock_owner_uid="${AI6_EFFECT_LOCK_OWNER_UID:-0}"', $branch);
+        self::assertStringContainsString('while [ "$lock_index" -le "$effect_lock_count" ]', $branch);
+        self::assertStringContainsString('if [ ! -e "$lock_object" ]', $branch);
+        self::assertStringContainsString(': > "$lock_object"', $branch);
+        self::assertStringContainsString('chown "$effect_lock_owner_uid:0" "$lock_object"', $branch);
+        self::assertStringContainsString('chmod 0444 "$lock_object"', $branch);
+        self::assertStringContainsString("stat -c '%u' -- \"\$lock_object\"", $branch);
+        self::assertStringContainsString("stat -c '%a' -- \"\$lock_object\"", $branch);
+        self::assertLessThan(strpos($branch, "else\n                lock_owner="), strpos($branch, 'chown "$effect_lock_owner_uid:0" "$lock_object"'));
+        self::assertStringNotContainsString('rm ', $branch);
+        self::assertStringNotContainsString('mv ', $branch);
+        self::assertLessThan(strpos($branch, 'php /opt/ai6/artisan migrate'), strpos($branch, 'chmod 0444 "$lock_object"'));
+
+        $script = $this->read('docker/entrypoint.sh');
+        foreach (['app', 'worker', 'scheduler', 'agent', 'checker'] as $role) {
+            $roleBranch = $this->branch($script, $role);
+            self::assertStringNotContainsString('effect_lock_directory', $roleBranch);
+            self::assertStringNotContainsString('lock_object', $roleBranch);
+            self::assertStringNotContainsString('AI6_EFFECT_LOCK_OBJECT_COUNT', $roleBranch);
+        }
+
+        $dockerfile = $this->read('Dockerfile');
+        self::assertStringNotContainsString('COPY --chown=0:0', $dockerfile);
+        self::assertStringNotContainsString('/var/lib/ai6/managed/effect-locks', $dockerfile);
+    }
+
     public function test_agent_and_checker_healthchecks_do_not_start_php_or_artisan(): void
     {
         $script = $this->read('docker/healthcheck.sh');
@@ -152,6 +183,8 @@ final class RuntimeScriptsTest extends TestCase
         self::assertStringContainsString('COPY --from=vendor /opt/ai6/vendor ./vendor', $dockerfile);
         self::assertStringContainsString('--no-scripts', $dockerfile);
         self::assertStringContainsString('USER 10001:10001', $dockerfile);
+        self::assertStringContainsString('/usr/bin/ssh-keygen', $dockerfile);
+        self::assertStringNotContainsString('/var/lib/ai6/managed \\', $dockerfile);
         self::assertStringNotContainsString('composer update', $dockerfile);
         self::assertStringNotContainsString('--ignore-platform-req', $dockerfile);
         self::assertStringContainsString('bootstrap/cache/*.php', $this->read('.dockerignore'));

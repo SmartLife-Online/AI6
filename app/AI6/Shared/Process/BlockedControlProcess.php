@@ -2,6 +2,7 @@
 
 namespace App\AI6\Shared\Process;
 
+use Closure;
 use LogicException;
 use Symfony\Component\Process\InputStream;
 
@@ -40,8 +41,9 @@ final class BlockedControlProcess
         $this->process->cancel();
     }
 
-    public function wait(): ProcessResult
+    /** @param null|Closure(): void $heartbeat */
+    public function wait(?Closure $heartbeat = null, int $heartbeatSeconds = 1): ProcessResult
     {
-        return $this->process->wait();
+        return $this->process->wait($heartbeat, $heartbeatSeconds);
     }
 }

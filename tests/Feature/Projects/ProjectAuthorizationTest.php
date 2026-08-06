@@ -2,8 +2,13 @@
 
 namespace Tests\Feature\Projects;
 
+use App\AI6\Git\ControlOperationPhase;
+use App\AI6\Git\ControlOperationState;
+use App\AI6\Git\ControlOperationType;
+use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Projects\ProjectRole;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
 use Tests\Feature\Auth\AuthFeatureTestCase;
 use Tests\Unit\Auth\ExpectedAuthorizationMatrix;
 
@@ -61,6 +66,21 @@ final class ProjectAuthorizationTest extends AuthFeatureTestCase
     {
         $project = $this->createProject('Gebunden '.bin2hex(random_bytes(4)));
         $user = $this->createUser();
+        $owner = $this->createUser();
+        $this->addMembership($owner, $project, ProjectRole::ADMIN);
+        $operation = ControlOperation::query()->create([
+            'id' => (string) Str::uuid(),
+            'project_id' => $project->getKey(),
+            'actor_id' => $owner->getKey(),
+            'operation_type' => ControlOperationType::DEPLOY_KEY_PROVISION,
+            'schema_version' => 1,
+            'authorization_snapshot' => ['actor_id' => $owner->getKey()],
+            'authorization_snapshot_jcs' => '{"actor_id":'.$owner->getKey().'}',
+            'operation_parameters_jcs' => '{"algorithm":"ed25519"}',
+            'request_hash' => hash('sha256', 'authorization-route-fixture'),
+            'phase' => ControlOperationPhase::QUEUED,
+            'state' => ControlOperationState::QUEUED,
+        ]);
         $projectRoutes = array_values(array_filter(
             Route::getRoutes()->getRoutes(),
             static fn ($route): bool => str_starts_with((string) $route->getName(), 'projects.')
@@ -70,9 +90,15 @@ final class ProjectAuthorizationTest extends AuthFeatureTestCase
         self::assertNotSame([], $projectRoutes);
 
         foreach ($projectRoutes as $route) {
-            self::assertSame(['GET', 'HEAD'], $route->methods());
-            $this->actingAs($user)
-                ->get('/'.str_replace('{project}', (string) $project->getKey(), $route->uri()))
+            $path = '/'.str_replace(
+                ['{project}', '{operation}'],
+                [(string) $project->getKey(), $operation->id],
+                $route->uri(),
+            );
+            $response = in_array('POST', $route->methods(), true)
+                ? $this->actingAs($user)->post($path)
+                : $this->actingAs($user)->get($path);
+            $response
                 ->assertForbidden()
                 ->assertDontSee($project->name);
         }

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Shared\Http;
 
+use App\AI6\Shared\Http\EnforceHttpsOrPrivateAccess;
 use App\AI6\Shared\Http\HttpSecurityConfiguration;
 use App\AI6\Shared\Http\HttpSecurityConfigurationFactory;
 use App\AI6\Shared\Security\SecurityMeasure;
@@ -126,6 +127,33 @@ final class HttpHardeningTest extends AuthFeatureTestCase
         $this->requestWithServer([
             'REMOTE_ADDR' => '127.0.0.1',
         ])->assertOk();
+    }
+
+    public function test_loopback_ingress_assertion_counts_only_from_a_trusted_proxy_and_keeps_the_client_address(): void
+    {
+        $this->useSecurityPolicy(SecurityProfile::DEVELOPMENT, httpsMeasureEnabled: false);
+        $this->useHttpConfiguration('10.0.0.2');
+        $assertion = ['HTTP_X_AI6_INGRESS' => EnforceHttpsOrPrivateAccess::LOOPBACK_INGRESS_VALUE];
+
+        $this->requestWithServer([
+            'REMOTE_ADDR' => '10.0.0.2',
+            'HTTP_X_FORWARDED_FOR' => '203.0.113.10',
+            ...$assertion,
+        ])->assertOk();
+        self::assertSame('203.0.113.10', request()->getClientIp());
+
+        $this->requestWithServer([
+            'REMOTE_ADDR' => '10.0.0.2',
+            'HTTP_X_FORWARDED_FOR' => '203.0.113.10',
+            'HTTP_X_AI6_INGRESS' => 'loopback-publication ',
+        ])->assertStatus(400);
+        $this->requestWithServer([
+            'REMOTE_ADDR' => '10.0.0.2',
+            'HTTP_X_FORWARDED_FOR' => '203.0.113.10',
+        ])->assertStatus(400);
+
+        $this->useHttpConfiguration('');
+        $this->requestWithServer(['REMOTE_ADDR' => '203.0.113.10', ...$assertion])->assertStatus(400);
     }
 
     public function test_host_and_forwarding_values_are_accepted_only_from_configuration(): void

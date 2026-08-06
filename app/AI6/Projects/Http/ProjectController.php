@@ -10,6 +10,7 @@ use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 final class ProjectController
@@ -66,6 +67,10 @@ final class ProjectController
         return view('projects.show', [
             'project' => $project,
             'publicDeployKey' => $project->publicDeployKeyForDisplay(),
+            'latestOperation' => $project->controlOperations()
+                ->latest('created_at')
+                ->first(),
+            'provisionOperationId' => (string) Str::uuid(),
         ]);
     }
 

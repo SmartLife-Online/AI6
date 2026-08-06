@@ -63,10 +63,16 @@ final class RunningControlProcess
         $this->terminate();
     }
 
-    public function wait(): ProcessResult
+    /** @param null|Closure(): void $heartbeat */
+    public function wait(?Closure $heartbeat = null, int $heartbeatSeconds = 1): ProcessResult
     {
+        if ($heartbeatSeconds < 1) {
+            throw new \InvalidArgumentException('The process heartbeat interval must be positive.');
+        }
+
         $observedBytes = 0;
         $outcome = null;
+        $nextHeartbeat = microtime(true) + $heartbeatSeconds;
 
         while ($this->process->isRunning()) {
             $observedBytes += strlen($this->process->getIncrementalOutput());
@@ -82,6 +88,11 @@ final class RunningControlProcess
                 $outcome = ProcessOutcome::TIMED_OUT;
                 $this->terminate();
                 break;
+            }
+
+            if ($heartbeat !== null && microtime(true) >= $nextHeartbeat) {
+                $heartbeat();
+                $nextHeartbeat = microtime(true) + $heartbeatSeconds;
             }
 
             usleep(10000);

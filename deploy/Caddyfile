@@ -6,5 +6,13 @@
 # Caddy must accept traffic on the container service interface. The Compose
 # publication is the security boundary and exposes this port only on 127.0.0.1.
 :8080 {
-    reverse_proxy app:8080
+    reverse_proxy app:8080 {
+        # The container runtime presents the host's loopback publication to this
+        # listener as a bridge or gateway address, which the application must not
+        # accept as private access. Assert the ingress explicitly instead of
+        # rewriting X-Forwarded-For: the application keeps the real client
+        # address for auditing and decides the private-access gate itself. The
+        # directive replaces any client supplied value.
+        header_up X-AI6-Ingress loopback-publication
+    }
 }

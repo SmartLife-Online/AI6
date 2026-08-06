@@ -61,9 +61,9 @@ return [
         'shell_binary' => env('AI6_PROCESS_SHELL_BINARY', '/usr/bin/dash'),
         'setsid_binary' => env('AI6_PROCESS_SETSID_BINARY', '/usr/bin/setsid'),
         'process_group_kill_binary' => env('AI6_PROCESS_GROUP_KILL_BINARY', '/usr/bin/kill'),
-        'lock_directory' => env('AI6_EFFECT_LOCK_DIRECTORY', '/var/lib/ai6/effect-locks'),
+        'lock_directory' => env('AI6_EFFECT_LOCK_DIRECTORY', '/var/lib/ai6/managed/effect-locks'),
         'lock_object_count' => env('AI6_EFFECT_LOCK_OBJECT_COUNT', '64'),
-        'lock_wait_milliseconds' => env('AI6_EFFECT_LOCK_WAIT_MILLISECONDS', '30000'),
+        'lock_wait_milliseconds' => env('AI6_EFFECT_LOCK_WAIT_MILLISECONDS', '25000'),
         'lock_owner_uid' => env('AI6_EFFECT_LOCK_OWNER_UID', '0'),
     ],
     'git' => [
@@ -79,5 +79,15 @@ return [
         'allowed_remote_paths' => env('AI6_GIT_ALLOWED_REMOTE_PATHS', ''),
         'allowed_ref_patterns' => env('AI6_GIT_ALLOWED_REF_PATTERNS', 'refs/heads/*'),
         'pinned_host_keys' => env('AI6_GIT_PINNED_HOST_KEYS', ''),
+    ],
+    'control_operations' => [
+        'managed_root' => env('AI6_MANAGED_PROJECT_ROOT', '/var/lib/ai6/managed'),
+        'key_root' => env('AI6_DEPLOY_KEY_ROOT', '/var/lib/ai6/managed/deploy-keys'),
+        'ssh_keygen_binary' => env('AI6_SSH_KEYGEN_BINARY', '/usr/bin/ssh-keygen'),
+        'ssh_keygen_wrapper' => base_path('app/AI6/Git/generate-deploy-key.sh'),
+        'lease_seconds' => env('AI6_CONTROL_OPERATION_LEASE_SECONDS', '120'),
+        'heartbeat_seconds' => env('AI6_CONTROL_OPERATION_HEARTBEAT_SECONDS', '30'),
+        'reconciler_seconds' => env('AI6_CONTROL_OPERATION_RECONCILER_SECONDS', '30'),
+        'max_attempts' => env('AI6_CONTROL_OPERATION_MAX_ATTEMPTS', '3'),
     ],
 ];

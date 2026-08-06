@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Shared\Runtime;
 
+use App\AI6\Shared\Http\EnforceHttpsOrPrivateAccess;
 use App\AI6\Shared\Runtime\RuntimeHeartbeat;
 use App\AI6\Shared\Security\SecurityMeasure;
 use PHPUnit\Framework\TestCase;
@@ -69,6 +70,8 @@ final class RuntimeComposeContractTest extends TestCase
         'caddy' => [],
         'init' => [
             ...self::SECURITY_ENVIRONMENT,
+            'AI6_EFFECT_LOCK_DIRECTORY', 'AI6_EFFECT_LOCK_OBJECT_COUNT', 'AI6_EFFECT_LOCK_OWNER_UID',
+            'AI6_MANAGED_PROJECT_ROOT',
             'AI6_RUNTIME_ROLE', 'APP_DEBUG', 'APP_ENV', 'DB_BUSY_TIMEOUT', 'DB_CONNECTION', 'DB_DATABASE',
             'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE', 'DB_SYNCHRONOUS',
         ],
@@ -85,6 +88,10 @@ final class RuntimeComposeContractTest extends TestCase
             ...self::MAIL_ENVIRONMENT,
             ...self::SECURITY_ENVIRONMENT,
             ...self::REDACTION_ENVIRONMENT,
+            'AI6_CONTROL_OPERATION_HEARTBEAT_SECONDS', 'AI6_CONTROL_OPERATION_LEASE_SECONDS',
+            'AI6_CONTROL_OPERATION_MAX_ATTEMPTS', 'AI6_CONTROL_OPERATION_RECONCILER_SECONDS',
+            'AI6_DEPLOY_KEY_ROOT', 'AI6_EFFECT_LOCK_DIRECTORY', 'AI6_EFFECT_LOCK_OBJECT_COUNT',
+            'AI6_EFFECT_LOCK_OWNER_UID', 'AI6_MANAGED_PROJECT_ROOT', 'AI6_SSH_KEYGEN_BINARY',
             'AI6_EXECUTION_DIRECTORY', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE',
             'AI6_WORKER_TIMEOUT', 'APP_DEBUG', 'APP_ENV', 'APP_KEY', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',
             'DB_CONNECTION', 'DB_DATABASE', 'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE',
@@ -93,6 +100,7 @@ final class RuntimeComposeContractTest extends TestCase
         'scheduler' => [
             ...self::SECURITY_ENVIRONMENT,
             ...self::REDACTION_ENVIRONMENT,
+            'AI6_CONTROL_OPERATION_RECONCILER_SECONDS',
             'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'APP_DEBUG', 'APP_ENV',
             'CACHE_STORE', 'DB_BUSY_TIMEOUT', 'DB_CONNECTION', 'DB_DATABASE',
             'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE', 'DB_QUEUE_RETRY_AFTER',
@@ -108,6 +116,7 @@ final class RuntimeComposeContractTest extends TestCase
         'init' => [
             'tmpfs::/tmp:rw',
             'volume:ai6_database:/var/lib/ai6/database:rw',
+            'volume:ai6_managed:/var/lib/ai6/managed:rw',
             'volume:ai6_storage:/opt/ai6/storage:rw',
         ],
         'app' => [
@@ -121,6 +130,7 @@ final class RuntimeComposeContractTest extends TestCase
             'tmpfs::/tmp:rw',
             'volume:ai6_database:/var/lib/ai6/database:rw',
             'volume:ai6_executions:/var/lib/ai6/executions:rw',
+            'volume:ai6_managed:/var/lib/ai6/managed:rw',
             'volume:ai6_storage:/opt/ai6/storage:rw',
         ],
         'scheduler' => [
@@ -170,6 +180,18 @@ final class RuntimeComposeContractTest extends TestCase
 
         self::assertSame(['caddy'], $withPorts);
         self::assertMatchesRegularExpression('/\A127\.0\.0\.1:/', $services['caddy']['ports'][0] ?? '');
+        $caddyfile = file_get_contents(dirname(__DIR__, 4).'/deploy/Caddyfile');
+        self::assertIsString($caddyfile);
+        self::assertSame(1, substr_count($caddyfile, 'reverse_proxy app:8080'));
+        self::assertSame(
+            1,
+            substr_count(
+                $caddyfile,
+                'header_up '.EnforceHttpsOrPrivateAccess::LOOPBACK_INGRESS_HEADER
+                    .' '.EnforceHttpsOrPrivateAccess::LOOPBACK_INGRESS_VALUE,
+            ),
+        );
+        self::assertStringNotContainsString('header_up X-Forwarded-For', $caddyfile);
         self::assertSame(
             ['CMD', 'wget', '--quiet', '--spider', 'http://127.0.0.1:8080/health'],
             $services['caddy']['healthcheck']['test'] ?? null,
@@ -280,7 +302,7 @@ final class RuntimeComposeContractTest extends TestCase
         $expected = [
             'AI6_HTTP_SESSION_SAME_SITE' => '${AI6_HTTP_SESSION_SAME_SITE:-lax}',
             'AI6_HTTP_TRUSTED_HOSTS' => '${AI6_HTTP_TRUSTED_HOSTS:-localhost,127.0.0.1,::1}',
-            'AI6_HTTP_TRUSTED_PROXIES' => '${AI6_HTTP_TRUSTED_PROXIES:-172.30.60.2}',
+            'AI6_HTTP_TRUSTED_PROXIES' => '${AI6_HTTP_TRUSTED_PROXIES:-172.30.61.2}',
         ];
 
         foreach ($expected as $key => $value) {
@@ -291,12 +313,18 @@ final class RuntimeComposeContractTest extends TestCase
             }
         }
 
-        $caddyAddress = $services['caddy']['networks']['default']['ipv4_address'] ?? null;
-        $subnet = $compose['networks']['default']['ipam']['config'][0]['subnet'] ?? null;
-        $dynamicRange = $compose['networks']['default']['ipam']['config'][0]['ip_range'] ?? null;
-        self::assertSame('172.30.60.2', $caddyAddress);
-        self::assertSame('172.30.60.0/24', $subnet);
-        self::assertSame('172.30.60.128/25', $dynamicRange);
+        $caddyAddress = $services['caddy']['networks']['proxy']['ipv4_address'] ?? null;
+        $subnet = $compose['networks']['proxy']['ipam']['config'][0]['subnet'] ?? null;
+        $dynamicRange = $compose['networks']['proxy']['ipam']['config'][0]['ip_range'] ?? null;
+        self::assertSame(['proxy'], array_keys($services['caddy']['networks'] ?? []));
+        self::assertSame(['default', 'proxy'], array_keys($services['app']['networks'] ?? []));
+        foreach (['init', 'worker', 'scheduler', 'agent', 'checker'] as $role) {
+            self::assertArrayNotHasKey('networks', $services[$role]);
+        }
+        self::assertArrayNotHasKey('internal', $compose['networks']['proxy'] ?? []);
+        self::assertSame('172.30.61.2', $caddyAddress);
+        self::assertSame('172.30.61.0/29', $subnet);
+        self::assertSame('172.30.61.4/30', $dynamicRange);
         self::assertTrue(IpUtils::checkIp($caddyAddress, $subnet));
         self::assertFalse(IpUtils::checkIp($caddyAddress, $dynamicRange));
     }
@@ -304,7 +332,7 @@ final class RuntimeComposeContractTest extends TestCase
     public function test_heartbeat_mounts_are_private_tmpfs_and_persistent_targets_are_named_volumes(): void
     {
         $compose = $this->compose();
-        self::assertSame(['ai6_database', 'ai6_executions', 'ai6_storage'], $this->sortedKeys($compose['volumes'] ?? []));
+        self::assertSame(['ai6_database', 'ai6_executions', 'ai6_managed', 'ai6_storage'], $this->sortedKeys($compose['volumes'] ?? []));
 
         foreach (['worker', 'scheduler', 'agent', 'checker'] as $role) {
             $heartbeatMounts = array_values(array_filter(
@@ -355,6 +383,38 @@ final class RuntimeComposeContractTest extends TestCase
         self::assertNotSame([], $this->allowlistErrors($persistentHeartbeat));
     }
 
+    public function test_effect_locks_exist_only_on_the_shared_managed_volume_with_unprivileged_workers(): void
+    {
+        $services = $this->services();
+        self::assertSame('0:0', $services['init']['user'] ?? null);
+        self::assertArrayNotHasKey('user', $services['worker']);
+        self::assertArrayNotHasKey('privileged', $services['worker']);
+        self::assertContains('volume:ai6_managed:/var/lib/ai6/managed:rw', $this->mountSignatures($services['init']));
+        self::assertContains('volume:ai6_managed:/var/lib/ai6/managed:rw', $this->mountSignatures($services['worker']));
+        self::assertSame(
+            '/var/lib/ai6/managed/effect-locks',
+            $services['init']['environment']['AI6_EFFECT_LOCK_DIRECTORY'] ?? null,
+        );
+        self::assertSame(
+            '/var/lib/ai6/managed/effect-locks',
+            $services['worker']['environment']['AI6_EFFECT_LOCK_DIRECTORY'] ?? null,
+        );
+
+        foreach ($services['worker']['volumes'] ?? [] as $mount) {
+            self::assertIsArray($mount);
+            if (($mount['type'] ?? null) === 'tmpfs') {
+                self::assertFalse(str_starts_with('/var/lib/ai6/managed/effect-locks', (string) ($mount['target'] ?? '')));
+            }
+        }
+        foreach (['app', 'scheduler', 'agent', 'checker', 'caddy'] as $role) {
+            self::assertNotContains(
+                'volume:ai6_managed:/var/lib/ai6/managed:rw',
+                $this->mountSignatures($services[$role]),
+                $role.' must not receive the managed effect-lock volume.',
+            );
+        }
+    }
+
     public function test_agent_checker_and_proxy_receive_no_ai6_data_or_application_key(): void
     {
         $services = $this->services();
@@ -367,7 +427,7 @@ final class RuntimeComposeContractTest extends TestCase
 
             foreach ($services[$role]['volumes'] ?? [] as $mount) {
                 self::assertIsArray($mount);
-                self::assertNotContains($mount['source'] ?? null, ['ai6_database', 'ai6_storage', 'ai6_executions']);
+                self::assertNotContains($mount['source'] ?? null, ['ai6_database', 'ai6_storage', 'ai6_executions', 'ai6_managed']);
             }
         }
 

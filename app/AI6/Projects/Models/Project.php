@@ -2,6 +2,7 @@
 
 namespace App\AI6\Projects\Models;
 
+use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Projects\ProjectProvisioningStatus;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -58,6 +59,12 @@ final class Project extends Model
     public function memberships(): HasMany
     {
         return $this->hasMany(ProjectMembership::class);
+    }
+
+    /** @return HasMany<ControlOperation, $this> */
+    public function controlOperations(): HasMany
+    {
+        return $this->hasMany(ControlOperation::class);
     }
 
     public function publicDeployKeyForDisplay(): ?string

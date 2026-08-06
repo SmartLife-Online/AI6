@@ -67,7 +67,7 @@ RUN set -eux; \
     apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
     rm -rf /var/lib/apt/lists/* /tmp/sqlite /tmp/sqlite.tar.gz; \
     curl --version > /dev/null; \
-    for executable in /usr/bin/git /usr/bin/ssh /usr/bin/flock /usr/bin/stat /usr/bin/setsid /usr/bin/kill /usr/bin/dash; do test -x "$executable"; test ! -L "$executable"; done; \
+    for executable in /usr/bin/git /usr/bin/ssh /usr/bin/ssh-keygen /usr/bin/flock /usr/bin/stat /usr/bin/setsid /usr/bin/kill /usr/bin/dash; do test -x "$executable"; test ! -L "$executable"; done; \
     php -r 'foreach (["intl", "mbstring", "openssl"] as $extension) { if (! extension_loaded($extension)) { fwrite(STDERR, "Required PHP extension is missing.\n"); exit(1); } }'
 
 FROM runtime AS vendor
@@ -143,7 +143,7 @@ RUN set -eux; \
     chown -R ai6:ai6 /opt/ai6/storage /var/lib/ai6; \
     find /opt/ai6 -path /opt/ai6/storage -prune -o -type d -exec chmod 0555 {} +; \
     find /opt/ai6 -path /opt/ai6/storage -prune -o -type f -exec chmod 0444 {} +; \
-    chmod 0555 /opt/ai6/artisan /opt/ai6/docker/*.sh /opt/ai6/bin/ai6-git-ssh.sh /opt/ai6/app/AI6/Shared/Process/control-process-wrapper.sh; \
+    chmod 0555 /opt/ai6/artisan /opt/ai6/docker/*.sh /opt/ai6/bin/ai6-git-ssh.sh /opt/ai6/app/AI6/Git/generate-deploy-key.sh /opt/ai6/app/AI6/Shared/Process/control-process-wrapper.sh; \
     chmod 0555 /opt/ai6/etc /opt/ai6/etc/git-hooks; \
     chmod 0444 /opt/ai6/etc/gitconfig; \
     chmod 0700 /var/lib/ai6/git-home /var/lib/ai6/git-home/cache /var/lib/ai6/git-home/xdg; \

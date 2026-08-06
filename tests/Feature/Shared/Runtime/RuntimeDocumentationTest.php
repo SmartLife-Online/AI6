@@ -36,6 +36,15 @@ final class RuntimeDocumentationTest extends TestCase
             'JSON ist gültiges Compose-YAML',
             'Containerinterface',
             'stabilen Selbsttestschlüssel je Scheduler-Boot-ID',
+            '`ai6_managed`',
+            '`AI6_CONTROL_OPERATION_LEASE_SECONDS`',
+            '`ai6-control-operation-reconciler`',
+            '`recovery_required`',
+            '`retry_reconciliation`',
+            '`adopt_external_state`',
+            '`abandon_operation`',
+            '`AI6-006C/MG-01`',
+            '`AI6-006C/MG-02`',
             'strikt größer als der Worker-Timeout',
             'natives `ext-intl`',
             'storage/app/ai6-local.sqlite',
@@ -45,5 +54,49 @@ final class RuntimeDocumentationTest extends TestCase
         ] as $required) {
             self::assertStringContainsString($required, $readme);
         }
+
+        $init = $this->serviceRow($readme, 'init');
+        foreach ([
+            'AI6_MANAGED_PROJECT_ROOT',
+            'AI6_EFFECT_LOCK_DIRECTORY',
+            'AI6_EFFECT_LOCK_OBJECT_COUNT',
+            'AI6_EFFECT_LOCK_OWNER_UID',
+            'ai6_managed',
+        ] as $required) {
+            self::assertStringContainsString($required, $init);
+        }
+
+        $worker = $this->serviceRow($readme, 'worker');
+        foreach ([
+            'AI6_MANAGED_PROJECT_ROOT',
+            'AI6_DEPLOY_KEY_ROOT',
+            'AI6_EFFECT_LOCK_DIRECTORY',
+            'AI6_EFFECT_LOCK_OBJECT_COUNT',
+            'AI6_EFFECT_LOCK_OWNER_UID',
+            'AI6_CONTROL_OPERATION_LEASE_SECONDS',
+            'AI6_CONTROL_OPERATION_HEARTBEAT_SECONDS',
+            'AI6_CONTROL_OPERATION_RECONCILER_SECONDS',
+            'AI6_CONTROL_OPERATION_MAX_ATTEMPTS',
+            'AI6_SSH_KEYGEN_BINARY',
+            'ai6_managed',
+        ] as $required) {
+            self::assertStringContainsString($required, $worker);
+        }
+
+        self::assertStringContainsString(
+            'AI6_CONTROL_OPERATION_RECONCILER_SECONDS',
+            $this->serviceRow($readme, 'scheduler'),
+        );
+
+        foreach (['Claim', 'Publish', 'key_generated', 'key_activated', 'provisioning_finalized', 'attempt_completed'] as $phase) {
+            self::assertStringContainsString($phase, $readme);
+        }
+    }
+
+    private function serviceRow(string $readme, string $service): string
+    {
+        self::assertSame(1, preg_match('/^\| `'.preg_quote($service, '/').'` \|.*$/m', $readme, $matches));
+
+        return $matches[0];
     }
 }

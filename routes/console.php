@@ -1,5 +1,6 @@
 <?php
 
+use App\AI6\Git\ControlOperationReconciler;
 use App\AI6\Shared\Runtime\RuntimeHeartbeat;
 use App\AI6\Shared\Runtime\RuntimeSelfTestJob;
 use Illuminate\Support\Facades\Queue;
@@ -17,4 +18,10 @@ Schedule::call(static function (): void {
     Queue::connection('database')->push(new RuntimeSelfTestJob('scheduler:'.$heartbeat->bootId()));
 })
     ->name('ai6-runtime-scheduler')
+    ->everyTenSeconds();
+
+Schedule::call(static function (): void {
+    app(ControlOperationReconciler::class)->reconcile();
+})
+    ->name('ai6-control-operation-reconciler')
     ->everyTenSeconds();

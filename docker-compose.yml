@@ -8,7 +8,7 @@
         "app": { "condition": "service_healthy" }
       },
       "ports": ["127.0.0.1:${AI6_HTTP_PORT:-8080}:8080"],
-      "networks": { "default": { "ipv4_address": "172.30.60.2" } },
+      "networks": { "proxy": { "ipv4_address": "172.30.61.2" } },
       "volumes": [
         {
           "type": "bind",
@@ -34,6 +34,10 @@
       "read_only": true,
       "environment": {
         "AI6_RUNTIME_ROLE": "init",
+        "AI6_MANAGED_PROJECT_ROOT": "/var/lib/ai6/managed",
+        "AI6_EFFECT_LOCK_DIRECTORY": "/var/lib/ai6/managed/effect-locks",
+        "AI6_EFFECT_LOCK_OBJECT_COUNT": "${AI6_EFFECT_LOCK_OBJECT_COUNT:-64}",
+        "AI6_EFFECT_LOCK_OWNER_UID": "${AI6_EFFECT_LOCK_OWNER_UID:-0}",
         "AI6_SECURITY_ACKNOWLEDGE_REDUCED_MODE": "${AI6_SECURITY_ACKNOWLEDGE_REDUCED_MODE:-false}",
         "AI6_SECURITY_LOGIN_EMAIL_CONFIRMATION": "${AI6_SECURITY_LOGIN_EMAIL_CONFIRMATION:-true}",
         "AI6_SECURITY_PROFILE": "${AI6_SECURITY_PROFILE:-strict}",
@@ -55,6 +59,7 @@
       "volumes": [
         { "type": "volume", "source": "ai6_database", "target": "/var/lib/ai6/database" },
         { "type": "volume", "source": "ai6_storage", "target": "/opt/ai6/storage" },
+        { "type": "volume", "source": "ai6_managed", "target": "/var/lib/ai6/managed" },
         { "type": "tmpfs", "target": "/tmp", "tmpfs": { "mode": 1023, "size": 67108864 } }
       ],
       "restart": "no"
@@ -65,6 +70,7 @@
       "command": ["app"],
       "depends_on": { "init": { "condition": "service_completed_successfully" } },
       "read_only": true,
+      "networks": { "default": {}, "proxy": {} },
       "environment": {
         "AI6_AUTH_ENROLLMENT_TTL_SECONDS": "${AI6_AUTH_ENROLLMENT_TTL_SECONDS:-900}",
         "AI6_AUTH_LOGIN_CONFIRMATION_MAX_ATTEMPTS": "${AI6_AUTH_LOGIN_CONFIRMATION_MAX_ATTEMPTS:-5}",
@@ -78,7 +84,7 @@
         "AI6_AUTH_STEP_UP_WINDOW_SECONDS": "${AI6_AUTH_STEP_UP_WINDOW_SECONDS:-300}",
         "AI6_HTTP_SESSION_SAME_SITE": "${AI6_HTTP_SESSION_SAME_SITE:-lax}",
         "AI6_HTTP_TRUSTED_HOSTS": "${AI6_HTTP_TRUSTED_HOSTS:-localhost,127.0.0.1,::1}",
-        "AI6_HTTP_TRUSTED_PROXIES": "${AI6_HTTP_TRUSTED_PROXIES:-172.30.60.2}",
+        "AI6_HTTP_TRUSTED_PROXIES": "${AI6_HTTP_TRUSTED_PROXIES:-172.30.61.2}",
         "AI6_LOGIN_CONFIRMATION_EMAIL": "${AI6_LOGIN_CONFIRMATION_EMAIL:-}",
         "AI6_REDACTION_ACTIVE_KEY_ID": "${AI6_REDACTION_ACTIVE_KEY_ID:-app-key-v1}",
         "AI6_REDACTION_KEYS": "${AI6_REDACTION_KEYS:-}",
@@ -130,6 +136,16 @@
       "read_only": true,
       "environment": {
         "AI6_EXECUTION_DIRECTORY": "/var/lib/ai6/executions",
+        "AI6_MANAGED_PROJECT_ROOT": "/var/lib/ai6/managed",
+        "AI6_DEPLOY_KEY_ROOT": "/var/lib/ai6/managed/deploy-keys",
+        "AI6_EFFECT_LOCK_DIRECTORY": "/var/lib/ai6/managed/effect-locks",
+        "AI6_EFFECT_LOCK_OBJECT_COUNT": "${AI6_EFFECT_LOCK_OBJECT_COUNT:-64}",
+        "AI6_EFFECT_LOCK_OWNER_UID": "${AI6_EFFECT_LOCK_OWNER_UID:-0}",
+        "AI6_CONTROL_OPERATION_LEASE_SECONDS": "${AI6_CONTROL_OPERATION_LEASE_SECONDS:-120}",
+        "AI6_CONTROL_OPERATION_HEARTBEAT_SECONDS": "${AI6_CONTROL_OPERATION_HEARTBEAT_SECONDS:-30}",
+        "AI6_CONTROL_OPERATION_RECONCILER_SECONDS": "${AI6_CONTROL_OPERATION_RECONCILER_SECONDS:-30}",
+        "AI6_CONTROL_OPERATION_MAX_ATTEMPTS": "${AI6_CONTROL_OPERATION_MAX_ATTEMPTS:-3}",
+        "AI6_SSH_KEYGEN_BINARY": "/usr/bin/ssh-keygen",
         "AI6_HEARTBEAT_DIRECTORY": "/run/ai6/heartbeat/worker",
         "AI6_HEARTBEAT_MAX_AGE": "${AI6_WORKER_HEARTBEAT_MAX_AGE:-75}",
         "AI6_REDACTION_ACTIVE_KEY_ID": "${AI6_REDACTION_ACTIVE_KEY_ID:-app-key-v1}",
@@ -173,6 +189,7 @@
         { "type": "volume", "source": "ai6_database", "target": "/var/lib/ai6/database" },
         { "type": "volume", "source": "ai6_storage", "target": "/opt/ai6/storage" },
         { "type": "volume", "source": "ai6_executions", "target": "/var/lib/ai6/executions" },
+        { "type": "volume", "source": "ai6_managed", "target": "/var/lib/ai6/managed" },
         { "type": "tmpfs", "target": "/run/ai6/heartbeat/worker", "tmpfs": { "mode": 511, "size": 1048576 } },
         { "type": "tmpfs", "target": "/tmp", "tmpfs": { "mode": 1023, "size": 67108864 } }
       ],
@@ -193,6 +210,7 @@
       "read_only": true,
       "environment": {
         "AI6_HEARTBEAT_DIRECTORY": "/run/ai6/heartbeat/scheduler",
+        "AI6_CONTROL_OPERATION_RECONCILER_SECONDS": "${AI6_CONTROL_OPERATION_RECONCILER_SECONDS:-30}",
         "AI6_HEARTBEAT_MAX_AGE": "${AI6_SCHEDULER_HEARTBEAT_MAX_AGE:-25}",
         "AI6_REDACTION_ACTIVE_KEY_ID": "${AI6_REDACTION_ACTIVE_KEY_ID:-app-key-v1}",
         "AI6_REDACTION_KEYS": "${AI6_REDACTION_KEYS:-}",
@@ -286,11 +304,15 @@
   "networks": {
     "default": {
       "ipam": { "config": [{ "subnet": "172.30.60.0/24", "ip_range": "172.30.60.128/25" }] }
+    },
+    "proxy": {
+      "ipam": { "config": [{ "subnet": "172.30.61.0/29", "ip_range": "172.30.61.4/30" }] }
     }
   },
   "volumes": {
     "ai6_database": {},
     "ai6_storage": {},
-    "ai6_executions": {}
+    "ai6_executions": {},
+    "ai6_managed": {}
   }
 }
