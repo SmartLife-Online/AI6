@@ -78,7 +78,7 @@ git add -A -N && git -c core.abbrev=40 -c diff.algorithm=myers -c diff.renames=f
 PowerShell:
 
 ```
-git add -A -N; git -c core.abbrev=40 -c diff.algorithm=myers -c diff.renames=false diff --binary --no-color --no-ext-diff --unified=3 --output=..i6-checkdiff.patch HEAD; git reset -q; (Get-FileHash ..i6-checkdiff.patch -Algorithm SHA256).Hash.ToLower()
+git add -A -N; git -c core.abbrev=40 -c diff.algorithm=myers -c diff.renames=false diff --binary --no-color --no-ext-diff --unified=3 --output=..\ai6-checkdiff.patch HEAD; git reset -q; (Get-FileHash ..\ai6-checkdiff.patch -Algorithm SHA256).Hash.ToLower()
 ```
 
 Drei Details sind für die Reproduzierbarkeit zwingend und wurden in beiden Shells gegen
