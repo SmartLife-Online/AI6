@@ -23,6 +23,10 @@ oder Unix-`curl` kennt — dort ist `curl` ein Alias für `Invoke-WebRequest` un
 Unix-Flags mit `Fehlendes Argument für den Parameter "SessionVariable"` ab. Wo kein Unterschied
 besteht, steht der Befehl nur einmal.
 
+Absolute Containerpfade stehen durchgehend in einem `sh -c '…'`-Rahmen. Git Bash unter
+Windows würde ein nacktes `/var/lib/…` sonst in einen Windows-Pfad übersetzen und der Befehl
+liefe gegen `C:/Program Files/Git/var/lib/…` ins Leere.
+
 Arbeitsverzeichnis, Compose-Datei und Projektname prüfen — POSIX:
 
 ```
@@ -115,7 +119,7 @@ docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/ai6/man
 Dateisystemtyp des Lockverzeichnisses aus Sicht des Workers:
 
 ```
-docker compose exec -T worker stat -f -c '%T %b %S' /var/lib/ai6/managed/effect-locks
+docker compose exec -T worker sh -c 'stat -f -c "%T %b %S" /var/lib/ai6/managed/effect-locks'
 ```
 
 | Feld | Gemessener Wert |
@@ -155,7 +159,7 @@ docker inspect --format '{{.Id}} {{.Name}} {{.Config.User}} {{.HostConfig.Privil
 Inode vor und nach einem zweiten `init`-Lauf vergleichen:
 
 ```
-docker compose exec -T worker stat -c '%d:%i' /var/lib/ai6/managed/effect-locks/lock-0001
+docker compose exec -T worker sh -c 'stat -c "%d:%i" /var/lib/ai6/managed/effect-locks/lock-0001'
 ```
 
 ```
