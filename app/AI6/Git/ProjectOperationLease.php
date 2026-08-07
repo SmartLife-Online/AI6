@@ -48,35 +48,38 @@ final readonly class ProjectOperationLease
             $lease = $now->copy()->addSeconds($this->configuration->leaseSeconds);
             $initialClaim = $operation->state === ControlOperationState::QUEUED
                 && $operation->current_attempt_token !== null;
-            if ($initialClaim) {
-                $updated = Project::query()
-                    ->whereKey($operation->project_id)
-                    ->where('operation_lock_operation_id', $operation->id)
-                    ->where('operation_lock_attempt_token', $operation->current_attempt_token)
-                    ->update([
-                        'operation_lock_lease_expires_at' => $lease,
-                        'operation_lock_heartbeat_at' => $now,
-                    ]);
-            } else {
-                $updated = Project::query()
-                    ->whereKey($operation->project_id)
-                    ->where(function (Builder $query) use ($operation, $now): void {
-                        $query->whereNull('operation_lock_operation_id')
-                            ->orWhere(function (Builder $owned) use ($operation, $now): void {
-                                $owned->where('operation_lock_operation_id', $operation->id)
-                                    ->where(function (Builder $expired) use ($now): void {
-                                        $expired->whereNull('operation_lock_lease_expires_at')
-                                            ->orWhere('operation_lock_lease_expires_at', '<=', $now);
-                                    });
-                            });
-                    })
-                    ->update([
-                        'operation_lock_operation_id' => $operation->id,
-                        'operation_lock_lease_expires_at' => $lease,
-                        'operation_lock_heartbeat_at' => $now,
-                        'operation_lock_attempt_token' => DB::raw('operation_lock_attempt_token + 1'),
-                    ]);
-            }
+
+            // Single atomic claim seam: the initial claim (re-affirming the token that
+            // claimInitialDeployKeyProvisioning already bound to this operation) and every
+            // later reclaim (free lock, or this operation's own expired lease) go through
+            // exactly one compare-and-swap UPDATE so no branch can drift out of parity.
+            $updated = Project::query()
+                ->whereKey($operation->project_id)
+                ->where(function (Builder $query) use ($operation, $now, $initialClaim): void {
+                    if ($initialClaim) {
+                        $query->where('operation_lock_operation_id', $operation->id)
+                            ->where('operation_lock_attempt_token', $operation->current_attempt_token);
+
+                        return;
+                    }
+
+                    $query->whereNull('operation_lock_operation_id')
+                        ->orWhere(function (Builder $owned) use ($operation, $now): void {
+                            $owned->where('operation_lock_operation_id', $operation->id)
+                                ->where(function (Builder $expired) use ($now): void {
+                                    $expired->whereNull('operation_lock_lease_expires_at')
+                                        ->orWhere('operation_lock_lease_expires_at', '<=', $now);
+                                });
+                        });
+                })
+                ->update([
+                    'operation_lock_operation_id' => $operation->id,
+                    'operation_lock_lease_expires_at' => $lease,
+                    'operation_lock_heartbeat_at' => $now,
+                    'operation_lock_attempt_token' => $initialClaim
+                        ? $operation->current_attempt_token
+                        : DB::raw('operation_lock_attempt_token + 1'),
+                ]);
 
             if ($updated !== 1) {
                 return null;

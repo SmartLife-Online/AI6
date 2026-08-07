@@ -23,6 +23,7 @@ final readonly class ControlOperationExecutor
         private ControlOperationConfiguration $configuration,
         private Redactor $redactor,
         private ControlOperationRecoveryProcessor $recovery,
+        private ControlOperationRuntimeIdentity $runtimeIdentity,
     ) {}
 
     public function execute(string $operationId): void
@@ -39,11 +40,11 @@ final readonly class ControlOperationExecutor
             return;
         }
 
-        if (config('ai6.runtime_role') !== 'worker') {
+        if ($this->runtimeIdentity->runtimeRole !== 'worker') {
             throw new RuntimeException('Control operations may execute only in the worker role.');
         }
 
-        $heartbeatDirectory = getenv('AI6_HEARTBEAT_DIRECTORY');
+        $heartbeatDirectory = $this->runtimeIdentity->heartbeatDirectory;
         if ($heartbeatDirectory !== RuntimeHeartbeat::WORKER_DIRECTORY) {
             throw new RuntimeException('The worker heartbeat identity is unavailable.');
         }
@@ -188,18 +189,13 @@ final readonly class ControlOperationExecutor
         $safe = 'Project operation lease conflict.';
         $operation->refresh();
         if ($operation->state !== ControlOperationState::QUEUED) {
-            ControlOperation::query()
-                ->whereKey($operation->id)
-                ->whereIn('state', [
-                    ControlOperationState::RUNNING->value,
-                    ControlOperationState::RECOVERY_REQUIRED->value,
-                ])
-                ->update([
-                    'last_error' => $safe,
-                    'version' => DB::raw('version + 1'),
-                    'updated_at' => Date::now(),
-                ]);
-
+            // This attempt never obtained a claim, so it holds no attempt
+            // token to bind a compare-and-swap update to. The operation is
+            // RUNNING or RECOVERY_REQUIRED under some other attempt's lease;
+            // only the owning attempt may mutate last_error or version for
+            // it (see requireRecovery/recordFailure/recordRetryableConflict,
+            // all of which CAS on current_attempt_token). A non-owner simply
+            // has nothing to record here.
             return;
         }
 

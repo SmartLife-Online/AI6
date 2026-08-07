@@ -56,7 +56,7 @@ final class ControlOperationRecoveryTest extends ControlOperationTestCase
             ->assertForbidden();
     }
 
-    public function test_abandonment_requires_reason_and_evidence_and_non_global_admin_is_denied(): void
+    public function test_abandonment_by_non_global_admin_is_denied(): void
     {
         $administrator = $this->createUser(['is_global_admin' => true]);
         $project = $this->registeredProject($administrator);
@@ -69,6 +69,50 @@ final class ControlOperationRecoveryTest extends ControlOperationTestCase
                 'decision' => 'abandon_operation',
             ])
             ->assertForbidden();
+
+        self::assertSame(0, ControlOperationRecoveryDecision::query()->count());
+    }
+
+    public function test_abandonment_without_a_reason_is_a_named_conflict_with_no_decision_recorded(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $operation = $this->recoveryOperation($administrator, $project);
+        $this->actingAs($administrator);
+        $this->preserveCurrentSessionCookie();
+        $this->withCredentials();
+        $secret = $this->createConfirmedTotp($administrator);
+        $this->post(route('auth.step-up.totp.verify', ['action' => 'control_operation_recovery']), [
+            'code' => $this->currentTotpCode($secret),
+        ])->assertRedirect();
+
+        $this->post(route('projects.operations.recover', [$project, $operation]), [
+            ...$this->decisionPayload($operation),
+            'decision' => 'abandon_operation',
+            'evidence_commit' => str_repeat('a', 40),
+        ])->assertSessionHasErrors('decision');
+
+        self::assertSame(0, ControlOperationRecoveryDecision::query()->count());
+    }
+
+    public function test_abandonment_without_bound_evidence_is_a_named_conflict_with_no_decision_recorded(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $operation = $this->recoveryOperation($administrator, $project);
+        $this->actingAs($administrator);
+        $this->preserveCurrentSessionCookie();
+        $this->withCredentials();
+        $secret = $this->createConfirmedTotp($administrator);
+        $this->post(route('auth.step-up.totp.verify', ['action' => 'control_operation_recovery']), [
+            'code' => $this->currentTotpCode($secret),
+        ])->assertRedirect();
+
+        $this->post(route('projects.operations.recover', [$project, $operation]), [
+            ...$this->decisionPayload($operation),
+            'decision' => 'abandon_operation',
+            'reason' => 'Der Außenstand wurde geprüft.',
+        ])->assertSessionHasErrors('decision');
 
         self::assertSame(0, ControlOperationRecoveryDecision::query()->count());
     }
@@ -221,6 +265,87 @@ final class ControlOperationRecoveryTest extends ControlOperationTestCase
         self::assertSame(1, DB::table('jobs')->count());
         self::assertSame($operation->id, $project->refresh()->operation_lock_operation_id);
         self::assertSame(ControlOperationState::RECOVERY_REQUIRED, $operation->refresh()->state);
+    }
+
+    public function test_recovery_decision_rejects_a_tuple_where_only_the_finding_hash_is_stale(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $operation = $this->recoveryOperation($administrator, $project);
+
+        $this->actingAs($administrator);
+        $this->preserveCurrentSessionCookie();
+        $this->withCredentials();
+        $secret = $this->createConfirmedTotp($administrator);
+        $this->post(route('auth.step-up.totp.verify', ['action' => 'control_operation_recovery']), [
+            'code' => $this->currentTotpCode($secret),
+        ])->assertRedirect();
+
+        $this->post(route('projects.operations.recover', [$project, $operation]), [
+            ...$this->decisionPayload($operation),
+            'finding_hash' => hash('sha256', 'a-different-finding'),
+        ])->assertSessionHasErrors('decision');
+
+        self::assertFalse($operation->recoveryDecision()->exists());
+    }
+
+    public function test_recovery_decision_against_an_operation_that_already_left_recovery_state_is_a_conflict(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $operation = $this->recoveryOperation($administrator, $project);
+        $payload = $this->decisionPayload($operation);
+        $operation->forceFill([
+            'phase' => ControlOperationPhase::CLAIMED,
+            'state' => ControlOperationState::RUNNING,
+            'recovery_attempt_token' => null,
+            'recovery_version' => null,
+            'recovery_effect_hash' => null,
+        ])->save();
+
+        $this->actingAs($administrator);
+        $this->preserveCurrentSessionCookie();
+        $this->withCredentials();
+        $secret = $this->createConfirmedTotp($administrator);
+        $this->post(route('auth.step-up.totp.verify', ['action' => 'control_operation_recovery']), [
+            'code' => $this->currentTotpCode($secret),
+        ])->assertRedirect();
+
+        $this->post(route('projects.operations.recover', [$project, $operation]), $payload)
+            ->assertSessionHasErrors('decision');
+
+        self::assertFalse($operation->recoveryDecision()->exists());
+    }
+
+    public function test_duplicate_recovery_decision_submission_is_rejected_as_a_pending_conflict(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $operation = $this->recoveryOperation($administrator, $project);
+        ControlOperationRecoveryDecision::query()->create([
+            'id' => (string) Str::uuid(),
+            'control_operation_id' => $operation->id,
+            'actor_id' => $administrator->getKey(),
+            'decision' => RecoveryDecisionType::RETRY_RECONCILIATION,
+            'expected_attempt_token' => $operation->recovery_attempt_token,
+            'expected_operation_version' => $operation->recovery_version,
+            'finding_hash' => $operation->finding_hash,
+            'state' => 'pending',
+        ]);
+
+        $this->actingAs($administrator);
+        $this->preserveCurrentSessionCookie();
+        $this->withCredentials();
+        $secret = $this->createConfirmedTotp($administrator);
+        $this->post(route('auth.step-up.totp.verify', ['action' => 'control_operation_recovery']), [
+            'code' => $this->currentTotpCode($secret),
+        ])->assertRedirect();
+
+        $this->post(route('projects.operations.recover', [$project, $operation]), $this->decisionPayload($operation))
+            ->assertSessionHasErrors('decision');
+
+        self::assertSame(1, ControlOperationRecoveryDecision::query()->count());
+        self::assertSame('pending', ControlOperationRecoveryDecision::query()->sole()->state);
     }
 
     private function recoveryOperation(User $administrator, Project $project): ControlOperation

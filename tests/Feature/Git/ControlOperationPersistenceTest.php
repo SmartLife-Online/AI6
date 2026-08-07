@@ -2,20 +2,27 @@
 
 namespace Tests\Feature\Git;
 
+use App\AI6\Auth\Models\User;
 use App\AI6\Git\Actions\QueueDeployKeyProvisioning;
 use App\AI6\Git\ControlOperationOutcome;
 use App\AI6\Git\ControlOperationPhase;
+use App\AI6\Git\ControlOperationRecoveryRequired;
+use App\AI6\Git\ControlOperationRetryableConflict;
 use App\AI6\Git\ControlOperationState;
 use App\AI6\Git\ControlOperationType;
 use App\AI6\Git\DeployKeyProvisioner;
+use App\AI6\Git\ManagedProjectPath;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\ControlOperationResult;
 use App\AI6\Git\ProjectOperationLease;
+use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\ProjectProvisioningStatus;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
+use Throwable;
 
 final class ControlOperationPersistenceTest extends ControlOperationTestCase
 {
@@ -109,11 +116,32 @@ final class ControlOperationPersistenceTest extends ControlOperationTestCase
             }
             $source = file_get_contents($file->getPathname());
             self::assertIsString($source);
-            if (preg_match("/'operation_lock_operation_id'\\s*=>/", $source) === 1) {
+            // Catches both the array-key write form used by Eloquent update()/insert()/
+            // forceFill() calls (single- or double-quoted) and a raw-SQL assignment form
+            // (e.g. inside DB::statement()/DB::unprepared() "SET operation_lock_operation_id = ..."),
+            // so a second writer cannot slip in under a different spelling.
+            $writesField = preg_match(
+                '/[\'"]operation_lock_operation_id[\'"]\s*=>'
+                .'|(?<![\'"\w])operation_lock_operation_id(?![\'"\w])\s*=(?!=|>)/',
+                $source,
+            ) === 1;
+            if ($writesField) {
                 $writers[] = str_replace('\\', '/', substr($file->getPathname(), strlen(base_path()) + 1));
             }
         }
         self::assertSame(['app/AI6/Git/ProjectOperationLease.php'], $writers);
+
+        $claim = $this->methodSource(ProjectOperationLease::class, 'claim');
+        self::assertSame(
+            1,
+            substr_count($claim, '->whereKey($operation->project_id)'),
+            'claim() must fence the project-lock compare-and-swap through exactly one atomic UPDATE seam, not a per-branch pair of independent updates.',
+        );
+        self::assertSame(
+            1,
+            substr_count($claim, "'operation_lock_attempt_token' =>"),
+            'claim() must set the project-lock attempt token from a single SET clause shared by every claim branch.',
+        );
 
         $publish = $this->methodSource(DeployKeyProvisioner::class, 'finalizeProvisioning');
         self::assertStringContainsString("->where('operation_lock_operation_id', \$operation->id)", $publish);
@@ -184,6 +212,126 @@ final class ControlOperationPersistenceTest extends ControlOperationTestCase
 
         $this->expectException(AuthorizationException::class);
         $this->app->make(QueueDeployKeyProvisioning::class)->handle($viewer, $project, (string) Str::uuid());
+    }
+
+    public function test_finalize_provisioning_rejects_a_foreign_attempt_token_over_the_real_worker_path(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $this->configureRealWorkerRuntime($project);
+        $operation = $this->reachKeyActivated($administrator, $project->refresh());
+
+        try {
+            $this->app->make(DeployKeyProvisioner::class)->advance($operation, 999);
+            self::fail('A foreign attempt token unexpectedly reached provisioning finalization.');
+        } catch (Throwable $exception) {
+            self::assertInstanceOf(ControlOperationRetryableConflict::class, $exception);
+            self::assertSame('lease_lost', $exception->conflict);
+            self::assertSame('The operation lease was lost before provisioning finalization.', $exception->getMessage());
+        }
+
+        self::assertSame(ControlOperationPhase::KEY_ACTIVATED, $operation->refresh()->phase);
+        self::assertSame(ProjectProvisioningStatus::PROVISIONING, $project->refresh()->provisioning_status);
+    }
+
+    public function test_finalize_provisioning_requires_recovery_when_the_active_intent_binds_a_foreign_operation(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $this->configureRealWorkerRuntime($project);
+        $operation = $this->reachKeyActivated($administrator, $project->refresh());
+
+        $paths = $this->app->make(ManagedProjectPath::class);
+        $active = $paths->activeDirectory((string) $project->refresh()->project_identifier);
+        $fingerprint = hash_file('sha256', $active.'/id_ed25519.pub');
+        self::assertIsString($fingerprint);
+        self::assertNotFalse(file_put_contents($active.'/intent.json', json_encode([
+            'schema' => 1,
+            'operation_id' => (string) Str::uuid(),
+            'request_hash' => hash('sha256', 'foreign-request'),
+            'attempt_token' => 1,
+            'public_key_fingerprint' => $fingerprint,
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)."\n"));
+        chmod($active.'/intent.json', 0600);
+
+        try {
+            $this->app->make(DeployKeyProvisioner::class)->advance($operation, 1);
+            self::fail('A foreign operation-id binding was unexpectedly accepted at finalization.');
+        } catch (Throwable $exception) {
+            self::assertSame(ControlOperationRecoveryRequired::class, $exception::class);
+            self::assertSame('The active deploy key lost its operation binding before finalization.', $exception->getMessage());
+        }
+    }
+
+    #[DataProvider('changedPriorProjectStateProvider')]
+    public function test_finalize_provisioning_requires_recovery_when_prior_project_state_changed(
+        string $field,
+        \Closure $mutate,
+    ): void {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $this->configureRealWorkerRuntime($project);
+        $operation = $this->reachKeyActivated($administrator, $project->refresh());
+
+        $mutate($project->refresh());
+
+        try {
+            $this->app->make(DeployKeyProvisioner::class)->advance($operation, 1);
+            self::fail(sprintf('A changed %s was unexpectedly accepted at finalization.', $field));
+        } catch (Throwable $exception) {
+            self::assertSame(ControlOperationRecoveryRequired::class, $exception::class);
+            self::assertSame('Project provenance changed before deploy-key finalization.', $exception->getMessage());
+        }
+    }
+
+    /** @return iterable<string, array{string, \Closure(Project): void}> */
+    public static function changedPriorProjectStateProvider(): iterable
+    {
+        yield 'provisioning_operation_id' => ['provisioning_operation_id', static function (Project $project): void {
+            $project->forceFill(['provisioning_operation_id' => (string) Str::uuid()])->save();
+        }];
+        yield 'control_oid' => ['control_oid', static function (Project $project): void {
+            $project->forceFill(['control_oid' => str_repeat('c', 40)])->save();
+        }];
+    }
+
+    /**
+     * Drives the real DeployKeyProvisioner up to KEY_ACTIVATED with a genuinely
+     * bound active deploy key (real ssh-keygen material and a matching intent.json),
+     * the same real state finalizeProvisioning() reads on the worker's production path.
+     */
+    private function reachKeyActivated(User $administrator, Project $project): ControlOperation
+    {
+        $operation = $this->app->make(QueueDeployKeyProvisioning::class)->handle(
+            $administrator,
+            $project,
+            (string) Str::uuid(),
+        );
+        $paths = $this->app->make(ManagedProjectPath::class);
+        $active = $paths->activeDirectory((string) $project->refresh()->project_identifier);
+        $this->generateTestKeyPair($active, 'ai6:'.$operation->id.':'.$operation->request_hash);
+        $fingerprint = hash_file('sha256', $active.'/id_ed25519.pub');
+        self::assertIsString($fingerprint);
+        self::assertNotFalse(file_put_contents($active.'/intent.json', json_encode([
+            'schema' => 1,
+            'operation_id' => $operation->id,
+            'request_hash' => $operation->request_hash,
+            'attempt_token' => 1,
+            'public_key_fingerprint' => $fingerprint,
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)."\n"));
+        chmod($active.'/intent.json', 0600);
+
+        $operation->forceFill([
+            'phase' => ControlOperationPhase::KEY_ACTIVATED,
+            'state' => ControlOperationState::RUNNING,
+            'attempts' => 1,
+            'current_attempt_token' => 1,
+            'effect_attempt_token' => 1,
+            'key_fingerprint' => $fingerprint,
+            'version' => $operation->version + 1,
+        ])->save();
+
+        return $operation->refresh();
     }
 
     private function methodSource(string $class, string $method): string

@@ -111,7 +111,10 @@ final readonly class DeployKeyProvisioner
         ]);
 
         if (! $this->lease->owns($operation->id, $operation->project_id, $attemptToken)) {
-            throw new RuntimeException('The operation lease was lost before process start.');
+            throw new ControlOperationRetryableConflict(
+                'lease_lost',
+                'The operation lease was lost before process start.',
+            );
         }
 
         $request = new ProcessRequest(
@@ -147,7 +150,10 @@ final readonly class DeployKeyProvisioner
             $blocked->release();
             $result = $blocked->wait(function () use ($operation, $attemptToken): void {
                 if (! $this->lease->heartbeat($operation->id, $operation->project_id, $attemptToken)) {
-                    throw new RuntimeException('The operation lease was lost while the deploy-key process was running.');
+                    throw new ControlOperationRetryableConflict(
+                        'lease_lost',
+                        'The operation lease was lost while the deploy-key process was running.',
+                    );
                 }
             }, $this->configuration->heartbeatSeconds);
         } catch (\Throwable $exception) {
@@ -265,7 +271,10 @@ final readonly class DeployKeyProvisioner
 
         try {
             if (! $this->lease->owns($operation->id, $operation->project_id, $attemptToken)) {
-                throw new RuntimeException('The operation lease was lost before deploy-key activation.');
+                throw new ControlOperationRetryableConflict(
+                    'lease_lost',
+                    'The operation lease was lost before deploy-key activation.',
+                );
             }
 
             $active = $this->paths->activeDirectory((string) $project->project_identifier);
@@ -389,7 +398,10 @@ final readonly class DeployKeyProvisioner
 
         DB::transaction(function () use ($operation, $attemptToken): void {
             if (! $this->lease->owns($operation->id, $operation->project_id, $attemptToken)) {
-                throw new RuntimeException('The operation lease was lost before result finalization.');
+                throw new ControlOperationRetryableConflict(
+                    'lease_lost',
+                    'The operation lease was lost before result finalization.',
+                );
             }
 
             $binding = hash('sha256', "AI6-CONTROL-RESULT-V1\0".$operation->id.$operation->request_hash.$operation->key_fingerprint);
@@ -485,18 +497,89 @@ final readonly class DeployKeyProvisioner
         $lock = $this->acquireEffectLock($operation, $project, $attemptToken, 'attempt cleanup');
 
         try {
-            if ($operation->state === ControlOperationState::RECOVERY_REQUIRED) {
-                $this->assertRecoveryEffectUnchanged($operation, $project);
-            }
-            if ($operation->effect_attempt_token !== null) {
-                $this->paths->removeOwnedAttempt(
-                    (string) $project->project_identifier,
-                    $operation->id,
-                    $operation->effect_attempt_token,
-                );
-            }
+            $this->releaseOwnedAttemptFiles($operation, $project);
         } finally {
             $lock->release();
+        }
+    }
+
+    public function abandon(
+        ControlOperation $operation,
+        ControlOperationRecoveryDecision $decision,
+    ): void {
+        $project = $operation->project()->firstOrFail();
+        $attemptToken = $this->recoveryAttemptToken($operation);
+        $lock = $this->acquireEffectLock($operation, $project, $attemptToken, 'abandonment');
+
+        try {
+            $this->releaseOwnedAttemptFiles($operation, $project);
+
+            DB::transaction(function () use ($operation, $decision, $attemptToken): void {
+                $projectUpdated = Project::query()
+                    ->whereKey($operation->project_id)
+                    ->where('provisioning_operation_id', $operation->id)
+                    ->where('operation_lock_operation_id', $operation->id)
+                    ->where('operation_lock_attempt_token', $attemptToken)
+                    ->where('provisioning_status', ProjectProvisioningStatus::PROVISIONING)
+                    ->update([
+                        'provisioning_status' => ProjectProvisioningStatus::PROVISIONING_FAILED,
+                        'provisioning_operation_id' => null,
+                    ]);
+                if ($projectUpdated !== 1) {
+                    throw new ControlOperationRecoveryRequired(
+                        'The project provisioning state was already finalized and no longer matches the abandonment compare-and-swap binding.',
+                    );
+                }
+                $binding = hash('sha256', "AI6-CONTROL-RESULT-V1\0".$operation->id.$operation->request_hash.'abandoned');
+                $result = ControlOperationResult::query()->firstOrCreate(
+                    ['control_operation_id' => $operation->id],
+                    [
+                        'outcome' => ControlOperationOutcome::ABANDONED,
+                        'result_binding' => $binding,
+                        'safe_summary' => 'The operation was abandoned by an authorized recovery decision.',
+                    ],
+                );
+                if ($result->outcome !== ControlOperationOutcome::ABANDONED
+                    || ! hash_equals($result->result_binding, $binding)) {
+                    throw new RuntimeException('The existing abandonment result has a different provenance binding.');
+                }
+                $updated = ControlOperation::query()
+                    ->whereKey($operation->id)
+                    ->where('current_attempt_token', $attemptToken)
+                    ->where('state', ControlOperationState::RECOVERY_REQUIRED)
+                    ->where('version', $operation->version)
+                    ->where('finding_hash', $operation->finding_hash)
+                    ->update([
+                        'phase' => ControlOperationPhase::ATTEMPT_COMPLETED,
+                        'state' => ControlOperationState::ABANDONED,
+                        'recovery_attempt_token' => null,
+                        'recovery_version' => null,
+                        'recovery_effect_hash' => null,
+                        'completed_at' => Date::now(),
+                        'version' => DB::raw('version + 1'),
+                        'updated_at' => Date::now(),
+                    ]);
+                if ($updated !== 1) {
+                    throw new RuntimeException('The abandonment decision lost its compare-and-swap binding.');
+                }
+                $this->markDecisionApplied($decision);
+            });
+        } finally {
+            $lock->release();
+        }
+    }
+
+    private function releaseOwnedAttemptFiles(ControlOperation $operation, Project $project): void
+    {
+        if ($operation->state === ControlOperationState::RECOVERY_REQUIRED) {
+            $this->assertRecoveryEffectUnchanged($operation, $project);
+        }
+        if ($operation->effect_attempt_token !== null) {
+            $this->paths->removeOwnedAttempt(
+                (string) $project->project_identifier,
+                $operation->id,
+                $operation->effect_attempt_token,
+            );
         }
     }
 
@@ -751,7 +834,10 @@ final readonly class DeployKeyProvisioner
         string $section,
     ): EffectLockHandle {
         if (! $this->lease->owns($operation->id, $operation->project_id, $attemptToken)) {
-            throw new RuntimeException(sprintf('The operation lease was lost before %s.', $section));
+            throw new ControlOperationRetryableConflict(
+                'lease_lost',
+                sprintf('The operation lease was lost before %s.', $section),
+            );
         }
 
         $lock = $this->effectLock->acquire($this->lockNames->forProject((string) $project->project_identifier));
@@ -771,7 +857,10 @@ final readonly class DeployKeyProvisioner
         if (! $this->lease->owns($operation->id, $operation->project_id, $attemptToken)) {
             $lock->handle->release();
 
-            throw new RuntimeException(sprintf('The operation lease was lost under the effect lock for %s.', $section));
+            throw new ControlOperationRetryableConflict(
+                'lease_lost',
+                sprintf('The operation lease was lost under the effect lock for %s.', $section),
+            );
         }
 
         return $lock->handle;
@@ -781,7 +870,10 @@ final readonly class DeployKeyProvisioner
     private function progress(ControlOperation $operation, int $attemptToken, ControlOperationPhase $phase, array $updates): void
     {
         if (! $this->lease->owns($operation->id, $operation->project_id, $attemptToken)) {
-            throw new RuntimeException('The operation lease was lost before progress persistence.');
+            throw new ControlOperationRetryableConflict(
+                'lease_lost',
+                'The operation lease was lost before progress persistence.',
+            );
         }
 
         $updates['version'] = DB::raw('version + 1');

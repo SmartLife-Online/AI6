@@ -142,6 +142,8 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Git/ControlOperationRecoveryProcessor.php',
             'app/AI6/Git/ControlOperationRecoveryRequired.php',
             'app/AI6/Git/ControlOperationRetryableConflict.php',
+            'app/AI6/Git/ControlOperationRuntimeIdentity.php',
+            'app/AI6/Git/ControlOperationRuntimeIdentityFactory.php',
             'app/AI6/Git/ControlOperationState.php',
             'app/AI6/Git/ControlOperationType.php',
             'app/AI6/Git/DeployKeyProvisioner.php',

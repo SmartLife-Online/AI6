@@ -13,41 +13,37 @@ AI6/
 ├── .gitattributes                   LF for text/Markdown; CRLF only for Windows scripts
 ├── AGENTS.md                        this file
 ├── CLAUDE.md                        imports AGENTS.md only
-├── README.md
+├── README.md                        runtime, security and operations documentation, bound by tests
 ├── composer.json / composer.lock    Laravel 13 dependency baseline on PHP 8.5
-├── artisan, app/, bootstrap/ ...    integrated AI6-001/AI6-002 plus AI6-003 worktree changes
-├── Dockerfile, docker-compose.yml    integrated AI6-002 runtime plus AI6-003 config forwarding
-├── docker/, deploy/                  integrated AI6-002 role scripts and reverse-proxy profile
-├── tests/                            PHPUnit baseline plus AI6-002/AI6-003 tests
+├── artisan, app/, bootstrap/ ...    integrated AI6-001 … AI6-006B plus the AI6-006C implementation
+├── Dockerfile, docker-compose.yml    single image, process roles, worker volume, proxy net (AI6-002…AI6-006C)
+├── docker/, deploy/                  role dispatcher with init provisioning; Caddy reverse-proxy profile
+├── tests/                            PHPUnit suite; part of it requires the Linux runtime and skips elsewhere
 ├── docs/
 │   ├── AI6_IMPLEMENTATION_PLAN.md   normative source, revision V1.6.21, German
-│   └── AI6_TICKET_TEMPLATE_V1.md    ticket generation and implementation contract, German
+│   ├── AI6_TICKET_TEMPLATE_V1.md    ticket generation and implementation contract, German
+│   └── AI6-004_VERIFICATION.md, AI6-005B_MG-01_…, AI6-006C_MG-01/02_…   human gate protocols
 └── tickets/
     ├── README.md                    backlog overview; a view, never a status source
-    ├── AI6-001.md                   status done — integrated as commit 264cf2f
-    ├── AI6-002.md                   status todo — integrated as commit 29d67fa
-    ├── AI6-003.md                   status todo — rebased; implementation is in the worktree
-    ├── AI6-004.md                   status todo — derived ahead of its dependencies (§8.1)
-    ├── AI6-005A.md, AI6-005B.md     status todo — derived ahead of their dependencies (§8.1)
-    └── AI6-006A.md … AI6-006F.md    status todo — derived ahead of their dependencies (§8.1)
+    ├── AI6-001.md … AI6-006B.md     status done — integrated and human-accepted
+    ├── AI6-006C.md                  status ready — implementation on main, review/gates still open
+    └── AI6-006D.md … AI6-006F.md    status todo — derived ahead of their dependencies (§8.1)
 ```
 
-Commit `264cf2f` integrates `AI6-001`: Laravel 13, `composer.json`, the committed lockfile, PHPUnit, Pint, PHPStan, the manifest generator and the eleven module roots. Its ticket has `status: done`.
+`AI6-001` through `AI6-006B` are integrated and human-accepted (`264cf2f`, `29d67fa`, `93d3f44`, `f7d8919`, `ea3476a`, `2877bc1`, `d6e329f`, `e7a9059` plus their acceptance commits); their tickets carry `status: done`.
 
-Commit `29d67fa` integrates the human-accepted `AI6-002` runtime: the single Docker image, Compose process roles, SQLite Database Queue, scheduler, runtime heartbeats and their automated tests. Its ticket file still has `status: todo`; integration and human acceptance do not authorize an agent to change that status.
+`AI6-006C` — the control-operation core, project operation lease, effect-lock consumption and deploy-key provisioning — is implemented on `main` (commits `1f0e6b7` through `f4b738e`) after an explicitly human-approved `ahead-derived` rebase against `e7a9059`. Its ticket has `status: ready`: review findings, the Linux verification lane and the manual gates `AI6-006C/MG-01`, `AI6-006C/MG-02` and `AI6-005B/MG-01` are still open. Implementation on `main` does not authorize an agent to change that status.
 
-The worktree contains the not-yet-integrated implementation of `AI6-003`: typed instance security configuration, `SecurityPolicy`, central redaction, HMAC fingerprints, `ai6:doctor` and their automated tests. Its ticket was rebased against commit `29d67fa` with explicit human approval and still has `status: todo`.
-
-What does **not** exist yet: application modules after `AI6-003` and `.ai6/`.
+What does **not** exist yet: managed-project clone/fetch and everything after `AI6-006C` (`AI6-006D` onward), and `.ai6/`.
 
 Of the 44 planned tickets twelve exist as files. The other 32 are blueprints in plan §15 — `tickets/AI6-007.md` and everything after it cannot be opened. Plan revisions V1.6.2, V1.6.5, V1.6.7 and V1.6.10 progressively split the former `AI6-005` and `AI6-006`, so M0 ends with `AI6-005A`/`AI6-005B` and the M1 chain is now `AI6-006A` … `AI6-006F`. The IDs `AI6-005` and `AI6-006` no longer exist.
 
 Consequences for you:
 
-- The Laravel/PHP toolchain commands in §4 are available in the current worktree and must be run when relevant. The external locked-install suite additionally requires the explicit PHP 8.5 and Composer paths documented in `README.md`.
-- Verify every path with `rg --files` or `ls` before naming it. The `AI6-001` scaffold and `AI6-002` runtime are integrated, `AI6-003` exists only in the worktree, and later module contracts still do not exist.
-- `AI6-003` remains a ticket task until its review and integration are complete; do not infer completion or change its status from the presence of the implementation.
-- `AI6-004` through `AI6-006F` were derived ahead of dependencies. Their `— existing` markers describe the state their dependencies must produce, not evidence that every named seam exists today. The rebase obligation in §8.1 remains binding for them.
+- The Laravel/PHP toolchain commands in §4 are available and must be run when relevant. The external locked-install suite additionally requires the explicit PHP 8.5 and Composer paths documented in `README.md`. A substantial part of the Git/process test suite proves POSIX lock and `exec` semantics and self-skips outside the Linux runtime; a green Windows run is not the full evidence.
+- Verify every path with `rg --files` or `ls` before naming it. Module contracts up to `AI6-006C` exist in code; later module contracts still do not.
+- `AI6-006C` remains a ticket task until its review, gates and integration acceptance are complete; do not infer completion or change its status from the presence of the implementation.
+- `AI6-006D` through `AI6-006F` were derived ahead of dependencies. Their `— existing` markers describe the state their dependencies must produce, not evidence that every named seam exists today. The rebase obligation in §8.1 remains binding for them.
 
 When this section goes stale, it must be updated — but only when explicitly asked (§10).
 

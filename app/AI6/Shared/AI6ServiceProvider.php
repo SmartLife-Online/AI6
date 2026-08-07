@@ -13,6 +13,8 @@ use App\AI6\Auth\PasskeyRelyingPartyFactory;
 use App\AI6\Auth\Policies\UserPolicy;
 use App\AI6\Git\ControlOperationConfiguration;
 use App\AI6\Git\ControlOperationConfigurationFactory;
+use App\AI6\Git\ControlOperationRuntimeIdentity;
+use App\AI6\Git\ControlOperationRuntimeIdentityFactory;
 use App\AI6\Git\GitConfiguration;
 use App\AI6\Git\GitConfigurationFactory;
 use App\AI6\Git\GitRemotePolicy;
@@ -140,6 +142,13 @@ final class AI6ServiceProvider extends ServiceProvider
             ControlOperationConfiguration::class,
             static fn (Application $app): ControlOperationConfiguration => $app
                 ->make(ControlOperationConfigurationFactory::class)
+                ->fromConfiguredValues(),
+        );
+        $this->app->singleton(ControlOperationRuntimeIdentityFactory::class);
+        $this->app->singleton(
+            ControlOperationRuntimeIdentity::class,
+            static fn (Application $app): ControlOperationRuntimeIdentity => $app
+                ->make(ControlOperationRuntimeIdentityFactory::class)
                 ->fromConfiguredValues(),
         );
         $this->app->singleton(

@@ -133,11 +133,14 @@ final class ProjectRegistrationSchemaTest extends ProjectRegistrationTestCase
     public function test_database_rejects_counter_regressions_and_partial_pending_binding(): void
     {
         $project = Project::query()->create(['name' => 'Versionsprojekt']);
-        $project->update([
+        // operation_lock_attempt_token is intentionally not mass-assignable (only the
+        // compare-and-swap path in ProjectOperationLease may write it), so this direct
+        // setup uses forceFill() instead of the guarded update().
+        $project->forceFill([
             'operation_lock_attempt_token' => 2,
             'control_generation' => 2,
             'control_binding_version' => 2,
-        ]);
+        ])->save();
 
         foreach (['operation_lock_attempt_token', 'control_generation', 'control_binding_version'] as $column) {
             try {

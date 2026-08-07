@@ -66,12 +66,19 @@ sonst als neue Datei erfasst und der Diff sich selbst enthielte. `git reset -q` 
 
 | Feld | Wert |
 |---|---|
-| Bindungsart | Commit |
-| Commit beziehungsweise Base-Commit | 1f0e6b7002176195c51777f63b8c528d150e4331 |
-| SHA-256 des Prüfdiffs | Entfällt bei Commit-Bindung; der Arbeitsbaum ist gegenüber diesem Commit bis auf dieses Protokoll unverändert |
+| Bindungsart | Commit — wird unmittelbar vor der Zeichnung neu erhoben |
+| Commit beziehungsweise Base-Commit | Wird unmittelbar vor der Zeichnung per `git rev-parse HEAD` eingetragen; der Entwurf entstand auf Base-Commit 1a1d0d23b06caf870a3128eee717418ebba4bc9b, dessen Arbeitsbaum zum Zeichnungszeitpunkt jedoch nicht mehr unverändert ist (Review-Korrekturen zu `AI6-006C`) |
+| SHA-256 des Prüfdiffs | Bei Zeichnung auf einem sauberen Commit: entfällt. Bei ungecommitteten Änderungen: mit den obenstehenden Bindungsbefehlen erheben und hier eintragen |
 | Entscheider | Michael Strübing — als menschlicher Entscheider vorgesehen; persönliche Bestätigung ausstehend |
 | Zeitpunkt (ISO 8601 mit Zeitzone) | 2026-08-06T23:33:22+02:00 |
 | Zielinstallation (Host, Netzlage, Nutzerkreis) | Geplanter Linux-VPS mit Docker Compose; administrativer Einzelbetrieb; keine öffentliche Erreichbarkeit im MVP; produktiver Browserzugriff erst über privates VPN und stabilen internen HTTPS-Hostnamen, eingeschränkter SSH-Tunnel nur als Fallback |
+
+Bestätigungsvermerk: Michael Strübing hat am 2026-08-07 per direkter Anweisung in der
+Arbeitssitzung die Entscheidung für Option A aktiv getroffen und damit zugleich das
+vorausgewählte Kreuz unter Abschnitt 4 als seine Entscheidung bestätigt. Die vorausgefüllten
+Messwerte unter Abschnitt 3.1 und 3.2 bleiben Entwurfswerte und sind bei der Bindung am
+gezeichneten Stand nachzuvollziehen (Abschnitt 3.3 ist weiterhin offen). Die persönliche
+Unterschrift unter Abschnitt 5 bleibt davon unberührt und weiterhin ausstehend.
 
 ## 2. Ausgangslage
 

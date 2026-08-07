@@ -32,7 +32,13 @@ use Illuminate\Support\Carbon;
  */
 final class Project extends Model
 {
-    /** @var list<string> */
+    /**
+     * The four operation_lock_* columns are deliberately absent here. They are written
+     * exclusively by the compare-and-swap query builder updates in ProjectOperationLease,
+     * never through Eloquent mass assignment, so no fillable entry may reopen that path.
+     *
+     * @var list<string>
+     */
     protected $fillable = [
         'name',
         'remote',
@@ -43,10 +49,6 @@ final class Project extends Model
         'public_deploy_key',
         'provisioning_status',
         'provisioning_operation_id',
-        'operation_lock_operation_id',
-        'operation_lock_lease_expires_at',
-        'operation_lock_heartbeat_at',
-        'operation_lock_attempt_token',
         'control_generation',
         'control_oid',
         'control_binding_version',

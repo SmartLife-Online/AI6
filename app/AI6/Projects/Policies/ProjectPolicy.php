@@ -44,12 +44,12 @@ final class ProjectPolicy
 
     public function provisionDeployKey(User $user, Project $project): bool
     {
-        return $user->is_active && $user->is_global_admin && $this->isProjectAdministrator($user, $project);
+        return $user->is_active && $user->is_global_admin;
     }
 
     public function decideRecovery(User $user, Project $project): bool
     {
-        return $user->is_active && $user->is_global_admin && $this->isProjectAdministrator($user, $project);
+        return $user->is_active && $user->is_global_admin;
     }
 
     public function decide(ProjectAction $action, User $user, Project $project): bool
@@ -92,18 +92,5 @@ final class ProjectPolicy
     private function matrix(): array
     {
         return self::MATRIX;
-    }
-
-    private function isProjectAdministrator(User $user, Project $project): bool
-    {
-        if (! $user->is_active) {
-            return false;
-        }
-
-        return ProjectMembership::query()
-            ->where('user_id', $user->getKey())
-            ->where('project_id', $project->getKey())
-            ->where('role', ProjectRole::ADMIN)
-            ->exists();
     }
 }

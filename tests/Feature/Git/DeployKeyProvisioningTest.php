@@ -2,11 +2,14 @@
 
 namespace Tests\Feature\Git;
 
+use App\AI6\Auth\Models\User;
 use App\AI6\Git\Actions\QueueDeployKeyProvisioning;
+use App\AI6\Git\ControlOperationConfiguration;
 use App\AI6\Git\ControlOperationExecutor;
 use App\AI6\Git\ControlOperationOutcome;
 use App\AI6\Git\ControlOperationPhase;
 use App\AI6\Git\ControlOperationReconciler;
+use App\AI6\Git\ControlOperationRecoveryProcessor;
 use App\AI6\Git\ControlOperationRetryableConflict;
 use App\AI6\Git\ControlOperationState;
 use App\AI6\Git\DeployKeyProvisioner;
@@ -21,8 +24,10 @@ use App\AI6\Projects\ProjectProvisioningStatus;
 use App\AI6\Shared\Process\BlockedControlProcess;
 use App\AI6\Shared\Process\ControlProcessRunner;
 use App\AI6\Shared\Process\EffectLock;
+use App\AI6\Shared\Process\ProcessConfiguration;
 use App\AI6\Shared\Process\ProcessRequest;
 use App\AI6\Shared\Redaction\RedactionContext;
+use App\AI6\Shared\Redaction\Redactor;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -250,6 +255,42 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
         self::assertSame(['rejected', 'applied'], ControlOperationRecoveryDecision::query()->orderBy('created_at')->pluck('state')->all());
     }
 
+    public function test_real_worker_abandonment_of_an_already_provisioned_project_ends_as_a_named_conflict_without_regressing_it(): void
+    {
+        [$project, $operation] = $this->recoveryFixture(RecoveryDecisionType::ABANDON_OPERATION, withDecision: false);
+
+        // Simulate the project having already been finalized as provisioned by a concurrent
+        // path while this operation's own compare-and-swap identity (lock and provisioning
+        // binding) still points at it.
+        $project->forceFill([
+            'provisioning_status' => ProjectProvisioningStatus::PROVISIONED,
+            'deploy_key_reference' => '/managed/other-attempt/id_ed25519',
+            'public_deploy_key' => "ssh-ed25519 AAAAfinalized already-finalized\n",
+        ])->save();
+
+        ControlOperationRecoveryDecision::query()->create([
+            'id' => (string) Str::uuid(),
+            'control_operation_id' => $operation->id,
+            'actor_id' => $operation->actor_id,
+            'decision' => RecoveryDecisionType::ABANDON_OPERATION,
+            'expected_attempt_token' => $operation->recovery_attempt_token,
+            'expected_operation_version' => $operation->recovery_version,
+            'finding_hash' => $operation->finding_hash,
+            'reason' => 'Abbruch nach bereits abgeschlossener Provisionierung.',
+            'bound_evidence' => 'Gebundener Testbefund.',
+            'state' => 'pending',
+        ]);
+
+        $this->app->make(ControlOperationExecutor::class)->execute($operation->id);
+
+        self::assertSame(ControlOperationState::RECOVERY_REQUIRED, $operation->refresh()->state);
+        self::assertSame('rejected', ControlOperationRecoveryDecision::query()->sole()->state);
+        $project->refresh();
+        self::assertSame(ProjectProvisioningStatus::PROVISIONED, $project->provisioning_status);
+        self::assertSame('/managed/other-attempt/id_ed25519', $project->deploy_key_reference);
+        self::assertSame(0, ControlOperationResult::query()->where('control_operation_id', $operation->id)->count());
+    }
+
     public function test_real_worker_keeps_an_unchanged_recovery_finding_and_decision_binding_stable(): void
     {
         [$project, $operation] = $this->recoveryFixture(
@@ -421,6 +462,11 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
         $administrator = $this->createUser(['is_global_admin' => true]);
         $project = $this->registeredProject($administrator);
         $root = $this->configureRealWorkerRuntime($project);
+        // The contended contender below must never legitimately exhaust its own lock-wait
+        // budget while blocked on the fixture holder; only the explicit SIGKILL below may end
+        // the wait. Raising the budget well past any plausible scheduling delay removes the
+        // flakiness the 500ms fixture default caused on a slow machine (finding: TC-22 budget).
+        $this->raiseEffectLockWaitBudget(30_000);
         $operation = $this->app->make(QueueDeployKeyProvisioning::class)->handle(
             $administrator,
             $project->refresh(),
@@ -521,6 +567,453 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
         self::assertSame($first->id, $project->refresh()->operation_lock_operation_id);
         self::assertNull($project->provisioning_operation_id);
         self::assertSame('provisioning_failed', $project->provisioning_status->value);
+    }
+
+    public function test_a_non_owning_attempts_claim_conflict_cannot_mutate_a_running_operation_it_does_not_own(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $this->configureRealWorkerRuntime($project);
+        $operation = $this->app->make(QueueDeployKeyProvisioning::class)->handle(
+            $administrator,
+            $project->refresh(),
+            (string) Str::uuid(),
+        );
+
+        $ownerToken = $this->app->make(ProjectOperationLease::class)->claim($operation, str_repeat('b', 32));
+        self::assertIsInt($ownerToken);
+        $operation->refresh();
+        self::assertSame(ControlOperationState::RUNNING, $operation->state);
+        self::assertNull($operation->last_error);
+        $ownedVersion = $operation->version;
+        $ownedAttemptToken = $operation->current_attempt_token;
+
+        // A second, non-owning attempt tries to execute the same operation
+        // while the first attempt's lease is still active. Its own claim
+        // fails, so it must not be able to overwrite last_error or bump
+        // version for the attempt that actually owns the lease.
+        $this->app->make(ControlOperationExecutor::class)->execute($operation->id);
+
+        $operation->refresh();
+        self::assertSame(ControlOperationState::RUNNING, $operation->state);
+        self::assertNull($operation->last_error);
+        self::assertSame($ownedVersion, $operation->version);
+        self::assertSame($ownedAttemptToken, $operation->current_attempt_token);
+    }
+
+    public function test_real_launch_contract_persists_process_identity_before_the_wrapper_is_released(): void
+    {
+        if (! function_exists('pcntl_fork') || ! is_file('/proc/self/stat')) {
+            self::markTestSkipped('TC-21 requires Linux procfs and pcntl_fork.');
+        }
+
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $root = $this->configureRealWorkerRuntime($project);
+        // A deliberately slow keygen fixture widens the window between the wrapper being
+        // released and the real key material appearing, so the launch-contract phase can be
+        // observed reliably from the parent instead of racing a near-instant key generation.
+        $this->installSlowKeygenFixture($root);
+        $operation = $this->app->make(QueueDeployKeyProvisioning::class)->handle(
+            $administrator,
+            $project->refresh(),
+            (string) Str::uuid(),
+        );
+        $lease = $this->app->make(ProjectOperationLease::class);
+        self::assertSame(1, $lease->claim($operation, str_repeat('f', 32)));
+
+        $child = pcntl_fork();
+        self::assertNotSame(-1, $child);
+        if ($child === 0) {
+            try {
+                $this->app->make(DeployKeyProvisioner::class)->advance($operation->refresh(), 1);
+                exit(0);
+            } catch (\Throwable) {
+                exit(51);
+            }
+        }
+
+        try {
+            $observed = null;
+            $deadline = microtime(true) + 5;
+            do {
+                $current = ControlOperation::query()->find($operation->id);
+                if ($current instanceof ControlOperation
+                    && $current->phase === ControlOperationPhase::PROCESS_STARTED
+                    && $current->process_id !== null) {
+                    $observed = $current;
+                    break;
+                }
+                usleep(2_000);
+            } while (microtime(true) < $deadline);
+
+            self::assertNotNull($observed, 'The launch-contract phase was never observed as persisted.');
+            self::assertSame(ControlOperationPhase::PROCESS_STARTED, $observed->phase);
+            self::assertNotNull($observed->launch_argument_hash);
+            self::assertNotNull($observed->process_id);
+            self::assertNotNull($observed->process_started_at);
+            self::assertTrue(
+                is_file('/proc/'.$observed->process_id.'/stat'),
+                'The persisted process identity does not name a running process.',
+            );
+            $effectAttemptId = $observed->effect_attempt_token;
+            $stagingDirectory = $root.'/.control-staging/'.$operation->id;
+            $stagedPrivateKeyPath = $stagingDirectory.'/'.$effectAttemptId.'/bundle/id_ed25519';
+            self::assertFileDoesNotExist(
+                $stagedPrivateKeyPath,
+                'The staged private key must not exist while the process is still held before its effect.',
+            );
+
+            pcntl_waitpid($child, $status);
+            self::assertTrue(pcntl_wifexited($status));
+            self::assertSame(0, pcntl_wexitstatus($status));
+        } finally {
+            if ($child > 0) {
+                pcntl_waitpid($child, $status, WNOHANG);
+            }
+        }
+
+        self::assertSame(ControlOperationPhase::KEY_GENERATED, $operation->refresh()->phase);
+
+        // Static negative-probe proof: the code that persists the launch-contract fields must
+        // textually precede the release call within generate(). A test double that released the
+        // wrapper before this persistence would let the effect proceed with no persisted record
+        // (see test_release_before_persistence_lets_a_blocked_effect_proceed_without_a_launch_record
+        // below) — this assertion is what guarantees the real generate() path never does that.
+        $generate = $this->methodSource(DeployKeyProvisioner::class, 'generate');
+        self::assertLessThan(
+            strpos($generate, '$blocked->release()'),
+            strpos($generate, "'process_started_at' => Date::createFromTimestamp"),
+            'DeployKeyProvisioner::generate() must persist the launch-contract fields before releasing the blocked wrapper.',
+        );
+    }
+
+    public function test_release_before_persistence_lets_a_blocked_effect_proceed_without_a_launch_record(): void
+    {
+        if (! function_exists('pcntl_fork') || ! is_file('/proc/self/stat')) {
+            self::markTestSkipped('TC-21 requires Linux procfs and pcntl_fork.');
+        }
+
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $root = $this->configureRealWorkerRuntime($project);
+        $operation = $this->app->make(QueueDeployKeyProvisioning::class)->handle(
+            $administrator,
+            $project->refresh(),
+            (string) Str::uuid(),
+        );
+
+        $marker = $root.'/tc21-negative-probe-effect';
+        $start = $this->app->make(ControlProcessRunner::class)->startBlocked(
+            new ProcessRequest(
+                ['/usr/bin/touch', $marker],
+                $root,
+                [],
+                [],
+                new RedactionContext((string) $project->getKey(), $operation->id, 'tc21-negative-probe'),
+            ),
+            'lock-0001',
+        );
+        self::assertTrue($start->ready(), $start->message);
+        self::assertNotNull($start->process);
+
+        // The negative probe: release the blocked wrapper before any launch-contract record is
+        // persisted — the reverse of the order DeployKeyProvisioner::generate() enforces. If the
+        // real code ever did this, the process would proceed to its effect before anything was
+        // written to the database.
+        $start->process->release();
+        $result = $start->process->wait();
+
+        self::assertTrue($result->succeeded());
+        self::assertFileExists(
+            $marker,
+            'A release-before-persistence ordering let the blocked effect proceed with no persisted launch '.
+            'record — exactly the ordering the real generate() path must never allow.',
+        );
+        self::assertNull(
+            $operation->refresh()->process_id,
+            'No launch-contract record was ever persisted for this probe process; its effect happened independent of one.',
+        );
+    }
+
+    public function test_real_reconciliation_finds_an_active_key_bound_to_another_operation_and_preserves_it_byte_identical(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $root = $this->configureRealWorkerRuntime($project);
+        [$project, $first] = $this->completeRealProvisioning($administrator, $project);
+
+        $active = $root.'/deploy-keys/'.$project->project_identifier;
+        $privateBefore = file_get_contents($active.'/id_ed25519');
+        $publicBefore = file_get_contents($active.'/id_ed25519.pub');
+        $intentBefore = file_get_contents($active.'/intent.json');
+        self::assertIsString($privateBefore);
+        self::assertIsString($publicBefore);
+        self::assertIsString($intentBefore);
+
+        $second = ControlOperation::query()->create([
+            'id' => (string) Str::uuid(),
+            'project_id' => $project->getKey(),
+            'actor_id' => $administrator->getKey(),
+            'operation_type' => $first->operation_type,
+            'schema_version' => 1,
+            'authorization_snapshot' => $first->authorization_snapshot,
+            'authorization_snapshot_jcs' => $first->authorization_snapshot_jcs,
+            'expected_control_commit' => $first->expected_control_commit,
+            'operation_parameters_jcs' => $first->operation_parameters_jcs,
+            'request_hash' => hash('sha256', 'second-operation-reconciliation-request'),
+            'phase' => ControlOperationPhase::QUEUED,
+            'state' => ControlOperationState::QUEUED,
+        ]);
+
+        // Drive the second operation through the real claim/generate/activate path (not
+        // forceFill): it stages its own genuine keypair and only then discovers, under the
+        // effect lock, that the active key belongs to the first operation.
+        $this->app->make(ControlOperationExecutor::class)->execute($second->id);
+
+        $second->refresh();
+        self::assertSame(ControlOperationState::RECOVERY_REQUIRED, $second->state);
+        self::assertStringContainsString('not bound to this operation', (string) $second->last_error);
+        self::assertSame($second->id, $project->refresh()->operation_lock_operation_id);
+
+        self::assertSame($privateBefore, file_get_contents($active.'/id_ed25519'));
+        self::assertSame($publicBefore, file_get_contents($active.'/id_ed25519.pub'));
+        self::assertSame($intentBefore, file_get_contents($active.'/intent.json'));
+        $intent = json_decode((string) file_get_contents($active.'/intent.json'), true, 8, JSON_THROW_ON_ERROR);
+        self::assertSame($first->id, $intent['operation_id']);
+    }
+
+    public function test_real_reconciliation_finds_an_active_key_with_no_attributable_intent_and_preserves_it_byte_identical(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $root = $this->configureRealWorkerRuntime($project);
+        $active = $this->app->make(ManagedProjectPath::class)
+            ->activeDirectory((string) $project->project_identifier);
+        $this->generateTestKeyPair($active, 'externally-planted-key-without-attributable-intent');
+        // A syntactically parseable but schema-incomplete intent: it cannot be resolved to any
+        // real operation, so this key must be neither adopted nor deleted by reconciliation.
+        self::assertNotFalse(file_put_contents($active.'/intent.json', json_encode([
+            'schema' => 1,
+            'operation_id' => (string) Str::uuid(),
+        ], JSON_THROW_ON_ERROR)."\n"));
+        chmod($active.'/intent.json', 0600);
+        $privateBefore = file_get_contents($active.'/id_ed25519');
+        $publicBefore = file_get_contents($active.'/id_ed25519.pub');
+        $intentBefore = file_get_contents($active.'/intent.json');
+        self::assertIsString($privateBefore);
+        self::assertIsString($publicBefore);
+        self::assertIsString($intentBefore);
+
+        $operation = $this->app->make(QueueDeployKeyProvisioning::class)->handle(
+            $administrator,
+            $project->refresh(),
+            (string) Str::uuid(),
+        );
+
+        // Real claim/generate/activate path again: this operation stages its own keypair before
+        // it ever inspects the active directory under the effect lock.
+        $this->app->make(ControlOperationExecutor::class)->execute($operation->id);
+
+        $operation->refresh();
+        self::assertSame(ControlOperationState::RECOVERY_REQUIRED, $operation->state);
+        self::assertStringContainsString('incomplete', (string) $operation->last_error);
+        self::assertSame($operation->id, $project->refresh()->operation_lock_operation_id);
+
+        self::assertSame($privateBefore, file_get_contents($active.'/id_ed25519'));
+        self::assertSame($publicBefore, file_get_contents($active.'/id_ed25519.pub'));
+        self::assertSame($intentBefore, file_get_contents($active.'/intent.json'));
+    }
+
+    public function test_real_worker_cleans_a_staged_key_on_exhausted_retries_and_a_fresh_retry_produces_exactly_one_keypair(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $root = $this->configureRealWorkerRuntime($project);
+        $configuration = $this->app->make(ControlOperationConfiguration::class);
+        self::assertSame(3, $configuration->maxAttempts);
+
+        // Pre-create the key root write-protected so the real, atomic activation rename fails
+        // deterministically once a genuinely staged keypair exists, without touching staging.
+        $keyRoot = $root.'/deploy-keys';
+        self::assertTrue(mkdir($keyRoot, 0500, true));
+
+        $operation = $this->app->make(QueueDeployKeyProvisioning::class)->handle(
+            $administrator,
+            $project->refresh(),
+            (string) Str::uuid(),
+        );
+        $executor = $this->app->make(ControlOperationExecutor::class);
+
+        try {
+            for ($attempt = 0; $attempt < 2; $attempt++) {
+                try {
+                    $executor->execute($operation->id);
+                    self::fail('The activation unexpectedly succeeded while the key root was write-protected.');
+                } catch (RuntimeException $exception) {
+                    self::assertStringContainsString('remains retryable', $exception->getMessage());
+                }
+            }
+            // The third delivery exhausts the configured retry budget and terminates the attempt.
+            $executor->execute($operation->id);
+        } finally {
+            chmod($keyRoot, 0700);
+        }
+
+        $operation->refresh();
+        $project->refresh();
+        self::assertSame(3, $operation->attempts);
+        self::assertSame(ControlOperationState::FAILED, $operation->state);
+        self::assertSame('provisioning_failed', $project->provisioning_status->value);
+        self::assertSame(ControlOperationOutcome::FAILED, $operation->result()->sole()->outcome);
+        self::assertDirectoryDoesNotExist($root.'/.control-staging/'.$operation->id);
+        self::assertDirectoryDoesNotExist($keyRoot.'/'.$project->project_identifier);
+
+        // A fresh retry after exhaustion produces exactly one keypair with no orphaned predecessor.
+        $retry = $this->app->make(QueueDeployKeyProvisioning::class)->handle(
+            $administrator,
+            $project->refresh(),
+            (string) Str::uuid(),
+        );
+        $executor->execute($retry->id);
+
+        $retry->refresh();
+        $project->refresh();
+        self::assertSame(ControlOperationState::COMPLETED, $retry->state);
+        self::assertSame('provisioned', $project->provisioning_status->value);
+        $active = $keyRoot.'/'.$project->project_identifier;
+        self::assertFileExists($active.'/id_ed25519');
+        self::assertFileExists($active.'/id_ed25519.pub');
+        self::assertDirectoryDoesNotExist($root.'/.control-staging/'.$operation->id);
+        self::assertDirectoryDoesNotExist($root.'/.control-staging/'.$retry->id);
+        $intent = json_decode((string) file_get_contents($active.'/intent.json'), true, 8, JSON_THROW_ON_ERROR);
+        self::assertSame($retry->id, $intent['operation_id']);
+        $entries = array_values(array_diff(scandir($active), ['.', '..']));
+        sort($entries);
+        self::assertSame(['id_ed25519', 'id_ed25519.pub', 'intent.json'], $entries);
+    }
+
+    public function test_real_publish_aborts_before_any_effect_when_the_lease_is_lost_immediately_after_the_effect_lock_is_acquired(): void
+    {
+        if (! function_exists('pcntl_fork') || ! is_file('/proc/self/stat')) {
+            self::markTestSkipped('TC-22 requires Linux procfs and pcntl_fork.');
+        }
+
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $root = $this->configureRealWorkerRuntime($project);
+        $this->raiseEffectLockWaitBudget(30_000);
+        $operation = $this->app->make(QueueDeployKeyProvisioning::class)->handle(
+            $administrator,
+            $project->refresh(),
+            (string) Str::uuid(),
+        );
+        $lease = $this->app->make(ProjectOperationLease::class);
+        self::assertSame(1, $lease->claim($operation, str_repeat('e', 32)));
+        self::assertFalse($this->app->make(DeployKeyProvisioner::class)->advance($operation->refresh(), 1));
+        self::assertSame(ControlOperationPhase::KEY_GENERATED, $operation->refresh()->phase);
+
+        $holder = $this->startLockHoldingTarget($operation, $root);
+        $active = $root.'/deploy-keys/'.$project->project_identifier;
+        $exitFile = $root.'/tc22b-child-exit';
+        $child = pcntl_fork();
+        self::assertNotSame(-1, $child);
+        if ($child === 0) {
+            try {
+                $this->app->make(DeployKeyProvisioner::class)->advance($operation->refresh(), 1);
+                file_put_contents($exitFile, 'unexpected-success');
+                exit(0);
+            } catch (ControlOperationRetryableConflict $exception) {
+                file_put_contents($exitFile, $exception->conflict.': '.$exception->getMessage());
+                exit($exception->conflict === 'lease_lost' ? 0 : 61);
+            } catch (\Throwable $exception) {
+                file_put_contents($exitFile, get_class($exception).': '.$exception->getMessage());
+                exit(62);
+            }
+        }
+
+        try {
+            // The child's own pre-acquisition lease check has already passed by now (it runs in
+            // microseconds right after the fork) and it is now blocked inside
+            // EffectLock::acquire()'s poll loop because the fixture holder still owns the lock.
+            // Expiring the lease here — strictly before the holder is released below — guarantees
+            // that only the post-acquisition recheck (DeployKeyProvisioner::acquireEffectLock(),
+            // the second `lease->owns()` check after `$this->effectLock->acquire(...)`) can catch
+            // the loss, because the lock cannot be acquired before the holder is killed.
+            usleep(50_000);
+            self::assertTrue($lease->expire($operation->id, $project->getKey(), 1));
+            (new Process(['/usr/bin/kill', '-KILL', (string) $holder->processId]))->mustRun();
+            $holder->wait();
+
+            pcntl_waitpid($child, $status);
+            self::assertTrue(pcntl_wifexited($status));
+            self::assertSame(0, pcntl_wexitstatus($status), (string) file_get_contents($exitFile));
+            self::assertDirectoryDoesNotExist($active);
+        } finally {
+            if (is_file('/proc/'.$holder->processId.'/stat')) {
+                (new Process(['/usr/bin/kill', '-KILL', (string) $holder->processId]))->run();
+            }
+            if ($child > 0) {
+                pcntl_waitpid($child, $status, WNOHANG);
+            }
+        }
+
+        $acquireEffectLock = $this->methodSource(DeployKeyProvisioner::class, 'acquireEffectLock');
+        self::assertSame(
+            2,
+            substr_count($acquireEffectLock, "'lease_lost',"),
+            'acquireEffectLock() must recheck lease ownership both before and after acquiring the effect lock.',
+        );
+        self::assertLessThan(
+            strrpos($acquireEffectLock, "'lease_lost',"),
+            strpos($acquireEffectLock, '$this->effectLock->acquire('),
+            'The post-acquisition lease recheck must occur after the effect lock has actually been acquired.',
+        );
+    }
+
+    /** @return array{Project, ControlOperation} */
+    private function completeRealProvisioning(User $administrator, Project $project): array
+    {
+        $operation = $this->app->make(QueueDeployKeyProvisioning::class)->handle(
+            $administrator,
+            $project->refresh(),
+            (string) Str::uuid(),
+        );
+        $this->app->make(ControlOperationExecutor::class)->execute($operation->id);
+        $operation->refresh();
+        self::assertSame(ControlOperationState::COMPLETED, $operation->state);
+
+        return [$project->refresh(), $operation];
+    }
+
+    private function installSlowKeygenFixture(string $root): string
+    {
+        $shim = $root.'/tc21-slow-ssh-keygen.sh';
+        self::assertNotFalse(file_put_contents(
+            $shim,
+            "#!/bin/sh\nset -eu\nsleep 1\nexec /usr/bin/ssh-keygen \"\$@\"\n",
+        ));
+        chmod($shim, 0700);
+
+        $current = $this->app->make(ControlOperationConfiguration::class);
+        $slow = new ControlOperationConfiguration(
+            $current->managedRoot,
+            $current->keyRoot,
+            $shim,
+            $current->sshKeygenWrapper,
+            $current->leaseSeconds,
+            $current->heartbeatSeconds,
+            $current->reconcilerSeconds,
+            $current->maxAttempts,
+        );
+        $this->app->instance(ControlOperationConfiguration::class, $slow);
+        $this->app->instance(ManagedProjectPath::class, new ManagedProjectPath($slow));
+        $this->app->instance(ProjectOperationLease::class, new ProjectOperationLease($slow));
+        foreach ([DeployKeyProvisioner::class, ControlOperationRecoveryProcessor::class, ControlOperationExecutor::class] as $service) {
+            $this->app->forgetInstance($service);
+        }
+
+        return $shim;
     }
 
     /** @return array{Project, ControlOperation} */
@@ -664,6 +1157,43 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
         } while (microtime(true) < $deadline);
 
         self::fail('The expected process marker was not created: '.$path);
+    }
+
+    /**
+     * Rebinds the effect-lock wait budget to a much larger value than the fixture default
+     * (500ms) so that a blocked-process race is not gated by wall-clock scheduling jitter on
+     * a slow machine. The parent side still asserts "not yet effected" using a short sleep
+     * while the fixture holder keeps the lock; only the deadline the contender itself waits
+     * against needs headroom, because the holder is killed explicitly by the test, not by a
+     * timeout.
+     */
+    private function raiseEffectLockWaitBudget(int $milliseconds): void
+    {
+        $current = $this->app->make(ProcessConfiguration::class);
+        $raised = new ProcessConfiguration(
+            $current->timeoutSeconds,
+            $current->outputLimitBytes,
+            $current->cancelGraceMilliseconds,
+            $current->wrapperReadyTimeoutSeconds,
+            $current->wrapperScript,
+            $current->shellBinary,
+            $current->setsidBinary,
+            $current->processGroupKillBinary,
+            $current->lockDirectory,
+            $current->lockObjectCount,
+            $milliseconds,
+            $current->lockOwnerUid,
+        );
+        $effectLock = new EffectLock($raised);
+        $this->app->instance(ProcessConfiguration::class, $raised);
+        $this->app->instance(EffectLock::class, $effectLock);
+        $this->app->instance(
+            ControlProcessRunner::class,
+            new ControlProcessRunner($raised, $this->app->make(Redactor::class), $effectLock),
+        );
+        foreach ([DeployKeyProvisioner::class, ControlOperationRecoveryProcessor::class, ControlOperationExecutor::class] as $service) {
+            $this->app->forgetInstance($service);
+        }
     }
 
     private function methodSource(string $class, string $method): string

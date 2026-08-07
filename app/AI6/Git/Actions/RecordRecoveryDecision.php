@@ -45,7 +45,6 @@ final readonly class RecordRecoveryDecision
         if (! $this->projectPolicy->decideRecovery($actor, $project)) {
             throw new AuthorizationException;
         }
-        $this->stepUp->consumeFresh($request, $actor, 'control_operation_recovery');
 
         $evidence = RecoveryEvidenceReference::bind(
             $boundEvidence,
@@ -69,6 +68,7 @@ final readonly class RecordRecoveryDecision
         }
 
         return DB::transaction(function () use (
+            $request,
             $operation,
             $actor,
             $decision,
@@ -78,13 +78,6 @@ final readonly class RecordRecoveryDecision
             $reason,
             $boundEvidence,
         ): ControlOperationRecoveryDecision {
-            if (ControlOperationRecoveryDecision::query()
-                ->where('control_operation_id', $operation->id)
-                ->where('state', 'pending')
-                ->exists()) {
-                throw new ControlOperationConflict('A recovery decision is already pending.');
-            }
-
             $updated = ControlOperation::query()
                 ->whereKey($operation->id)
                 ->where('state', ControlOperationState::RECOVERY_REQUIRED)
@@ -96,6 +89,20 @@ final readonly class RecordRecoveryDecision
                 ->update(['version' => DB::raw('version')]);
             if ($updated !== 1) {
                 throw new ControlOperationConflict('The recovery finding changed before the decision was recorded.');
+            }
+
+            // Freshness is checked and consumed immediately before the decision record is
+            // created, per Task 16: it must not be burned by a finding-binding CAS failure
+            // above, but a stale/already-used step-up proof must still be rejected ahead of
+            // the pending-decision anti-replay guard below, so a resubmission with a stale
+            // proof surfaces as "step-up required" rather than "decision already pending".
+            $this->stepUp->consumeFresh($request, $actor, 'control_operation_recovery');
+
+            if (ControlOperationRecoveryDecision::query()
+                ->where('control_operation_id', $operation->id)
+                ->where('state', 'pending')
+                ->exists()) {
+                throw new ControlOperationConflict('A recovery decision is already pending.');
             }
 
             $record = ControlOperationRecoveryDecision::query()->create([

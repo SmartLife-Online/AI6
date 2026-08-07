@@ -19,10 +19,11 @@ use App\AI6\Git\ProjectOperationLease;
 use App\AI6\Git\RecoveryDecisionType;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\ProjectProvisioningStatus;
-use App\AI6\Shared\Process\ProcessConfiguration;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
+use ReflectionMethod;
+use RuntimeException;
 
 final class ControlOperationCrashInjectionTest extends ControlOperationTestCase
 {
@@ -73,6 +74,112 @@ final class ControlOperationCrashInjectionTest extends ControlOperationTestCase
         }
     }
 
+    /**
+     * TC-16: an attempt that is paused before its child process ever starts is
+     * resumed after its lease expires and the reconciler redelivers the operation
+     * under a higher attempt token. Every effect of the paused attempt -- heartbeat,
+     * phase transition, process start, result persistence, lock release and the
+     * terminal publish -- is rejected as a fencing conflict through the real
+     * `ProjectOperationLease` and `DeployKeyProvisioner` production paths. The new
+     * attempt alone remains effective and reaches exactly one terminal state.
+     */
+    public function test_tc16_a_stale_attempt_paused_before_process_start_is_fenced_on_every_effect(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $root = $this->configureRealWorkerRuntime($project);
+        $operation = $this->app->make(QueueDeployKeyProvisioning::class)->handle(
+            $administrator,
+            $project->refresh(),
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+
+        $lease = $this->app->make(ProjectOperationLease::class);
+        $deployKeys = $this->app->make(DeployKeyProvisioner::class);
+        $paths = $this->app->make(ManagedProjectPath::class);
+        $configuration = $this->app->make(ControlOperationConfiguration::class);
+
+        // The first attempt claims the project lease and is paused before it ever
+        // reaches the process runner: `advance()`/`generate()` are never invoked for
+        // it, so no child process comes into existence.
+        $firstAttemptToken = $lease->claim($operation->refresh(), 'boot-attempt-one');
+        self::assertSame(1, $firstAttemptToken);
+        self::assertSame(ControlOperationPhase::CLAIMED, $operation->refresh()->phase);
+
+        // The lease expires purely through the passage of time: the paused attempt
+        // never sent a heartbeat because it never reached the loop that sends one.
+        $this->travel($configuration->leaseSeconds + 1)->seconds();
+
+        self::assertSame(1, $this->app->make(ControlOperationReconciler::class)->reconcile());
+        self::assertSame(1, DB::table('jobs')->count());
+        self::assertStringContainsString($operation->id, (string) DB::table('jobs')->value('payload'));
+
+        // The redelivered worker claims the lease under a higher attempt token while
+        // the operation is still sitting at `claimed` -- exactly the state the paused
+        // first attempt still believes it is in.
+        $secondAttemptToken = $lease->claim($operation->refresh(), 'boot-attempt-two');
+        self::assertSame(2, $secondAttemptToken);
+        self::assertSame(ControlOperationPhase::CLAIMED, $operation->refresh()->phase);
+
+        // Effect 1/6 -- heartbeat: the paused attempt can no longer keep its lease alive.
+        self::assertFalse($lease->heartbeat($operation->id, $project->getKey(), $firstAttemptToken));
+
+        // Effect 2/6 and 3/6 -- phase transition and process start: resuming the
+        // paused attempt through the real `advance()`/`generate()` production path is
+        // rejected before any process is launched.
+        try {
+            $deployKeys->advance($operation, $firstAttemptToken);
+            self::fail('The paused attempt was able to progress after a lease takeover.');
+        } catch (RuntimeException $exception) {
+            self::assertStringContainsString('lease was lost', $exception->getMessage());
+        }
+        $operation->refresh();
+        self::assertSame(ControlOperationPhase::CLAIMED, $operation->phase);
+        self::assertNull($operation->launch_argument_hash);
+        $staleBundle = $paths->prepareBundle((string) $project->project_identifier, $operation->id, $firstAttemptToken);
+        self::assertFileDoesNotExist($staleBundle.'/id_ed25519');
+
+        // Drive the winning attempt for real, one phase at a time, so the losing
+        // attempt can be probed again immediately before the terminal write.
+        self::assertFalse($deployKeys->advance($operation, $secondAttemptToken));
+        self::assertSame(ControlOperationPhase::KEY_GENERATED, $operation->refresh()->phase);
+
+        self::assertFalse($deployKeys->advance($operation, $secondAttemptToken));
+        self::assertSame(ControlOperationPhase::KEY_ACTIVATED, $operation->refresh()->phase);
+
+        self::assertFalse($deployKeys->advance($operation, $secondAttemptToken));
+        self::assertSame(ControlOperationPhase::PROVISIONING_FINALIZED, $operation->refresh()->phase);
+
+        // Effect 4/6 and 6/6 -- result persistence and publish: the paused attempt
+        // cannot finalize the saga either, even though the live phase now matches
+        // the phase it would need to dispatch into `complete()`.
+        self::assertSame(0, ControlOperationResult::query()->where('control_operation_id', $operation->id)->count());
+        try {
+            $deployKeys->advance($operation, $firstAttemptToken);
+            self::fail('The paused attempt was able to publish the terminal result after a lease takeover.');
+        } catch (RuntimeException $exception) {
+            self::assertStringContainsString('lease was lost', $exception->getMessage());
+        }
+        $operation->refresh();
+        self::assertSame(ControlOperationPhase::PROVISIONING_FINALIZED, $operation->phase);
+        self::assertSame(ControlOperationState::RUNNING, $operation->state);
+        self::assertSame(0, ControlOperationResult::query()->where('control_operation_id', $operation->id)->count());
+
+        // The new attempt remains solely effective and reaches exactly one terminal state.
+        self::assertTrue($deployKeys->advance($operation, $secondAttemptToken));
+        $operation->refresh();
+        self::assertTrue($operation->state->terminal());
+        self::assertSame(ControlOperationPhase::ATTEMPT_COMPLETED, $operation->phase);
+        self::assertSame(1, ControlOperationResult::query()->where('control_operation_id', $operation->id)->count());
+        self::assertDirectoryExists($root.'/deploy-keys/'.$project->refresh()->project_identifier);
+        self::assertNull($project->refresh()->operation_lock_operation_id);
+
+        // Effect 5/6 -- lock release: the paused attempt can never release a lock it
+        // does not hold, whether before or after the winning attempt terminates it.
+        self::assertFalse($lease->release($operation->id, $project->getKey(), $firstAttemptToken));
+    }
+
     #[DataProvider('allPhaseProvider')]
     public function test_real_worker_reconciles_every_declared_phase_to_one_external_and_terminal_result(
         ControlOperationPhase $phase,
@@ -100,19 +207,31 @@ final class ControlOperationCrashInjectionTest extends ControlOperationTestCase
 
         if ($phase === ControlOperationPhase::KEY_ACTIVATED) {
             $lease = $this->app->make(ProjectOperationLease::class);
+            $deployKeys = $this->app->make(DeployKeyProvisioner::class);
             self::assertGreaterThan(1, $operation->current_attempt_token);
             self::assertFalse($lease->heartbeat($operation->id, $project->getKey(), 1));
             self::assertFalse($lease->release($operation->id, $project->getKey(), 1));
-            self::assertSame(0, ControlOperation::query()
-                ->whereKey($operation->id)
-                ->where('current_attempt_token', 1)
-                ->where('state', ControlOperationState::RUNNING)
-                ->update(['phase' => ControlOperationPhase::ATTEMPT_COMPLETED->value]));
-            self::assertSame(0, Project::query()
-                ->whereKey($project->getKey())
-                ->where('operation_lock_operation_id', $operation->id)
-                ->where('operation_lock_attempt_token', 1)
-                ->update(['public_deploy_key' => "ssh-ed25519 STALE stale-attempt\n"]));
+
+            // TC-27: waking the old, fenced attempt is driven through real production
+            // entry points instead of a raw-query fixture write. `cleanupFailedAttempt()`
+            // is reachable independently of the operation's current phase and still
+            // rejects the stale attempt token as a fencing conflict.
+            try {
+                $deployKeys->cleanupFailedAttempt($operation, 1);
+                self::fail('The stale attempt was able to run cleanup after a lease takeover.');
+            } catch (RuntimeException $exception) {
+                self::assertStringContainsString('lease was lost', $exception->getMessage());
+            }
+
+            // Waking the old attempt through the real state-machine entry point
+            // (`advance()`) produces no effect either: the live phase is already
+            // terminal, so the stale attempt token never reaches a write, publish or
+            // project mutation -- the winning attempt's state stays exactly as it was.
+            $versionBeforeWake = $operation->refresh()->version;
+            $publicKeyBeforeWake = $project->refresh()->public_deploy_key;
+            self::assertTrue($deployKeys->advance($operation, 1));
+            self::assertSame($versionBeforeWake, $operation->refresh()->version);
+            self::assertSame($publicKeyBeforeWake, $project->refresh()->public_deploy_key);
         }
     }
 
@@ -235,19 +354,30 @@ final class ControlOperationCrashInjectionTest extends ControlOperationTestCase
     {
         $paths = $this->app->make(ManagedProjectPath::class);
         $bundle = $paths->prepareBundle((string) $project->project_identifier, $operation->id, $attemptToken);
-        $process = $this->app->make(ProcessConfiguration::class);
-        $configuration = $this->app->make(ControlOperationConfiguration::class);
-        $arguments = [
-            $process->shellBinary,
-            $configuration->sshKeygenWrapper,
-            $configuration->sshKeygenBinary,
-            '-C',
-            'ai6:'.$operation->id.':'.$operation->request_hash,
-            '-f',
-            $bundle.'/id_ed25519',
-        ];
+        $arguments = $this->productionKeygenArguments($operation, $bundle.'/id_ed25519');
 
         return hash('sha256', json_encode($arguments, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
+    }
+
+    /**
+     * Invokes the real, private `DeployKeyProvisioner::keygenArguments()` production
+     * method through reflection instead of hand-copying its argument list. Binding to
+     * the actual production function means any future change to the launch-argument
+     * shape or the key-generation comment format fails this fixture instead of
+     * silently drifting from what the worker really executes.
+     *
+     * @return list<string>
+     */
+    private function productionKeygenArguments(ControlOperation $operation, string $privateKey): array
+    {
+        $provisioner = $this->app->make(DeployKeyProvisioner::class);
+        $method = new ReflectionMethod($provisioner, 'keygenArguments');
+        $method->setAccessible(true);
+
+        /** @var list<string> $arguments */
+        $arguments = $method->invoke($provisioner, $operation, $privateKey);
+
+        return $arguments;
     }
 
     private function writeBoundEffect(
@@ -260,7 +390,8 @@ final class ControlOperationCrashInjectionTest extends ControlOperationTestCase
         $directory = $active
             ? $paths->activeDirectory((string) $project->project_identifier)
             : $paths->prepareBundle((string) $project->project_identifier, $operation->id, $attemptToken);
-        $this->generateTestKeyPair($directory, 'ai6:'.$operation->id.':'.$operation->request_hash);
+        $comment = $this->productionKeygenArguments($operation, $directory.'/id_ed25519')[4];
+        $this->generateTestKeyPair($directory, $comment);
         $fingerprint = hash_file('sha256', $directory.'/id_ed25519.pub');
         self::assertIsString($fingerprint);
         file_put_contents($directory.'/intent.json', json_encode([

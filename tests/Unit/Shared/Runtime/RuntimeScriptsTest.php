@@ -36,6 +36,17 @@ final class RuntimeScriptsTest extends TestCase
         self::assertStringContainsString(': > "$lock_object"', $branch);
         self::assertStringContainsString('chown "$effect_lock_owner_uid:0" "$lock_object"', $branch);
         self::assertStringContainsString('chmod 0444 "$lock_object"', $branch);
+        self::assertStringContainsString('umask 0377', $branch);
+        self::assertLessThan(
+            strpos($branch, ': > "$lock_object"'),
+            strpos($branch, 'umask 0377'),
+            'A restrictive umask must be active before the lock object is created, closing the crash window before chmod 0444.',
+        );
+        self::assertLessThan(
+            strpos($branch, 'umask "$original_umask"'),
+            strpos($branch, 'chmod 0444 "$lock_object"'),
+            'The restrictive umask must remain active for the whole lock-object creation loop.',
+        );
         self::assertStringContainsString("stat -c '%u' -- \"\$lock_object\"", $branch);
         self::assertStringContainsString("stat -c '%a' -- \"\$lock_object\"", $branch);
         self::assertLessThan(strpos($branch, "else\n                lock_owner="), strpos($branch, 'chown "$effect_lock_owner_uid:0" "$lock_object"'));
@@ -73,7 +84,7 @@ final class RuntimeScriptsTest extends TestCase
         $branch = $this->branch($this->read('docker/role-process.sh'), 'worker');
 
         self::assertStringContainsString('worker_timeout="${AI6_WORKER_TIMEOUT:-60}"', $branch);
-        self::assertStringContainsString('queue_retry_after="${DB_QUEUE_RETRY_AFTER:-90}"', $branch);
+        self::assertStringContainsString('queue_retry_after="${DB_QUEUE_RETRY_AFTER:-360}"', $branch);
         self::assertStringContainsString('heartbeat_max_age="${AI6_HEARTBEAT_MAX_AGE:-75}"', $branch);
         self::assertStringContainsString("''|*[!0-9]*|0*)", $branch);
         self::assertStringContainsString('[ "${#worker_timeout}" -gt 18 ]', $branch);

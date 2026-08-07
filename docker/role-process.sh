@@ -25,7 +25,7 @@ printf '%s\n' "$boot_id" > "$expected_directory/boot-id"
 case "$role" in
     worker)
         worker_timeout="${AI6_WORKER_TIMEOUT:-60}"
-        queue_retry_after="${DB_QUEUE_RETRY_AFTER:-90}"
+        queue_retry_after="${DB_QUEUE_RETRY_AFTER:-360}"
         heartbeat_max_age="${AI6_HEARTBEAT_MAX_AGE:-75}"
 
         case "$worker_timeout" in

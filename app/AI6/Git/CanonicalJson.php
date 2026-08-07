@@ -76,6 +76,12 @@ final class CanonicalJson
         }
 
         if ($value instanceof CanonicalJsonObject) {
+            // RFC 8785 §3.2.3 sorts property names "formatted as arrays of UTF-16 code
+            // units ... treated as unsigned integers", NOT by Unicode code point. A
+            // surrogate pair's lead unit (e.g. U+10000 -> 0xD800) therefore sorts ahead
+            // of a BMP character with a larger code unit (e.g. U+FF61); the RFC's own
+            // §3.2.3 example places U+1F600 before U+FB33 for exactly this reason.
+            // Big-endian UTF-16 bytes compared bytewise reproduce that code-unit order.
             $members = $value->members;
             usort($members, static fn (CanonicalJsonMember $left, CanonicalJsonMember $right): int => strcmp(
                 mb_convert_encoding($left->key, 'UTF-16BE', 'UTF-8'),
@@ -108,7 +114,7 @@ final class CanonicalJson
     private function encodeString(string $value): string
     {
         try {
-            return json_encode($value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            return json_encode($value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_LINE_TERMINATORS);
         } catch (JsonException $exception) {
             throw new CanonicalRequestException('A request string could not be encoded.', previous: $exception);
         }

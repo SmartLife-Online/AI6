@@ -9,7 +9,7 @@ use Tests\Feature\Git\ControlOperationTestCase;
 
 final class ControlOperationAuthorizationTest extends ControlOperationTestCase
 {
-    public function test_provisioning_and_recovery_require_a_global_project_administrator(): void
+    public function test_provisioning_and_recovery_require_a_global_administrator_regardless_of_project_membership(): void
     {
         $projectAdministrator = $this->createUser();
         $viewer = $this->createUser();
@@ -22,13 +22,14 @@ final class ControlOperationAuthorizationTest extends ControlOperationTestCase
         $this->actingAs($projectAdministrator)
             ->post(route('projects.deploy-key.provision', $project), ['operation_id' => (string) Str::uuid()])
             ->assertForbidden();
-        $projectAdministrator->forceFill(['is_global_admin' => true])->save();
-        $this->actingAs($projectAdministrator->fresh())
+
+        $globalAdministrator = $this->createUser(['is_global_admin' => true]);
+        $this->actingAs($globalAdministrator)
             ->post(route('projects.deploy-key.provision', $project), ['operation_id' => (string) Str::uuid()])
             ->assertRedirect();
 
         self::assertSame(1, ControlOperation::query()->count());
-        self::assertTrue($projectAdministrator->fresh()->can('decideRecovery', $project));
+        self::assertTrue($globalAdministrator->fresh()->can('decideRecovery', $project));
     }
 
     public function test_no_controller_or_livewire_component_executes_git_or_processes_and_only_one_process_wrapper_exists(): void
@@ -40,7 +41,8 @@ final class ControlOperationAuthorizationTest extends ControlOperationTestCase
             $relative = str_replace('\\', '/', substr($path, strlen(base_path()) + 1));
             $isControllerOrComponent = str_ends_with($path, 'Controller.php')
                 || str_contains($relative, '/Livewire/')
-                || str_contains($relative, '/Components/');
+                || str_contains($relative, '/Components/')
+                || str_starts_with($relative, 'routes/');
             if ($isControllerOrComponent) {
                 foreach ([
                     'ControlProcessRunner',
@@ -52,6 +54,13 @@ final class ControlOperationAuthorizationTest extends ControlOperationTestCase
                     'startBlocked(',
                     'proc_open(',
                     'shell_exec(',
+                    'exec(',
+                    'system(',
+                    'passthru(',
+                    'popen(',
+                    'pcntl_exec',
+                    'dispatchSync',
+                    'ControlOperationExecutor',
                 ] as $forbidden) {
                     self::assertStringNotContainsString($forbidden, $source, $relative.' contains '.$forbidden);
                 }
@@ -59,7 +68,9 @@ final class ControlOperationAuthorizationTest extends ControlOperationTestCase
 
             if (str_contains($source, 'new Process(')
                 || str_contains($source, 'proc_open(')
-                || str_contains($source, 'shell_exec(')) {
+                || str_contains($source, 'shell_exec(')
+                || str_contains($source, 'Illuminate\\Support\\Facades\\Process')
+                || str_contains($source, 'Facades\\Process;')) {
                 $processStarters[] = $relative;
             }
         }
@@ -71,10 +82,12 @@ final class ControlOperationAuthorizationTest extends ControlOperationTestCase
     private function productionPhpFiles(): array
     {
         $files = [];
-        $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator(base_path('app')));
-        foreach ($iterator as $file) {
-            if ($file->isFile() && $file->getExtension() === 'php') {
-                $files[] = $file->getPathname();
+        foreach ([base_path('app'), base_path('routes')] as $root) {
+            $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root));
+            foreach ($iterator as $file) {
+                if ($file->isFile() && $file->getExtension() === 'php') {
+                    $files[] = $file->getPathname();
+                }
             }
         }
         sort($files);

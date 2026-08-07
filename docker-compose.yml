@@ -170,7 +170,7 @@
         "DB_DATABASE": "/var/lib/ai6/database/database.sqlite",
         "DB_FOREIGN_KEYS": "true",
         "DB_JOURNAL_MODE": "WAL",
-        "DB_QUEUE_RETRY_AFTER": "${DB_QUEUE_RETRY_AFTER:-90}",
+        "DB_QUEUE_RETRY_AFTER": "${DB_QUEUE_RETRY_AFTER:-360}",
         "DB_SYNCHRONOUS": "NORMAL",
         "LOG_CHANNEL": "stderr",
         "MAIL_EHLO_DOMAIN": "${MAIL_EHLO_DOMAIN:-}",
@@ -232,7 +232,7 @@
         "DB_DATABASE": "/var/lib/ai6/database/database.sqlite",
         "DB_FOREIGN_KEYS": "true",
         "DB_JOURNAL_MODE": "WAL",
-        "DB_QUEUE_RETRY_AFTER": "${DB_QUEUE_RETRY_AFTER:-90}",
+        "DB_QUEUE_RETRY_AFTER": "${DB_QUEUE_RETRY_AFTER:-360}",
         "DB_SYNCHRONOUS": "NORMAL",
         "LOG_CHANNEL": "stderr",
         "QUEUE_CONNECTION": "database"

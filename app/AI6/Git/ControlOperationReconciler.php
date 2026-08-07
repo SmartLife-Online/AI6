@@ -51,10 +51,10 @@ final readonly class ControlOperationReconciler
 
         $requeued = 0;
         foreach ($operations as $operation) {
-            $queued = DB::transaction(function () use ($operation, $threshold, $expiredProjectIds): bool {
+            $queued = DB::transaction(function () use ($operation, $threshold): bool {
                 $current = ControlOperation::query()->find($operation->id);
                 if (! $current instanceof ControlOperation
-                    || ! $this->eligible($current, $threshold, $expiredProjectIds->all())
+                    || ! $this->eligible($current, $threshold)
                     || $this->hasRunnableJob($current->id)) {
                     return false;
                 }
@@ -119,20 +119,33 @@ final readonly class ControlOperationReconciler
         return $released;
     }
 
-    /** @param list<int> $expiredProjectIds */
-    private function eligible(ControlOperation $operation, \DateTimeInterface $threshold, array $expiredProjectIds): bool
+    private function eligible(ControlOperation $operation, \DateTimeInterface $threshold): bool
     {
         if ($operation->state === ControlOperationState::QUEUED) {
             return $operation->updated_at !== null && $operation->updated_at <= $threshold;
         }
 
         if ($operation->state === ControlOperationState::RUNNING) {
-            return in_array($operation->project_id, $expiredProjectIds, true);
+            // Re-checked here, inside this operation's own transaction, instead of against the
+            // pre-loop snapshot: a heartbeat can renew the project's lease while earlier operations
+            // in this batch are still being processed, and that renewal must be honored immediately
+            // rather than causing a spurious requeue of a lease that is no longer expired.
+            return $this->projectLeaseExpired($operation->project_id);
         }
 
         return $operation->state === ControlOperationState::RECOVERY_REQUIRED
             && ($operation->recoveryDecision()->exists()
                 || ($operation->updated_at !== null && $operation->updated_at <= $threshold));
+    }
+
+    private function projectLeaseExpired(int $projectId): bool
+    {
+        $project = Project::query()->find($projectId);
+
+        return ! $project instanceof Project
+            || $project->operation_lock_operation_id === null
+            || $project->operation_lock_lease_expires_at === null
+            || $project->operation_lock_lease_expires_at->lte(Date::now());
     }
 
     private function hasRunnableJob(string $operationId): bool

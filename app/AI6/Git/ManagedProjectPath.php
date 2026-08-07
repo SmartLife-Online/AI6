@@ -59,6 +59,9 @@ final readonly class ManagedProjectPath
     public function removeOwnedAttempt(string $projectIdentifier, string $operationId, int $attempt): void
     {
         $this->assertIdentifiers($projectIdentifier, $operationId, $attempt);
+        if (is_link($this->configuration->managedRoot)) {
+            throw new RuntimeException('A managed operation directory is missing or unsafe.');
+        }
         $root = realpath($this->configuration->managedRoot);
         if (! is_string($root)) {
             return;

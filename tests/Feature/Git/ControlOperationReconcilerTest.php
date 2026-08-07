@@ -78,6 +78,42 @@ final class ControlOperationReconcilerTest extends ControlOperationTestCase
         self::assertSame(0, $this->app->make(ControlOperationReconciler::class)->reconcile());
     }
 
+    public function test_running_operation_lease_renewed_while_the_batch_is_processed_is_not_requeued(): void
+    {
+        $operation = $this->queuedOperation();
+        DB::table('jobs')->delete();
+        $project = $operation->project()->sole();
+        $project->forceFill([
+            'operation_lock_operation_id' => $operation->id,
+            'operation_lock_attempt_token' => 1,
+            'operation_lock_lease_expires_at' => now()->subSecond(),
+            'operation_lock_heartbeat_at' => now()->subMinute(),
+        ])->save();
+        $operation->forceFill([
+            'state' => ControlOperationState::RUNNING,
+            'current_attempt_token' => 1,
+        ])->save();
+
+        // Simulates a heartbeat renewing the project's lease in between the reconciler's initial
+        // candidate selection and the moment it actually re-checks this specific operation inside
+        // its own transaction. The renewal must be honored: without the per-operation re-check this
+        // would spuriously requeue an operation whose lease is, by the time it is processed, current.
+        $renewed = false;
+        ControlOperation::retrieved(function (ControlOperation $model) use (&$renewed, $operation, $project): void {
+            if (! $renewed && $model->getKey() === $operation->id) {
+                $renewed = true;
+                $project->forceFill(['operation_lock_lease_expires_at' => now()->addMinute()])->save();
+            }
+        });
+
+        try {
+            self::assertSame(0, $this->app->make(ControlOperationReconciler::class)->reconcile());
+            self::assertSame(0, DB::table('jobs')->count());
+        } finally {
+            ControlOperation::flushEventListeners();
+        }
+    }
+
     private function queuedOperation(): ControlOperation
     {
         $administrator = $this->createUser(['is_global_admin' => true]);

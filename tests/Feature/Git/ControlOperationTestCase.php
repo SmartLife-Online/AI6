@@ -6,6 +6,7 @@ use App\AI6\Auth\Models\User;
 use App\AI6\Git\ControlOperationConfiguration;
 use App\AI6\Git\ControlOperationExecutor;
 use App\AI6\Git\ControlOperationRecoveryProcessor;
+use App\AI6\Git\ControlOperationRuntimeIdentity;
 use App\AI6\Git\DeployKeyProvisioner;
 use App\AI6\Git\ManagedProjectPath;
 use App\AI6\Git\ProjectEffectLockName;
@@ -118,10 +119,15 @@ abstract class ControlOperationTestCase extends AuthFeatureTestCase
             ControlProcessRunner::class,
             new ControlProcessRunner($process, $this->app->make(Redactor::class), $effectLock),
         );
-        foreach ([DeployKeyProvisioner::class, ControlOperationRecoveryProcessor::class, ControlOperationExecutor::class] as $service) {
+        config(['ai6.runtime_role' => 'worker']);
+        foreach ([
+            DeployKeyProvisioner::class,
+            ControlOperationRecoveryProcessor::class,
+            ControlOperationExecutor::class,
+            ControlOperationRuntimeIdentity::class,
+        ] as $service) {
             $this->app->forgetInstance($service);
         }
-        config(['ai6.runtime_role' => 'worker']);
 
         return $root;
     }

@@ -86,6 +86,35 @@ final class ManagedProjectPathTest extends TestCase
         );
     }
 
+    public function test_cleanup_rejects_a_symlinked_managed_root(): void
+    {
+        if (DIRECTORY_SEPARATOR === '\\') {
+            self::markTestSkipped('This assertion requires POSIX symlink semantics.');
+        }
+
+        $link = $this->root.'-link';
+        if (! @symlink($this->root, $link)) {
+            self::markTestSkipped('This runtime cannot create a directory symlink.');
+        }
+
+        try {
+            $unsafe = new ManagedProjectPath(new ControlOperationConfiguration(
+                $link,
+                $link.DIRECTORY_SEPARATOR.'deploy-keys',
+                '/usr/bin/ssh-keygen',
+                '/wrapper',
+                120,
+                30,
+                30,
+                3,
+            ));
+            $this->expectException(RuntimeException::class);
+            $unsafe->removeOwnedAttempt(str_repeat('a', 32), '123e4567-e89b-42d3-a456-426614174000', 1);
+        } finally {
+            @unlink($link);
+        }
+    }
+
     public function test_cleanup_rejects_a_symlinked_operation_parent_without_touching_its_target(): void
     {
         if (DIRECTORY_SEPARATOR === '\\') {

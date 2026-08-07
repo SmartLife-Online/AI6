@@ -32,6 +32,13 @@ case "$role" in
         chown ai6:ai6 "$managed_root/.control-staging" "$managed_root/deploy-keys"
         chmod 0700 "$managed_root/.control-staging" "$managed_root/deploy-keys"
         lock_index=1
+        original_umask="$(umask)"
+        # A crash between object creation and the chmod below must never leave a
+        # world/group-writable lock object behind: a restrictive umask makes the
+        # object non-writable to group/other from the instant it is created, so
+        # the later chmod 0444 only tightens an already-safe mode instead of being
+        # the sole guard against a transient writable window.
+        umask 0377
         while [ "$lock_index" -le "$effect_lock_count" ]; do
             lock_object="$effect_lock_directory/lock-$(printf '%04d' "$lock_index")"
             if [ -L "$lock_object" ] || { [ -e "$lock_object" ] && [ ! -f "$lock_object" ]; }; then
@@ -52,6 +59,7 @@ case "$role" in
             fi
             lock_index=$((lock_index + 1))
         done
+        umask "$original_umask"
         touch /var/lib/ai6/database/database.sqlite
         chown -R ai6:ai6 /var/lib/ai6/database /opt/ai6/storage
         chmod 0770 /var/lib/ai6/database /opt/ai6/storage

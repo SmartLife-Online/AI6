@@ -7,6 +7,7 @@ use App\AI6\Git\CanonicalRequestException;
 use App\AI6\Git\ControlOperationHasher;
 use App\AI6\Git\ControlOperationType;
 use PHPUnit\Framework\TestCase;
+use stdClass;
 
 final class ControlOperationHashTest extends TestCase
 {
@@ -123,6 +124,51 @@ final class ControlOperationHashTest extends TestCase
         self::assertSame(
             '{"emoji":"😀","music":"𝄞"}',
             (new CanonicalJson)->normalizeAndEncode(['music' => '𝄞', 'emoji' => '😀']),
+        );
+    }
+
+    public function test_line_terminators_and_control_characters_are_encoded_per_rfc_8785(): void
+    {
+        // RFC 8785 §3.2.2.2 does not require U+2028/U+2029 to be escaped, so they
+        // must appear as literal UTF-8 bytes, while control characters below
+        // U+0020 remain \uXXXX-escaped (lowercase hex).
+        $value = "\u{2028}\u{2029}\u{0000}\u{001f}";
+
+        self::assertSame(
+            "\"\u{2028}\u{2029}\\u0000\\u001f\"",
+            (new CanonicalJson)->normalizeAndEncode($value),
+        );
+    }
+
+    public function test_named_and_numeric_control_character_escapes_are_encoded_per_rfc_8785(): void
+    {
+        // Distinct from the line-terminator vector above: this covers the named
+        // short escapes (backspace, form feed, newline, CR, tab) plus the
+        // numeric control-character escape range (U+0001 through U+001F).
+        $value = "\u{0008}\u{000C}\u{000A}\u{000D}\u{0009}\u{0001}\u{001f}";
+
+        self::assertSame(
+            '"\\b\\f\\n\\r\\t\\u0001\\u001f"',
+            (new CanonicalJson)->normalizeAndEncode($value),
+        );
+    }
+
+    public function test_object_keys_outside_the_bmp_sort_by_utf16_code_unit_not_code_point(): void
+    {
+        // RFC 8785 §3.2.3 sorts property names as arrays of UTF-16 code units, so
+        // U+10000 (lead surrogate 0xD800) must sort before U+FF61 (0xFF61) even
+        // though its code point (65536) is larger. The RFC's own §3.2.3 example
+        // orders U+1F600 before U+FB33 for the same reason; a code-point (UTF-32)
+        // comparison would wrongly place the U+FF61 key first.
+        $object = new stdClass;
+        $keyU10000 = "k\u{10000}";
+        $keyUff61 = "k\u{FF61}";
+        $object->$keyU10000 = 'b';
+        $object->$keyUff61 = 'a';
+
+        self::assertSame(
+            '{"k𐀀":"b","k｡":"a"}',
+            (new CanonicalJson)->normalizeAndEncode($object),
         );
     }
 }
