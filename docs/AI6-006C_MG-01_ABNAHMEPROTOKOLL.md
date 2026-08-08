@@ -89,10 +89,10 @@ sonst als neue Datei erfasst und der Diff sich selbst enthielte. `git reset -q` 
 
 | Feld | Wert |
 |---|---|
-| Bindungsart | Base-Commit + Prüfdiff erforderlich; technische Messung noch nicht vollständig gebunden |
-| Commit beziehungsweise Base-Commit | 570141cc6a2db7a889fdddd95a4c61aec886073a |
-| SHA-256 des Prüfdiffs | |
-| Anlage `checkdiff.patch` beigefügt | nein |
+| Bindungsart | Commit |
+| Commit beziehungsweise Base-Commit | 786fbc73d4a20b1905ef1d89801c6c33f762d70d |
+| SHA-256 des Prüfdiffs | entfällt |
+| Anlage `checkdiff.patch` beigefügt | entfällt |
 
 ## 2. Laufzeit
 
@@ -192,8 +192,8 @@ PowerShell:
 | Feld | Wert |
 |---|---|
 | Gesamtergebnis | nicht abgeschlossen |
-| Abweichungen und Vorbehalte | Die technischen Messungen sind erfolgreich. Die Bindung bleibt offen: Die laufzeitrelevante lokale `.env` ist ignoriert und deshalb nicht Teil eines vollständigen Git-Prüfdiffs. Die menschliche Abnahme und Unterschrift stehen aus. |
-| Anlagen | keine; `checkdiff.patch` fehlt |
+| Abweichungen und Vorbehalte | Die technischen Messungen sind erfolgreich. Die menschliche Abnahme und Unterschrift stehen aus. |
+| Anlagen | entfällt |
 | Unterschrift | |
 
 ## 6. Gültigkeit

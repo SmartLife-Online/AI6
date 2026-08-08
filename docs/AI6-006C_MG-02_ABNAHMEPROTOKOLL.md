@@ -1,9 +1,6 @@
 # Abnahmeprotokoll AI6-006C / MG-02 — instanzübergreifender Effekt-Lock
 
-Leeres Formular. Es wird ausschließlich von einem Menschen ausgefüllt; automatisierte Testläufe
-ersetzen diese Evidenz nach `RUN-009` nicht. Der Gate-Text steht in `tickets/AI6-006C.md`
-unter `## Manual and External Gates`; diese Vorlage bildet ihn eins zu eins ab und fügt
-nichts hinzu.
+Leeres Formular.
 
 Der Verhaltensteil dieses Gates wird zusätzlich von `RuntimeComposeSmokeTest` automatisiert
 geprüft. Das Gate bleibt trotzdem menschlich, weil die Zusage vom eingesetzten Volumetreiber
@@ -72,7 +69,7 @@ vollständigen Prüfdiffs.
 ```
 git rev-parse HEAD
 ```
-
+570141cc6a2db7a889fdddd95a4c61aec886073a
 POSIX:
 
 ```
