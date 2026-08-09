@@ -20,7 +20,6 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
-use ReflectionMethod;
 use RuntimeException;
 use Throwable;
 
@@ -131,19 +130,16 @@ final class ControlOperationTest extends ControlOperationTestCase
         $rsaHash = $hasher->hash(1, str_repeat('a', 32), ControlOperationType::DEPLOY_KEY_PROVISION, '1', $snapshot, null, ['algorithm' => 'rsa']);
         self::assertNotSame($edHash, $rsaHash, 'Different type-specific parameters must not collapse into the same request hash.');
 
-        // Production currently declares exactly one ControlOperationType case, so a second
-        // real type cannot be constructed to prove cross-type distinctness end-to-end via
-        // hash(). This instead reuses the hasher's own field-composition primitive (via
-        // reflection on the production method, not a re-implementation) to show that the
-        // operation-type value is bound into the payload the same way every other field
-        // is, so a future second type is cryptographically distinguished by construction.
-        $field = new ReflectionMethod(ControlOperationHasher::class, 'field');
-        $field->setAccessible(true);
-        $domain = "AI6-CONTROL-OPERATION-V1\0";
-        $prefix = $domain.$field->invoke($hasher, '1').$field->invoke($hasher, str_repeat('a', 32));
-        $deployKeyProvisionPayload = $prefix.$field->invoke($hasher, ControlOperationType::DEPLOY_KEY_PROVISION->value);
-        $otherTypePayload = $prefix.$field->invoke($hasher, 'other_operation_type');
-        self::assertNotSame(hash('sha256', $deployKeyProvisionPayload), hash('sha256', $otherTypePayload));
+        $managedCloneHash = $hasher->hash(
+            1,
+            str_repeat('a', 32),
+            ControlOperationType::MANAGED_CLONE,
+            '1',
+            $snapshot,
+            null,
+            ['control_ref' => 'refs/heads/main', 'expected_binding_version' => 0],
+        );
+        self::assertNotSame($edHash, $managedCloneHash);
     }
 
     public function test_operation_schema_contains_authoritative_request_attempt_and_recovery_bindings(): void
@@ -151,7 +147,7 @@ final class ControlOperationTest extends ControlOperationTestCase
         foreach ([
             'operation_type', 'authorization_snapshot', 'authorization_snapshot_jcs', 'expected_control_commit',
             'operation_parameters_jcs', 'request_hash', 'phase', 'state', 'attempts', 'current_attempt_token',
-            'effect_attempt_token', 'lease_boot_id', 'launch_argument_hash', 'process_id', 'process_started_at', 'finding_hash',
+            'effect_attempt_token', 'target_control_oid', 'lease_boot_id', 'launch_argument_hash', 'process_id', 'process_started_at', 'finding_hash',
             'recovery_attempt_token', 'recovery_version', 'recovery_effect_hash', 'version',
         ] as $column) {
             self::assertTrue(Schema::hasColumn('control_operations', $column), $column);

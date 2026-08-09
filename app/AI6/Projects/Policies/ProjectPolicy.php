@@ -52,6 +52,11 @@ final class ProjectPolicy
         return $user->is_active && $user->is_global_admin;
     }
 
+    public function synchronizeManagedClone(User $user, Project $project): bool
+    {
+        return $user->is_active && $user->is_global_admin;
+    }
+
     public function decide(ProjectAction $action, User $user, Project $project): bool
     {
         if (! $user->is_active) {

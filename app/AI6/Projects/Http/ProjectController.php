@@ -6,6 +6,7 @@ use App\AI6\Auth\Models\User;
 use App\AI6\Projects\Actions\RegisterProject;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\ProjectRegistrationRejected;
+use App\AI6\Projects\ProjectSynchronizationStatus;
 use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
@@ -62,7 +63,7 @@ final class ProjectController
         return redirect()->route('projects.show', $project);
     }
 
-    public function show(Project $project): View
+    public function show(Project $project, ProjectSynchronizationStatus $synchronizationStatus): View
     {
         return view('projects.show', [
             'project' => $project,
@@ -71,6 +72,9 @@ final class ProjectController
                 ->latest('created_at')
                 ->first(),
             'provisionOperationId' => (string) Str::uuid(),
+            'cloneOperationId' => (string) Str::uuid(),
+            'fetchOperationId' => (string) Str::uuid(),
+            ...$synchronizationStatus->for($project),
         ]);
     }
 

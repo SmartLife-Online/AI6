@@ -17,6 +17,10 @@
         <dd>{{ $operation->phase->value }}</dd>
         <dt>Versuche</dt>
         <dd>{{ $operation->attempts }}</dd>
+        @if ($operation->target_control_oid !== null)
+            <dt>Ziel-Control-OID</dt>
+            <dd>{{ $operation->target_control_oid }}</dd>
+        @endif
     </dl>
 
     @if ($operation->result !== null)

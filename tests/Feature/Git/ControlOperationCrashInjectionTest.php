@@ -28,6 +28,28 @@ use RuntimeException;
 
 final class ControlOperationCrashInjectionTest extends ControlOperationTestCase
 {
+    public function test_operation_specific_phase_sets_exhaust_the_declared_phase_enum(): void
+    {
+        $covered = [
+            ...self::deployKeyPhases(),
+            ControlOperationPhase::EFFECT_STAGED,
+            ControlOperationPhase::OUTCOME_PUBLISHED,
+            ControlOperationPhase::BINDING_FINALIZED,
+        ];
+        $expected = array_map(
+            static fn (ControlOperationPhase $phase): string => $phase->value,
+            ControlOperationPhase::cases(),
+        );
+        $actual = array_map(
+            static fn (ControlOperationPhase $phase): string => $phase->value,
+            $covered,
+        );
+        sort($expected);
+        sort($actual);
+
+        self::assertSame($expected, $actual);
+    }
+
     /**
      * Partial, runtime-independent evidence for TC-07: durable nonterminal
      * phases are rediscovered and requeued. The terminal end-state and
@@ -69,7 +91,7 @@ final class ControlOperationCrashInjectionTest extends ControlOperationTestCase
     /** @return iterable<string, array{ControlOperationPhase}> */
     public static function durablePhaseProvider(): iterable
     {
-        foreach (ControlOperationPhase::cases() as $phase) {
+        foreach (self::deployKeyPhases() as $phase) {
             if (in_array($phase, [
                 ControlOperationPhase::QUEUED, // Queue absence is covered by the queued-operation reconciler tests.
                 ControlOperationPhase::CLAIMED, // No durable external-effect boundary has been crossed yet.
@@ -248,9 +270,25 @@ final class ControlOperationCrashInjectionTest extends ControlOperationTestCase
     /** @return iterable<string, array{ControlOperationPhase}> */
     public static function allPhaseProvider(): iterable
     {
-        foreach (ControlOperationPhase::cases() as $phase) {
+        foreach (self::deployKeyPhases() as $phase) {
             yield $phase->value => [$phase];
         }
+    }
+
+    /** @return list<ControlOperationPhase> */
+    private static function deployKeyPhases(): array
+    {
+        return [
+            ControlOperationPhase::QUEUED,
+            ControlOperationPhase::CLAIMED,
+            ControlOperationPhase::LAUNCH_INTENT,
+            ControlOperationPhase::PROCESS_STARTED,
+            ControlOperationPhase::KEY_GENERATED,
+            ControlOperationPhase::KEY_ACTIVATED,
+            ControlOperationPhase::PROVISIONING_FINALIZED,
+            ControlOperationPhase::RECOVERY_REQUIRED,
+            ControlOperationPhase::ATTEMPT_COMPLETED,
+        ];
     }
 
     private function placeAtPhase(ControlOperation $operation, Project $project, ControlOperationPhase $phase): void

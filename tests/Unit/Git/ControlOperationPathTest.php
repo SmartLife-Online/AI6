@@ -23,6 +23,10 @@ final class ControlOperationPathTest extends TestCase
             30,
             30,
             3,
+            $root.DIRECTORY_SEPARATOR.'known_hosts',
+            ['refs/heads/main'],
+            300,
+            8,
         ));
 
         foreach ([

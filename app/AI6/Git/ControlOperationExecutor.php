@@ -20,6 +20,7 @@ final readonly class ControlOperationExecutor
     public function __construct(
         private ProjectOperationLease $lease,
         private DeployKeyProvisioner $deployKeys,
+        private ManagedCloneSynchronizer $managedClones,
         private ControlOperationConfiguration $configuration,
         private Redactor $redactor,
         private ControlOperationRecoveryProcessor $recovery,
@@ -106,7 +107,10 @@ final readonly class ControlOperationExecutor
                 if (! $this->lease->heartbeat($operation->id, $operation->project_id, $attemptToken)) {
                     throw new RuntimeException('The control operation lost its lease heartbeat.');
                 }
-                if ($this->deployKeys->advance($operation, $attemptToken)) {
+                $completed = $operation->operation_type === ControlOperationType::DEPLOY_KEY_PROVISION
+                    ? $this->deployKeys->advance($operation, $attemptToken)
+                    : $this->managedClones->advance($operation, $attemptToken);
+                if ($completed) {
                     return;
                 }
                 $operation->refresh();
@@ -135,7 +139,9 @@ final readonly class ControlOperationExecutor
             ? $operation->last_error
             : $this->recoveryDeviation($operation, $exception);
         try {
-            $finding = $this->deployKeys->recoveryFinding($operation, $attemptToken, $deviation);
+            $finding = $operation->operation_type === ControlOperationType::DEPLOY_KEY_PROVISION
+                ? $this->deployKeys->recoveryFinding($operation, $attemptToken, $deviation)
+                : $this->managedClones->recoveryFinding($operation, $attemptToken, $deviation);
         } catch (Throwable $inspectionFailure) {
             $this->recordRecoveryInspectionFailure($operation, $attemptToken, $inspectionFailure);
 
@@ -273,7 +279,9 @@ final readonly class ControlOperationExecutor
         $safe = $this->persistedFailureSummary($operation, $exception);
         if ($operation->attempts >= $this->configuration->maxAttempts) {
             try {
-                $active = $this->deployKeys->activeIntentUnderLock($operation, $attemptToken);
+                $active = $operation->operation_type === ControlOperationType::DEPLOY_KEY_PROVISION
+                    ? $this->deployKeys->activeIntentUnderLock($operation, $attemptToken)
+                    : $this->managedClones->activeIntentUnderLock($operation, $attemptToken);
             } catch (Throwable $inspectionFailure) {
                 $this->requireRecovery($operation, $attemptToken, $inspectionFailure);
 
@@ -282,14 +290,18 @@ final readonly class ControlOperationExecutor
 
             if ($active !== null) {
                 $this->requireRecovery($operation, $attemptToken, new ControlOperationRecoveryRequired(
-                    'Retry exhaustion left an active deploy-key effect that requires a human decision.',
+                    'Retry exhaustion left an active external effect that requires a human decision.',
                 ));
 
                 return;
             }
 
             try {
-                $this->deployKeys->cleanupFailedAttempt($operation, $attemptToken);
+                if ($operation->operation_type === ControlOperationType::DEPLOY_KEY_PROVISION) {
+                    $this->deployKeys->cleanupFailedAttempt($operation, $attemptToken);
+                } else {
+                    $this->managedClones->cleanupFailedAttempt($operation, $attemptToken);
+                }
             } catch (Throwable $cleanupFailure) {
                 $this->requireRecovery($operation, $attemptToken, $cleanupFailure);
 
@@ -297,17 +309,19 @@ final readonly class ControlOperationExecutor
             }
 
             DB::transaction(function () use ($operation, $attemptToken, $safe): void {
-                $projectUpdated = Project::query()
-                    ->whereKey($operation->project_id)
-                    ->where('provisioning_operation_id', $operation->id)
-                    ->where('operation_lock_operation_id', $operation->id)
-                    ->where('operation_lock_attempt_token', $attemptToken)
-                    ->update([
-                        'provisioning_status' => ProjectProvisioningStatus::PROVISIONING_FAILED,
-                        'provisioning_operation_id' => null,
-                    ]);
-                if ($projectUpdated !== 1) {
-                    throw new RuntimeException('The failed operation lost its project compare-and-swap binding.');
+                if ($operation->operation_type === ControlOperationType::DEPLOY_KEY_PROVISION) {
+                    $projectUpdated = Project::query()
+                        ->whereKey($operation->project_id)
+                        ->where('provisioning_operation_id', $operation->id)
+                        ->where('operation_lock_operation_id', $operation->id)
+                        ->where('operation_lock_attempt_token', $attemptToken)
+                        ->update([
+                            'provisioning_status' => ProjectProvisioningStatus::PROVISIONING_FAILED,
+                            'provisioning_operation_id' => null,
+                        ]);
+                    if ($projectUpdated !== 1) {
+                        throw new RuntimeException('The failed operation lost its project compare-and-swap binding.');
+                    }
                 }
                 $binding = hash('sha256', "AI6-CONTROL-RESULT-V1\0".$operation->id.$operation->request_hash.'failed');
                 $result = ControlOperationResult::query()->firstOrCreate(
@@ -380,6 +394,7 @@ final readonly class ControlOperationExecutor
 
         return match (true) {
             $exception->conflict === 'lease_lost' => 'Die Operation hat ihre Projektsperre verloren und wird erneut versucht.',
+            $exception->conflict === 'fencing_conflict' => 'Der Publish wurde durch einen neueren Operationsversuch verworfen.',
             str_starts_with($exception->conflict, 'effect_lock_') => 'Der Effekt-Lock ist für diese Operation derzeit nicht sicher verfügbar; sie wird erneut versucht.',
             default => $this->safeMessage($operation, $exception),
         };
@@ -404,6 +419,18 @@ final readonly class ControlOperationExecutor
             'Retry exhaustion left an active deploy-key effect that requires a human decision.' => 'Nach ausgeschöpften Wiederholungen verbleibt ein aktiver Deploy-Key-Außenstand, der eine menschliche Entscheidung erfordert.',
             'The active deploy key still differs from the operation intent.' => 'Der aktive Deploy-Key weicht weiterhin vom persistierten Operationsintent ab.',
             'The external deploy-key state changed after the recovery finding.' => 'Der externe Deploy-Key-Außenstand änderte sich nach dem Recoverybefund.',
+            'The managed Git launch has no durable effect intent.' => 'Der Managed-Git-Start besitzt keinen dauerhaft gebundenen Effekt-Intent.',
+            'The persisted managed Git launch arguments no longer match this operation.' => 'Die persistierten Managed-Git-Startargumente stimmen nicht mehr mit der Operation überein.',
+            'The staged managed-clone effect has no bound attempt token.' => 'Der vorbereitete Managed-Clone-Effekt besitzt keinen gebundenen Versuchs-Token.',
+            'The control-binding version changed while this operation still owned the project lease.' => 'Die Control-Bindungsversion änderte sich, obwohl die Operation noch die Projektsperre hielt.',
+            'The managed repository contains a ref outside the configured allowlist.' => 'Das verwaltete Repository enthält einen Ref außerhalb der konfigurierten Allowlist.',
+            'The managed repository and active control binding are inconsistent.' => 'Das verwaltete Repository und die aktive Control-Bindung sind inkonsistent.',
+            'The managed recovery binding compare-and-swap exhausted its configured budget.' => 'Der Recovery-Abgleich der Control-Bindung hat sein konfiguriertes Wiederholungsbudget ausgeschöpft.',
+            'An inconsistent published managed-clone effect cannot be abandoned.' => 'Ein inkonsistenter veröffentlichter Managed-Clone-Effekt kann nicht sicher abgebrochen werden.',
+            'The published managed-clone ref differs from the persisted intent.' => 'Der veröffentlichte Managed-Clone-Ref weicht vom persistierten Intent ab.',
+            'The managed-clone operation has no valid persisted target OID.' => 'Die Managed-Clone-Operation besitzt keine gültige persistierte Ziel-OID.',
+            'The managed-clone effect changed after the recovery finding.' => 'Der Managed-Clone-Effekt änderte sich nach dem Recoverybefund.',
+            'The managed Git ref could not be resolved safely.' => 'Der verwaltete Git-Ref konnte nicht sicher aufgelöst werden.',
             default => 'Die sichere Reconciliation konnte Außenstand und persistierten Intent nicht konsistent zusammenführen.',
         };
     }

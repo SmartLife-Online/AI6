@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_006c(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_006d(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -127,6 +127,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Checks/.gitkeep',
             'app/AI6/Git/.gitkeep',
             'app/AI6/Git/Actions/QueueDeployKeyProvisioning.php',
+            'app/AI6/Git/Actions/QueueManagedCloneOperation.php',
             'app/AI6/Git/Actions/RecordRecoveryDecision.php',
             'app/AI6/Git/CanonicalJson.php',
             'app/AI6/Git/CanonicalRequestException.php',
@@ -157,6 +158,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Git/Http/ControlOperationController.php',
             'app/AI6/Git/Jobs/ExecuteControlOperation.php',
             'app/AI6/Git/KnownHostsVerifier.php',
+            'app/AI6/Git/ManagedCloneSynchronizer.php',
             'app/AI6/Git/ManagedProjectPath.php',
             'app/AI6/Git/Models/ControlOperation.php',
             'app/AI6/Git/Models/ControlOperationRecoveryDecision.php',
@@ -179,6 +181,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Projects/ProjectProvisioningStatus.php',
             'app/AI6/Projects/ProjectRegistrationRejected.php',
             'app/AI6/Projects/ProjectRole.php',
+            'app/AI6/Projects/ProjectSynchronizationStatus.php',
             'app/AI6/Prompts/.gitkeep',
             'app/AI6/Reviews/.gitkeep',
             'app/AI6/Runs/.gitkeep',
@@ -323,6 +326,10 @@ final class ScaffoldStructureTest extends TestCase
             'AI6_HTTP_TRUSTED_PROXIES=',
             'AI6_HTTP_SESSION_SAME_SITE=lax',
             'AI6_WORKER_HEARTBEAT_MAX_AGE=75',
+            'AI6_CONTROL_OPERATION_KNOWN_HOSTS_FILE=/var/lib/ai6/managed/known_hosts',
+            'AI6_CONTROL_OPERATION_MANAGED_REF_ALLOWLIST=refs/heads/main',
+            'AI6_CONTROL_OPERATION_STALE_SECONDS=300',
+            'AI6_CONTROL_OPERATION_RECONCILIATION_BUDGET=8',
         ] as $default) {
             self::assertContains($default, $lines);
         }
@@ -487,7 +494,7 @@ final class ScaffoldStructureTest extends TestCase
         }
     }
 
-    public function test_migrations_match_the_approved_state_through_ai6_006c(): void
+    public function test_migrations_match_the_approved_state_through_ai6_006d(): void
     {
         $migrations = glob($this->path('database/migrations/*.php'));
         self::assertIsArray($migrations);
@@ -510,6 +517,7 @@ final class ScaffoldStructureTest extends TestCase
             '2026_08_03_000008_create_authentication_audit_entries_table.php',
             '2026_08_05_000000_add_registration_metadata_to_projects_table.php',
             '2026_08_06_000000_create_control_operations_table.php',
+            '2026_08_09_000000_add_clone_fetch_control_operation_contract.php',
         ], $migrations);
     }
 

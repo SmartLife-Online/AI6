@@ -10,11 +10,30 @@ final class GitRemotePolicy
     ) {}
 
     /** @throws GitRemoteRejected */
-    public function validate(string $remote, string $ref, string $knownHostsPath): ValidatedGitRemote
-    {
+    public function validate(
+        string $remote,
+        string $ref,
+        string $knownHostsPath,
+        ?string $expectedFingerprint = null,
+    ): ValidatedGitRemote {
         $validated = $this->validateRemoteAndRef($remote, $ref);
 
         $pins = $this->configuration->pinnedHostKeyFingerprints[$validated->host] ?? [];
+        if ($expectedFingerprint !== null) {
+            $candidate = HostKeyFingerprint::parse($expectedFingerprint)['fingerprint'];
+            if (! $candidate instanceof HostKeyFingerprint) {
+                throw new GitRemoteRejected('format_error');
+            }
+            $canonical = $candidate->canonical();
+            $configured = false;
+            foreach ($pins as $pin) {
+                $configured = hash_equals($pin, $canonical) || $configured;
+            }
+            if (! $configured) {
+                throw new GitRemoteRejected('digest_mismatch');
+            }
+            $pins = [$canonical];
+        }
         if ($pins === [] || ! $this->knownHosts->containsPinnedHost($knownHostsPath, $validated->host, $pins)) {
             throw new GitRemoteRejected('host_key_not_pinned');
         }

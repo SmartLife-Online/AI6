@@ -55,6 +55,7 @@ final readonly class DeployKeyProvisioner
             ControlOperationPhase::ATTEMPT_COMPLETED => true,
             ControlOperationPhase::RECOVERY_REQUIRED => throw new ControlOperationRecoveryRequired('The operation requires a human recovery decision.'),
             ControlOperationPhase::QUEUED => throw new RuntimeException('The operation was not claimed before execution.'),
+            default => throw new RuntimeException('The deploy-key operation has an incompatible phase.'),
         };
     }
 

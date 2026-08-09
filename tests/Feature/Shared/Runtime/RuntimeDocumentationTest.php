@@ -47,6 +47,12 @@ final class RuntimeDocumentationTest extends TestCase
             '`abandon_operation`',
             '`AI6-006C/MG-01`',
             '`AI6-006C/MG-02`',
+            '`AI6-006D/MG-01`',
+            '`AI6_CONTROL_OPERATION_MANAGED_REF_ALLOWLIST`',
+            '`AI6_CONTROL_OPERATION_STALE_SECONDS`',
+            '`AI6_CONTROL_OPERATION_RECONCILIATION_BUDGET`',
+            '`target_control_oid`',
+            'ausschließlich Remotes im SHA-256-Objektformat',
             'strikt größer als der Worker-Timeout',
             'natives `ext-intl`',
             'storage/app/ai6-local.sqlite',
@@ -79,6 +85,10 @@ final class RuntimeDocumentationTest extends TestCase
             'AI6_CONTROL_OPERATION_HEARTBEAT_SECONDS',
             'AI6_CONTROL_OPERATION_RECONCILER_SECONDS',
             'AI6_CONTROL_OPERATION_MAX_ATTEMPTS',
+            'AI6_CONTROL_OPERATION_KNOWN_HOSTS_FILE',
+            'AI6_CONTROL_OPERATION_MANAGED_REF_ALLOWLIST',
+            'AI6_CONTROL_OPERATION_STALE_SECONDS',
+            'AI6_CONTROL_OPERATION_RECONCILIATION_BUDGET',
             'AI6_SSH_KEYGEN_BINARY',
             'ai6_managed',
         ] as $required) {
@@ -90,9 +100,18 @@ final class RuntimeDocumentationTest extends TestCase
             $this->serviceRow($readme, 'scheduler'),
         );
 
-        foreach (['Claim', 'Publish', 'key_generated', 'key_activated', 'provisioning_finalized', 'attempt_completed'] as $phase) {
+        foreach (['Claim', 'Publish', 'key_generated', 'key_activated', 'provisioning_finalized', 'effect_staged', 'outcome_published', 'binding_finalized', 'attempt_completed'] as $phase) {
             self::assertStringContainsString($phase, $readme);
         }
+
+        self::assertStringNotContainsString(
+            'AI6_CONTROL_OPERATION_KNOWN_HOSTS_FILE',
+            $this->serviceRow($readme, 'app'),
+        );
+        self::assertStringContainsString(
+            'AI6_CONTROL_OPERATION_HEARTBEAT_SECONDS',
+            $this->serviceRow($readme, 'app'),
+        );
     }
 
     private function serviceRow(string $readme, string $service): string

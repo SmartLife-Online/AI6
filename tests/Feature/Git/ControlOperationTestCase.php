@@ -100,6 +100,10 @@ abstract class ControlOperationTestCase extends AuthFeatureTestCase
             1,
             1,
             3,
+            $root.'/known_hosts',
+            ['refs/heads/main'],
+            300,
+            8,
         );
         $mapping = new ProjectEffectLockName($process);
         for ($index = 1; $index <= 10000; $index++) {

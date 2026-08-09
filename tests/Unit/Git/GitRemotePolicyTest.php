@@ -89,6 +89,44 @@ final class GitRemotePolicyTest extends TestCase
         $this->policy()->validate('git@git.example.test:acme/project.git', 'refs/heads/main', $this->knownHosts);
     }
 
+    public function test_execution_is_bound_to_the_projects_exact_registered_fingerprint(): void
+    {
+        $other = 'SHA256:'.rtrim(base64_encode(hash('sha256', random_bytes(48), true)), '=');
+        $policy = new GitRemotePolicy(new GitConfiguration(
+            'git',
+            '/usr/bin/ssh',
+            '/usr/local/bin:/usr/bin:/bin',
+            __FILE__,
+            dirname(__DIR__, 3),
+            dirname(__DIR__, 3),
+            __FILE__,
+            dirname(__DIR__, 3),
+            ['git.example.test'],
+            ['acme/project.git'],
+            ['refs/heads/*'],
+            ['git.example.test' => [$this->fingerprint, $other]],
+        ), new KnownHostsVerifier);
+
+        self::assertSame('git.example.test', $policy->validate(
+            'git@git.example.test:acme/project.git',
+            'refs/heads/main',
+            $this->knownHosts,
+            $this->fingerprint,
+        )->host);
+
+        try {
+            $policy->validate(
+                'git@git.example.test:acme/project.git',
+                'refs/heads/main',
+                $this->knownHosts,
+                $other,
+            );
+            self::fail('Execution accepted a known-host key that differed from the project binding.');
+        } catch (GitRemoteRejected $exception) {
+            self::assertSame('host_key_not_pinned', $exception->reason);
+        }
+    }
+
     public function test_registration_validates_the_same_remote_contract_against_digest_bytes(): void
     {
         $validated = $this->policy()->validateForRegistration(

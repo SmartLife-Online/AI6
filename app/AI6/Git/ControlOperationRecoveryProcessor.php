@@ -12,6 +12,7 @@ final readonly class ControlOperationRecoveryProcessor
 {
     public function __construct(
         private DeployKeyProvisioner $deployKeys,
+        private ManagedCloneSynchronizer $managedClones,
     ) {}
 
     public function apply(ControlOperation $operation): void
@@ -29,9 +30,12 @@ final readonly class ControlOperationRecoveryProcessor
         }
 
         try {
+            $handler = $operation->operation_type === ControlOperationType::DEPLOY_KEY_PROVISION
+                ? $this->deployKeys
+                : $this->managedClones;
             match ($decision->decision) {
-                RecoveryDecisionType::RETRY_RECONCILIATION => $this->deployKeys->retryRecovery($operation, $decision),
-                RecoveryDecisionType::ADOPT_EXTERNAL_STATE => $this->deployKeys->adoptExternalState($operation, $decision),
+                RecoveryDecisionType::RETRY_RECONCILIATION => $handler->retryRecovery($operation, $decision),
+                RecoveryDecisionType::ADOPT_EXTERNAL_STATE => $handler->adoptExternalState($operation, $decision),
                 RecoveryDecisionType::ABANDON_OPERATION => $this->abandon($operation, $decision),
             };
         } catch (ControlOperationRetryableConflict $exception) {
@@ -49,6 +53,12 @@ final readonly class ControlOperationRecoveryProcessor
             throw new RuntimeException('The abandonment decision is missing its required evidence.');
         }
 
-        $this->deployKeys->abandon($operation, $decision);
+        if ($operation->operation_type === ControlOperationType::DEPLOY_KEY_PROVISION) {
+            $this->deployKeys->abandon($operation, $decision);
+
+            return;
+        }
+
+        $this->managedClones->abandon($operation, $decision);
     }
 }

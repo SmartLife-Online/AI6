@@ -5,10 +5,14 @@ namespace App\AI6\Git;
 enum ControlOperationType: string
 {
     case DEPLOY_KEY_PROVISION = 'deploy_key_provision';
+    case MANAGED_CLONE = 'managed_clone';
+    case MANAGED_FETCH = 'managed_fetch';
 
     /** @var array<string, list<string>> */
     public const PARAMETER_FIELDS = [
         'deploy_key_provision' => ['algorithm'],
+        'managed_clone' => ['control_ref', 'expected_binding_version'],
+        'managed_fetch' => ['control_ref', 'expected_binding_version'],
     ];
 
     /**

@@ -71,6 +71,10 @@ final class ManagedProjectPathTest extends TestCase
                 30,
                 30,
                 3,
+                $link.DIRECTORY_SEPARATOR.'known_hosts',
+                ['refs/heads/main'],
+                300,
+                8,
             ));
             $this->expectException(RuntimeException::class);
             $unsafe->prepareAttempt(str_repeat('a', 32), '123e4567-e89b-42d3-a456-426614174000', 1);
@@ -117,6 +121,109 @@ final class ManagedProjectPathTest extends TestCase
         self::assertDirectoryExists($this->root.DIRECTORY_SEPARATOR.'deploy-keys');
     }
 
+    public function test_managed_repository_and_attempt_ref_paths_are_canonical_and_attempt_bound(): void
+    {
+        $paths = $this->paths();
+        $projectIdentifier = str_repeat('a', 32);
+        $operationId = '123e4567-e89b-42d3-a456-426614174000';
+        $staged = $paths->stagedRepository($projectIdentifier, $operationId, 7);
+
+        self::assertSame(
+            str_replace('\\', '/', (string) realpath($this->root)).'/.control-staging/'.$operationId.'/7/repository',
+            str_replace('\\', '/', $staged),
+        );
+        self::assertSame(
+            'refs/ai6/attempts/'.$operationId.'/7/control',
+            ManagedProjectPath::attemptRef($operationId, 7),
+        );
+        self::assertSame(
+            str_replace('\\', '/', (string) realpath($this->root)).'/projects/'.$projectIdentifier.'/repository',
+            str_replace('\\', '/', $paths->repositoryDirectory($projectIdentifier)),
+        );
+    }
+
+    public function test_repository_lookup_does_not_create_project_directories(): void
+    {
+        $projectIdentifier = str_repeat('a', 32);
+        $repository = $this->paths()->repositoryDirectory($projectIdentifier);
+
+        self::assertSame(
+            str_replace('\\', '/', (string) realpath($this->root)).'/projects/'.$projectIdentifier.'/repository',
+            str_replace('\\', '/', $repository),
+        );
+        self::assertDirectoryDoesNotExist($this->root.DIRECTORY_SEPARATOR.'projects');
+    }
+
+    public function test_staged_repository_publish_preserves_the_previous_repository_as_owned_recovery_material(): void
+    {
+        $paths = $this->paths();
+        $projectIdentifier = str_repeat('a', 32);
+        $operationId = '123e4567-e89b-42d3-a456-426614174000';
+        $active = $paths->repositoryDirectory($projectIdentifier);
+        self::assertTrue(mkdir(dirname($active), 0700, true));
+        self::assertTrue(mkdir($active, 0700));
+        $this->createRepositoryMetadata($active);
+        self::assertNotFalse(file_put_contents($active.'/old', 'old'));
+        $staged = $paths->stagedRepository($projectIdentifier, $operationId, 1);
+        self::assertTrue(mkdir($staged, 0700));
+        $this->createRepositoryMetadata($staged);
+        self::assertNotFalse(file_put_contents($staged.'/new', 'new'));
+
+        $published = $paths->publishStagedRepository($projectIdentifier, $operationId, 1);
+        self::assertSame(realpath($active), $published);
+        self::assertFileExists($active.'/new');
+        self::assertFileDoesNotExist($active.'/old');
+        self::assertFileExists(dirname($staged).'/previous-repository/old');
+
+        $paths->removeOwnedOperation($projectIdentifier, $operationId);
+        self::assertFileExists($active.'/new');
+        self::assertDirectoryDoesNotExist($this->root.'/.control-staging/'.$operationId);
+    }
+
+    public function test_interrupted_publish_with_backup_and_no_active_repository_resumes_idempotently(): void
+    {
+        $paths = $this->paths();
+        $projectIdentifier = str_repeat('a', 32);
+        $operationId = '123e4567-e89b-42d3-a456-426614174000';
+        $active = $paths->repositoryDirectory($projectIdentifier);
+        self::assertTrue(mkdir(dirname($active), 0700, true));
+        self::assertTrue(mkdir($active, 0700));
+        $this->createRepositoryMetadata($active);
+        self::assertNotFalse(file_put_contents($active.'/old', 'old'));
+        $staged = $paths->stagedRepository($projectIdentifier, $operationId, 1);
+        self::assertTrue(mkdir($staged, 0700));
+        $this->createRepositoryMetadata($staged);
+        self::assertNotFalse(file_put_contents($staged.'/new', 'new'));
+        $backup = dirname($staged).'/previous-repository';
+        self::assertTrue(rename($active, $backup));
+
+        $published = $paths->publishStagedRepository($projectIdentifier, $operationId, 1);
+        self::assertSame(realpath($active), $published);
+        self::assertFileExists($active.'/new');
+        self::assertFileExists($backup.'/old');
+    }
+
+    public function test_repository_metadata_symlinks_are_rejected(): void
+    {
+        if (DIRECTORY_SEPARATOR === '\\') {
+            self::markTestSkipped('This assertion requires POSIX file-symlink semantics.');
+        }
+
+        $repository = $this->paths()->repositoryDirectory(str_repeat('a', 32));
+        self::assertTrue(mkdir(dirname($repository), 0700, true));
+        self::assertTrue(mkdir($repository, 0700));
+        self::assertTrue(mkdir($repository.'/objects', 0700));
+        self::assertTrue(mkdir($repository.'/refs', 0700));
+        $outside = $this->root.'/outside-head';
+        self::assertNotFalse(file_put_contents($outside, "ref: refs/heads/main\n"));
+        if (! @symlink($outside, $repository.'/HEAD')) {
+            self::markTestSkipped('This runtime cannot create a file symlink.');
+        }
+
+        $this->expectException(RuntimeException::class);
+        $this->paths()->assertRepository($repository);
+    }
+
     public function test_cleanup_rejects_a_symlinked_managed_root(): void
     {
         if (DIRECTORY_SEPARATOR === '\\') {
@@ -138,6 +245,10 @@ final class ManagedProjectPathTest extends TestCase
                 30,
                 30,
                 3,
+                $link.DIRECTORY_SEPARATOR.'known_hosts',
+                ['refs/heads/main'],
+                300,
+                8,
             ));
             $this->expectException(RuntimeException::class);
             $unsafe->removeOwnedAttempt(str_repeat('a', 32), '123e4567-e89b-42d3-a456-426614174000', 1);
@@ -210,7 +321,19 @@ final class ManagedProjectPathTest extends TestCase
             30,
             30,
             3,
+            $this->root.DIRECTORY_SEPARATOR.'known_hosts',
+            ['refs/heads/main'],
+            300,
+            8,
         ));
+    }
+
+    private function createRepositoryMetadata(string $repository): void
+    {
+        self::assertTrue(mkdir($repository.'/.git', 0700));
+        self::assertTrue(mkdir($repository.'/.git/objects', 0700));
+        self::assertTrue(mkdir($repository.'/.git/refs', 0700));
+        self::assertNotFalse(file_put_contents($repository.'/.git/HEAD', "ref: refs/heads/main\n"));
     }
 
     private function remove(string $path): void

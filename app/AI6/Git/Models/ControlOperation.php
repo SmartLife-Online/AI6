@@ -29,6 +29,7 @@ use Illuminate\Support\Carbon;
  * @property int $attempts
  * @property int|null $current_attempt_token
  * @property int|null $effect_attempt_token
+ * @property string|null $target_control_oid
  * @property string|null $lease_boot_id
  * @property string|null $launch_argument_hash
  * @property int|null $process_id

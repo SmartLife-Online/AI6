@@ -41,6 +41,27 @@ final readonly class ProjectOperationLease
             ->value('operation_lock_attempt_token');
     }
 
+    public function claimInitialControlOperation(Project $project, string $operationId): ?int
+    {
+        $now = Date::now();
+        $updated = Project::query()
+            ->whereKey($project->getKey())
+            ->whereNull('operation_lock_operation_id')
+            ->update([
+                'operation_lock_operation_id' => $operationId,
+                'operation_lock_lease_expires_at' => $now->copy()->addSeconds($this->configuration->leaseSeconds),
+                'operation_lock_heartbeat_at' => $now,
+                'operation_lock_attempt_token' => DB::raw('operation_lock_attempt_token + 1'),
+            ]);
+        if ($updated !== 1) {
+            return null;
+        }
+
+        return (int) Project::query()
+            ->whereKey($project->getKey())
+            ->value('operation_lock_attempt_token');
+    }
+
     public function claim(ControlOperation $operation, string $bootId): ?int
     {
         return DB::transaction(function () use ($operation, $bootId): ?int {

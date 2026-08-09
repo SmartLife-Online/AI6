@@ -80,6 +80,10 @@ final class ControlOperationWebTest extends ControlOperationTestCase
             $configuration->heartbeatSeconds,
             $configuration->reconcilerSeconds,
             1,
+            $configuration->knownHostsFile,
+            $configuration->managedRefAllowlist,
+            $configuration->staleSeconds,
+            $configuration->reconciliationBudget,
         );
         $this->app->instance(ControlOperationConfiguration::class, $singleAttempt);
         $this->app->instance(ManagedProjectPath::class, new ManagedProjectPath($singleAttempt));

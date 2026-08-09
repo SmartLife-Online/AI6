@@ -258,6 +258,60 @@ SH);
         self::assertSame([], is_dir($managed.'/nested') ? array_values(array_diff(scandir($managed.'/nested') ?: [], ['.', '..'])) : []);
     }
 
+    public function test_managed_ref_publication_and_attempt_cleanup_are_oid_bound(): void
+    {
+        $root = $this->createFixtureRoot();
+        $repository = $root.'/sha256-repository';
+        mkdir($repository);
+        $init = new Process(['git', 'init', '--object-format=sha256', '--initial-branch=main'], $repository);
+        $init->run();
+        if (! $init->isSuccessful()) {
+            self::markTestSkipped('The installed Git runtime does not support SHA-256 repositories.');
+        }
+        $this->git(['config', 'user.name', 'AI6 Test'], $repository);
+        $this->git(['config', 'user.email', 'ai6@example.invalid'], $repository);
+        file_put_contents($repository.'/payload.txt', "first\n");
+        $this->git(['add', 'payload.txt'], $repository);
+        $this->git(['commit', '-m', 'first'], $repository);
+        $first = trim($this->git(['rev-parse', 'HEAD'], $repository));
+        file_put_contents($repository.'/payload.txt', "second\n");
+        $this->git(['commit', '-am', 'second'], $repository);
+        $second = trim($this->git(['rev-parse', 'HEAD'], $repository));
+        $this->git(['update-ref', 'refs/heads/main', $first, $second], $repository);
+        $attempt = 'refs/ai6/attempts/123e4567-e89b-42d3-a456-426614174000/1/control';
+        $this->git(['update-ref', $attempt, $second], $repository);
+
+        $runner = $this->runner($root.'/runtime');
+        $context = new RedactionContext('project-1', '123e4567-e89b-42d3-a456-426614174000', 'managed-ref-test');
+        $published = $runner->updateRef($repository, 'refs/heads/main', $second, $first, $context);
+        self::assertTrue($published->succeeded(), $published->errorOutput);
+        self::assertSame($second, trim($this->git(['rev-parse', 'refs/heads/main'], $repository)));
+
+        $stale = $runner->updateRef($repository, 'refs/heads/main', $first, $first, $context);
+        self::assertFalse($stale->succeeded());
+        self::assertSame($second, trim($this->git(['rev-parse', 'refs/heads/main'], $repository)));
+
+        self::assertSame($second, $runner->refs($repository, $context)[$attempt]);
+        $wrongDelete = $runner->deleteAttemptRef($repository, $attempt, $first, $context);
+        self::assertFalse($wrongDelete->succeeded());
+        self::assertSame($second, trim($this->git(['rev-parse', $attempt], $repository)));
+        $deleted = $runner->deleteAttemptRef($repository, $attempt, $second, $context);
+        self::assertTrue($deleted->succeeded(), $deleted->errorOutput);
+        self::assertArrayNotHasKey($attempt, $runner->refs($repository, $context));
+
+        $missing = $runner->resolveRef($repository, 'refs/heads/missing', $context);
+        self::assertFalse($missing->succeeded());
+        self::assertSame(1, $missing->exitCode);
+        self::assertSame('', trim($missing->output));
+        self::assertSame('', trim($missing->errorOutput));
+
+        $this->git(['config', 'core.sshCommand', 'definitely-not-an-ai6-helper'], $repository);
+        $unsafeConfiguration = $runner->resolveRef($repository, 'refs/heads/missing', $context);
+        self::assertFalse($unsafeConfiguration->succeeded());
+        self::assertNotSame(1, $unsafeConfiguration->exitCode);
+        self::assertSame('Repository Git configuration was rejected.', $unsafeConfiguration->errorOutput);
+    }
+
     #[After]
     public function removeFixture(): void
     {

@@ -34,6 +34,107 @@ final readonly class ManagedProjectPath
         return $this->regularDirectory($attemptDirectory.'/bundle', create: true);
     }
 
+    public function stagedRepository(string $projectIdentifier, string $operationId, int $attempt): string
+    {
+        $attemptDirectory = $this->prepareAttempt($projectIdentifier, $operationId, $attempt);
+
+        return $attemptDirectory.DIRECTORY_SEPARATOR.'repository';
+    }
+
+    public function repositoryDirectory(string $projectIdentifier): string
+    {
+        return $this->repositoryPath($projectIdentifier, create: false);
+    }
+
+    private function repositoryPath(string $projectIdentifier, bool $create): string
+    {
+        if (preg_match('/\A[0-9a-f]{32}\z/D', $projectIdentifier) !== 1) {
+            throw new RuntimeException('The managed project identifier is invalid.');
+        }
+
+        $root = $this->regularDirectory($this->configuration->managedRoot, create: false);
+        $repositoriesPath = $root.'/projects';
+        if (! $create && ! file_exists($repositoriesPath) && ! is_link($repositoriesPath)) {
+            return $repositoriesPath.DIRECTORY_SEPARATOR.$projectIdentifier.DIRECTORY_SEPARATOR.'repository';
+        }
+        $repositories = $this->regularDirectory($repositoriesPath, create: $create);
+        $this->assertContained($repositories, $root);
+
+        $projectPath = $repositories.'/'.$projectIdentifier;
+        if (! $create && ! file_exists($projectPath) && ! is_link($projectPath)) {
+            return $projectPath.DIRECTORY_SEPARATOR.'repository';
+        }
+        $project = $this->regularDirectory($projectPath, create: $create);
+        $this->assertContained($project, $root);
+
+        return $project.DIRECTORY_SEPARATOR.'repository';
+    }
+
+    public function assertRepository(string $repository): string
+    {
+        $real = $this->regularDirectory($repository, create: false);
+        $root = $this->regularDirectory($this->configuration->managedRoot, create: false);
+        $this->assertContained($real, $root);
+        $git = $real.DIRECTORY_SEPARATOR.'.git';
+        $metadata = file_exists($git) || is_link($git)
+            ? $this->regularDirectory($git, create: false)
+            : $real;
+        $this->assertContained($metadata, $root);
+        $this->assertRegularFile($metadata.DIRECTORY_SEPARATOR.'HEAD', $metadata);
+        foreach (['objects', 'refs'] as $directory) {
+            $resolved = $this->regularDirectory($metadata.DIRECTORY_SEPARATOR.$directory, create: false);
+            if (dirname($resolved) !== $metadata) {
+                throw new RuntimeException('The managed repository metadata is missing or unsafe.');
+            }
+        }
+
+        return $real;
+    }
+
+    public function publishStagedRepository(
+        string $projectIdentifier,
+        string $operationId,
+        int $attempt,
+    ): string {
+        $staged = $this->stagedRepository($projectIdentifier, $operationId, $attempt);
+        $this->assertRepository($staged);
+        $active = $this->repositoryPath($projectIdentifier, create: true);
+        $backup = dirname($staged).DIRECTORY_SEPARATOR.'previous-repository';
+
+        $backupExists = file_exists($backup) || is_link($backup);
+        if ($backupExists) {
+            $this->assertRepository($backup);
+        }
+        if (file_exists($active) || is_link($active)) {
+            if ($backupExists) {
+                throw new RuntimeException('The managed repository publish has both active and backup state.');
+            }
+            $this->assertRepository($active);
+            if (! rename($active, $backup)) {
+                throw new RuntimeException('The previous managed repository could not be staged for replacement.');
+            }
+        }
+
+        if (! rename($staged, $active)) {
+            if (is_dir($backup) && ! file_exists($active)) {
+                @rename($backup, $active);
+            }
+
+            throw new RuntimeException('The staged managed repository could not be published.');
+        }
+
+        return $this->assertRepository($active);
+    }
+
+    public static function attemptRef(string $operationId, int $attempt): string
+    {
+        if (! self::validOperationIdentifier($operationId) || $attempt < 1) {
+            throw new RuntimeException('A managed operation identifier is invalid.');
+        }
+
+        return sprintf('refs/ai6/attempts/%s/%d/control', $operationId, $attempt);
+    }
+
     public function activeDirectory(string $projectIdentifier): string
     {
         if (preg_match('/\A[0-9a-f]{32}\z/D', $projectIdentifier) !== 1) {

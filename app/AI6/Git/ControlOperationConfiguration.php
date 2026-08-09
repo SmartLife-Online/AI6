@@ -13,5 +13,10 @@ final readonly class ControlOperationConfiguration
         public int $heartbeatSeconds,
         public int $reconcilerSeconds,
         public int $maxAttempts,
+        public string $knownHostsFile,
+        /** @var non-empty-list<string> */
+        public array $managedRefAllowlist,
+        public int $staleSeconds,
+        public int $reconciliationBudget,
     ) {}
 }

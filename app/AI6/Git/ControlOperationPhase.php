@@ -11,6 +11,9 @@ enum ControlOperationPhase: string
     case KEY_GENERATED = 'key_generated';
     case KEY_ACTIVATED = 'key_activated';
     case PROVISIONING_FINALIZED = 'provisioning_finalized';
+    case EFFECT_STAGED = 'effect_staged';
+    case OUTCOME_PUBLISHED = 'outcome_published';
+    case BINDING_FINALIZED = 'binding_finalized';
     case ATTEMPT_COMPLETED = 'attempt_completed';
     case RECOVERY_REQUIRED = 'recovery_required';
 }

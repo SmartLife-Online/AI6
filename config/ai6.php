@@ -85,9 +85,13 @@ return [
         'key_root' => env('AI6_DEPLOY_KEY_ROOT', '/var/lib/ai6/managed/deploy-keys'),
         'ssh_keygen_binary' => env('AI6_SSH_KEYGEN_BINARY', '/usr/bin/ssh-keygen'),
         'ssh_keygen_wrapper' => base_path('app/AI6/Git/generate-deploy-key.sh'),
+        'known_hosts_file' => env('AI6_CONTROL_OPERATION_KNOWN_HOSTS_FILE', '/var/lib/ai6/managed/known_hosts'),
+        'managed_ref_allowlist' => env('AI6_CONTROL_OPERATION_MANAGED_REF_ALLOWLIST', 'refs/heads/main'),
         'lease_seconds' => env('AI6_CONTROL_OPERATION_LEASE_SECONDS', '120'),
         'heartbeat_seconds' => env('AI6_CONTROL_OPERATION_HEARTBEAT_SECONDS', '30'),
         'reconciler_seconds' => env('AI6_CONTROL_OPERATION_RECONCILER_SECONDS', '30'),
         'max_attempts' => env('AI6_CONTROL_OPERATION_MAX_ATTEMPTS', '3'),
+        'stale_seconds' => env('AI6_CONTROL_OPERATION_STALE_SECONDS', '300'),
+        'reconciliation_budget' => env('AI6_CONTROL_OPERATION_RECONCILIATION_BUDGET', '8'),
     ],
 ];

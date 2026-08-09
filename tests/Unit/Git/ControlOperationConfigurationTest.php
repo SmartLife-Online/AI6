@@ -20,6 +20,10 @@ final class ControlOperationConfigurationTest extends TestCase
         self::assertSame('/managed/keys', $result->keyRoot);
         self::assertSame(120, $result->leaseSeconds);
         self::assertSame(30, $result->heartbeatSeconds);
+        self::assertSame('/managed/known_hosts', $result->knownHostsFile);
+        self::assertSame(['refs/heads/main', 'refs/heads/release'], $result->managedRefAllowlist);
+        self::assertSame(300, $result->staleSeconds);
+        self::assertSame(8, $result->reconciliationBudget);
     }
 
     public function test_key_root_escape_and_non_strict_or_incoherent_intervals_are_rejected(): void
@@ -29,11 +33,40 @@ final class ControlOperationConfigurationTest extends TestCase
             ['lease_seconds' => '120seconds'],
             ['heartbeat_seconds' => '120'],
             ['max_attempts' => 0],
+            ['managed_ref_allowlist' => ''],
+            ['managed_ref_allowlist' => 'refs/heads/*'],
+            ['managed_ref_allowlist' => 'refs/heads/Main,refs/heads/Main'],
+            ['managed_ref_allowlist' => 'refs/tags/release'],
+            ['managed_ref_allowlist' => 'refs/heads/main/'],
+            ['managed_ref_allowlist' => 'refs/heads/main.'],
+            ['managed_ref_allowlist' => 'refs/heads/a.lock/b'],
+            ['managed_ref_allowlist' => 'refs/heads/.hidden'],
+            ['stale_seconds' => 0],
+            ['reconciliation_budget' => 0],
         ] as $overrides) {
             self::assertInstanceOf(
                 ConfigurationViolation::class,
                 (new ControlOperationConfigurationFactory)->inspect(array_replace($this->configuration(), $overrides)),
             );
+        }
+    }
+
+    public function test_known_hosts_path_must_be_canonical_absolute_and_contained_below_managed_root(): void
+    {
+        foreach ([
+            'known_hosts',
+            '/managed/../known_hosts',
+            '/managed//known_hosts',
+            '/managed/known_hosts/',
+            '/outside/known_hosts',
+        ] as $knownHostsFile) {
+            $result = (new ControlOperationConfigurationFactory)->inspect(array_replace(
+                $this->configuration(),
+                ['known_hosts_file' => $knownHostsFile],
+            ));
+
+            self::assertInstanceOf(ConfigurationViolation::class, $result);
+            self::assertStringContainsString('AI6_CONTROL_OPERATION_KNOWN_HOSTS_FILE', $result->message);
         }
     }
 
@@ -93,10 +126,14 @@ final class ControlOperationConfigurationTest extends TestCase
             'key_root' => '/managed/keys',
             'ssh_keygen_binary' => '/usr/bin/ssh-keygen',
             'ssh_keygen_wrapper' => '/opt/ai6/keygen.sh',
+            'known_hosts_file' => '/managed/known_hosts',
+            'managed_ref_allowlist' => 'refs/heads/main,refs/heads/release',
             'lease_seconds' => '120',
             'heartbeat_seconds' => '30',
             'reconciler_seconds' => '30',
             'max_attempts' => '3',
+            'stale_seconds' => '300',
+            'reconciliation_budget' => '8',
         ];
     }
 }

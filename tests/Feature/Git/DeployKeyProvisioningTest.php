@@ -572,6 +572,7 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
             'app/AI6/Git/ControlOperationExecutor.php',
             'app/AI6/Git/ControlOperationReconciler.php',
             'app/AI6/Git/DeployKeyProvisioner.php',
+            'app/AI6/Git/ManagedCloneSynchronizer.php',
             'app/AI6/Git/ProjectOperationLease.php',
         ], $terminalReleaseMethods);
 
@@ -1086,6 +1087,10 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
             $current->heartbeatSeconds,
             $current->reconcilerSeconds,
             $current->maxAttempts,
+            $current->knownHostsFile,
+            $current->managedRefAllowlist,
+            $current->staleSeconds,
+            $current->reconciliationBudget,
         );
         $this->app->instance(ControlOperationConfiguration::class, $slow);
         $this->app->instance(ManagedProjectPath::class, new ManagedProjectPath($slow));
