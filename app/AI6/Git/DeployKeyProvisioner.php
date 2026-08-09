@@ -410,7 +410,7 @@ final readonly class DeployKeyProvisioner
                 [
                     'outcome' => ControlOperationOutcome::SUCCEEDED,
                     'result_binding' => $binding,
-                    'safe_summary' => 'Deploy-key provisioning completed.',
+                    'safe_summary' => 'Die Deploy-Key-Provisionierung wurde abgeschlossen.',
                 ],
             );
             if ($result->outcome !== ControlOperationOutcome::SUCCEEDED
@@ -536,7 +536,7 @@ final readonly class DeployKeyProvisioner
                     [
                         'outcome' => ControlOperationOutcome::ABANDONED,
                         'result_binding' => $binding,
-                        'safe_summary' => 'The operation was abandoned by an authorized recovery decision.',
+                        'safe_summary' => 'Die Operation wurde durch eine autorisierte Recovery-Entscheidung aufgegeben.',
                     ],
                 );
                 if ($result->outcome !== ControlOperationOutcome::ABANDONED
@@ -574,13 +574,10 @@ final readonly class DeployKeyProvisioner
         if ($operation->state === ControlOperationState::RECOVERY_REQUIRED) {
             $this->assertRecoveryEffectUnchanged($operation, $project);
         }
-        if ($operation->effect_attempt_token !== null) {
-            $this->paths->removeOwnedAttempt(
-                (string) $project->project_identifier,
-                $operation->id,
-                $operation->effect_attempt_token,
-            );
-        }
+        $this->paths->removeOwnedOperation(
+            (string) $project->project_identifier,
+            $operation->id,
+        );
     }
 
     public function adoptExternalState(

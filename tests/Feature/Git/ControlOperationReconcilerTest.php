@@ -52,7 +52,7 @@ final class ControlOperationReconcilerTest extends ControlOperationTestCase
         self::assertSame(1, $this->app->make(ControlOperationReconciler::class)->reconcile());
         self::assertSame(1, DB::table('jobs')->count());
         self::assertSame(
-            'The exhausted control-operation queue job was recovered.',
+            'Der ausgeschöpfte Queue-Auftrag der Control-Operation wurde erneut zugestellt.',
             $operation->refresh()->last_error,
         );
     }

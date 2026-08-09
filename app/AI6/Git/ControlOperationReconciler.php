@@ -72,7 +72,7 @@ final readonly class ControlOperationReconciler
                             ControlOperationState::ABANDONED->value,
                         ])
                         ->update([
-                            'last_error' => 'The exhausted control-operation queue job was recovered.',
+                            'last_error' => 'Der ausgeschöpfte Queue-Auftrag der Control-Operation wurde erneut zugestellt.',
                             'version' => DB::raw('version + 1'),
                             'updated_at' => Date::now(),
                         ]);

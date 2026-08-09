@@ -48,7 +48,12 @@ final class RuntimeScriptsTest extends TestCase
             'The restrictive umask must remain active for the whole lock-object creation loop.',
         );
         self::assertStringContainsString("stat -c '%u' -- \"\$lock_object\"", $branch);
+        self::assertStringContainsString("stat -c '%g' -- \"\$lock_object\"", $branch);
         self::assertStringContainsString("stat -c '%a' -- \"\$lock_object\"", $branch);
+        self::assertStringContainsString("stat -c '%s' -- \"\$lock_object\"", $branch);
+        self::assertStringContainsString('[ "$lock_mode" = "400" ]', $branch);
+        self::assertStringContainsString('[ "$lock_size" = "0" ]', $branch);
+        self::assertStringContainsString('[ "$lock_group" = "0" ]', $branch);
         self::assertLessThan(strpos($branch, "else\n                lock_owner="), strpos($branch, 'chown "$effect_lock_owner_uid:0" "$lock_object"'));
         self::assertStringNotContainsString('rm ', $branch);
         self::assertStringNotContainsString('mv ', $branch);

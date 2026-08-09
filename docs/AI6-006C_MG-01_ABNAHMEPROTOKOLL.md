@@ -1,6 +1,7 @@
 # Abnahmeprotokoll AI6-006C / MG-01 — Deploy-Key-Rechte und Mountmatrix
 
-Leeres Formular.
+Ergebnisfreie Vorlage. Bindung, Messwerte, Ergebnis und Unterschrift werden ausschließlich
+von der menschlichen Prüfperson eingetragen.
 
 ## 0. Vorbereitung
 
@@ -59,7 +60,6 @@ Die Evidenz ist an genau einen Stand gebunden. Zulässig ist der geprüfte Git-C
 vor einem Commit — Base-Commit **und** SHA-256 des vollständigen Prüfdiffs.
 
 Commit-Bindung ermitteln:
-570141cc6a2db7a889fdddd95a4c61aec886073a
 ```
 git rev-parse HEAD
 ```
@@ -89,21 +89,21 @@ sonst als neue Datei erfasst und der Diff sich selbst enthielte. `git reset -q` 
 
 | Feld | Wert |
 |---|---|
-| Bindungsart | Commit |
-| Commit beziehungsweise Base-Commit | 786fbc73d4a20b1905ef1d89801c6c33f762d70d |
-| SHA-256 des Prüfdiffs | entfällt |
-| Anlage `checkdiff.patch` beigefügt | entfällt |
+| Bindungsart | Commit / Base-Commit + Prüfdiff |
+| Commit beziehungsweise Base-Commit | |
+| SHA-256 des Prüfdiffs | |
+| Anlage `checkdiff.patch` beigefügt | ja / nein / entfällt |
 
 ## 2. Laufzeit
 
 | Feld | Wert |
 |---|---|
-| Prüfer | Codex (technische Testausführung; keine menschliche Abnahme) |
-| Zeitpunkt (ISO 8601 mit Zeitzone) | 2026-08-08T23:12:49.4251609+02:00 |
-| Host und Betriebssystem | MICHAEL-PC — Microsoft Windows NT 10.0.26200.0 |
-| Docker-Version | 29.6.1 |
-| Compose-Projektname | ai6 |
-| Sicherheitsprofil (`AI6_SECURITY_PROFILE`) | strict |
+| Prüfer | |
+| Zeitpunkt (ISO 8601 mit Zeitzone) | |
+| Host und Betriebssystem | |
+| Docker-Version | |
+| Compose-Projektname | |
+| Sicherheitsprofil (`AI6_SECURITY_PROFILE`) | |
 
 ## 3. Auslösung
 
@@ -112,10 +112,10 @@ Das Gate prüft den realen Weg einschließlich Policy, Step-up und Queue.
 
 | Feld | Wert |
 |---|---|
-| Projekt (Name und `project_identifier`) | AI6-Test (`c571a178d657ae9dfeb123501ac05741`) |
-| Operation-ID | 621ebc5f-2c1b-44bb-b397-1278858d5e3e |
-| Auslösender Actor | Michael (`info@smartlife-online.de`) |
-| Endzustand der Operation | `completed` / `attempt_completed`; Ergebnis `succeeded` |
+| Projekt (Name und `project_identifier`) | |
+| Operation-ID | |
+| Auslösender Actor | |
+| Endzustand der Operation | |
 
 ## 4. Messungen
 
@@ -129,9 +129,9 @@ docker compose exec -T worker sh -c 'ls -lnR /var/lib/ai6/managed/deploy-keys'
 
 | Erwartung | Gemessener Wert | Ergebnis |
 |---|---|---|
-| Verzeichnis `<project_identifier>` gehört `10001 10001`, Modus `drwx------` | `<pre>drwx------ 2 10001 10001 4096 Aug  8 21:11 c571a178d657ae9dfeb123501ac05741</pre>` | technisch bestanden |
-| `id_ed25519` gehört `10001 10001`, Modus `-rw-------` | `<pre>-rw------- 1 10001 10001 529 Aug  8 21:11 id_ed25519</pre>` | technisch bestanden |
-| `id_ed25519.pub` gehört `10001 10001`, Modus `-rw-r--r--` | `<pre>-rw-r--r-- 1 10001 10001 187 Aug  8 21:11 id_ed25519.pub</pre>` | technisch bestanden |
+| Verzeichnis `<project_identifier>` gehört `10001 10001`, Modus `drwx------` | | bestanden / nicht bestanden |
+| `id_ed25519` gehört `10001 10001`, Modus `-rw-------` | | bestanden / nicht bestanden |
+| `id_ed25519.pub` gehört `10001 10001`, Modus `-rw-r--r--` | | bestanden / nicht bestanden |
 
 ### 4.2 Mountmatrix je Rolle
 
@@ -149,12 +149,12 @@ foreach ($s in 'app','worker','scheduler','agent','checker','init') { "$s : " + 
 
 | Rolle | Erwartung für `ai6_managed` | Gemessener Wert | Ergebnis |
 |---|---|---|---|
-| `app` | nicht gemountet | `<pre>ai6_ai6_storage:/opt/ai6/storage:rw ai6_ai6_executions:/var/lib/ai6/executions:ro ai6_ai6_database:/var/lib/ai6/database:rw :/tmp:rw</pre>` | technisch bestanden |
-| `worker` | gemountet, `rw` | `<pre>ai6_ai6_database:/var/lib/ai6/database:rw ai6_ai6_storage:/opt/ai6/storage:rw ai6_ai6_executions:/var/lib/ai6/executions:rw ai6_ai6_managed:/var/lib/ai6/managed:rw :/run/ai6/heartbeat/worker:rw :/tmp:rw</pre>` | technisch bestanden |
-| `scheduler` | nicht gemountet | `<pre>ai6_ai6_database:/var/lib/ai6/database:rw ai6_ai6_storage:/opt/ai6/storage:rw :/tmp:rw :/run/ai6/heartbeat/scheduler:rw</pre>` | technisch bestanden |
-| `agent` | nicht gemountet | `<pre>:/tmp:rw :/run/ai6/heartbeat/agent:rw</pre>` | technisch bestanden |
-| `checker` | nicht gemountet | `<pre>:/run/ai6/heartbeat/checker:rw :/tmp:rw</pre>` | technisch bestanden |
-| `init` | gemountet, `rw` | `<pre>ai6_ai6_database:/var/lib/ai6/database:rw ai6_ai6_storage:/opt/ai6/storage:rw ai6_ai6_managed:/var/lib/ai6/managed:rw :/tmp:rw</pre>` | technisch bestanden |
+| `app` | nicht gemountet | | bestanden / nicht bestanden |
+| `worker` | gemountet, `rw` | | bestanden / nicht bestanden |
+| `scheduler` | nicht gemountet | | bestanden / nicht bestanden |
+| `agent` | nicht gemountet | | bestanden / nicht bestanden |
+| `checker` | nicht gemountet | | bestanden / nicht bestanden |
+| `init` | gemountet, `rw` | | bestanden / nicht bestanden |
 
 ### 4.3 Einmaliger Dienst `init` ist beendet
 
@@ -164,8 +164,8 @@ docker compose ps -a --format 'table {{.Service}}\t{{.Status}}\t{{.ID}}'
 
 | Erwartung | Gemessener Wert | Ergebnis |
 |---|---|---|
-| `init` steht auf `exited (0)` | `<pre>init        Exited (0) 29 minutes ago   f3d0986cf85c</pre>` | technisch bestanden |
-| Die fünf dauerhaften Dienste laufen und sind `healthy` | `<pre>agent       Up 25 hours (healthy)<br>app         Up 29 minutes (healthy)<br>caddy       Up 2 days (healthy)<br>checker     Up 25 hours (healthy)<br>scheduler   Up 25 hours (healthy)<br>worker      Up 29 minutes (healthy)</pre>` | technisch bestanden; zusätzlich ist Caddy als sechster dauerhafter Dienst healthy |
+| `init` steht auf `exited (0)` | | bestanden / nicht bestanden |
+| Die fünf dauerhaften Dienste laufen und sind `healthy` | | bestanden / nicht bestanden |
 
 ### 4.4 Kein privates Schlüsselmaterial in Log und Antwort
 
@@ -183,17 +183,17 @@ PowerShell:
 
 | Erwartung | Gemessener Wert | Ergebnis |
 |---|---|---|
-| Trefferzahl im Containerlog ist `0` | `<pre>0</pre>` | technisch bestanden |
-| Die HTTP-Antwort der Auslösung enthält keinen privaten Teil | `<pre>Ergebnis: succeeded<br>Zusammenfassung: Deploy-key provisioning completed.</pre>` | technisch bestanden |
-| Die Projektansicht zeigt ausschließlich den öffentlichen Schlüssel | `<pre>Provisionierungszustand: provisioned<br>Öffentlicher Deploy-Key: ssh-ed25519 …</pre>` | technisch bestanden |
+| Trefferzahl im Containerlog ist `0` | | bestanden / nicht bestanden |
+| Die HTTP-Antwort der Auslösung enthält keinen privaten Teil | | bestanden / nicht bestanden |
+| Die Projektansicht zeigt ausschließlich den öffentlichen Schlüssel | | bestanden / nicht bestanden |
 
 ## 5. Ergebnis
 
 | Feld | Wert |
 |---|---|
-| Gesamtergebnis | nicht abgeschlossen |
-| Abweichungen und Vorbehalte | Die technischen Messungen sind erfolgreich. Die menschliche Abnahme und Unterschrift stehen aus. |
-| Anlagen | entfällt |
+| Gesamtergebnis | bestanden / nicht bestanden |
+| Abweichungen und Vorbehalte | |
+| Anlagen | |
 | Unterschrift | |
 
 ## 6. Gültigkeit

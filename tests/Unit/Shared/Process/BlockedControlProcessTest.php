@@ -248,7 +248,12 @@ SH);
         $start->process->wait();
 
         self::assertTrue(is_file($cleanupLock), 'SIGKILL must expose the stale marker left by cleanup-based locking.');
-        $next = @fopen($cleanupLock, 'x');
+        set_error_handler(static fn (): bool => true);
+        try {
+            $next = fopen($cleanupLock, 'x');
+        } finally {
+            restore_error_handler();
+        }
         self::assertFalse($next, 'A regular cleanup-based acquisition must fail while the stale marker still exists.');
     }
 

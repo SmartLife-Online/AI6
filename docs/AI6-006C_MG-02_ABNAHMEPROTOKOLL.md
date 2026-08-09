@@ -1,6 +1,7 @@
 # Abnahmeprotokoll AI6-006C / MG-02 — instanzübergreifender Effekt-Lock
 
-Leeres Formular.
+Ergebnisfreie Vorlage. Bindung, Messwerte, Ergebnis und Unterschrift werden ausschließlich
+von der menschlichen Prüfperson eingetragen.
 
 Der Verhaltensteil dieses Gates wird zusätzlich von `RuntimeComposeSmokeTest` automatisiert
 geprüft. Das Gate bleibt trotzdem menschlich, weil die Zusage vom eingesetzten Volumetreiber
@@ -69,7 +70,6 @@ vollständigen Prüfdiffs.
 ```
 git rev-parse HEAD
 ```
-570141cc6a2db7a889fdddd95a4c61aec886073a
 POSIX:
 
 ```

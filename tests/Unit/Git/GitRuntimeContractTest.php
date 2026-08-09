@@ -181,7 +181,9 @@ final class GitRuntimeContractTest extends TestCase
                 $configuration[$field] = $original;
             }
         } finally {
-            @unlink($link);
+            if (is_link($link)) {
+                unlink($link);
+            }
             @chmod($wrapper, 0600);
             @unlink($wrapper);
             @chmod($runtimeBinary, 0600);

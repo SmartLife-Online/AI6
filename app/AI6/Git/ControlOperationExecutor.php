@@ -186,7 +186,7 @@ final readonly class ControlOperationExecutor
 
     private function recordClaimConflict(ControlOperation $operation): void
     {
-        $safe = 'Project operation lease conflict.';
+        $safe = 'Die Operation steht in Konflikt mit der aktiven Projektsperre.';
         $operation->refresh();
         if ($operation->state !== ControlOperationState::QUEUED) {
             // This attempt never obtained a claim, so it holds no attempt
@@ -246,7 +246,7 @@ final readonly class ControlOperationExecutor
         ControlOperationRetryableConflict $exception,
     ): void {
         $operation->refresh();
-        $safe = $this->safeMessage($operation, $exception);
+        $safe = $this->persistedFailureSummary($operation, $exception);
         ControlOperation::query()
             ->whereKey($operation->id)
             ->where('current_attempt_token', $attemptToken)
@@ -270,7 +270,7 @@ final readonly class ControlOperationExecutor
     private function recordFailure(ControlOperation $operation, int $attemptToken, Throwable $exception): void
     {
         $operation->refresh();
-        $safe = $this->safeMessage($operation, $exception);
+        $safe = $this->persistedFailureSummary($operation, $exception);
         if ($operation->attempts >= $this->configuration->maxAttempts) {
             try {
                 $active = $this->deployKeys->activeIntentUnderLock($operation, $attemptToken);
@@ -372,6 +372,19 @@ final readonly class ControlOperationExecutor
         }
     }
 
+    private function persistedFailureSummary(ControlOperation $operation, Throwable $exception): string
+    {
+        if (! $exception instanceof ControlOperationRetryableConflict) {
+            return $this->safeMessage($operation, $exception);
+        }
+
+        return match (true) {
+            $exception->conflict === 'lease_lost' => 'Die Operation hat ihre Projektsperre verloren und wird erneut versucht.',
+            str_starts_with($exception->conflict, 'effect_lock_') => 'Der Effekt-Lock ist für diese Operation derzeit nicht sicher verfügbar; sie wird erneut versucht.',
+            default => $this->safeMessage($operation, $exception),
+        };
+    }
+
     private function recoveryDeviation(ControlOperation $operation, Throwable $exception): string
     {
         $safe = $this->safeMessage($operation, $exception);
@@ -401,7 +414,7 @@ final readonly class ControlOperationExecutor
         Throwable $exception,
     ): void {
         $safe = $exception instanceof ControlOperationRetryableConflict
-            ? $this->safeMessage($operation, $exception)
+            ? $this->persistedFailureSummary($operation, $exception)
             : 'Der Recovery-Außenstand konnte nicht sicher erhoben werden; die Inspektion wird wiederholt.';
         ControlOperation::query()
             ->whereKey($operation->id)

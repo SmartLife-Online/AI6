@@ -84,6 +84,43 @@ final class ControlOperationTest extends ControlOperationTestCase
         $action->handle($administrator, $secondProject->refresh(), $id);
     }
 
+    public function test_reusing_an_operation_id_with_different_type_specific_parameters_is_a_conflict(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $id = (string) Str::uuid();
+        $canonical = $this->app->make(CanonicalJson::class);
+        $snapshot = $this->app->make(ControlOperationAuthorizationSnapshot::class)
+            ->capture($administrator, $project);
+        $snapshotJcs = $canonical->normalizeAndEncode($snapshot);
+        $parameters = ControlOperationType::DEPLOY_KEY_PROVISION->parameters(['algorithm' => 'rsa']);
+        ControlOperation::query()->create([
+            'id' => $id,
+            'project_id' => $project->getKey(),
+            'actor_id' => $administrator->getKey(),
+            'operation_type' => ControlOperationType::DEPLOY_KEY_PROVISION,
+            'schema_version' => 1,
+            'authorization_snapshot' => $snapshot,
+            'authorization_snapshot_jcs' => $snapshotJcs,
+            'expected_control_commit' => $project->control_oid,
+            'operation_parameters_jcs' => $canonical->normalizeAndEncode($parameters),
+            'request_hash' => $this->app->make(ControlOperationHasher::class)->hash(
+                1,
+                (string) $project->project_identifier,
+                ControlOperationType::DEPLOY_KEY_PROVISION,
+                (string) $administrator->getKey(),
+                $snapshotJcs,
+                $project->control_oid,
+                $parameters,
+            ),
+            'phase' => ControlOperationPhase::QUEUED,
+            'state' => ControlOperationState::QUEUED,
+        ]);
+
+        $this->expectException(ControlOperationConflict::class);
+        $this->app->make(QueueDeployKeyProvisioning::class)->handle($administrator, $project, $id);
+    }
+
     public function test_hasher_binds_operation_type_and_type_specific_parameters_into_distinct_hashes(): void
     {
         $hasher = new ControlOperationHasher;

@@ -265,7 +265,7 @@ final class ControlProcessRunner
             );
             $exitCode = $probe->run();
             if ($exitCode === 0) {
-                return false;
+                return $this->processGroupContainsOnlyZombies($processId);
             }
 
             if ($exitCode === 1 || str_contains($probe->getErrorOutput(), 'No such process')) {
@@ -276,6 +276,49 @@ final class ControlProcessRunner
         } catch (Throwable) {
             return null;
         }
+    }
+
+    private function processGroupContainsOnlyZombies(int $processGroupId, string $procRoot = '/proc'): ?bool
+    {
+        $entries = @scandir($procRoot);
+        if (! is_array($entries)) {
+            return null;
+        }
+
+        $memberFound = false;
+        foreach ($entries as $entry) {
+            if (preg_match('/\A[1-9][0-9]*\z/D', $entry) !== 1) {
+                continue;
+            }
+
+            $processDirectory = $procRoot.'/'.$entry;
+            $path = $processDirectory.'/stat';
+            $stat = @file_get_contents($path);
+            if (! is_string($stat)) {
+                if (is_dir($processDirectory)) {
+                    return null;
+                }
+
+                continue;
+            }
+
+            $end = strrpos($stat, ')');
+            if ($end === false
+                || preg_match('/\A([A-Z]) [0-9]+ ([0-9]+) /', substr($stat, $end + 2), $matches) !== 1) {
+                return null;
+            }
+
+            if ((int) $matches[2] !== $processGroupId) {
+                continue;
+            }
+
+            $memberFound = true;
+            if (! in_array($matches[1], ['Z', 'X'], true)) {
+                return false;
+            }
+        }
+
+        return $memberFound ? true : null;
     }
 
     private function signalProcessGroup(int $processId, string $signal): bool

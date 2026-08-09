@@ -59,29 +59,11 @@ final readonly class ManagedProjectPath
     public function removeOwnedAttempt(string $projectIdentifier, string $operationId, int $attempt): void
     {
         $this->assertIdentifiers($projectIdentifier, $operationId, $attempt);
-        if (is_link($this->configuration->managedRoot)) {
-            throw new RuntimeException('A managed operation directory is missing or unsafe.');
-        }
-        $root = realpath($this->configuration->managedRoot);
-        if (! is_string($root)) {
+        $directories = $this->ownedOperationDirectory($operationId);
+        if ($directories === null) {
             return;
         }
-
-        $stagingPath = $root.'/.control-staging';
-        if (! file_exists($stagingPath) && ! is_link($stagingPath)) {
-            return;
-        }
-        $staging = $this->regularDirectory($stagingPath, create: false);
-        $this->assertContained($staging, $root);
-
-        $operationPath = $staging.'/'.$operationId;
-        if (! file_exists($operationPath) && ! is_link($operationPath)) {
-            return;
-        }
-        $operation = $this->regularDirectory($operationPath, create: false);
-        if (dirname($operation) !== $staging) {
-            throw new RuntimeException('Managed cleanup escaped its staging directory.');
-        }
+        [$operation] = $directories;
 
         $target = $operation.'/'.$attempt;
         if (! file_exists($target) && ! is_link($target)) {
@@ -93,6 +75,48 @@ final readonly class ManagedProjectPath
             && ! rmdir($operation)) {
             throw new RuntimeException('An empty operation staging directory could not be removed.');
         }
+    }
+
+    public function removeOwnedOperation(string $projectIdentifier, string $operationId): void
+    {
+        $this->assertOperationIdentifiers($projectIdentifier, $operationId);
+        $directories = $this->ownedOperationDirectory($operationId);
+        if ($directories === null) {
+            return;
+        }
+        [$operation, $staging] = $directories;
+
+        $this->removeTree($operation, $staging);
+    }
+
+    /** @return array{string, string}|null */
+    private function ownedOperationDirectory(string $operationId): ?array
+    {
+        if (is_link($this->configuration->managedRoot)) {
+            throw new RuntimeException('A managed operation directory is missing or unsafe.');
+        }
+        $root = realpath($this->configuration->managedRoot);
+        if (! is_string($root)) {
+            return null;
+        }
+
+        $stagingPath = $root.'/.control-staging';
+        if (! file_exists($stagingPath) && ! is_link($stagingPath)) {
+            return null;
+        }
+        $staging = $this->regularDirectory($stagingPath, create: false);
+        $this->assertContained($staging, $root);
+
+        $operationPath = $staging.'/'.$operationId;
+        if (! file_exists($operationPath) && ! is_link($operationPath)) {
+            return null;
+        }
+        $operation = $this->regularDirectory($operationPath, create: false);
+        if (dirname($operation) !== $staging) {
+            throw new RuntimeException('Managed cleanup escaped its staging directory.');
+        }
+
+        return [$operation, $staging];
     }
 
     private function removeTree(string $path, string $expectedParent): void
@@ -150,9 +174,16 @@ final readonly class ManagedProjectPath
 
     private function assertIdentifiers(string $projectIdentifier, string $operationId, int $attempt): void
     {
+        $this->assertOperationIdentifiers($projectIdentifier, $operationId);
+        if ($attempt < 1) {
+            throw new RuntimeException('A managed operation identifier is invalid.');
+        }
+    }
+
+    private function assertOperationIdentifiers(string $projectIdentifier, string $operationId): void
+    {
         if (preg_match('/\A[0-9a-f]{32}\z/D', $projectIdentifier) !== 1
-            || ! self::validOperationIdentifier($operationId)
-            || $attempt < 1) {
+            || ! self::validOperationIdentifier($operationId)) {
             throw new RuntimeException('A managed operation identifier is invalid.');
         }
     }

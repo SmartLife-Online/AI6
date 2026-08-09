@@ -21,6 +21,8 @@ final class RuntimeDocumentationTest extends TestCase
             '`agent`',
             '`checker`',
             '127.0.0.1:${AI6_HTTP_PORT:-8080}',
+            '`AI6_SERVICE_SUBNET`',
+            '`AI6_PROXY_ADDRESS`',
             'caddy:2.10.2-alpine',
             'sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d',
             'php artisan migrate --force --no-interaction',

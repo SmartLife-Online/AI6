@@ -6,6 +6,7 @@ use App\AI6\Auth\Models\User;
 use App\AI6\Git\RecoveryDecisionType;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Carbon;
 
 /**
  * @property string $id
@@ -20,6 +21,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int|null $application_attempt_token
  * @property string|null $application_fingerprint
  * @property string $state
+ * @property Carbon|null $applied_at
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
  */
 final class ControlOperationRecoveryDecision extends Model
 {

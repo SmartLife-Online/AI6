@@ -51,8 +51,17 @@ case "$role" in
                 chmod 0444 "$lock_object"
             else
                 lock_owner="$(stat -c '%u' -- "$lock_object")"
+                lock_group="$(stat -c '%g' -- "$lock_object")"
                 lock_mode="$(stat -c '%a' -- "$lock_object")"
-                if [ "$lock_owner" != "$effect_lock_owner_uid" ] || [ "$lock_mode" != "444" ]; then
+                lock_size="$(stat -c '%s' -- "$lock_object")"
+                if { [ "$lock_owner" = "0" ] || [ "$lock_owner" = "$effect_lock_owner_uid" ]; } \
+                    && [ "$lock_group" = "0" ] && [ "$lock_mode" = "400" ] && [ "$lock_size" = "0" ]; then
+                    # Complete the only safe crash residue from the creation branch
+                    # above without replacing its inode. Any content, broader mode,
+                    # foreign group or unrelated owner still fails closed.
+                    chown "$effect_lock_owner_uid:0" "$lock_object"
+                    chmod 0444 "$lock_object"
+                elif [ "$lock_owner" != "$effect_lock_owner_uid" ] || [ "$lock_group" != "0" ] || [ "$lock_mode" != "444" ]; then
                     printf '%s\n' 'An existing effect-lock object has unsafe ownership or mode.' >&2
                     exit 78
                 fi

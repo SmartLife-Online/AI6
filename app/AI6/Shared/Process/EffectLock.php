@@ -43,7 +43,12 @@ final class EffectLock
 
         $path = $directory.'/'.$name;
         clearstatcache(true, $path);
-        $objectStat = @lstat($path);
+        set_error_handler(static fn (): bool => true);
+        try {
+            $objectStat = lstat($path);
+        } finally {
+            restore_error_handler();
+        }
         if (! is_array($objectStat)) {
             return $this->invalid(EffectLockOutcome::CONFIGURATION_ERROR, 'The effect lock object is not provisioned.');
         }

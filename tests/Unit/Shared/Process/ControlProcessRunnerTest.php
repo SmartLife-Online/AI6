@@ -14,6 +14,7 @@ use App\AI6\Shared\Redaction\RedactionPolicy;
 use App\AI6\Shared\Redaction\RedactionRuleSet;
 use App\AI6\Shared\Redaction\Redactor;
 use PHPUnit\Framework\TestCase;
+use ReflectionMethod;
 
 final class ControlProcessRunnerTest extends TestCase
 {
@@ -112,6 +113,44 @@ PHP;
         self::assertSame(ProcessOutcome::TERMINATION_FAILED, $result->outcome);
         self::assertFalse($running->running());
         self::assertLessThan(2.0, microtime(true) - $started);
+    }
+
+    public function test_proc_inventory_distinguishes_an_only_zombie_group_from_a_group_with_a_live_member(): void
+    {
+        $procRoot = sys_get_temp_dir().'/ai6-proc-inventory-'.bin2hex(random_bytes(8));
+        $zombieDirectory = $procRoot.'/1001';
+        $liveDirectory = $procRoot.'/1002';
+        self::assertTrue(mkdir($zombieDirectory, 0700, true));
+        self::assertNotFalse(file_put_contents(
+            $zombieDirectory.'/stat',
+            '1001 (terminated worker) Z 1 4242 4242 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0',
+        ));
+
+        $method = new ReflectionMethod(ControlProcessRunner::class, 'processGroupContainsOnlyZombies');
+        $runner = $this->runner(timeout: 5, outputLimit: 4096);
+
+        try {
+            self::assertTrue($method->invoke($runner, 4242, $procRoot));
+
+            self::assertTrue(mkdir($liveDirectory, 0700));
+            self::assertNotFalse(file_put_contents(
+                $liveDirectory.'/stat',
+                '1002 (live worker) S 1 4242 4242 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0',
+            ));
+            self::assertFalse($method->invoke($runner, 4242, $procRoot));
+        } finally {
+            foreach ([$liveDirectory, $zombieDirectory] as $directory) {
+                if (is_file($directory.'/stat')) {
+                    unlink($directory.'/stat');
+                }
+                if (is_dir($directory)) {
+                    rmdir($directory);
+                }
+            }
+            if (is_dir($procRoot)) {
+                rmdir($procRoot);
+            }
+        }
     }
 
     private function runner(int $timeout, int $outputLimit, ?string $killBinary = null): ControlProcessRunner

@@ -30,10 +30,10 @@ final class EffectLockRuntimeSecurityTest extends TestCase
 
         $held = $lock->acquire('lock-0001', 100);
         self::assertTrue($held->acquired(), $held->message);
-        self::assertFalse(@unlink($path));
-        self::assertFalse(@rename($path, $path.'.renamed'));
-        self::assertFalse(@file_put_contents($path.'.replacement', 'replacement'));
-        self::assertFalse(@file_put_contents($path, 'replacement'));
+        self::assertFalse($this->withoutWarning(static fn (): bool => unlink($path)));
+        self::assertFalse($this->withoutWarning(static fn (): bool => rename($path, $path.'.renamed')));
+        self::assertFalse($this->withoutWarning(static fn (): int|false => file_put_contents($path.'.replacement', 'replacement')));
+        self::assertFalse($this->withoutWarning(static fn (): int|false => file_put_contents($path, 'replacement')));
 
         clearstatcache(true, $path);
         $after = lstat($path);
@@ -179,5 +179,15 @@ PHP;
         }
 
         self::assertFileExists($path);
+    }
+
+    private function withoutWarning(callable $operation): mixed
+    {
+        set_error_handler(static fn (): bool => true);
+        try {
+            return $operation();
+        } finally {
+            restore_error_handler();
+        }
     }
 }

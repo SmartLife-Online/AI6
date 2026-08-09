@@ -328,6 +328,7 @@ final class ControlOperationPersistenceTest extends ControlOperationTestCase
             'current_attempt_token' => 1,
             'effect_attempt_token' => 1,
             'key_fingerprint' => $fingerprint,
+            'launch_argument_hash' => hash('sha256', 'finalization-fixture-launch'),
             'version' => $operation->version + 1,
         ])->save();
 

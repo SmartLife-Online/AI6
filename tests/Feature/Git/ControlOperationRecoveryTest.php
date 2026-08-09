@@ -4,6 +4,7 @@ namespace Tests\Feature\Git;
 
 use App\AI6\Auth\Models\User;
 use App\AI6\Git\Actions\QueueDeployKeyProvisioning;
+use App\AI6\Git\ControlOperationConflict;
 use App\AI6\Git\ControlOperationPhase;
 use App\AI6\Git\ControlOperationReconciler;
 use App\AI6\Git\ControlOperationState;
@@ -39,16 +40,25 @@ final class ControlOperationRecoveryTest extends ControlOperationTestCase
             'code' => $this->currentTotpCode($secret),
         ])
             ->assertRedirect();
+        $decisionRequestedAt = now();
         $this->post(route('projects.operations.recover', [$project, $operation]), $payload)
             ->assertRedirect(route('projects.operations.show', [$project, $operation]));
 
         $record = ControlOperationRecoveryDecision::query()->sole();
+        self::assertSame($administrator->getKey(), $record->actor_id);
+        self::assertNotNull($record->created_at);
+        self::assertTrue($record->created_at->betweenIncluded(
+            $decisionRequestedAt->copy()->startOfSecond(),
+            now()->addSecond(),
+        ));
         self::assertSame('retry_reconciliation', $record->decision->value);
         self::assertSame('pending', $record->state);
         self::assertSame($operation->finding_hash, $record->finding_hash);
         self::assertSame('password=[REDACTED:SECRET]', $record->reason);
         $this->get(route('projects.operations.show', [$project, $operation]))
             ->assertOk()
+            ->assertSee($administrator->name)
+            ->assertSee($record->created_at->toIso8601String())
             ->assertSee('retry_reconciliation')
             ->assertSee('[REDACTED:SECRET]');
 
@@ -185,6 +195,54 @@ final class ControlOperationRecoveryTest extends ControlOperationTestCase
         self::assertSame(2, $operation->current_attempt_token);
         self::assertFalse($this->app->make(ProjectOperationLease::class)->release($operation->id, $project->getKey(), 2));
         self::assertSame($operation->id, $project->refresh()->operation_lock_operation_id);
+    }
+
+    public function test_recovery_state_is_visible_and_rejects_a_second_mutating_operation_as_a_named_conflict(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $operation = $this->recoveryOperation($administrator, $project);
+
+        try {
+            $this->app->make(QueueDeployKeyProvisioning::class)->handle(
+                $administrator,
+                $project->refresh(),
+                (string) Str::uuid(),
+            );
+            self::fail('A second mutating operation was accepted while recovery held the project lease.');
+        } catch (ControlOperationConflict $exception) {
+            self::assertStringContainsString('already active', $exception->getMessage());
+        }
+
+        self::assertSame(1, ControlOperation::query()->count());
+        self::assertSame($operation->id, $project->refresh()->operation_lock_operation_id);
+        $this->actingAs($administrator)
+            ->get(route('projects.show', $project))
+            ->assertOk()
+            ->assertSee('recovery_required')
+            ->assertSee(route('projects.operations.show', [$project, $operation]));
+    }
+
+    public function test_invalid_recovery_decision_value_is_rejected_without_effect(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $operation = $this->recoveryOperation($administrator, $project);
+        $jobsBefore = DB::table('jobs')->count();
+        $versionBefore = $operation->version;
+
+        $this->actingAs($administrator)
+            ->post(route('projects.operations.recover', [$project, $operation]), [
+                ...$this->decisionPayload($operation),
+                'decision' => 'delete_external_state',
+            ])
+            ->assertSessionHasErrors('decision');
+
+        self::assertSame(0, ControlOperationRecoveryDecision::query()->count());
+        self::assertSame($versionBefore, $operation->refresh()->version);
+        self::assertSame(ControlOperationState::RECOVERY_REQUIRED, $operation->state);
+        self::assertSame($operation->id, $project->refresh()->operation_lock_operation_id);
+        self::assertSame($jobsBefore, DB::table('jobs')->count());
     }
 
     public function test_recovery_decision_rejects_a_tuple_after_current_attempt_and_version_advanced(): void

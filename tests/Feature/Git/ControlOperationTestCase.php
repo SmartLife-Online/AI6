@@ -19,6 +19,8 @@ use App\AI6\Shared\Process\EffectLock;
 use App\AI6\Shared\Process\ProcessConfiguration;
 use App\AI6\Shared\Redaction\Redactor;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\Process\Process;
 use Tests\Feature\Auth\AuthFeatureTestCase;
 
@@ -27,6 +29,8 @@ abstract class ControlOperationTestCase extends AuthFeatureTestCase
     private ?string $realWorkerRoot = null;
 
     private string|false|null $previousHeartbeatDirectory = null;
+
+    private ?string $forkDatabasePath = null;
 
     protected function registeredProject(User $administrator): Project
     {
@@ -155,8 +159,28 @@ abstract class ControlOperationTestCase extends AuthFeatureTestCase
         chmod($directory.'/id_ed25519.pub', 0644);
     }
 
+    protected function useForkSafeDatabase(): void
+    {
+        if (DIRECTORY_SEPARATOR !== '/') {
+            self::markTestSkipped('A shared fork database requires the POSIX runtime.');
+        }
+
+        $path = sys_get_temp_dir().'/ai6-fork-database-'.bin2hex(random_bytes(8)).'.sqlite';
+        self::assertNotFalse(touch($path));
+        chmod($path, 0600);
+        $this->forkDatabasePath = $path;
+        config(['database.connections.sqlite.database' => $path]);
+        DB::purge('sqlite');
+        self::assertSame(0, Artisan::call('migrate:fresh'), Artisan::output());
+    }
+
     protected function tearDown(): void
     {
+        if ($this->forkDatabasePath !== null) {
+            DB::disconnect('sqlite');
+            DB::purge('sqlite');
+            @unlink($this->forkDatabasePath);
+        }
         if ($this->realWorkerRoot !== null) {
             (new Filesystem)->deleteDirectory($this->realWorkerRoot);
         }

@@ -17,6 +17,9 @@ final class RuntimeComposeSmokeTest extends TestCase
 
     private string $redactionKeyring = '';
 
+    /** @var array<string, string> */
+    private array $networkEnvironment = [];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -28,6 +31,8 @@ final class RuntimeComposeSmokeTest extends TestCase
         $docker = new Process(['docker', 'info', '--format', '{{json .ServerVersion}}']);
         $docker->setTimeout(20);
         self::assertSame(0, $docker->run(), 'Das Smoke-Flag ist gesetzt, aber Docker ist nicht verfügbar: '.$docker->getErrorOutput());
+
+        $this->networkEnvironment = $this->isolatedNetworkEnvironment();
 
         $socket = stream_socket_server('tcp://127.0.0.1:0', $errorCode, $errorMessage);
         self::assertNotFalse($socket, $errorCode.': '.$errorMessage);
@@ -191,6 +196,24 @@ final class RuntimeComposeSmokeTest extends TestCase
         $inodeAfter = $this->compose(['exec', '-T', 'worker', 'stat', '-c', '%d:%i', $lock], 30);
         $inodeAfter->mustRun();
         self::assertSame(trim($inodeBefore->getOutput()), trim($inodeAfter->getOutput()));
+
+        $incomplete = $this->compose([
+            'run', '--rm', '--no-deps', '--entrypoint', 'sh', 'init', '-c',
+            'chmod 0600 -- "$1" && : > "$1" && chmod 0400 -- "$1"', 'sh', $lock,
+        ], 30);
+        $incomplete->mustRun();
+        $incompleteStat = $this->compose(['exec', '-T', 'worker', 'stat', '-c', '%d:%i|%u|%g|%a|%s', $lock], 30);
+        $incompleteStat->mustRun();
+        self::assertStringEndsWith('|0|0|400|0', trim($incompleteStat->getOutput()));
+
+        $recoveryRerun = $this->compose(['run', '--rm', '--no-deps', 'init'], 120);
+        $recoveryRerun->mustRun();
+        $recoveredStat = $this->compose(['exec', '-T', 'worker', 'stat', '-c', '%d:%i|%u|%g|%a|%s', $lock], 30);
+        $recoveredStat->mustRun();
+        $incompleteParts = explode('|', trim($incompleteStat->getOutput()));
+        $recoveredParts = explode('|', trim($recoveredStat->getOutput()));
+        self::assertSame($incompleteParts[0], $recoveredParts[0]);
+        self::assertSame(['0', '0', '444', '0'], array_slice($recoveredParts, 1));
     }
 
     private function assertEffectLockSerializesAcrossWorkerInstances(): void
@@ -386,10 +409,96 @@ final class RuntimeComposeSmokeTest extends TestCase
             'AI6_REDACTION_ACTIVE_KEY_ID' => 'smoke-key-v1',
             'AI6_REDACTION_KEYS' => $this->redactionKeyring,
             'APP_KEY' => $this->appKey,
+            ...$this->networkEnvironment,
         ]);
         $process->setTimeout($timeout);
 
         return $process;
+    }
+
+    /** @return array<string, string> */
+    private function isolatedNetworkEnvironment(): array
+    {
+        $list = new Process(['docker', 'network', 'ls', '--quiet']);
+        $list->setTimeout(30);
+        $list->mustRun();
+        $occupied = [];
+
+        foreach (array_filter(preg_split('/\R/', trim($list->getOutput())) ?: []) as $networkId) {
+            $inspect = new Process([
+                'docker', 'network', 'inspect', '--format',
+                '{{range .IPAM.Config}}{{println .Subnet}}{{end}}', $networkId,
+            ]);
+            $inspect->setTimeout(30);
+            $inspect->mustRun();
+
+            foreach (array_filter(preg_split('/\R/', trim($inspect->getOutput())) ?: []) as $subnet) {
+                $range = $this->ipv4CidrRange($subnet);
+                if ($range !== null) {
+                    $occupied[] = $range;
+                }
+            }
+        }
+
+        for ($secondOctet = 240; $secondOctet <= 254; $secondOctet++) {
+            for ($thirdOctet = 0; $thirdOctet <= 254; $thirdOctet += 2) {
+                $serviceSubnet = sprintf('10.%d.%d.0/24', $secondOctet, $thirdOctet);
+                $proxySubnet = sprintf('10.%d.%d.0/29', $secondOctet, $thirdOctet + 1);
+                $candidates = [$this->ipv4CidrRange($serviceSubnet), $this->ipv4CidrRange($proxySubnet)];
+                self::assertNotContains(null, $candidates);
+
+                $collides = false;
+                foreach ($candidates as $candidate) {
+                    foreach ($occupied as $existing) {
+                        if ($candidate[0] <= $existing[1] && $existing[0] <= $candidate[1]) {
+                            $collides = true;
+                            break 2;
+                        }
+                    }
+                }
+
+                if (! $collides) {
+                    $proxyPrefix = sprintf('10.%d.%d', $secondOctet, $thirdOctet + 1);
+
+                    return [
+                        'AI6_SERVICE_SUBNET' => $serviceSubnet,
+                        'AI6_SERVICE_IP_RANGE' => sprintf('10.%d.%d.128/25', $secondOctet, $thirdOctet),
+                        'AI6_PROXY_SUBNET' => $proxySubnet,
+                        'AI6_PROXY_IP_RANGE' => $proxyPrefix.'.4/30',
+                        'AI6_PROXY_ADDRESS' => $proxyPrefix.'.2',
+                        'AI6_HTTP_TRUSTED_PROXIES' => $proxyPrefix.'.2',
+                    ];
+                }
+            }
+        }
+
+        self::fail('Kein kollisionsfreies privates IPv4-Netz für den isolierten Compose-Smoke gefunden.');
+    }
+
+    /** @return array{int, int}|null */
+    private function ipv4CidrRange(string $cidr): ?array
+    {
+        $parts = explode('/', $cidr, 2);
+        if (count($parts) !== 2 || filter_var($parts[0], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false
+            || ! preg_match('/\A(?:[0-9]|[12][0-9]|3[0-2])\z/D', $parts[1])) {
+            return null;
+        }
+
+        $packed = inet_pton($parts[0]);
+        if ($packed === false) {
+            return null;
+        }
+
+        $unpacked = unpack('Naddress', $packed);
+        if (! is_array($unpacked)) {
+            return null;
+        }
+
+        $prefix = (int) $parts[1];
+        $mask = $prefix === 0 ? 0 : (0xFFFFFFFF << (32 - $prefix)) & 0xFFFFFFFF;
+        $network = $unpacked['address'] & $mask;
+
+        return [$network, $network | (0xFFFFFFFF ^ $mask)];
     }
 
     /** @param callable(string): bool $predicate */

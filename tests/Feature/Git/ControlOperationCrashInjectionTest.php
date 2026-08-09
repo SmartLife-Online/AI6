@@ -8,6 +8,7 @@ use App\AI6\Git\ControlOperationExecutor;
 use App\AI6\Git\ControlOperationOutcome;
 use App\AI6\Git\ControlOperationPhase;
 use App\AI6\Git\ControlOperationReconciler;
+use App\AI6\Git\ControlOperationRetryableConflict;
 use App\AI6\Git\ControlOperationState;
 use App\AI6\Git\DeployKeyProvisioner;
 use App\AI6\Git\Jobs\ExecuteControlOperation;
@@ -27,6 +28,11 @@ use RuntimeException;
 
 final class ControlOperationCrashInjectionTest extends ControlOperationTestCase
 {
+    /**
+     * Partial, runtime-independent evidence for TC-07: durable nonterminal
+     * phases are rediscovered and requeued. The terminal end-state and
+     * exactly-once effect proof remains the gated real-worker test below.
+     */
     #[DataProvider('durablePhaseProvider')]
     public function test_reconciler_requeues_the_same_operation_after_a_crash_boundary(ControlOperationPhase $phase): void
     {
@@ -63,13 +69,16 @@ final class ControlOperationCrashInjectionTest extends ControlOperationTestCase
     /** @return iterable<string, array{ControlOperationPhase}> */
     public static function durablePhaseProvider(): iterable
     {
-        foreach ([
-            ControlOperationPhase::LAUNCH_INTENT,
-            ControlOperationPhase::PROCESS_STARTED,
-            ControlOperationPhase::KEY_GENERATED,
-            ControlOperationPhase::KEY_ACTIVATED,
-            ControlOperationPhase::PROVISIONING_FINALIZED,
-        ] as $phase) {
+        foreach (ControlOperationPhase::cases() as $phase) {
+            if (in_array($phase, [
+                ControlOperationPhase::QUEUED, // Queue absence is covered by the queued-operation reconciler tests.
+                ControlOperationPhase::CLAIMED, // No durable external-effect boundary has been crossed yet.
+                ControlOperationPhase::ATTEMPT_COMPLETED, // Terminal operations are released, never requeued.
+                ControlOperationPhase::RECOVERY_REQUIRED, // Recovery has its own nonterminal decision contract.
+            ], true)) {
+                continue;
+            }
+
             yield $phase->value => [$phase];
         }
     }
@@ -219,19 +228,20 @@ final class ControlOperationCrashInjectionTest extends ControlOperationTestCase
             try {
                 $deployKeys->cleanupFailedAttempt($operation, 1);
                 self::fail('The stale attempt was able to run cleanup after a lease takeover.');
-            } catch (RuntimeException $exception) {
-                self::assertStringContainsString('lease was lost', $exception->getMessage());
+            } catch (ControlOperationRetryableConflict $exception) {
+                self::assertSame('lease_lost', $exception->conflict);
             }
 
-            // Waking the old attempt through the real state-machine entry point
-            // (`advance()`) produces no effect either: the live phase is already
-            // terminal, so the stale attempt token never reaches a write, publish or
-            // project mutation -- the winning attempt's state stays exactly as it was.
-            $versionBeforeWake = $operation->refresh()->version;
-            $publicKeyBeforeWake = $project->refresh()->public_deploy_key;
-            self::assertTrue($deployKeys->advance($operation, 1));
-            self::assertSame($versionBeforeWake, $operation->refresh()->version);
-            self::assertSame($publicKeyBeforeWake, $project->refresh()->public_deploy_key);
+            // The winning attempt must adopt the same operation's active effect even
+            // though its intent belongs to the fenced predecessor. Restricting
+            // adoption to the current attempt token would strand this operation in
+            // recovery and violate AC-25.
+            $active = $this->app->make(ManagedProjectPath::class)
+                ->activeDirectory((string) $project->refresh()->project_identifier);
+            $intent = json_decode((string) file_get_contents($active.'/intent.json'), true, 8, JSON_THROW_ON_ERROR);
+            self::assertSame(1, $intent['attempt_token']);
+            self::assertGreaterThan($intent['attempt_token'], $operation->refresh()->current_attempt_token);
+            self::assertTrue($operation->state->terminal());
         }
     }
 

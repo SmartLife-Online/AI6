@@ -155,6 +155,17 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
         self::assertFileExists($root.'/deploy-keys/'.$project->project_identifier.'/id_ed25519');
         self::assertFileExists($root.'/deploy-keys/'.$project->project_identifier.'/id_ed25519.pub');
         self::assertFileExists($root.'/deploy-keys/'.$project->project_identifier.'/intent.json');
+        $privateKey = (string) file_get_contents($root.'/deploy-keys/'.$project->project_identifier.'/id_ed25519');
+        self::assertSame(0600, fileperms($root.'/deploy-keys/'.$project->project_identifier.'/id_ed25519') & 0777);
+        self::assertStringContainsString('BEGIN OPENSSH PRIVATE KEY', $privateKey);
+        $databaseSnapshot = json_encode([
+            'projects' => DB::table('projects')->get()->all(),
+            'operations' => DB::table('control_operations')->get()->all(),
+            'results' => DB::table('control_operation_results')->get()->all(),
+            'jobs' => DB::table('jobs')->get()->all(),
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        self::assertStringNotContainsString($privateKey, $databaseSnapshot);
+        self::assertStringNotContainsString('BEGIN OPENSSH PRIVATE KEY', $databaseSnapshot);
         self::assertDirectoryDoesNotExist($root.'/.control-staging/'.$operation->id);
         $this->assertPersistedKeyPairCanSignAndVerify(
             $root.'/deploy-keys/'.$project->project_identifier,
@@ -341,7 +352,10 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
 
         $operation->refresh();
         self::assertSame(ControlOperationState::RUNNING, $operation->state);
-        self::assertStringContainsString('effect-lock conflict', (string) $operation->last_error);
+        self::assertSame(
+            'Der Effekt-Lock ist für diese Operation derzeit nicht sicher verfügbar; sie wird erneut versucht.',
+            $operation->last_error,
+        );
         self::assertNull($operation->result()->first());
 
         DB::table('jobs')->delete();
@@ -375,7 +389,10 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
         self::assertSame($effectHash, $operation->recovery_effect_hash);
         self::assertSame($version, $operation->version);
         self::assertSame($attempts, $operation->attempts);
-        self::assertStringContainsString('effect lock', (string) $operation->last_error);
+        self::assertSame(
+            'Der Effekt-Lock ist für diese Operation derzeit nicht sicher verfügbar; sie wird erneut versucht.',
+            $operation->last_error,
+        );
         self::assertSame($operation->id, $project->refresh()->operation_lock_operation_id);
     }
 
@@ -514,17 +531,71 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
             }
         }
 
-        $source = file_get_contents(base_path('app/AI6/Git/DeployKeyProvisioner.php'));
-        self::assertIsString($source);
+    }
+
+    public function test_managed_inventory_writes_are_repo_wide_routed_through_the_effect_lock(): void
+    {
+        $sharedInventoryMutationFiles = [];
+        $terminalReleaseMethods = [];
+        $root = base_path('app/AI6');
+        $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root));
+        foreach ($iterator as $file) {
+            if (! $file->isFile() || $file->getExtension() !== 'php') {
+                continue;
+            }
+
+            $source = file_get_contents($file->getPathname());
+            self::assertIsString($source);
+            $relative = str_replace('\\', '/', substr($file->getPathname(), strlen(base_path()) + 1));
+            if (str_contains($source, 'activeDirectory(')
+                && preg_match('/\b(?:file_put_contents|rename|unlink|rmdir|chmod)\s*\(/', $source) === 1) {
+                $sharedInventoryMutationFiles[] = $relative;
+            }
+
+            if (str_contains($source, 'releaseTerminal(')) {
+                $terminalReleaseMethods[] = $relative;
+            }
+        }
+
+        sort($sharedInventoryMutationFiles);
+        sort($terminalReleaseMethods);
+        self::assertSame([
+            'app/AI6/Git/DeployKeyProvisioner.php',
+            'app/AI6/Git/ManagedProjectPath.php',
+        ], $sharedInventoryMutationFiles);
+        self::assertDoesNotMatchRegularExpression(
+            '/\b(?:file_put_contents|rename|unlink|rmdir|chmod)\s*\(/',
+            $this->methodSource(ManagedProjectPath::class, 'activeDirectory'),
+            'The path resolver must remain effect-free; shared inventory writes belong in the locked provisioner.',
+        );
+        self::assertSame([
+            'app/AI6/Git/ControlOperationExecutor.php',
+            'app/AI6/Git/ControlOperationReconciler.php',
+            'app/AI6/Git/DeployKeyProvisioner.php',
+            'app/AI6/Git/ProjectOperationLease.php',
+        ], $terminalReleaseMethods);
+
+        foreach ([
+            [ControlOperationExecutor::class, 'releaseTerminalLease'],
+            [ControlOperationReconciler::class, 'releaseTerminalLeases'],
+            [DeployKeyProvisioner::class, 'complete'],
+            [ProjectOperationLease::class, 'releaseTerminal'],
+        ] as [$class, $method]) {
+            $releaseSource = $this->methodSource($class, $method);
+            self::assertStringNotContainsString('$this->effectLock', $releaseSource, $class.'::'.$method.' conflates both locks.');
+            self::assertStringNotContainsString('$lock->release()', $releaseSource, $class.'::'.$method.' conflates both locks.');
+        }
+
+        foreach (['activate', 'adoptExternalState'] as $method) {
+            $methodSource = $this->methodSource(DeployKeyProvisioner::class, $method);
+            self::assertStringContainsString('acquireEffectLock(', $methodSource, $method.' mutates shared inventory without the effect lock.');
+            self::assertStringContainsString('$lock->release()', $methodSource, $method.' does not release its scoped effect lock.');
+        }
         $activate = $this->methodSource(DeployKeyProvisioner::class, 'activate');
         self::assertLessThan(strpos($activate, 'rename($bundle, $active)'), strpos($activate, 'acquireEffectLock('));
         self::assertLessThan(strrpos($activate, '$lock->release()'), strpos($activate, 'rename($bundle, $active)'));
-        foreach (['activate', 'adoptExternalState'] as $method) {
-            $methodSource = $this->methodSource(DeployKeyProvisioner::class, $method);
-            self::assertStringContainsString('acquireEffectLock(', $methodSource);
-            self::assertStringContainsString('$lock->release()', $methodSource);
-        }
         $complete = $this->methodSource(DeployKeyProvisioner::class, 'complete');
+        self::assertStringContainsString('cleanupFailedAttempt(', $complete);
         self::assertStringContainsString('releaseTerminal(', $complete);
         self::assertStringNotContainsString('$lock->release()', $complete);
     }
@@ -562,7 +633,7 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
         $this->app->make(ControlOperationExecutor::class)->execute($second->id);
 
         self::assertSame(ControlOperationState::FAILED, $second->refresh()->state);
-        self::assertSame('Project operation lease conflict.', $second->last_error);
+        self::assertSame('Die Operation steht in Konflikt mit der aktiven Projektsperre.', $second->last_error);
         self::assertSame(ControlOperationOutcome::FAILED, $second->result()->sole()->outcome);
         self::assertSame($first->id, $project->refresh()->operation_lock_operation_id);
         self::assertNull($project->provisioning_operation_id);
@@ -607,6 +678,8 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
             self::markTestSkipped('TC-21 requires Linux procfs and pcntl_fork.');
         }
 
+        $this->useForkSafeDatabase();
+
         $administrator = $this->createUser(['is_global_admin' => true]);
         $project = $this->registeredProject($administrator);
         $root = $this->configureRealWorkerRuntime($project);
@@ -625,6 +698,7 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
         $child = pcntl_fork();
         self::assertNotSame(-1, $child);
         if ($child === 0) {
+            DB::purge('sqlite');
             try {
                 $this->app->make(DeployKeyProvisioner::class)->advance($operation->refresh(), 1);
                 exit(0);
@@ -632,6 +706,8 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
                 exit(51);
             }
         }
+
+        DB::purge('sqlite');
 
         try {
             $observed = null;
@@ -773,7 +849,7 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
 
         $second->refresh();
         self::assertSame(ControlOperationState::RECOVERY_REQUIRED, $second->state);
-        self::assertStringContainsString('not bound to this operation', (string) $second->last_error);
+        self::assertStringContainsString('nicht an diese Operation gebunden', (string) $second->last_error);
         self::assertSame($second->id, $project->refresh()->operation_lock_operation_id);
 
         self::assertSame($privateBefore, file_get_contents($active.'/id_ed25519'));
@@ -817,7 +893,7 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
 
         $operation->refresh();
         self::assertSame(ControlOperationState::RECOVERY_REQUIRED, $operation->state);
-        self::assertStringContainsString('incomplete', (string) $operation->last_error);
+        self::assertStringContainsString('Intent ist unvollständig', (string) $operation->last_error);
         self::assertSame($operation->id, $project->refresh()->operation_lock_operation_id);
 
         self::assertSame($privateBefore, file_get_contents($active.'/id_ed25519'));
@@ -899,6 +975,8 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
             self::markTestSkipped('TC-22 requires Linux procfs and pcntl_fork.');
         }
 
+        $this->useForkSafeDatabase();
+
         $administrator = $this->createUser(['is_global_admin' => true]);
         $project = $this->registeredProject($administrator);
         $root = $this->configureRealWorkerRuntime($project);
@@ -919,6 +997,7 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
         $child = pcntl_fork();
         self::assertNotSame(-1, $child);
         if ($child === 0) {
+            DB::purge('sqlite');
             try {
                 $this->app->make(DeployKeyProvisioner::class)->advance($operation->refresh(), 1);
                 file_put_contents($exitFile, 'unexpected-success');
@@ -931,6 +1010,8 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
                 exit(62);
             }
         }
+
+        DB::purge('sqlite');
 
         try {
             // The child's own pre-acquisition lease check has already passed by now (it runs in

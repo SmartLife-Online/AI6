@@ -8,7 +8,7 @@
         "app": { "condition": "service_healthy" }
       },
       "ports": ["127.0.0.1:${AI6_HTTP_PORT:-8080}:8080"],
-      "networks": { "proxy": { "ipv4_address": "172.30.61.2" } },
+      "networks": { "proxy": { "ipv4_address": "${AI6_PROXY_ADDRESS:-172.30.61.2}" } },
       "volumes": [
         {
           "type": "bind",
@@ -312,10 +312,10 @@
   },
   "networks": {
     "default": {
-      "ipam": { "config": [{ "subnet": "172.30.60.0/24", "ip_range": "172.30.60.128/25" }] }
+      "ipam": { "config": [{ "subnet": "${AI6_SERVICE_SUBNET:-172.30.60.0/24}", "ip_range": "${AI6_SERVICE_IP_RANGE:-172.30.60.128/25}" }] }
     },
     "proxy": {
-      "ipam": { "config": [{ "subnet": "172.30.61.0/29", "ip_range": "172.30.61.4/30" }] }
+      "ipam": { "config": [{ "subnet": "${AI6_PROXY_SUBNET:-172.30.61.0/29}", "ip_range": "${AI6_PROXY_IP_RANGE:-172.30.61.4/30}" }] }
     }
   },
   "volumes": {

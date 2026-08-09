@@ -324,11 +324,19 @@ final class RuntimeComposeContractTest extends TestCase
             self::assertArrayNotHasKey('networks', $services[$role]);
         }
         self::assertArrayNotHasKey('internal', $compose['networks']['proxy'] ?? []);
-        self::assertSame('172.30.61.2', $caddyAddress);
-        self::assertSame('172.30.61.0/29', $subnet);
-        self::assertSame('172.30.61.4/30', $dynamicRange);
-        self::assertTrue(IpUtils::checkIp($caddyAddress, $subnet));
-        self::assertFalse(IpUtils::checkIp($caddyAddress, $dynamicRange));
+        self::assertSame('${AI6_PROXY_ADDRESS:-172.30.61.2}', $caddyAddress);
+        self::assertSame('${AI6_PROXY_SUBNET:-172.30.61.0/29}', $subnet);
+        self::assertSame('${AI6_PROXY_IP_RANGE:-172.30.61.4/30}', $dynamicRange);
+        self::assertSame(
+            '${AI6_SERVICE_SUBNET:-172.30.60.0/24}',
+            $compose['networks']['default']['ipam']['config'][0]['subnet'] ?? null,
+        );
+        self::assertSame(
+            '${AI6_SERVICE_IP_RANGE:-172.30.60.128/25}',
+            $compose['networks']['default']['ipam']['config'][0]['ip_range'] ?? null,
+        );
+        self::assertTrue(IpUtils::checkIp('172.30.61.2', '172.30.61.0/29'));
+        self::assertFalse(IpUtils::checkIp('172.30.61.2', '172.30.61.4/30'));
     }
 
     public function test_heartbeat_mounts_are_private_tmpfs_and_persistent_targets_are_named_volumes(): void

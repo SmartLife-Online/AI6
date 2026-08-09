@@ -22,7 +22,7 @@ AI6/
 ├── docs/
 │   ├── AI6_IMPLEMENTATION_PLAN.md   normative source, revision V1.6.21, German
 │   ├── AI6_TICKET_TEMPLATE_V1.md    ticket generation and implementation contract, German
-│   └── AI6-004_VERIFICATION.md, AI6-005B_MG-01_…, AI6-006C_MG-01/02_…   human gate protocols
+│   └── AI6-004_VERIFICATION.md, AI6-005B_MG-01_…, AI6-006C_MG-01/02_…   human gate protocols; AI6-006C forms are result-free
 └── tickets/
     ├── README.md                    backlog overview; a view, never a status source
     ├── AI6-001.md … AI6-006B.md     status done — integrated and human-accepted
@@ -32,7 +32,7 @@ AI6/
 
 `AI6-001` through `AI6-006B` are integrated and human-accepted (`264cf2f`, `29d67fa`, `93d3f44`, `f7d8919`, `ea3476a`, `2877bc1`, `d6e329f`, `e7a9059` plus their acceptance commits); their tickets carry `status: done`.
 
-`AI6-006C` — the control-operation core, project operation lease, effect-lock consumption and deploy-key provisioning — is implemented on `main` (commits `1f0e6b7` through `f4b738e`) after an explicitly human-approved `ahead-derived` rebase against `e7a9059`. Its ticket has `status: ready`: review findings, the Linux verification lane and the manual gates `AI6-006C/MG-01`, `AI6-006C/MG-02` and `AI6-005B/MG-01` are still open. Implementation on `main` does not authorize an agent to change that status.
+`AI6-006C` — the control-operation core, project operation lease, effect-lock consumption and deploy-key provisioning — is implemented on `main` (commits `1f0e6b7` through `feb8185`) after an explicitly human-approved `ahead-derived` rebase against `e7a9059`. Its ticket has `status: ready`: review findings, the Linux verification lane and the manual gates `AI6-006C/MG-01`, `AI6-006C/MG-02` and `AI6-005B/MG-01` are still open. The two AI6-006C gate protocols are result-free templates and carry no human decision. Implementation on `main` does not authorize an agent to change that status.
 
 What does **not** exist yet: managed-project clone/fetch and everything after `AI6-006C` (`AI6-006D` onward), and `.ai6/`.
 
