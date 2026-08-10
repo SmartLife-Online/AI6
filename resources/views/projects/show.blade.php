@@ -17,8 +17,16 @@
         <dd>{{ $project->provisioning_status->value }}</dd>
         <dt>Aktive Control-OID</dt>
         <dd>{{ $project->control_oid ?? 'Noch nicht gebunden' }}</dd>
+        <dt>Ausstehender Control-Ref</dt>
+        <dd>{{ $project->pending_control_ref ?? 'Keine ausstehende Bindung' }}</dd>
+        <dt>Ausstehende Control-OID</dt>
+        <dd>{{ $project->pending_control_oid ?? 'Keine ausstehende Bindung' }}</dd>
+        <dt>Quelloperation der ausstehenden Bindung</dt>
+        <dd>{{ $project->pending_control_operation_id ?? 'Keine ausstehende Bindung' }}</dd>
         <dt>Control-Bindungsversion</dt>
         <dd>{{ $project->control_binding_version }}</dd>
+        <dt>Control-Generation</dt>
+        <dd>{{ $project->control_generation }}</dd>
         <dt>Letzte Aktualisierung</dt>
         <dd>{{ $controlUpdatedAt?->toIso8601String() ?? 'Noch nicht aktualisiert' }}</dd>
         <dt>Aktualität</dt>
@@ -42,7 +50,7 @@
     @endcan
 
     @can('synchronizeManagedClone', $project)
-        @if ($project->provisioning_status->value === 'provisioned' && $project->control_oid === null)
+        @if ($project->provisioning_status->value === 'provisioned' && $project->control_oid === null && $project->pending_control_oid === null)
             <h2>Managed-Clone erstellen</h2>
             <form method="POST" action="{{ route('projects.managed-clone.clone', $project) }}">
                 @csrf
@@ -55,6 +63,26 @@
                 @csrf
                 <input type="hidden" name="operation_id" value="{{ $fetchOperationId }}">
                 <button type="submit">Fetch starten</button>
+            </form>
+        @endif
+    @endcan
+
+    @can('changeControlBranch', $project)
+        @if ($project->provisioning_status->value === 'provisioned' && ($project->control_oid !== null || $project->pending_control_oid !== null))
+            <h2>Control-Branch wechseln</h2>
+            <p>Der Wechsel erfordert eine frische Step-up-Bestätigung für <code>control_branch.change</code>.</p>
+            <form method="POST" action="{{ route('auth.step-up.totp.verify', ['action' => 'control_branch.change']) }}">
+                @csrf
+                <label for="control_branch_step_up_code">TOTP-Code für Step-up</label>
+                <input id="control_branch_step_up_code" name="code" required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}">
+                <button type="submit">Step-up bestätigen</button>
+            </form>
+            <form method="POST" action="{{ route('projects.control-branch.change', $project) }}">
+                @csrf
+                <input type="hidden" name="operation_id" value="{{ $branchOperationId }}">
+                <label for="new_control_ref">Neuer vollständiger Control-Ref</label>
+                <input id="new_control_ref" name="new_control_ref" required maxlength="255" value="{{ old('new_control_ref') }}">
+                <button type="submit">Branchwechsel beauftragen</button>
             </form>
         @endif
     @endcan

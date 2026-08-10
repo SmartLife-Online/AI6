@@ -41,6 +41,7 @@ final readonly class ProjectSynchronizationStatus
             'latestSynchronization' => $latestSynchronization,
             'controlUpdatedAt' => $controlUpdatedAt,
             'controlIsStale' => $controlUpdatedAt === null
+                || $project->pending_control_oid !== null
                 || $controlUpdatedAt->lte(now()->subSeconds($this->configuration->staleSeconds)),
         ];
     }

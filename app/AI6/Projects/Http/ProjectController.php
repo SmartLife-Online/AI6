@@ -74,6 +74,7 @@ final class ProjectController
             'provisionOperationId' => (string) Str::uuid(),
             'cloneOperationId' => (string) Str::uuid(),
             'fetchOperationId' => (string) Str::uuid(),
+            'branchOperationId' => (string) Str::uuid(),
             ...$synchronizationStatus->for($project),
         ]);
     }

@@ -21,6 +21,7 @@ final readonly class ControlOperationExecutor
         private ProjectOperationLease $lease,
         private DeployKeyProvisioner $deployKeys,
         private ManagedCloneSynchronizer $managedClones,
+        private ControlBranchChanger $controlBranches,
         private ControlOperationConfiguration $configuration,
         private Redactor $redactor,
         private ControlOperationRecoveryProcessor $recovery,
@@ -107,9 +108,12 @@ final readonly class ControlOperationExecutor
                 if (! $this->lease->heartbeat($operation->id, $operation->project_id, $attemptToken)) {
                     throw new RuntimeException('The control operation lost its lease heartbeat.');
                 }
-                $completed = $operation->operation_type === ControlOperationType::DEPLOY_KEY_PROVISION
-                    ? $this->deployKeys->advance($operation, $attemptToken)
-                    : $this->managedClones->advance($operation, $attemptToken);
+                $completed = match ($operation->operation_type) {
+                    ControlOperationType::DEPLOY_KEY_PROVISION => $this->deployKeys->advance($operation, $attemptToken),
+                    ControlOperationType::MANAGED_CLONE,
+                    ControlOperationType::MANAGED_FETCH => $this->managedClones->advance($operation, $attemptToken),
+                    ControlOperationType::CONTROL_BRANCH_CHANGE => $this->controlBranches->advance($operation, $attemptToken),
+                };
                 if ($completed) {
                     return;
                 }
@@ -117,6 +121,8 @@ final readonly class ControlOperationExecutor
             }
 
             throw new RuntimeException('The operation exceeded its bounded state transitions.');
+        } catch (ControlOperationTerminalConflict $exception) {
+            $this->recordTerminalConflict($operation, $attemptToken, $exception);
         } catch (ControlOperationRecoveryRequired $exception) {
             $this->requireRecovery($operation, $attemptToken, $exception);
         } catch (ControlOperationRetryableConflict $exception) {
@@ -139,9 +145,12 @@ final readonly class ControlOperationExecutor
             ? $operation->last_error
             : $this->recoveryDeviation($operation, $exception);
         try {
-            $finding = $operation->operation_type === ControlOperationType::DEPLOY_KEY_PROVISION
-                ? $this->deployKeys->recoveryFinding($operation, $attemptToken, $deviation)
-                : $this->managedClones->recoveryFinding($operation, $attemptToken, $deviation);
+            $finding = match ($operation->operation_type) {
+                ControlOperationType::DEPLOY_KEY_PROVISION => $this->deployKeys->recoveryFinding($operation, $attemptToken, $deviation),
+                ControlOperationType::MANAGED_CLONE,
+                ControlOperationType::MANAGED_FETCH => $this->managedClones->recoveryFinding($operation, $attemptToken, $deviation),
+                ControlOperationType::CONTROL_BRANCH_CHANGE => $this->controlBranches->recoveryFinding($operation, $attemptToken, $deviation),
+            };
         } catch (Throwable $inspectionFailure) {
             $this->recordRecoveryInspectionFailure($operation, $attemptToken, $inspectionFailure);
 
@@ -273,15 +282,76 @@ final readonly class ControlOperationExecutor
         );
     }
 
+    private function recordTerminalConflict(
+        ControlOperation $operation,
+        int $attemptToken,
+        ControlOperationTerminalConflict $exception,
+    ): void {
+        if (in_array($operation->operation_type, [
+            ControlOperationType::MANAGED_CLONE,
+            ControlOperationType::MANAGED_FETCH,
+        ], true)) {
+            try {
+                $this->managedClones->cleanupFailedAttempt($operation, $attemptToken);
+            } catch (Throwable $cleanupFailure) {
+                $this->requireRecovery($operation, $attemptToken, $cleanupFailure);
+
+                return;
+            }
+        }
+
+        $safe = $this->safeMessage($operation, $exception);
+        DB::transaction(function () use ($operation, $attemptToken, $exception, $safe): void {
+            $binding = hash(
+                'sha256',
+                "AI6-CONTROL-RESULT-V1\0".$operation->id.$operation->request_hash.$exception->conflict,
+            );
+            $result = ControlOperationResult::query()->firstOrCreate(
+                ['control_operation_id' => $operation->id],
+                [
+                    'outcome' => ControlOperationOutcome::FAILED,
+                    'result_binding' => $binding,
+                    'safe_summary' => $safe,
+                ],
+            );
+            if ($result->outcome !== ControlOperationOutcome::FAILED
+                || ! hash_equals($result->result_binding, $binding)) {
+                throw new RuntimeException('The existing terminal-conflict result has a different provenance binding.');
+            }
+
+            $operationUpdated = ControlOperation::query()
+                ->whereKey($operation->id)
+                ->where('current_attempt_token', $attemptToken)
+                ->where('state', ControlOperationState::RUNNING)
+                ->update([
+                    'phase' => ControlOperationPhase::ATTEMPT_COMPLETED,
+                    'state' => ControlOperationState::FAILED,
+                    'last_error' => $safe,
+                    'completed_at' => Date::now(),
+                    'version' => DB::raw('version + 1'),
+                    'updated_at' => Date::now(),
+                ]);
+            if ($operationUpdated !== 1) {
+                throw new RuntimeException('The terminal conflict lost its operation compare-and-swap binding.');
+            }
+
+        });
+        $operation->refresh();
+        $this->releaseTerminalLease($operation, $attemptToken);
+    }
+
     private function recordFailure(ControlOperation $operation, int $attemptToken, Throwable $exception): void
     {
         $operation->refresh();
         $safe = $this->persistedFailureSummary($operation, $exception);
         if ($operation->attempts >= $this->configuration->maxAttempts) {
             try {
-                $active = $operation->operation_type === ControlOperationType::DEPLOY_KEY_PROVISION
-                    ? $this->deployKeys->activeIntentUnderLock($operation, $attemptToken)
-                    : $this->managedClones->activeIntentUnderLock($operation, $attemptToken);
+                $active = match ($operation->operation_type) {
+                    ControlOperationType::DEPLOY_KEY_PROVISION => $this->deployKeys->activeIntentUnderLock($operation, $attemptToken),
+                    ControlOperationType::MANAGED_CLONE,
+                    ControlOperationType::MANAGED_FETCH => $this->managedClones->activeIntentUnderLock($operation, $attemptToken),
+                    ControlOperationType::CONTROL_BRANCH_CHANGE => $this->controlBranches->activeIntentUnderLock($operation, $attemptToken),
+                };
             } catch (Throwable $inspectionFailure) {
                 $this->requireRecovery($operation, $attemptToken, $inspectionFailure);
 
@@ -299,8 +369,13 @@ final readonly class ControlOperationExecutor
             try {
                 if ($operation->operation_type === ControlOperationType::DEPLOY_KEY_PROVISION) {
                     $this->deployKeys->cleanupFailedAttempt($operation, $attemptToken);
-                } else {
+                } elseif (in_array($operation->operation_type, [
+                    ControlOperationType::MANAGED_CLONE,
+                    ControlOperationType::MANAGED_FETCH,
+                ], true)) {
                     $this->managedClones->cleanupFailedAttempt($operation, $attemptToken);
+                } else {
+                    $this->controlBranches->cleanupFailedAttempt($operation, $attemptToken);
                 }
             } catch (Throwable $cleanupFailure) {
                 $this->requireRecovery($operation, $attemptToken, $cleanupFailure);

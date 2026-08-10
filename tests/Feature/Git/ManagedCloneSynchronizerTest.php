@@ -3,6 +3,9 @@
 namespace Tests\Feature\Git;
 
 use App\AI6\Auth\Models\User;
+use App\AI6\Auth\StepUpGuard;
+use App\AI6\Git\Actions\QueueControlBranchChange;
+use App\AI6\Git\Actions\QueueDeployKeyProvisioning;
 use App\AI6\Git\Actions\QueueManagedCloneOperation;
 use App\AI6\Git\ControlOperationConfiguration;
 use App\AI6\Git\ControlOperationConflict;
@@ -24,11 +27,15 @@ use App\AI6\Git\Models\ControlOperationRecoveryDecision;
 use App\AI6\Git\Models\ControlOperationResult;
 use App\AI6\Git\ProjectOperationLease;
 use App\AI6\Git\RecoveryDecisionType;
+use App\AI6\Projects\Models\ControlBranchAuditEntry;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\ProjectProvisioningStatus;
 use App\AI6\Shared\Process\ControlProcessRunner;
 use App\AI6\Shared\Process\EffectLock;
 use App\AI6\Shared\Redaction\RedactionContext;
+use Illuminate\Http\Request;
+use Illuminate\Session\ArraySessionHandler;
+use Illuminate\Session\Store;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -39,6 +46,209 @@ use Symfony\Component\Process\Process;
 
 final class ManagedCloneSynchronizerTest extends ControlOperationTestCase
 {
+    public function test_control_branch_probe_publish_and_fetch_consume_the_exact_pending_binding(): void
+    {
+        if (DIRECTORY_SEPARATOR !== '/') {
+            self::markTestSkipped('The control-branch probe and managed-fetch proof requires the Linux runtime.');
+        }
+
+        $fixture = $this->managedFixture();
+        $administrator = $fixture['administrator'];
+        $project = $fixture['project'];
+        $clone = $this->app->make(QueueManagedCloneOperation::class)->handle(
+            $administrator,
+            $project->refresh(),
+            ControlOperationType::MANAGED_CLONE,
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $this->app->make(ControlOperationExecutor::class)->execute($clone->id);
+        self::assertSame($fixture['first_oid'], $project->refresh()->control_oid);
+
+        $missing = $this->app->make(QueueControlBranchChange::class)->handle(
+            $this->stepUpRequest($administrator),
+            $administrator,
+            $project,
+            'refs/heads/missing',
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $this->app->make(ControlOperationExecutor::class)->execute($missing->id);
+        self::assertSame(ControlOperationState::FAILED, $missing->refresh()->state);
+        self::assertSame('refs/heads/main', $project->refresh()->control_branch);
+        self::assertSame($fixture['first_oid'], $project->control_oid);
+        self::assertNull($project->pending_control_oid);
+        self::assertSame(0, $project->control_generation);
+        self::assertSame(0, ControlBranchAuditEntry::query()->count());
+
+        $this->git(['checkout', '-b', 'next'], $fixture['source']);
+        self::assertNotFalse(file_put_contents($fixture['source'].'/ticket.md', "next\n"));
+        $this->git(['add', 'ticket.md'], $fixture['source']);
+        $this->git(['commit', '-m', 'next'], $fixture['source']);
+        $nextOid = trim($this->git(['rev-parse', 'HEAD'], $fixture['source']));
+        $this->git(['push', $fixture['remote'], 'refs/heads/next:refs/heads/next'], $fixture['source']);
+
+        $repository = $fixture['paths']->assertRepository(
+            $fixture['paths']->repositoryDirectory((string) $project->project_identifier),
+        );
+        $metadataBeforeProbe = $this->protectedMetadataSnapshot($repository);
+
+        $request = $this->stepUpRequest($administrator);
+        $change = $this->app->make(QueueControlBranchChange::class)->handle(
+            $request,
+            $administrator,
+            $project->refresh(),
+            'refs/heads/next',
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $this->app->make(ControlOperationExecutor::class)->execute($change->id);
+        $this->app->make(ControlOperationExecutor::class)->execute($change->id);
+
+        $project->refresh();
+        self::assertSame('refs/heads/next', $project->control_branch);
+        self::assertNull($project->control_oid);
+        self::assertSame('refs/heads/next', $project->pending_control_ref);
+        self::assertSame($nextOid, $project->pending_control_oid);
+        self::assertSame($change->id, $project->pending_control_operation_id);
+        self::assertSame(1, $project->control_generation);
+        self::assertSame(1, ControlBranchAuditEntry::query()->count());
+        self::assertSame($metadataBeforeProbe, $this->protectedMetadataSnapshot($repository));
+
+        $expectedCommitOperationId = (string) Str::uuid();
+        try {
+            $this->app->make(QueueDeployKeyProvisioning::class)->handle(
+                $administrator,
+                $project,
+                $expectedCommitOperationId,
+            );
+            self::fail('An expected-commit operation was queued before the pending binding was consumed.');
+        } catch (ControlOperationConflict $exception) {
+            self::assertStringContainsString('pending binding', $exception->getMessage());
+        }
+
+        self::assertNotFalse(file_put_contents($fixture['source'].'/ticket.md', "moved after branch decision\n"));
+        $this->git(['commit', '-am', 'moved after branch decision'], $fixture['source']);
+        $movedOid = trim($this->git(['rev-parse', 'HEAD'], $fixture['source']));
+        $this->git(['push', $fixture['remote'], 'HEAD:refs/heads/moved'], $fixture['source']);
+        $this->git(
+            ['--git-dir='.$fixture['remote'], 'update-ref', 'refs/heads/next', $movedOid, $nextOid],
+            $fixture['root'],
+        );
+
+        $movedFetch = $this->app->make(QueueManagedCloneOperation::class)->handle(
+            $administrator,
+            $project,
+            ControlOperationType::MANAGED_FETCH,
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $this->app->make(ControlOperationExecutor::class)->execute($movedFetch->id);
+        $movedFetch->refresh();
+        self::assertSame(ControlOperationState::FAILED, $movedFetch->state);
+        self::assertSame(
+            hash('sha256', "AI6-CONTROL-RESULT-V1\0".$movedFetch->id.$movedFetch->request_hash.'pending_control_oid_mismatch'),
+            $movedFetch->result()->firstOrFail()->result_binding,
+        );
+        $project->refresh();
+        self::assertNull($project->control_oid);
+        self::assertSame('refs/heads/next', $project->pending_control_ref);
+        self::assertSame($nextOid, $project->pending_control_oid);
+        self::assertSame($change->id, $project->pending_control_operation_id);
+        self::assertSame(2, $project->control_binding_version);
+
+        $this->git(
+            ['--git-dir='.$fixture['remote'], 'update-ref', 'refs/heads/next', $nextOid, $movedOid],
+            $fixture['root'],
+        );
+        $wrapper = $fixture['root'].'/ssh-wrapper';
+        $originalWrapper = file_get_contents($wrapper);
+        self::assertIsString($originalWrapper);
+        self::assertTrue(chmod($wrapper, 0700));
+        $raceWrapper = str_replace(
+            ['__REMOTE__', '__COUNTER__', '__EXPECTED__', '__MOVED__'],
+            [
+                escapeshellarg((string) realpath($fixture['remote'])),
+                escapeshellarg($fixture['root'].'/pending-head-counter'),
+                escapeshellarg($nextOid),
+                escapeshellarg($movedOid),
+            ],
+            <<<'SH'
+#!/bin/sh
+set -eu
+[ "$#" -eq 2 ]
+[ "$1" = "git@git.fixture.test" ]
+[ "$2" = "git-upload-pack 'acme/control.git'" ]
+count=0
+if [ -f __COUNTER__ ]; then count=$(cat __COUNTER__); fi
+count=$((count + 1))
+printf '%s\n' "$count" > __COUNTER__
+if [ "$count" -eq 2 ]; then
+    git --git-dir=__REMOTE__ update-ref refs/heads/next __MOVED__ __EXPECTED__
+fi
+exec git-upload-pack __REMOTE__
+SH,
+        );
+        self::assertNotFalse(file_put_contents($wrapper, $raceWrapper));
+        self::assertTrue(chmod($wrapper, 0555));
+
+        $racingFetch = $this->app->make(QueueManagedCloneOperation::class)->handle(
+            $administrator,
+            $project->refresh(),
+            ControlOperationType::MANAGED_FETCH,
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $this->app->make(ControlOperationExecutor::class)->execute($racingFetch->id);
+        $this->git(
+            ['--git-dir='.$fixture['remote'], 'update-ref', 'refs/heads/next', $nextOid, $movedOid],
+            $fixture['root'],
+        );
+        $racingFetch->refresh();
+        self::assertSame(ControlOperationState::FAILED, $racingFetch->state);
+        self::assertSame(
+            hash('sha256', "AI6-CONTROL-RESULT-V1\0".$racingFetch->id.$racingFetch->request_hash.'pending_control_head_mismatch'),
+            $racingFetch->result()->firstOrFail()->result_binding,
+        );
+        $project->refresh();
+        self::assertNull($project->control_oid);
+        self::assertSame('refs/heads/next', $project->pending_control_ref);
+        self::assertSame($nextOid, $project->pending_control_oid);
+        self::assertSame($change->id, $project->pending_control_operation_id);
+        self::assertSame(2, $project->control_binding_version);
+
+        self::assertTrue(chmod($wrapper, 0700));
+        self::assertNotFalse(file_put_contents($wrapper, $originalWrapper));
+        self::assertTrue(chmod($wrapper, 0555));
+
+        $fetch = $this->app->make(QueueManagedCloneOperation::class)->handle(
+            $administrator,
+            $project,
+            ControlOperationType::MANAGED_FETCH,
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        self::assertNull($fetch->expected_control_commit);
+        $this->app->make(ControlOperationExecutor::class)->execute($fetch->id);
+
+        $project->refresh();
+        self::assertSame('refs/heads/next', $project->control_branch);
+        self::assertSame($nextOid, $project->control_oid);
+        self::assertNull($project->pending_control_ref);
+        self::assertNull($project->pending_control_oid);
+        self::assertNull($project->pending_control_operation_id);
+        self::assertSame(3, $project->control_binding_version);
+        self::assertSame(1, $project->control_generation);
+
+        $project->forceFill(['provisioning_status' => ProjectProvisioningStatus::NOT_PROVISIONED])->save();
+        $expectedCommitOperation = $this->app->make(QueueDeployKeyProvisioning::class)->handle(
+            $administrator,
+            $project->refresh(),
+            $expectedCommitOperationId,
+        );
+        self::assertSame($nextOid, $expectedCommitOperation->expected_control_commit);
+    }
+
     public function test_clone_then_fetch_publish_only_the_bound_control_ref_and_binding(): void
     {
         if (DIRECTORY_SEPARATOR !== '/') {
@@ -798,7 +1008,7 @@ SH)));
             1,
             3,
             (string) realpath($knownHosts),
-            ['refs/heads/main'],
+            ['refs/heads/main', 'refs/heads/next', 'refs/heads/missing'],
             300,
             8,
         );
@@ -893,5 +1103,21 @@ SH)));
     private function context(int $projectId, string $operationId): RedactionContext
     {
         return new RedactionContext((string) $projectId, $operationId, 'managed-clone-e2e');
+    }
+
+    private function stepUpRequest(User $administrator): Request
+    {
+        $session = new Store('control-branch-test', new ArraySessionHandler(120));
+        $session->setId('control-branch-'.bin2hex(random_bytes(8)));
+        $session->start();
+        $request = Request::create('/projects/control-branch', 'POST');
+        $request->setLaravelSession($session);
+        $this->app->make(StepUpGuard::class)->markSatisfied(
+            $request,
+            $administrator,
+            QueueControlBranchChange::STEP_UP_ACTION,
+        );
+
+        return $request;
     }
 }

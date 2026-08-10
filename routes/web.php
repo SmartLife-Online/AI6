@@ -85,6 +85,9 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/projects/{project}/managed-fetch', [ControlOperationController::class, 'fetch'])
         ->middleware('can:synchronizeManagedClone,project')
         ->name('projects.managed-clone.fetch');
+    Route::post('/projects/{project}/control-branch', [ControlOperationController::class, 'changeControlBranch'])
+        ->middleware('can:changeControlBranch,project')
+        ->name('projects.control-branch.change');
     Route::get('/projects/{project}/operations/{operation}', [ControlOperationController::class, 'show'])
         ->middleware('can:view,project')
         ->name('projects.operations.show');

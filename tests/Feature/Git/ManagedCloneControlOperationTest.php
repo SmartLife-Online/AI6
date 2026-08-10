@@ -75,7 +75,13 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
         self::assertSame(ControlOperationType::MANAGED_FETCH, $fetch->operation_type);
         self::assertSame(str_repeat('b', 64), $fetch->expected_control_commit);
         self::assertSame(
-            ['control_ref' => 'refs/heads/main', 'expected_binding_version' => 1],
+            [
+                'control_ref' => 'refs/heads/main',
+                'expected_binding_version' => 1,
+                'pending_binding_version' => null,
+                'pending_control_oid' => null,
+                'pending_source_operation_id' => null,
+            ],
             json_decode($fetch->operation_parameters_jcs, true, 8, JSON_THROW_ON_ERROR),
         );
 
@@ -358,12 +364,14 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
         }
     }
 
-    public function test_follow_up_migration_restores_the_exact_ai6_006c_contract_on_down(): void
+    public function test_migration_chain_restores_the_exact_ai6_006c_contract_on_ordered_down(): void
     {
-        $migration = require database_path('migrations/2026_08_09_000000_add_clone_fetch_control_operation_contract.php');
+        $branchMigration = require database_path('migrations/2026_08_10_000000_add_control_branch_change_operation_contract.php');
+        $cloneMigration = require database_path('migrations/2026_08_09_000000_add_clone_fetch_control_operation_contract.php');
         self::assertTrue(Schema::hasColumn('control_operations', 'target_control_oid'));
 
-        $migration->down();
+        $branchMigration->down();
+        $cloneMigration->down();
         self::assertFalse(Schema::hasColumn('control_operations', 'target_control_oid'));
         $downTrigger = (string) DB::table('sqlite_master')
             ->where('type', 'trigger')
@@ -372,7 +380,7 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
         self::assertStringContainsString("'deploy_key_provision'", $downTrigger);
         self::assertStringNotContainsString('managed_clone', $downTrigger);
 
-        $migration->up();
+        $cloneMigration->up();
         self::assertTrue(Schema::hasColumn('control_operations', 'target_control_oid'));
         $upTrigger = (string) DB::table('sqlite_master')
             ->where('type', 'trigger')
@@ -380,6 +388,14 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
             ->value('sql');
         self::assertStringContainsString('managed_clone', $upTrigger);
         self::assertStringContainsString('binding_finalized', $upTrigger);
+
+        $branchMigration->up();
+        $latestTrigger = (string) DB::table('sqlite_master')
+            ->where('type', 'trigger')
+            ->where('name', 'control_operations_insert_guard')
+            ->value('sql');
+        self::assertStringContainsString('control_branch_change', $latestTrigger);
+        self::assertStringContainsString('remote_probed', $latestTrigger);
     }
 
     public function test_launch_fetch_publish_and_cleanup_keep_the_single_process_and_effect_lock_boundaries(): void

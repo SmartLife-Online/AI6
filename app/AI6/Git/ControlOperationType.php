@@ -7,12 +7,25 @@ enum ControlOperationType: string
     case DEPLOY_KEY_PROVISION = 'deploy_key_provision';
     case MANAGED_CLONE = 'managed_clone';
     case MANAGED_FETCH = 'managed_fetch';
+    case CONTROL_BRANCH_CHANGE = 'control_branch_change';
 
     /** @var array<string, list<string>> */
     public const PARAMETER_FIELDS = [
         'deploy_key_provision' => ['algorithm'],
         'managed_clone' => ['control_ref', 'expected_binding_version'],
-        'managed_fetch' => ['control_ref', 'expected_binding_version'],
+        'managed_fetch' => [
+            'control_ref',
+            'expected_binding_version',
+            'pending_source_operation_id',
+            'pending_binding_version',
+            'pending_control_oid',
+        ],
+        'control_branch_change' => [
+            'old_control_ref',
+            'old_control_oid',
+            'expected_binding_version',
+            'new_control_ref',
+        ],
     ];
 
     /**

@@ -3,6 +3,7 @@
 namespace App\AI6\Git\Http;
 
 use App\AI6\Auth\Models\User;
+use App\AI6\Git\Actions\QueueControlBranchChange;
 use App\AI6\Git\Actions\QueueDeployKeyProvisioning;
 use App\AI6\Git\Actions\QueueManagedCloneOperation;
 use App\AI6\Git\Actions\RecordRecoveryDecision;
@@ -72,6 +73,43 @@ final class ControlOperationController
         QueueManagedCloneOperation $action,
     ): RedirectResponse {
         return $this->enqueueManagedClone($request, $project, $action, ControlOperationType::MANAGED_FETCH);
+    }
+
+    public function changeControlBranch(
+        Request $request,
+        Project $project,
+        QueueControlBranchChange $action,
+    ): RedirectResponse {
+        $actor = $request->user();
+        abort_unless($actor instanceof User, 403);
+        $validated = $request->validate([
+            'operation_id' => [
+                'required',
+                'string',
+                static function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (! is_string($value) || ! ManagedProjectPath::validOperationIdentifier($value)) {
+                        $fail('Die Operations-ID ist ungültig.');
+                    }
+                },
+            ],
+            'new_control_ref' => ['required', 'string', 'max:255'],
+        ]);
+
+        try {
+            $operation = $action->handle(
+                $request,
+                $actor,
+                $project,
+                $validated['new_control_ref'],
+                $validated['operation_id'],
+            );
+        } catch (ControlOperationConflict) {
+            throw ValidationException::withMessages([
+                'new_control_ref' => ['Der Control-Branch-Wechsel steht in Konflikt mit dem aktuellen Projektzustand.'],
+            ]);
+        }
+
+        return redirect()->route('projects.operations.show', [$project, $operation]);
     }
 
     public function recover(

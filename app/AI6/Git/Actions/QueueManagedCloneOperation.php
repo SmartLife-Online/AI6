@@ -16,6 +16,7 @@ use App\AI6\Git\ManagedProjectPath;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\ProjectOperationLease;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Projects\PendingControlBinding;
 use App\AI6\Projects\Policies\ProjectPolicy;
 use App\AI6\Projects\ProjectProvisioningStatus;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -55,18 +56,30 @@ final readonly class QueueManagedCloneOperation
             || ! in_array($project->control_branch, $this->configuration->managedRefAllowlist, true)) {
             throw new ControlOperationConflict('The project is not ready for a managed-clone operation.');
         }
-        if (($type === ControlOperationType::MANAGED_CLONE && $project->control_oid !== null)
-            || ($type === ControlOperationType::MANAGED_FETCH && $project->control_oid === null)) {
+        $pending = PendingControlBinding::fromProject($project);
+        if (($type === ControlOperationType::MANAGED_CLONE
+                && ($project->control_oid !== null || $pending !== null))
+            || ($type === ControlOperationType::MANAGED_FETCH
+                && (($project->control_oid === null) === ($pending === null)))
+            || ($pending !== null && $pending->ref !== $project->control_branch)) {
             throw new ControlOperationConflict('The operation type does not match the active control binding.');
         }
 
         $operationId = strtolower($operationId);
         $snapshot = $this->authorizationSnapshots->capture($actor, $project);
         $snapshotJcs = $this->canonicalJson->normalizeAndEncode($snapshot);
-        $parameters = $type->parameters([
+        $parameterValues = [
             'control_ref' => $project->control_branch,
             'expected_binding_version' => $project->control_binding_version,
-        ]);
+        ];
+        if ($type === ControlOperationType::MANAGED_FETCH) {
+            $parameterValues += [
+                'pending_source_operation_id' => $pending?->sourceOperationId,
+                'pending_binding_version' => $pending?->version,
+                'pending_control_oid' => $pending?->oid,
+            ];
+        }
+        $parameters = $type->parameters($parameterValues);
         $parametersJcs = $this->canonicalJson->normalizeAndEncode($parameters);
         $hash = $this->hasher->hash(
             1,

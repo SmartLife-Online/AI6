@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Git;
 
+use App\AI6\Git\ControlRemoteProbe;
+use App\AI6\Git\HardenedControlRemoteProbe;
 use App\AI6\Git\HardenedGitRunner;
 use App\AI6\Shared\Process\ControlProcessRunner;
 use App\AI6\Shared\Process\EffectLock;
@@ -20,5 +22,7 @@ final class GitServiceProviderTest extends TestCase
         self::assertSame($this->app->make(ControlProcessRunner::class), $this->app->make(ControlProcessRunner::class));
         self::assertSame($this->app->make(EffectLock::class), $this->app->make(EffectLock::class));
         self::assertSame($this->app->make(HardenedGitRunner::class), $this->app->make(HardenedGitRunner::class));
+        self::assertInstanceOf(HardenedControlRemoteProbe::class, $this->app->make(ControlRemoteProbe::class));
+        self::assertSame($this->app->make(ControlRemoteProbe::class), $this->app->make(ControlRemoteProbe::class));
     }
 }

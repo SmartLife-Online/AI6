@@ -2,7 +2,11 @@
 
 namespace Tests\Feature\Git;
 
+use App\AI6\Auth\Models\User;
+use App\AI6\Auth\StepUpGuard;
+use App\AI6\Git\Actions\QueueControlBranchChange;
 use App\AI6\Git\Actions\QueueDeployKeyProvisioning;
+use App\AI6\Git\ControlBranchChanger;
 use App\AI6\Git\ControlOperationConfiguration;
 use App\AI6\Git\ControlOperationExecutor;
 use App\AI6\Git\ControlOperationOutcome;
@@ -10,6 +14,7 @@ use App\AI6\Git\ControlOperationPhase;
 use App\AI6\Git\ControlOperationReconciler;
 use App\AI6\Git\ControlOperationRetryableConflict;
 use App\AI6\Git\ControlOperationState;
+use App\AI6\Git\ControlRemoteProbe;
 use App\AI6\Git\DeployKeyProvisioner;
 use App\AI6\Git\Jobs\ExecuteControlOperation;
 use App\AI6\Git\ManagedProjectPath;
@@ -18,8 +23,13 @@ use App\AI6\Git\Models\ControlOperationRecoveryDecision;
 use App\AI6\Git\Models\ControlOperationResult;
 use App\AI6\Git\ProjectOperationLease;
 use App\AI6\Git\RecoveryDecisionType;
+use App\AI6\Projects\Models\ControlBranchAuditEntry;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\ProjectProvisioningStatus;
+use App\AI6\Shared\Redaction\RedactionContext;
+use Illuminate\Http\Request;
+use Illuminate\Session\ArraySessionHandler;
+use Illuminate\Session\Store;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -32,6 +42,7 @@ final class ControlOperationCrashInjectionTest extends ControlOperationTestCase
     {
         $covered = [
             ...self::deployKeyPhases(),
+            ControlOperationPhase::REMOTE_PROBED,
             ControlOperationPhase::EFFECT_STAGED,
             ControlOperationPhase::OUTCOME_PUBLISHED,
             ControlOperationPhase::BINDING_FINALIZED,
@@ -48,6 +59,99 @@ final class ControlOperationCrashInjectionTest extends ControlOperationTestCase
         sort($actual);
 
         self::assertSame($expected, $actual);
+    }
+
+    #[DataProvider('controlBranchCrashPhaseProvider')]
+    public function test_control_branch_redelivery_is_exactly_once_at_every_phase_boundary(
+        ControlOperationPhase $phase,
+    ): void {
+        config([
+            'ai6.control_operations.managed_ref_allowlist' => 'refs/heads/main,refs/heads/next',
+        ]);
+        foreach ([ControlOperationConfiguration::class, ProjectOperationLease::class, ControlOperationReconciler::class] as $service) {
+            $this->app->forgetInstance($service);
+        }
+        $targetOid = str_repeat('b', 64);
+        $probe = new CrashControlRemoteProbe($targetOid);
+        $this->app->instance(ControlRemoteProbe::class, $probe);
+        foreach ([ControlBranchChanger::class, ControlOperationExecutor::class] as $service) {
+            $this->app->forgetInstance($service);
+        }
+
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $project->forceFill([
+            'provisioning_status' => ProjectProvisioningStatus::PROVISIONED,
+            'deploy_key_reference' => '/managed/key',
+            'public_deploy_key' => "ssh-ed25519 fixture\n",
+            'control_oid' => str_repeat('a', 64),
+            'control_binding_version' => 4,
+            'control_generation' => 7,
+        ])->save();
+        $operation = $this->app->make(QueueControlBranchChange::class)->handle(
+            $this->branchStepUpRequest($administrator),
+            $administrator,
+            $project->refresh(),
+            'refs/heads/next',
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $lease = $this->app->make(ProjectOperationLease::class);
+        $changer = $this->app->make(ControlBranchChanger::class);
+
+        if ($phase === ControlOperationPhase::QUEUED) {
+            $operation->forceFill([
+                'updated_at' => now()->subSeconds(
+                    $this->app->make(ControlOperationConfiguration::class)->reconcilerSeconds + 1,
+                ),
+            ])->save();
+        } else {
+            $token = $lease->claim($operation, 'control-branch-crash');
+            self::assertIsInt($token);
+            if (in_array($phase, [ControlOperationPhase::REMOTE_PROBED, ControlOperationPhase::ATTEMPT_COMPLETED], true)) {
+                self::assertFalse($changer->advance($operation->refresh(), $token));
+            }
+            if ($phase === ControlOperationPhase::ATTEMPT_COMPLETED) {
+                self::assertTrue($changer->advance($operation->refresh(), $token));
+            } else {
+                self::assertTrue($lease->expire($operation->id, $project->getKey(), $token));
+            }
+        }
+
+        $reconciled = $this->app->make(ControlOperationReconciler::class)->reconcile();
+        self::assertSame($phase === ControlOperationPhase::ATTEMPT_COMPLETED ? 0 : 1, $reconciled);
+        if ($phase !== ControlOperationPhase::ATTEMPT_COMPLETED) {
+            self::assertSame(1, DB::table('jobs')->count());
+        }
+
+        if ($phase !== ControlOperationPhase::ATTEMPT_COMPLETED) {
+            $redeliveredToken = $lease->claim($operation->refresh(), 'control-branch-redelivered');
+            self::assertIsInt($redeliveredToken);
+            for ($step = 0; $step < 2 && ! $operation->refresh()->state->terminal(); $step++) {
+                $changer->advance($operation, $redeliveredToken);
+            }
+        }
+        self::assertTrue($changer->advance($operation->refresh(), (int) $operation->current_attempt_token));
+
+        $operation->refresh();
+        $project->refresh();
+        self::assertSame(ControlOperationState::COMPLETED, $operation->state);
+        self::assertSame(ControlOperationPhase::ATTEMPT_COMPLETED, $operation->phase);
+        self::assertSame(1, $probe->calls);
+        self::assertSame(8, $project->control_generation);
+        self::assertSame($targetOid, $project->pending_control_oid);
+        self::assertSame(1, ControlOperationResult::query()->where('control_operation_id', $operation->id)->count());
+        self::assertSame(1, ControlBranchAuditEntry::query()->where('control_operation_id', $operation->id)->count());
+        self::assertNull($project->operation_lock_operation_id);
+    }
+
+    /** @return iterable<string, array{ControlOperationPhase}> */
+    public static function controlBranchCrashPhaseProvider(): iterable
+    {
+        yield 'queued' => [ControlOperationPhase::QUEUED];
+        yield 'claimed' => [ControlOperationPhase::CLAIMED];
+        yield 'remote probed' => [ControlOperationPhase::REMOTE_PROBED];
+        yield 'attempt completed' => [ControlOperationPhase::ATTEMPT_COMPLETED];
     }
 
     /**
@@ -452,5 +556,35 @@ final class ControlOperationCrashInjectionTest extends ControlOperationTestCase
         chmod($directory.'/intent.json', 0600);
 
         return $fingerprint;
+    }
+
+    private function branchStepUpRequest(User $administrator): Request
+    {
+        $session = new Store('control-branch-crash', new ArraySessionHandler(120));
+        $session->setId('control-branch-crash-'.bin2hex(random_bytes(8)));
+        $session->start();
+        $request = Request::create('/projects/control-branch', 'POST');
+        $request->setLaravelSession($session);
+        $this->app->make(StepUpGuard::class)->markSatisfied(
+            $request,
+            $administrator,
+            QueueControlBranchChange::STEP_UP_ACTION,
+        );
+
+        return $request;
+    }
+}
+
+final class CrashControlRemoteProbe implements ControlRemoteProbe
+{
+    public int $calls = 0;
+
+    public function __construct(private readonly string $targetOid) {}
+
+    public function resolve(Project $project, string $ref, RedactionContext $context): string
+    {
+        $this->calls++;
+
+        return $this->targetOid;
     }
 }

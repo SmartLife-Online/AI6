@@ -15,9 +15,11 @@ use App\AI6\Git\ControlOperationConfiguration;
 use App\AI6\Git\ControlOperationConfigurationFactory;
 use App\AI6\Git\ControlOperationRuntimeIdentity;
 use App\AI6\Git\ControlOperationRuntimeIdentityFactory;
+use App\AI6\Git\ControlRemoteProbe;
 use App\AI6\Git\GitConfiguration;
 use App\AI6\Git\GitConfigurationFactory;
 use App\AI6\Git\GitRemotePolicy;
+use App\AI6\Git\HardenedControlRemoteProbe;
 use App\AI6\Git\HardenedGitEnvironment;
 use App\AI6\Git\HardenedGitRunner;
 use App\AI6\Git\KnownHostsVerifier;
@@ -173,6 +175,13 @@ final class AI6ServiceProvider extends ServiceProvider
                 $app->make(ControlProcessRunner::class),
                 $app->make(GitRemotePolicy::class),
                 $app->make(HardenedGitEnvironment::class),
+            ),
+        );
+        $this->app->singleton(
+            ControlRemoteProbe::class,
+            static fn (Application $app): ControlRemoteProbe => new HardenedControlRemoteProbe(
+                $app->make(ControlOperationConfiguration::class),
+                $app->make(HardenedGitRunner::class),
             ),
         );
         $this->app->singleton(AllowedHtmlPolicy::class);

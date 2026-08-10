@@ -6,6 +6,7 @@ use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\ControlOperationRecoveryDecision;
 use App\AI6\Git\Models\ControlOperationResult;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Projects\PendingControlBinding;
 use App\AI6\Projects\Policies\ProjectPolicy;
 use App\AI6\Projects\ProjectProvisioningStatus;
 use App\AI6\Shared\Process\BlockedStartOutcome;
@@ -26,6 +27,7 @@ final readonly class ManagedCloneSynchronizer
         private ProjectOperationLease $lease,
         private ProjectEffectLockName $lockNames,
         private HardenedGitRunner $git,
+        private ControlRemoteProbe $remoteProbe,
         private EffectLock $effectLock,
         private ProjectPolicy $projectPolicy,
         private ControlOperationAuthorizationSnapshot $authorizationSnapshots,
@@ -64,17 +66,18 @@ final readonly class ManagedCloneSynchronizer
             throw new RuntimeException('Authorization changed before the managed Git process started.');
         }
 
-        $context = $this->context($operation, 'managed-remote-probe');
-        $probe = $this->git->probeRemote(
-            (string) $project->remote,
+        $targetOid = $this->remoteProbe->resolve(
+            $project,
             $parameters['control_ref'],
-            $this->managedRoot(),
-            (string) $project->deploy_key_reference,
-            $this->configuration->knownHostsFile,
-            (string) $project->host_key_fingerprint,
-            $context,
+            $this->context($operation, 'managed-remote-probe'),
         );
-        $targetOid = $this->probeOid($probe->succeeded(), $probe->output, $probe->errorOutput, $parameters['control_ref']);
+        if ($parameters['pending_control_oid'] !== null
+            && ! hash_equals($parameters['pending_control_oid'], $targetOid)) {
+            throw new ControlOperationTerminalConflict(
+                'pending_control_oid_mismatch',
+                'Der Remote-Control-Head stimmt nicht mit der ausstehenden Bindung überein.',
+            );
+        }
 
         $attemptRef = ManagedProjectPath::attemptRef($operation->id, $attemptToken);
         if ($operation->operation_type === ControlOperationType::MANAGED_CLONE) {
@@ -192,7 +195,14 @@ final readonly class ManagedCloneSynchronizer
             throw new ControlOperationRetryableConflict('lease_lost', 'The operation lease was lost before staged-effect validation.');
         }
 
-        $this->assertStagedEffect($operation, $project, $attemptToken, $parameters['control_ref'], $targetOid);
+        $this->assertStagedEffect(
+            $operation,
+            $project,
+            $attemptToken,
+            $parameters['control_ref'],
+            $targetOid,
+            $parameters['pending_control_oid'] !== null,
+        );
         $this->progress($operation, $attemptToken, ControlOperationPhase::PROCESS_STARTED, [
             'phase' => ControlOperationPhase::EFFECT_STAGED,
         ]);
@@ -223,6 +233,7 @@ final readonly class ManagedCloneSynchronizer
         }
 
         $parameters = $this->parameters($operation);
+        $this->assertPendingBindingCurrent($operation, $project, $parameters);
         $expectedArgumentHash = $this->launchArgumentHash($operation, $project, $parameters, $effectAttemptToken);
         if ($operation->launch_argument_hash === null
             || ! hash_equals($operation->launch_argument_hash, $expectedArgumentHash)) {
@@ -237,6 +248,12 @@ final readonly class ManagedCloneSynchronizer
 
                 return false;
             }
+            if ($parameters['pending_control_oid'] !== null) {
+                throw new ControlOperationTerminalConflict(
+                    'pending_control_head_mismatch',
+                    'Der abgerufene Control-Head stimmt nicht mit der ausstehenden Bindung überein.',
+                );
+            }
             $this->paths->removeOwnedAttempt((string) $project->project_identifier, $operation->id, $effectAttemptToken);
         } finally {
             $lock->release();
@@ -249,6 +266,7 @@ final readonly class ManagedCloneSynchronizer
     {
         $project = $operation->project()->firstOrFail();
         $parameters = $this->parameters($operation);
+        $this->assertPendingBindingCurrent($operation, $project, $parameters);
         $targetOid = $this->intentOid($operation);
         $effectAttemptToken = $operation->effect_attempt_token;
         if ($effectAttemptToken === null) {
@@ -294,6 +312,7 @@ final readonly class ManagedCloneSynchronizer
     {
         $project = $operation->project()->firstOrFail();
         $parameters = $this->parameters($operation);
+        $this->assertPendingBindingCurrent($operation, $project, $parameters);
         $targetOid = $this->intentOid($operation);
         $lock = $this->acquireEffectLock($operation, $project, $attemptToken, 'control-binding finalization');
         try {
@@ -301,25 +320,49 @@ final readonly class ManagedCloneSynchronizer
             DB::transaction(function () use ($operation, $project, $parameters, $targetOid, $attemptToken): void {
                 $project->refresh();
                 $expectedVersion = $parameters['expected_binding_version'];
-                if (! ($project->control_oid === $targetOid && $project->control_binding_version === $expectedVersion + 1)) {
-                    $updated = Project::query()
+                if (! ($project->control_oid === $targetOid
+                    && $project->control_binding_version === $expectedVersion + 1
+                    && PendingControlBinding::fromProject($project) === null)) {
+                    $query = Project::query()
                         ->whereKey($project->getKey())
                         ->where('operation_lock_operation_id', $operation->id)
                         ->where('operation_lock_attempt_token', $attemptToken)
-                        ->where('control_binding_version', $expectedVersion)
-                        ->when(
+                        ->where('control_binding_version', $expectedVersion);
+                    $updates = [
+                        'control_oid' => $targetOid,
+                        'control_binding_version' => DB::raw('control_binding_version + 1'),
+                        'updated_at' => Date::now(),
+                    ];
+                    if ($parameters['pending_control_oid'] !== null) {
+                        $query->whereNull('control_oid')
+                            ->where('pending_control_ref', $parameters['control_ref'])
+                            ->where('pending_control_oid', $parameters['pending_control_oid'])
+                            ->where('pending_control_operation_id', $parameters['pending_source_operation_id']);
+                        $updates += [
+                            'pending_control_ref' => null,
+                            'pending_control_oid' => null,
+                            'pending_control_operation_id' => null,
+                        ];
+                    } else {
+                        $query->when(
                             $operation->expected_control_commit === null,
-                            static fn ($query) => $query->whereNull('control_oid'),
-                            static fn ($query) => $query->where('control_oid', $operation->expected_control_commit),
-                        )
-                        ->update([
-                            'control_oid' => $targetOid,
-                            'control_binding_version' => DB::raw('control_binding_version + 1'),
-                            'updated_at' => Date::now(),
-                        ]);
+                            static fn ($builder) => $builder->whereNull('control_oid'),
+                            static fn ($builder) => $builder->where('control_oid', $operation->expected_control_commit),
+                        )->whereNull('pending_control_ref')
+                            ->whereNull('pending_control_oid')
+                            ->whereNull('pending_control_operation_id');
+                    }
+                    $updated = $query->update($updates);
                     if ($updated !== 1) {
                         if (! $this->lease->owns($operation->id, $operation->project_id, $attemptToken)) {
                             throw new ControlOperationRetryableConflict('fencing_conflict', 'The binding publish lost its operation-attempt ownership.');
+                        }
+
+                        if ($parameters['pending_control_oid'] !== null) {
+                            throw new ControlOperationTerminalConflict(
+                                'pending_binding_conflict',
+                                'Die ausstehende Control-Bindung wurde vor dem atomaren Konsum ersetzt.',
+                            );
                         }
 
                         throw new ControlOperationRecoveryRequired('The control-binding version changed while this operation still owned the project lease.');
@@ -590,21 +633,25 @@ final readonly class ManagedCloneSynchronizer
         $this->lease->releaseTerminal($operation->refresh(), $attemptToken);
     }
 
-    /** @param array{control_ref: string, expected_binding_version: int} $parameters */
+    /**
+     * @param  array{control_ref: string, expected_binding_version: int, pending_source_operation_id: string|null, pending_binding_version: int|null, pending_control_oid: string|null}  $parameters
+     */
     private function assertExecutionContract(ControlOperation $operation, Project $project, array $parameters): void
     {
+        $this->assertPendingBindingCurrent($operation, $project, $parameters);
         if ($project->provisioning_status !== ProjectProvisioningStatus::PROVISIONED
             || $project->remote === null
             || $project->deploy_key_reference === null
             || $project->control_branch !== $parameters['control_ref']
             || ! in_array($parameters['control_ref'], $this->configuration->managedRefAllowlist, true)
-            || $project->control_binding_version !== $parameters['expected_binding_version']
-            || $project->control_oid !== $operation->expected_control_commit) {
+            || $project->control_binding_version !== $parameters['expected_binding_version']) {
             throw new RuntimeException('Project provenance changed before managed Git execution.');
         }
     }
 
-    /** @return array{control_ref: string, expected_binding_version: int} */
+    /**
+     * @return array{control_ref: string, expected_binding_version: int, pending_source_operation_id: string|null, pending_binding_version: int|null, pending_control_oid: string|null}
+     */
     private function parameters(ControlOperation $operation): array
     {
         try {
@@ -623,7 +670,66 @@ final readonly class ManagedCloneSynchronizer
             throw new RuntimeException('Managed-clone operation parameters are not canonical.');
         }
 
+        if ($operation->operation_type === ControlOperationType::MANAGED_CLONE) {
+            return $parameters + [
+                'pending_source_operation_id' => null,
+                'pending_binding_version' => null,
+                'pending_control_oid' => null,
+            ];
+        }
+
+        $pendingValues = [
+            $parameters['pending_source_operation_id'],
+            $parameters['pending_binding_version'],
+            $parameters['pending_control_oid'],
+        ];
+        $allNull = $pendingValues === [null, null, null];
+        $complete = is_string($parameters['pending_source_operation_id'])
+            && is_int($parameters['pending_binding_version'])
+            && $parameters['pending_binding_version'] >= 0
+            && $parameters['pending_binding_version'] === $parameters['expected_binding_version']
+            && is_string($parameters['pending_control_oid'])
+            && preg_match('/\A[0-9a-f]{64}\z/D', $parameters['pending_control_oid']) === 1;
+        if (! $allNull && ! $complete) {
+            throw new RuntimeException('Managed-fetch pending-binding parameters are incomplete.');
+        }
+
         return $parameters;
+    }
+
+    /**
+     * @param  array{control_ref: string, expected_binding_version: int, pending_source_operation_id: string|null, pending_binding_version: int|null, pending_control_oid: string|null}  $parameters
+     */
+    private function assertPendingBindingCurrent(
+        ControlOperation $operation,
+        Project $project,
+        array $parameters,
+    ): void {
+        $pending = PendingControlBinding::fromProject($project);
+        if ($parameters['pending_control_oid'] === null) {
+            if ($pending !== null || $project->control_oid !== $operation->expected_control_commit) {
+                throw new ControlOperationTerminalConflict(
+                    'pending_binding_conflict',
+                    'Die Control-Bindung stimmt nicht mehr mit dem Fetchauftrag überein.',
+                );
+            }
+
+            return;
+        }
+
+        if ($operation->operation_type !== ControlOperationType::MANAGED_FETCH
+            || $operation->expected_control_commit !== null
+            || $project->control_oid !== null
+            || $pending === null
+            || $pending->ref !== $parameters['control_ref']
+            || $pending->sourceOperationId !== $parameters['pending_source_operation_id']
+            || $pending->version !== $parameters['pending_binding_version']
+            || $pending->oid !== $parameters['pending_control_oid']) {
+            throw new ControlOperationTerminalConflict(
+                'pending_binding_conflict',
+                'Die ausstehende Control-Bindung wurde nach dem Anlegen des Fetchauftrags ersetzt.',
+            );
+        }
     }
 
     private function assertStagedEffect(
@@ -632,8 +738,16 @@ final readonly class ManagedCloneSynchronizer
         int $attemptToken,
         string $controlRef,
         string $targetOid,
+        bool $pendingBinding,
     ): void {
         if (! $this->stagedEffectMatches($operation, $project, $attemptToken, $controlRef, $targetOid)) {
+            if ($pendingBinding) {
+                throw new ControlOperationTerminalConflict(
+                    'pending_control_head_mismatch',
+                    'Der abgerufene Control-Head stimmt nicht mit der ausstehenden Bindung überein.',
+                );
+            }
+
             throw new RuntimeException('The staged managed Git result does not match its remote-probe binding.');
         }
     }
@@ -723,21 +837,9 @@ final readonly class ManagedCloneSynchronizer
         return $oid;
     }
 
-    private function probeOid(bool $succeeded, string $output, string $error, string $expectedRef): string
-    {
-        $lines = preg_split('/\r?\n/', trim($output)) ?: [];
-        if (! $succeeded || count($lines) !== 1) {
-            throw new RuntimeException($error !== '' ? $error : 'The control ref remote probe returned no unique result.');
-        }
-        $parts = preg_split('/\s+/', $lines[0], 2);
-        if (! is_array($parts) || count($parts) !== 2 || $parts[1] !== $expectedRef || ! $this->validOid($parts[0])) {
-            throw new RuntimeException('The control ref remote probe returned a malformed binding.');
-        }
-
-        return $parts[0];
-    }
-
-    /** @param array{control_ref: string, expected_binding_version: int} $parameters */
+    /**
+     * @param  array{control_ref: string, expected_binding_version: int, pending_source_operation_id: string|null, pending_binding_version: int|null, pending_control_oid: string|null}  $parameters
+     */
     private function launchArgumentHash(
         ControlOperation $operation,
         Project $project,
@@ -891,16 +993,6 @@ final readonly class ManagedCloneSynchronizer
     private function context(ControlOperation $operation, string $purpose): RedactionContext
     {
         return new RedactionContext((string) $operation->project_id, $operation->id, $purpose);
-    }
-
-    private function managedRoot(): string
-    {
-        $root = realpath($this->configuration->managedRoot);
-        if (! is_string($root) || is_link($this->configuration->managedRoot) || ! is_dir($root)) {
-            throw new RuntimeException('The managed root is unavailable or unsafe.');
-        }
-
-        return $root;
     }
 
     private function assertType(ControlOperation $operation): void

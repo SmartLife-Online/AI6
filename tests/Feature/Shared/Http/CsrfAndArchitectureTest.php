@@ -26,6 +26,7 @@ final class CsrfAndArchitectureTest extends AuthFeatureTestCase
             ['POST', '/projects/1/deploy-key'],
             ['POST', '/projects/1/managed-clone'],
             ['POST', '/projects/1/managed-fetch'],
+            ['POST', '/projects/1/control-branch'],
             ['POST', '/projects/1/operations/00000000-0000-0000-0000-000000000000/recovery'],
         ] as [$method, $path]) {
             $actualToken = bin2hex(random_bytes(20));
