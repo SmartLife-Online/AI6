@@ -22,6 +22,7 @@ final readonly class ControlOperationExecutor
         private DeployKeyProvisioner $deployKeys,
         private ManagedCloneSynchronizer $managedClones,
         private ControlBranchChanger $controlBranches,
+        private TicketReadModelRefresher $ticketReadModels,
         private ControlOperationConfiguration $configuration,
         private Redactor $redactor,
         private ControlOperationRecoveryProcessor $recovery,
@@ -113,6 +114,7 @@ final readonly class ControlOperationExecutor
                     ControlOperationType::MANAGED_CLONE,
                     ControlOperationType::MANAGED_FETCH => $this->managedClones->advance($operation, $attemptToken),
                     ControlOperationType::CONTROL_BRANCH_CHANGE => $this->controlBranches->advance($operation, $attemptToken),
+                    ControlOperationType::TICKET_REFRESH => $this->ticketReadModels->advance($operation, $attemptToken),
                 };
                 if ($completed) {
                     return;
@@ -150,6 +152,7 @@ final readonly class ControlOperationExecutor
                 ControlOperationType::MANAGED_CLONE,
                 ControlOperationType::MANAGED_FETCH => $this->managedClones->recoveryFinding($operation, $attemptToken, $deviation),
                 ControlOperationType::CONTROL_BRANCH_CHANGE => $this->controlBranches->recoveryFinding($operation, $attemptToken, $deviation),
+                ControlOperationType::TICKET_REFRESH => $this->ticketReadModels->recoveryFinding($operation, $attemptToken, $deviation),
             };
         } catch (Throwable $inspectionFailure) {
             $this->recordRecoveryInspectionFailure($operation, $attemptToken, $inspectionFailure);
@@ -351,6 +354,7 @@ final readonly class ControlOperationExecutor
                     ControlOperationType::MANAGED_CLONE,
                     ControlOperationType::MANAGED_FETCH => $this->managedClones->activeIntentUnderLock($operation, $attemptToken),
                     ControlOperationType::CONTROL_BRANCH_CHANGE => $this->controlBranches->activeIntentUnderLock($operation, $attemptToken),
+                    ControlOperationType::TICKET_REFRESH => $this->ticketReadModels->activeIntentUnderLock($operation, $attemptToken),
                 };
             } catch (Throwable $inspectionFailure) {
                 $this->requireRecovery($operation, $attemptToken, $inspectionFailure);
@@ -374,8 +378,10 @@ final readonly class ControlOperationExecutor
                     ControlOperationType::MANAGED_FETCH,
                 ], true)) {
                     $this->managedClones->cleanupFailedAttempt($operation, $attemptToken);
-                } else {
+                } elseif ($operation->operation_type === ControlOperationType::CONTROL_BRANCH_CHANGE) {
                     $this->controlBranches->cleanupFailedAttempt($operation, $attemptToken);
+                } else {
+                    $this->ticketReadModels->cleanupFailedAttempt($operation, $attemptToken);
                 }
             } catch (Throwable $cleanupFailure) {
                 $this->requireRecovery($operation, $attemptToken, $cleanupFailure);

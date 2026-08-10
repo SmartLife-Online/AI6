@@ -88,6 +88,9 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/projects/{project}/control-branch', [ControlOperationController::class, 'changeControlBranch'])
         ->middleware('can:changeControlBranch,project')
         ->name('projects.control-branch.change');
+    Route::post('/projects/{project}/ticket-read-model', [ControlOperationController::class, 'refreshReadModel'])
+        ->middleware('can:refreshReadModel,project')
+        ->name('projects.ticket-read-model.refresh');
     Route::get('/projects/{project}/operations/{operation}', [ControlOperationController::class, 'show'])
         ->middleware('can:view,project')
         ->name('projects.operations.show');

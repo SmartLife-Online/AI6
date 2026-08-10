@@ -75,6 +75,7 @@ final class ManagedProjectPathTest extends TestCase
                 ['refs/heads/main'],
                 300,
                 8,
+                'tickets',
             ));
             $this->expectException(RuntimeException::class);
             $unsafe->prepareAttempt(str_repeat('a', 32), '123e4567-e89b-42d3-a456-426614174000', 1);
@@ -249,6 +250,7 @@ final class ManagedProjectPathTest extends TestCase
                 ['refs/heads/main'],
                 300,
                 8,
+                'tickets',
             ));
             $this->expectException(RuntimeException::class);
             $unsafe->removeOwnedAttempt(str_repeat('a', 32), '123e4567-e89b-42d3-a456-426614174000', 1);
@@ -325,6 +327,7 @@ final class ManagedProjectPathTest extends TestCase
             ['refs/heads/main'],
             300,
             8,
+            'tickets',
         ));
     }
 

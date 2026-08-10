@@ -48,7 +48,13 @@ final class ControlBranchArchitectureTest extends TestCase
                 $generationComparisons[] = $file;
             }
             if (preg_match('/[\'\"](?:is_)?stale(?:_at)?[\'\"]\s*=>/', $source) === 1) {
-                $staleMarkerWrites[] = $file;
+                $readTimeStatusFiles = [
+                    str_replace('\\', '/', $root.'/app/AI6/Projects/ProjectReadModelStatus.php'),
+                    str_replace('\\', '/', $root.'/app/AI6/Projects/TicketReadModelFreshness.php'),
+                ];
+                if (! in_array($file, $readTimeStatusFiles, true)) {
+                    $staleMarkerWrites[] = $file;
+                }
             }
             if (str_contains($source, 'control_generation')) {
                 self::assertStringNotContainsString('implements ShouldQueue', $source, $file);
@@ -59,6 +65,18 @@ final class ControlBranchArchitectureTest extends TestCase
         self::assertSame([$generationFile], $generationMethods);
         self::assertSame([$generationFile], $generationComparisons);
         self::assertSame([], $staleMarkerWrites);
+
+        $freshness = file_get_contents($root.'/app/AI6/Projects/TicketReadModelFreshness.php');
+        self::assertIsString($freshness);
+        foreach (['DB::', '::query(', '->save(', '->update(', 'Queue::', 'dispatch(', 'control_ref', 'pending_control_ref'] as $forbidden) {
+            self::assertStringNotContainsString($forbidden, $freshness);
+        }
+
+        $status = file_get_contents($root.'/app/AI6/Projects/ProjectReadModelStatus.php');
+        self::assertIsString($status);
+        foreach (['DB::', '->save(', '->update(', 'Queue::', 'dispatch(', 'control_ref', 'pending_control_ref'] as $forbidden) {
+            self::assertStringNotContainsString($forbidden, $status);
+        }
     }
 
     public function test_web_entry_points_never_read_repository_content_or_start_git_and_processes(): void

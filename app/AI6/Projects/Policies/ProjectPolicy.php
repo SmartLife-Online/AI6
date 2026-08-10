@@ -25,6 +25,12 @@ final class ProjectPolicy
             'operator' => true,
             'approver' => true,
         ],
+        'refresh_read_model' => [
+            'admin' => true,
+            'viewer' => false,
+            'operator' => true,
+            'approver' => false,
+        ],
     ];
 
     public function create(User $user): bool
@@ -60,6 +66,11 @@ final class ProjectPolicy
     public function changeControlBranch(User $user, Project $project): bool
     {
         return $user->is_active && $user->is_global_admin;
+    }
+
+    public function refreshReadModel(User $user, Project $project): bool
+    {
+        return $this->decide(ProjectAction::REFRESH_READ_MODEL, $user, $project);
     }
 
     public function decide(ProjectAction $action, User $user, Project $project): bool

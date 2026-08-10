@@ -4,6 +4,7 @@ namespace App\AI6\Projects\Models;
 
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Projects\ProjectProvisioningStatus;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
@@ -29,6 +30,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $pending_control_ref
  * @property string|null $pending_control_oid
  * @property string|null $pending_control_operation_id
+ * @property-read Collection<int, TicketReadModel> $ticketReadModels
  */
 final class Project extends Model
 {
@@ -67,6 +69,12 @@ final class Project extends Model
     public function controlOperations(): HasMany
     {
         return $this->hasMany(ControlOperation::class);
+    }
+
+    /** @return HasMany<TicketReadModel, $this> */
+    public function ticketReadModels(): HasMany
+    {
+        return $this->hasMany(TicketReadModel::class);
     }
 
     public function publicDeployKeyForDisplay(): ?string

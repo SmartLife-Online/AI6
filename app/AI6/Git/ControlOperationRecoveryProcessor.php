@@ -30,8 +30,11 @@ final readonly class ControlOperationRecoveryProcessor
         }
 
         try {
-            if ($operation->operation_type === ControlOperationType::CONTROL_BRANCH_CHANGE) {
-                throw new RuntimeException('Control-branch operations have no recoverable external effect.');
+            if (in_array($operation->operation_type, [
+                ControlOperationType::CONTROL_BRANCH_CHANGE,
+                ControlOperationType::TICKET_REFRESH,
+            ], true)) {
+                throw new RuntimeException('This control operation has no recoverable external effect.');
             }
             $handler = $operation->operation_type === ControlOperationType::DEPLOY_KEY_PROVISION
                 ? $this->deployKeys
@@ -62,8 +65,11 @@ final readonly class ControlOperationRecoveryProcessor
             return;
         }
 
-        if ($operation->operation_type === ControlOperationType::CONTROL_BRANCH_CHANGE) {
-            throw new RuntimeException('Control-branch operations cannot be abandoned through effect recovery.');
+        if (in_array($operation->operation_type, [
+            ControlOperationType::CONTROL_BRANCH_CHANGE,
+            ControlOperationType::TICKET_REFRESH,
+        ], true)) {
+            throw new RuntimeException('This control operation cannot be abandoned through effect recovery.');
         }
 
         $this->managedClones->abandon($operation, $decision);

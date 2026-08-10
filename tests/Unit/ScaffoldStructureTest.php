@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_006e(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_006f(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -129,6 +129,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Git/Actions/QueueControlBranchChange.php',
             'app/AI6/Git/Actions/QueueDeployKeyProvisioning.php',
             'app/AI6/Git/Actions/QueueManagedCloneOperation.php',
+            'app/AI6/Git/Actions/QueueTicketReadModelRefresh.php',
             'app/AI6/Git/Actions/RecordRecoveryDecision.php',
             'app/AI6/Git/CanonicalJson.php',
             'app/AI6/Git/CanonicalRequestException.php',
@@ -173,6 +174,11 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Git/ProjectOperationLease.php',
             'app/AI6/Git/RecoveryDecisionType.php',
             'app/AI6/Git/RecoveryEvidenceReference.php',
+            'app/AI6/Git/RefreshPathPolicy.php',
+            'app/AI6/Git/TicketBlob.php',
+            'app/AI6/Git/TicketReadModelRefreshResult.php',
+            'app/AI6/Git/TicketReadModelRefresher.php',
+            'app/AI6/Git/TicketReadModelResultBinding.php',
             'app/AI6/Git/ValidatedGitRemote.php',
             'app/AI6/Git/generate-deploy-key.sh',
             'app/AI6/HumanLoop/.gitkeep',
@@ -183,14 +189,20 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Projects/Models/ControlBranchAuditEntry.php',
             'app/AI6/Projects/Models/Project.php',
             'app/AI6/Projects/Models/ProjectMembership.php',
+            'app/AI6/Projects/Models/TicketReadModel.php',
             'app/AI6/Projects/PendingControlBinding.php',
             'app/AI6/Projects/Policies/ProjectPolicy.php',
             'app/AI6/Projects/ProjectAction.php',
             'app/AI6/Projects/ProjectIdentifierGenerator.php',
             'app/AI6/Projects/ProjectProvisioningStatus.php',
+            'app/AI6/Projects/ProjectReadModelStatus.php',
             'app/AI6/Projects/ProjectRegistrationRejected.php',
             'app/AI6/Projects/ProjectRole.php',
             'app/AI6/Projects/ProjectSynchronizationStatus.php',
+            'app/AI6/Projects/TicketDocumentState.php',
+            'app/AI6/Projects/TicketReadModelFreshness.php',
+            'app/AI6/Projects/TicketReadModelRedactionState.php',
+            'app/AI6/Projects/TicketReadModelUsePolicy.php',
             'app/AI6/Prompts/.gitkeep',
             'app/AI6/Reviews/.gitkeep',
             'app/AI6/Runs/.gitkeep',
@@ -503,7 +515,7 @@ final class ScaffoldStructureTest extends TestCase
         }
     }
 
-    public function test_migrations_match_the_approved_state_through_ai6_006e(): void
+    public function test_migrations_match_the_approved_state_through_ai6_006f(): void
     {
         $migrations = glob($this->path('database/migrations/*.php'));
         self::assertIsArray($migrations);
@@ -528,6 +540,7 @@ final class ScaffoldStructureTest extends TestCase
             '2026_08_06_000000_create_control_operations_table.php',
             '2026_08_09_000000_add_clone_fetch_control_operation_contract.php',
             '2026_08_10_000000_add_control_branch_change_operation_contract.php',
+            '2026_08_10_010000_add_ticket_refresh_read_model_contract.php',
         ], $migrations);
     }
 

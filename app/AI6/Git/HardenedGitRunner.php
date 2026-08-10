@@ -184,6 +184,80 @@ final class HardenedGitRunner
         return $this->resolveRepositoryRef($repository, $attemptRef, $redactionContext);
     }
 
+    public function readRegularBlob(
+        string $repository,
+        string $controlCommit,
+        string $relativePath,
+        RedactionContext $redactionContext,
+    ): TicketBlob {
+        $this->assertOid($controlCommit);
+        if (RefreshPathPolicy::canonicalBasePath($relativePath) !== $relativePath) {
+            throw new ControlOperationTerminalConflict(
+                'refresh_path_not_canonical',
+                'Der Refresh-Pfad ist nicht kanonisch.',
+            );
+        }
+
+        $variables = $this->environment->variables();
+        $preflight = $this->repositoryConfiguration($repository, $variables, $redactionContext);
+        if ($preflight instanceof ProcessResult) {
+            throw new ControlOperationTerminalConflict(
+                'refresh_repository_configuration_rejected',
+                'Die Git-Konfiguration des verwalteten Repositorys wurde abgelehnt.',
+            );
+        }
+
+        $entry = $this->processes->run($this->request([
+            ...$this->environment->commandPrefix(), ...$preflight,
+            'ls-tree', '-z', '--full-tree', $controlCommit, '--', $relativePath,
+        ], $repository, $variables, $redactionContext));
+        if (! $entry->succeeded()) {
+            throw new ControlOperationTerminalConflict(
+                'refresh_tree_lookup_failed',
+                'Der angeforderte Git-Pfad konnte nicht sicher aufgelöst werden.',
+            );
+        }
+
+        $record = $entry->output;
+        if (! str_ends_with($record, "\0") || substr_count($record, "\0") !== 1) {
+            throw new ControlOperationTerminalConflict(
+                'refresh_path_missing_or_ambiguous',
+                'Der angeforderte Pfad bezeichnet keinen eindeutigen regulären Blob.',
+            );
+        }
+        $record = substr($record, 0, -1);
+        $tab = strpos($record, "\t");
+        if ($tab === false) {
+            throw new ControlOperationTerminalConflict(
+                'refresh_tree_entry_malformed',
+                'Git lieferte einen ungültigen Baumeintrag.',
+            );
+        }
+        $metadata = substr($record, 0, $tab);
+        $returnedPath = substr($record, $tab + 1);
+        if (preg_match('/\A(100644|100755) blob ([0-9a-f]{64})\z/D', $metadata, $matches) !== 1
+            || ! hash_equals($relativePath, $returnedPath)) {
+            throw new ControlOperationTerminalConflict(
+                'refresh_path_not_regular_blob',
+                'Der angeforderte Pfad ist kein case-genauer regulärer Blob.',
+            );
+        }
+
+        $blobSha = $matches[2];
+        $blob = $this->processes->run($this->request([
+            ...$this->environment->commandPrefix(), ...$preflight,
+            'cat-file', 'blob', $blobSha,
+        ], $repository, $variables, $redactionContext));
+        if (! $blob->succeeded()) {
+            throw new ControlOperationTerminalConflict(
+                'refresh_blob_read_failed',
+                'Der gebundene Git-Blob konnte nicht sicher gelesen werden.',
+            );
+        }
+
+        return new TicketBlob($returnedPath, $blobSha, $blob->output);
+    }
+
     private function resolveRepositoryRef(string $repository, string $ref, RedactionContext $redactionContext): ProcessResult
     {
         $variables = $this->environment->variables();

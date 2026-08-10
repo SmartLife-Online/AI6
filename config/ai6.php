@@ -93,5 +93,6 @@ return [
         'max_attempts' => env('AI6_CONTROL_OPERATION_MAX_ATTEMPTS', '3'),
         'stale_seconds' => env('AI6_CONTROL_OPERATION_STALE_SECONDS', '300'),
         'reconciliation_budget' => env('AI6_CONTROL_OPERATION_RECONCILIATION_BUDGET', '8'),
+        'refresh_base_path' => env('AI6_CONTROL_OPERATION_REFRESH_BASE_PATH', 'tickets'),
     ],
 ];

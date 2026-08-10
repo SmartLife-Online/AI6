@@ -20,6 +20,12 @@ final class ExpectedAuthorizationMatrix
                 'operator' => true,
                 'approver' => true,
             ],
+            'refresh_read_model' => [
+                'admin' => true,
+                'viewer' => false,
+                'operator' => true,
+                'approver' => false,
+            ],
         ];
     }
 

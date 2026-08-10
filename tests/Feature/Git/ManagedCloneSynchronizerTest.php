@@ -7,30 +7,21 @@ use App\AI6\Auth\StepUpGuard;
 use App\AI6\Git\Actions\QueueControlBranchChange;
 use App\AI6\Git\Actions\QueueDeployKeyProvisioning;
 use App\AI6\Git\Actions\QueueManagedCloneOperation;
-use App\AI6\Git\ControlOperationConfiguration;
 use App\AI6\Git\ControlOperationConflict;
 use App\AI6\Git\ControlOperationExecutor;
 use App\AI6\Git\ControlOperationPhase;
 use App\AI6\Git\ControlOperationReconciler;
-use App\AI6\Git\ControlOperationRecoveryProcessor;
 use App\AI6\Git\ControlOperationRetryableConflict;
 use App\AI6\Git\ControlOperationState;
 use App\AI6\Git\ControlOperationType;
-use App\AI6\Git\GitConfiguration;
-use App\AI6\Git\GitRemotePolicy;
-use App\AI6\Git\HardenedGitEnvironment;
-use App\AI6\Git\HardenedGitRunner;
-use App\AI6\Git\KnownHostsVerifier;
 use App\AI6\Git\ManagedCloneSynchronizer;
 use App\AI6\Git\ManagedProjectPath;
 use App\AI6\Git\Models\ControlOperationRecoveryDecision;
 use App\AI6\Git\Models\ControlOperationResult;
-use App\AI6\Git\ProjectOperationLease;
 use App\AI6\Git\RecoveryDecisionType;
 use App\AI6\Projects\Models\ControlBranchAuditEntry;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\ProjectProvisioningStatus;
-use App\AI6\Shared\Process\ControlProcessRunner;
 use App\AI6\Shared\Process\EffectLock;
 use App\AI6\Shared\Redaction\RedactionContext;
 use Illuminate\Http\Request;
@@ -41,11 +32,11 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
-use Symfony\Component\Process\ExecutableFinder;
-use Symfony\Component\Process\Process;
 
 final class ManagedCloneSynchronizerTest extends ControlOperationTestCase
 {
+    use BuildsManagedControlRuntimeFixture;
+
     public function test_control_branch_probe_publish_and_fetch_consume_the_exact_pending_binding(): void
     {
         if (DIRECTORY_SEPARATOR !== '/') {
@@ -63,6 +54,7 @@ final class ManagedCloneSynchronizerTest extends ControlOperationTestCase
         );
         DB::table('jobs')->delete();
         $this->app->make(ControlOperationExecutor::class)->execute($clone->id);
+
         self::assertSame($fixture['first_oid'], $project->refresh()->control_oid);
 
         $missing = $this->app->make(QueueControlBranchChange::class)->handle(
@@ -81,12 +73,12 @@ final class ManagedCloneSynchronizerTest extends ControlOperationTestCase
         self::assertSame(0, $project->control_generation);
         self::assertSame(0, ControlBranchAuditEntry::query()->count());
 
-        $this->git(['checkout', '-b', 'next'], $fixture['source']);
+        $this->managedFixtureGit(['checkout', '-b', 'next'], $fixture['source']);
         self::assertNotFalse(file_put_contents($fixture['source'].'/ticket.md', "next\n"));
-        $this->git(['add', 'ticket.md'], $fixture['source']);
-        $this->git(['commit', '-m', 'next'], $fixture['source']);
-        $nextOid = trim($this->git(['rev-parse', 'HEAD'], $fixture['source']));
-        $this->git(['push', $fixture['remote'], 'refs/heads/next:refs/heads/next'], $fixture['source']);
+        $this->managedFixtureGit(['add', 'ticket.md'], $fixture['source']);
+        $this->managedFixtureGit(['commit', '-m', 'next'], $fixture['source']);
+        $nextOid = trim($this->managedFixtureGit(['rev-parse', 'HEAD'], $fixture['source']));
+        $this->managedFixtureGit(['push', $fixture['remote'], 'refs/heads/next:refs/heads/next'], $fixture['source']);
 
         $repository = $fixture['paths']->assertRepository(
             $fixture['paths']->repositoryDirectory((string) $project->project_identifier),
@@ -128,10 +120,10 @@ final class ManagedCloneSynchronizerTest extends ControlOperationTestCase
         }
 
         self::assertNotFalse(file_put_contents($fixture['source'].'/ticket.md', "moved after branch decision\n"));
-        $this->git(['commit', '-am', 'moved after branch decision'], $fixture['source']);
-        $movedOid = trim($this->git(['rev-parse', 'HEAD'], $fixture['source']));
-        $this->git(['push', $fixture['remote'], 'HEAD:refs/heads/moved'], $fixture['source']);
-        $this->git(
+        $this->managedFixtureGit(['commit', '-am', 'moved after branch decision'], $fixture['source']);
+        $movedOid = trim($this->managedFixtureGit(['rev-parse', 'HEAD'], $fixture['source']));
+        $this->managedFixtureGit(['push', $fixture['remote'], 'HEAD:refs/heads/moved'], $fixture['source']);
+        $this->managedFixtureGit(
             ['--git-dir='.$fixture['remote'], 'update-ref', 'refs/heads/next', $movedOid, $nextOid],
             $fixture['root'],
         );
@@ -157,7 +149,7 @@ final class ManagedCloneSynchronizerTest extends ControlOperationTestCase
         self::assertSame($change->id, $project->pending_control_operation_id);
         self::assertSame(2, $project->control_binding_version);
 
-        $this->git(
+        $this->managedFixtureGit(
             ['--git-dir='.$fixture['remote'], 'update-ref', 'refs/heads/next', $nextOid, $movedOid],
             $fixture['root'],
         );
@@ -200,7 +192,7 @@ SH,
         );
         DB::table('jobs')->delete();
         $this->app->make(ControlOperationExecutor::class)->execute($racingFetch->id);
-        $this->git(
+        $this->managedFixtureGit(
             ['--git-dir='.$fixture['remote'], 'update-ref', 'refs/heads/next', $nextOid, $movedOid],
             $fixture['root'],
         );
@@ -285,9 +277,9 @@ SH,
         $protectedMetadata = $this->protectedMetadataSnapshot($repository);
 
         file_put_contents($source.'/ticket.md', "second\n");
-        $this->git(['commit', '-am', 'second'], $source);
-        $secondOid = trim($this->git(['rev-parse', 'HEAD'], $source));
-        $this->git(['push', $remote, 'refs/heads/main:refs/heads/main'], $source);
+        $this->managedFixtureGit(['commit', '-am', 'second'], $source);
+        $secondOid = trim($this->managedFixtureGit(['rev-parse', 'HEAD'], $source));
+        $this->managedFixtureGit(['push', $remote, 'refs/heads/main:refs/heads/main'], $source);
         $fetch = $this->app->make(QueueManagedCloneOperation::class)->handle(
             $administrator,
             $project->refresh(),
@@ -307,7 +299,7 @@ SH,
         self::assertSame($protectedMetadata, $this->protectedMetadataSnapshot($repository));
         self::assertDirectoryDoesNotExist($root.'/.control-staging/'.$fetch->id);
 
-        $this->git(['fetch', $remote, 'refs/heads/main'], $repository);
+        $this->managedFixtureGit(['fetch', $remote, 'refs/heads/main'], $repository);
         self::assertFileExists($repository.'/FETCH_HEAD');
         self::assertNotSame($protectedMetadata, $this->protectedMetadataSnapshot($repository));
     }
@@ -387,9 +379,9 @@ SH,
         $protectedMetadata = $this->protectedMetadataSnapshot($repository);
 
         self::assertNotFalse(file_put_contents($fixture['source'].'/ticket.md', "fetch crash target\n"));
-        $this->git(['commit', '-am', 'fetch crash target'], $fixture['source']);
-        $targetOid = trim($this->git(['rev-parse', 'HEAD'], $fixture['source']));
-        $this->git(['push', $fixture['remote'], 'refs/heads/main:refs/heads/main'], $fixture['source']);
+        $this->managedFixtureGit(['commit', '-am', 'fetch crash target'], $fixture['source']);
+        $targetOid = trim($this->managedFixtureGit(['rev-parse', 'HEAD'], $fixture['source']));
+        $this->managedFixtureGit(['push', $fixture['remote'], 'refs/heads/main:refs/heads/main'], $fixture['source']);
         $operation = $this->app->make(QueueManagedCloneOperation::class)->handle(
             $fixture['administrator'],
             $project->refresh(),
@@ -455,9 +447,9 @@ SH,
         $fixture = $this->managedFixture();
         $source = $fixture['source'];
         self::assertNotFalse(file_put_contents($source.'/ticket.md', "second\n"));
-        $this->git(['commit', '-am', 'second'], $source);
-        $secondOid = trim($this->git(['rev-parse', 'HEAD'], $source));
-        $this->git(['push', $fixture['remote'], 'HEAD:refs/heads/alternate'], $source);
+        $this->managedFixtureGit(['commit', '-am', 'second'], $source);
+        $secondOid = trim($this->managedFixtureGit(['rev-parse', 'HEAD'], $source));
+        $this->managedFixtureGit(['push', $fixture['remote'], 'HEAD:refs/heads/alternate'], $source);
 
         $wrapper = $fixture['root'].'/ssh-wrapper';
         self::assertTrue(chmod($wrapper, 0700));
@@ -537,9 +529,9 @@ SH,
         $this->app->make(ControlOperationExecutor::class)->execute($clone->id);
 
         self::assertNotFalse(file_put_contents($fixture['source'].'/ticket.md', "recovery target\n"));
-        $this->git(['commit', '-am', 'recovery target'], $fixture['source']);
-        $targetOid = trim($this->git(['rev-parse', 'HEAD'], $fixture['source']));
-        $this->git(['push', $fixture['remote'], 'refs/heads/main:refs/heads/main'], $fixture['source']);
+        $this->managedFixtureGit(['commit', '-am', 'recovery target'], $fixture['source']);
+        $targetOid = trim($this->managedFixtureGit(['rev-parse', 'HEAD'], $fixture['source']));
+        $this->managedFixtureGit(['push', $fixture['remote'], 'refs/heads/main:refs/heads/main'], $fixture['source']);
         $fetch = $this->app->make(QueueManagedCloneOperation::class)->handle(
             $fixture['administrator'],
             $project->refresh(),
@@ -750,9 +742,9 @@ SH,
         $this->app->make(ControlOperationExecutor::class)->execute($clone->id);
 
         self::assertNotFalse(file_put_contents($fixture['source'].'/ticket.md', "takeover target\n"));
-        $this->git(['commit', '-am', 'takeover target'], $fixture['source']);
-        $targetOid = trim($this->git(['rev-parse', 'HEAD'], $fixture['source']));
-        $this->git(['push', $fixture['remote'], 'refs/heads/main:refs/heads/main'], $fixture['source']);
+        $this->managedFixtureGit(['commit', '-am', 'takeover target'], $fixture['source']);
+        $targetOid = trim($this->managedFixtureGit(['rev-parse', 'HEAD'], $fixture['source']));
+        $this->managedFixtureGit(['push', $fixture['remote'], 'refs/heads/main:refs/heads/main'], $fixture['source']);
 
         $counterFile = $fixture['root'].'/takeover-counter';
         $oldStartedFile = $fixture['root'].'/takeover-old-started';
@@ -917,140 +909,6 @@ SH,
         self::assertDirectoryDoesNotExist($fixture['root'].'/.control-staging/'.$operation->id);
     }
 
-    /**
-     * @return array{
-     *     administrator: User,
-     *     project: Project,
-     *     root: string,
-     *     remote: string,
-     *     source: string,
-     *     first_oid: string,
-     *     paths: ManagedProjectPath,
-     *     runner: HardenedGitRunner,
-     *     lease: ProjectOperationLease
-     * }
-     */
-    private function managedFixture(): array
-    {
-        $administrator = $this->createUser(['is_global_admin' => true]);
-        $project = $this->registeredProject($administrator);
-        $root = $this->configureRealWorkerRuntime($project);
-        $remote = $root.'/remote.git';
-        $source = $root.'/source';
-        self::assertTrue(mkdir($source, 0700));
-        (new Process(['git', 'init', '--object-format=sha256', '--initial-branch=main'], $source))->mustRun();
-        $this->git(['config', 'user.name', 'AI6 Test'], $source);
-        $this->git(['config', 'user.email', 'ai6@example.invalid'], $source);
-        self::assertNotFalse(file_put_contents($source.'/ticket.md', "first\n"));
-        $this->git(['add', 'ticket.md'], $source);
-        $this->git(['commit', '-m', 'first'], $source);
-        $firstOid = trim($this->git(['rev-parse', 'HEAD'], $source));
-        self::assertTrue(mkdir($remote, 0700));
-        $this->git(['init', '--bare', '--object-format=sha256'], $remote);
-        $this->git(['push', $remote, 'refs/heads/main:refs/heads/main'], $source);
-
-        $keyBytes = random_bytes(48);
-        $fingerprint = 'SHA256:'.rtrim(base64_encode(hash('sha256', $keyBytes, true)), '=');
-        $knownHosts = $root.'/known_hosts';
-        self::assertNotFalse(file_put_contents($knownHosts, 'git.fixture.test ssh-ed25519 '.base64_encode($keyBytes)."\n"));
-        self::assertTrue(chmod($knownHosts, 0444));
-        $privateKey = $root.'/private-key';
-        self::assertNotFalse(file_put_contents($privateKey, "test-only-key\n"));
-        self::assertTrue(chmod($privateKey, 0400));
-        $sshWrapper = $root.'/ssh-wrapper';
-        $quotedRemote = escapeshellarg((string) realpath($remote));
-        self::assertNotFalse(file_put_contents($sshWrapper, str_replace('__REMOTE__', $quotedRemote, <<<'SH'
-#!/bin/sh
-set -eu
-[ "$#" -eq 2 ]
-[ "$1" = "git@git.fixture.test" ]
-[ "$2" = "git-upload-pack 'acme/control.git'" ]
-exec git-upload-pack __REMOTE__
-SH)));
-        self::assertTrue(chmod($sshWrapper, 0555));
-
-        $gitHome = $root.'/git-home';
-        $xdg = $gitHome.'/xdg';
-        $hooks = $root.'/git-hooks';
-        self::assertTrue(mkdir($xdg, 0700, true));
-        self::assertTrue(chmod($gitHome, 0700));
-        self::assertTrue(mkdir($hooks, 0555));
-        $globalConfig = $gitHome.'/gitconfig';
-        self::assertNotFalse(file_put_contents($globalConfig, "[credential]\n\thelper =\n"));
-        self::assertTrue(chmod($globalConfig, 0444));
-        $gitBinary = (new ExecutableFinder)->find('git');
-        $sshBinary = (new ExecutableFinder)->find('ssh');
-        $executablePath = getenv('PATH');
-        self::assertIsString($gitBinary);
-        self::assertIsString($sshBinary);
-        self::assertIsString($executablePath);
-        $gitConfiguration = new GitConfiguration(
-            (string) realpath($gitBinary),
-            (string) realpath($sshBinary),
-            $executablePath,
-            (string) realpath($sshWrapper),
-            (string) realpath($gitHome),
-            (string) realpath($xdg),
-            (string) realpath($globalConfig),
-            (string) realpath($hooks),
-            ['git.fixture.test'],
-            ['acme/control.git'],
-            ['refs/heads/*'],
-            ['git.fixture.test' => [$fingerprint]],
-        );
-        $operationConfiguration = new ControlOperationConfiguration(
-            $root,
-            $root.'/deploy-keys',
-            '/usr/bin/ssh-keygen',
-            base_path('app/AI6/Git/generate-deploy-key.sh'),
-            10,
-            1,
-            1,
-            3,
-            (string) realpath($knownHosts),
-            ['refs/heads/main', 'refs/heads/next', 'refs/heads/missing'],
-            300,
-            8,
-        );
-        $lease = new ProjectOperationLease($operationConfiguration);
-        $paths = new ManagedProjectPath($operationConfiguration);
-        $policy = new GitRemotePolicy($gitConfiguration, new KnownHostsVerifier);
-        $runner = new HardenedGitRunner(
-            $this->app->make(ControlProcessRunner::class),
-            $policy,
-            new HardenedGitEnvironment($gitConfiguration),
-        );
-        $this->app->instance(ControlOperationConfiguration::class, $operationConfiguration);
-        $this->app->instance(ProjectOperationLease::class, $lease);
-        $this->app->instance(ManagedProjectPath::class, $paths);
-        $this->app->instance(GitConfiguration::class, $gitConfiguration);
-        $this->app->instance(GitRemotePolicy::class, $policy);
-        $this->app->instance(HardenedGitRunner::class, $runner);
-        foreach ([ManagedCloneSynchronizer::class, ControlOperationRecoveryProcessor::class, ControlOperationExecutor::class] as $service) {
-            $this->app->forgetInstance($service);
-        }
-
-        $project->forceFill([
-            'remote' => 'git@git.fixture.test:acme/control.git',
-            'host_key_fingerprint' => $fingerprint,
-            'provisioning_status' => ProjectProvisioningStatus::PROVISIONED,
-            'deploy_key_reference' => (string) realpath($privateKey),
-            'public_deploy_key' => "ssh-ed25519 fixture\n",
-        ])->save();
-
-        return [
-            'administrator' => $administrator,
-            'project' => $project,
-            'root' => $root,
-            'remote' => $remote,
-            'source' => $source,
-            'first_oid' => $firstOid,
-            'paths' => $paths,
-            'runner' => $runner,
-            'lease' => $lease,
-        ];
-    }
-
     /** @return array<string, string> */
     private function protectedMetadataSnapshot(string $repository): array
     {
@@ -1086,18 +944,6 @@ SH)));
             usleep(1_000);
         }
         self::assertFileExists($path);
-    }
-
-    /** @param list<string> $arguments */
-    private function git(array $arguments, string $directory): string
-    {
-        $process = new Process(['git', ...$arguments], $directory, [
-            'GIT_CONFIG_NOSYSTEM' => '1',
-            'GIT_TERMINAL_PROMPT' => '0',
-        ]);
-        $process->mustRun();
-
-        return $process->getOutput();
     }
 
     private function context(int $projectId, string $operationId): RedactionContext

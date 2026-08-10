@@ -8,6 +8,7 @@ enum ControlOperationType: string
     case MANAGED_CLONE = 'managed_clone';
     case MANAGED_FETCH = 'managed_fetch';
     case CONTROL_BRANCH_CHANGE = 'control_branch_change';
+    case TICKET_REFRESH = 'ticket_refresh';
 
     /** @var array<string, list<string>> */
     public const PARAMETER_FIELDS = [
@@ -25,6 +26,10 @@ enum ControlOperationType: string
             'old_control_oid',
             'expected_binding_version',
             'new_control_ref',
+        ],
+        'ticket_refresh' => [
+            'refresh_base_path',
+            'relative_path',
         ],
     ];
 

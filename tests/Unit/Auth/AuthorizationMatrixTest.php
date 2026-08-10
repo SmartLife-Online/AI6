@@ -19,7 +19,7 @@ final class AuthorizationMatrixTest extends TestCase
             array_map(static fn (ProjectRole $role): string => $role->value, ProjectRole::cases()),
         );
         self::assertSame(
-            ['appear_in_list', 'view_details'],
+            ['appear_in_list', 'view_details', 'refresh_read_model'],
             array_map(static fn (ProjectAction $action): string => $action->value, ProjectAction::cases()),
         );
     }

@@ -6,6 +6,7 @@ use App\AI6\Auth\Models\User;
 use App\AI6\Git\Actions\QueueControlBranchChange;
 use App\AI6\Git\Actions\QueueDeployKeyProvisioning;
 use App\AI6\Git\Actions\QueueManagedCloneOperation;
+use App\AI6\Git\Actions\QueueTicketReadModelRefresh;
 use App\AI6\Git\Actions\RecordRecoveryDecision;
 use App\AI6\Git\ControlOperationConflict;
 use App\AI6\Git\ControlOperationType;
@@ -106,6 +107,42 @@ final class ControlOperationController
         } catch (ControlOperationConflict) {
             throw ValidationException::withMessages([
                 'new_control_ref' => ['Der Control-Branch-Wechsel steht in Konflikt mit dem aktuellen Projektzustand.'],
+            ]);
+        }
+
+        return redirect()->route('projects.operations.show', [$project, $operation]);
+    }
+
+    public function refreshReadModel(
+        Request $request,
+        Project $project,
+        QueueTicketReadModelRefresh $action,
+    ): RedirectResponse {
+        $actor = $request->user();
+        abort_unless($actor instanceof User, 403);
+        $validated = $request->validate([
+            'operation_id' => [
+                'required',
+                'string',
+                static function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (! is_string($value) || ! ManagedProjectPath::validOperationIdentifier($value)) {
+                        $fail('Die Operations-ID ist ungültig.');
+                    }
+                },
+            ],
+            'relative_path' => ['required', 'string', 'max:1024'],
+        ]);
+
+        try {
+            $operation = $action->handle(
+                $actor,
+                $project,
+                $validated['relative_path'],
+                $validated['operation_id'],
+            );
+        } catch (ControlOperationConflict) {
+            throw ValidationException::withMessages([
+                'relative_path' => ['Der Refresh-Pfad oder die aktive Control-Bindung wurde abgelehnt.'],
             ]);
         }
 

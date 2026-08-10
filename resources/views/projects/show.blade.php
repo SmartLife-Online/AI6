@@ -49,6 +49,58 @@
         @endif
     @endcan
 
+    @can('refreshReadModel', $project)
+        @if ($project->provisioning_status->value === 'provisioned' && $project->control_oid !== null && $project->pending_control_oid === null)
+            <h2>Read Model aktualisieren</h2>
+            <p>Der Server akzeptiert genau einen Pfad innerhalb von <code>{{ $refreshBasePath }}</code>.</p>
+            <form method="POST" action="{{ route('projects.ticket-read-model.refresh', $project) }}">
+                @csrf
+                <input type="hidden" name="operation_id" value="{{ $refreshOperationId }}">
+                <label for="relative_path">Repositoryrelativer Kandidatenpfad</label>
+                <input id="relative_path" name="relative_path" required maxlength="1024" placeholder="{{ $refreshBasePath }}/…" value="{{ old('relative_path') }}">
+                <button type="submit">Refresh beauftragen</button>
+            </form>
+        @endif
+    @endcan
+
+    <h2>Blobgebundenes Read Model</h2>
+    @if ($readModels !== [])
+        @foreach ($readModels as $readModelStatus)
+        @php($readModel = $readModelStatus['readModel'])
+        <dl>
+            <dt>Pfad</dt>
+            <dd>{{ $readModel->relative_path }}</dd>
+            <dt>Control-Commit</dt>
+            <dd>{{ $readModel->control_commit }}</dd>
+            <dt>Blob-SHA</dt>
+            <dd>{{ $readModel->blob_sha }}</dd>
+            <dt>Aktualisiert</dt>
+            <dd>{{ $readModel->generated_at->toIso8601String() }}</dd>
+            <dt>Dokumentzustand</dt>
+            <dd>{{ $readModel->document_state->value }}</dd>
+            <dt>Redactionzustand</dt>
+            <dd>{{ $readModel->redaction_state->value }}</dd>
+            <dt>Aktualität</dt>
+            <dd>{{ $readModelStatus['isStale'] ? 'Veraltet' : 'Aktuell' }}</dd>
+            <dt>Staleness-Prädikate</dt>
+            <dd>{{ $readModelStatus['staleReasons'] === [] ? 'Keine' : implode(', ', $readModelStatus['staleReasons']) }}</dd>
+            <dt>Approval-/Editorquelle</dt>
+            <dd>{{ $readModelStatus['approvalEditorEligible'] ? 'Zulässig' : 'Fail-closed gesperrt' }}</dd>
+        </dl>
+        @endforeach
+    @else
+        <p>Noch kein Read Model veröffentlicht.</p>
+    @endif
+
+    @if ($latestRefresh !== null)
+        <p>
+            Letzter Read-Model-Refresh:
+            <a href="{{ route('projects.operations.show', [$project, $latestRefresh]) }}">
+                {{ $latestRefresh->state->value }} / {{ $latestRefresh->phase->value }}
+            </a>
+        </p>
+    @endif
+
     @can('synchronizeManagedClone', $project)
         @if ($project->provisioning_status->value === 'provisioned' && $project->control_oid === null && $project->pending_control_oid === null)
             <h2>Managed-Clone erstellen</h2>

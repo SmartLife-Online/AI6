@@ -5,6 +5,7 @@ namespace App\AI6\Projects\Http;
 use App\AI6\Auth\Models\User;
 use App\AI6\Projects\Actions\RegisterProject;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Projects\ProjectReadModelStatus;
 use App\AI6\Projects\ProjectRegistrationRejected;
 use App\AI6\Projects\ProjectSynchronizationStatus;
 use Illuminate\Contracts\Auth\Access\Gate;
@@ -63,8 +64,11 @@ final class ProjectController
         return redirect()->route('projects.show', $project);
     }
 
-    public function show(Project $project, ProjectSynchronizationStatus $synchronizationStatus): View
-    {
+    public function show(
+        Project $project,
+        ProjectSynchronizationStatus $synchronizationStatus,
+        ProjectReadModelStatus $readModelStatus,
+    ): View {
         return view('projects.show', [
             'project' => $project,
             'publicDeployKey' => $project->publicDeployKeyForDisplay(),
@@ -75,7 +79,9 @@ final class ProjectController
             'cloneOperationId' => (string) Str::uuid(),
             'fetchOperationId' => (string) Str::uuid(),
             'branchOperationId' => (string) Str::uuid(),
+            'refreshOperationId' => (string) Str::uuid(),
             ...$synchronizationStatus->for($project),
+            ...$readModelStatus->for($project),
         ]);
     }
 
