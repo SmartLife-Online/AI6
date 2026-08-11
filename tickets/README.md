@@ -19,8 +19,8 @@ Diese README formuliert keine dieser Regeln neu. Bei Änderungen an Plan, Templa
 
 | Dateistand | Bedeutung | Anzahl |
 |---|---|---|
-| **Detailticket** | Reguläre Ticketdatei vorhanden | 12 |
-| **Blueprint** | Noch keine reguläre Ticketdatei vorhanden | 37 |
+| **Detailticket** | Reguläre Ticketdatei vorhanden | 16 |
+| **Blueprint** | Noch keine reguläre Ticketdatei vorhanden | 33 |
 
 `Dateistand` beschreibt ausschließlich, ob eine reguläre Ticketdatei existiert. Er sagt nichts über Gültigkeit, Freigabe oder Umsetzungsbereitschaft aus. Der Bearbeitungsstand eines Tickets steht in `status` der Ticketdatei. Die hier gezeigten `depends_on`-Werte liefern ausschließlich die Abhängigkeitsbedingung — nicht die Startbarkeit: Nach `RUN-008` wird die Eligibility unmittelbar vor jedem Claim und Start vollständig neu bewertet und hängt zusätzlich von gültiger Approval, Git- und Snapshotbindung, Policy, Capabilities, Projektsperre, Runabschluss und Queuezustand ab. Aus einer erfüllten `depends_on`-Liste folgt daher kein startbares Ticket.
 
@@ -30,8 +30,8 @@ Die Werte in den Spalten `Titel`, `Risiko` und `depends_on` sind ausschließlich
 
 | Ableitungsbasis | Tickets |
 |---|---|
-| Gegen den realen Repositoryzustand abgeleitet oder rebased | AI6-001, AI6-002, AI6-003, AI6-004, AI6-005A, AI6-005B, AI6-006A, AI6-006B, AI6-006C, AI6-006D, AI6-006E |
-| Gegen den erwarteten Zustand nach den Vorgängertickets abgeleitet | AI6-006F |
+| Gegen den realen Repositoryzustand abgeleitet oder rebased | AI6-001, AI6-002, AI6-003, AI6-004, AI6-005A, AI6-005B, AI6-006A, AI6-006B, AI6-006C, AI6-006D, AI6-006E, AI6-007 |
+| Gegen den erwarteten Zustand nach den Vorgängertickets abgeleitet | AI6-006F, AI6-008, AI6-009, AI6-010 |
 
 `AI6-001` bis `AI6-006F` sind im Repository integriert. `AI6-002` wurde am 1. August 2026 gegen den realen `AI6-001`-Stand rebased; `AI6-003` wurde am 2. August 2026 nach der menschlichen Abnahme beider Abhängigkeiten gegen den integrierten `AI6-002`-Stand `29d67fa` rebased. `AI6-004` wurde am 3. August 2026 mit ausdrücklicher menschlicher Freigabe gegen den integrierten Stand `c8b99b2` neu abgeleitet. `AI6-005A` wurde am 3. August 2026 mit ausdrücklicher menschlicher Freigabe gegen den integrierten `main`-Stand `38b3c1d` neu abgeleitet; dabei wurde insbesondere das fehlende `config/mail.php` als neuer Pfad berichtigt. `AI6-006A` wurde am 5. August 2026 mit ausdrücklicher menschlicher Freigabe gegen den integrierten M0-Stand `b29d802` rebased; dabei wurden die reale Symfony-Process-Version, die Redaction-Aufrufnaht, Provider, Konfiguration und Containerbaseline verifiziert. `AI6-006B` wurde am 5. August 2026 mit ausdrücklicher menschlicher Freigabe gegen den integrierten Stand `d6e329f` rebased; dabei wurden die realen Projekt-, Policy-, Controller-, Git-Remote-, Pin- und globalen Inventurverträge verifiziert und die notwendigen eng begrenzten Git- und Unit-Testpfade in den Scope aufgenommen. `AI6-006C` wurde am 6. August 2026 auf ausdrücklichen menschlichen Auftrag gegen den integrierten Stand `e7a9059` rebased; dabei wurden Step-up-, Prozess-, Lock-, Git-, Projekt-, Provider-, Scheduler-, Compose- und Init-Nähte verifiziert und die notwendigen Querschnittstests für Inventur, Compose-Allowlist, Init-Skript, reale Compose-Harness und Runtime-Dokumentation in den Scope aufgenommen. Die später menschlich freigegebene Reviewkorrektur nahm zusätzlich den optionalen Lease-Heartbeat-Callback der bestehenden Process-Naht samt vorhandenem Unit-Test sowie `deploy/Caddyfile` für die an ein separates Caddy-/App-Proxynetz gekoppelte Loopback-Normalisierung in den Scope auf. Diese Abgleiche haben den jeweiligen Status nicht verändert; Statusänderungen blieben getrennte menschliche Entscheidungen.
 
@@ -39,7 +39,9 @@ Die Werte in den Spalten `Titel`, `Risiko` und `depends_on` sind ausschließlich
 
 `AI6-006E` wurde am 10. August 2026 auf ausdrücklichen menschlichen Auftrag gegen den integrierten Stand `a200be1` rebased. Verifiziert wurden die reale Step-up-, Operations-, Claim-, Clone-/Fetch-, Projektbindungs-, Ref-Allowlist-, Web-, Inventur- und CSRF-Testnaht. Weil der mit `AI6-006D` veröffentlichte SQLite-Vertrag den zusätzlichen Operationstyp und seine Probephase geschlossen abweist und kein geeigneter Auditspeicher existiert, wurden eine neue Folgemigration sowie die vorhandenen Inventur- und CSRF-Vertragstests in den Ausgangsscope aufgenommen. Der Rebase hat weder vorhandene AC-/TC-/MG-IDs noch den Ticketstatus verändert.
 
-`AI6-006F` wurde nach dem Landen seiner Vorgänger implementiert, am 11. August 2026 integriert und menschlich abgenommen (`61db7e6`, einschließlich des Statuswechsels auf `done`); seine `— existing`-Marker bezeichnen seither den realen Repositoryzustand. Damit ist kein vorhandenes Detailticket mehr vorabgeleitet. Die Regeln für künftige, ausschließlich menschlich angeordnete Vorabableitungen — aufgeschobene Prüfungen, Rebase-Gate vor `status: ready`, kein Blockieren über `status: blocked` — stehen unverändert in Plan §13.6, Template §9.1 und `AGENTS.md` §8.1. Statusänderungen gehören AI6 und weder dieser Ansicht noch einem Agenten (Plan §5.2, `AGENTS.md` §10).
+`AI6-006F` wurde nach dem Landen seiner Vorgänger implementiert, am 11. August 2026 integriert und menschlich abgenommen (`61db7e6`, einschließlich des Statuswechsels auf `done`); seine `— existing`-Marker bezeichnen seither den realen Repositoryzustand. Zwischen dieser Abnahme und der Ticketerzeugung vom 11. August 2026 war kein vorhandenes Detailticket vorabgeleitet. Die Regeln für menschlich angeordnete Vorabableitungen — aufgeschobene Prüfungen, Rebase-Gate vor `status: ready`, kein Blockieren über `status: blocked` — stehen unverändert in Plan §13.6, Template §9.1 und `AGENTS.md` §8.1. Statusänderungen gehören AI6 und weder dieser Ansicht noch einem Agenten (Plan §5.2, `AGENTS.md` §10).
+
+`AI6-007` wurde am 11. August 2026 gegen den realen integrierten Stand nach `AI6-006F` abgeleitet; die genannten Refresher-, Guard-, Enum-, Policy-, Pfad-, Provider- und Konfigurationsnähte wurden zum Erzeugungszeitpunkt im Repository verifiziert. `AI6-008`, `AI6-009` und `AI6-010` wurden am selben Tag auf ausdrückliche menschliche Anordnung vor der Umsetzung ihrer noch offenen Abhängigkeiten vorabgeleitet und sind damit **ahead-derived** im Sinne von Plan §13.6: `AI6-008` fehlt `AI6-007`, `AI6-009` fehlen `AI6-007` und `AI6-008`, `AI6-010` fehlen `AI6-007` und `AI6-009`. Ihre `## Context`-Abschnitte benennen die noch fehlenden Pfade samt erzeugendem Ticket, ihre `## Notes` tragen die Rebase-Verpflichtung, und ihre `existing`-Marker bezeichnen die Runbasis nach dem Landen der `depends_on`-Tickets. Vor `status: ready` sind die aufgeschobenen Prüfungen je Ticket vollständig nachzuholen; bis dahin bleiben alle drei auf `status: todo` und dürfen weder freigegeben noch beansprucht werden. Diese Ableitungen haben keinen Status verändert; Statusänderungen bleiben getrennte menschliche Entscheidungen.
 
 ## 3. Backlog
 
@@ -66,10 +68,10 @@ Stand der abgeleiteten Ansicht: 11. August 2026, abgeleitet aus Planrevision V1.
 | [AI6-006D](./AI6-006D.md) | Managed-Clone, Clone und Fetch | high | Detailticket | AI6-006C |
 | [AI6-006E](./AI6-006E.md) | Control-Branch-Wechsel und Invalidierungsgeneration | high | Detailticket | AI6-005A, AI6-006D |
 | [AI6-006F](./AI6-006F.md) | Blobgebundene Read Models und Einzelpfad-Refresh | high | Detailticket | AI6-006E |
-| AI6-007 | Ticketparser V1, Legacy-Leser und Validator | medium | Blueprint | AI6-006F |
-| AI6-008 | Responsive Ticketübersicht und Ticketdetail | medium | Blueprint | AI6-004, AI6-007 |
-| AI6-009 | Ticketbearbeitung, Statusübergänge und Git-Persistenz | high | Blueprint | AI6-006F, AI6-007, AI6-008 |
-| AI6-010 | Projektkonfiguration und freigegebene Config-Snapshots | high | Blueprint | AI6-003, AI6-006F, AI6-007, AI6-009 |
+| [AI6-007](./AI6-007.md) | Ticketparser V1, Legacy-Leser und Validator | medium | Detailticket | AI6-006F |
+| [AI6-008](./AI6-008.md) | Responsive Ticketübersicht und Ticketdetail | medium | Detailticket | AI6-004, AI6-007 |
+| [AI6-009](./AI6-009.md) | Ticketbearbeitung, Statusübergänge und Git-Persistenz | high | Detailticket | AI6-006F, AI6-007, AI6-008 |
+| [AI6-010](./AI6-010.md) | Projektkonfiguration und freigegebene Config-Snapshots | high | Detailticket | AI6-003, AI6-006F, AI6-007, AI6-009 |
 
 ### M2 — Freigabe und Run-Fundament
 
