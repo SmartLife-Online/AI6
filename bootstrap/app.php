@@ -17,6 +17,7 @@ use App\AI6\Shared\Http\ResolveTrustedProxies;
 use App\AI6\Shared\Runtime\RuntimeHealthCommand;
 use App\AI6\Shared\Runtime\RuntimeHeartbeat;
 use App\AI6\Shared\Runtime\RuntimeSelfTestCommand;
+use App\AI6\Tickets\Console\ReprojectUnparsedTicketsCommand;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -47,6 +48,7 @@ return Application::configure(basePath: dirname(__DIR__))
         DoctorCommand::class,
         RuntimeHealthCommand::class,
         RuntimeSelfTestCommand::class,
+        ReprojectUnparsedTicketsCommand::class,
     ])
     ->withSingletons([
         $workerHeartbeatService => static fn (): RuntimeHeartbeat => new RuntimeHeartbeat(RuntimeHeartbeat::WORKER_DIRECTORY),

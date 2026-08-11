@@ -13,6 +13,9 @@ use App\AI6\Projects\TicketReadModelRedactionState;
 use App\AI6\Shared\Redaction\InvalidRedactionInputException;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
+use App\AI6\Tickets\TicketInventory;
+use App\AI6\Tickets\TicketSourceBlockers;
+use App\AI6\Tickets\TicketValidationConfiguration;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use JsonException;
@@ -23,13 +26,14 @@ final readonly class TicketReadModelRefresher
     public function __construct(
         private ManagedProjectPath $managedPaths,
         private RefreshPathPolicy $refreshPaths,
-        private HardenedGitRunner $git,
         private ProjectOperationLease $lease,
         private ProjectPolicy $projectPolicy,
         private ControlOperationAuthorizationSnapshot $authorizationSnapshots,
         private CanonicalJson $canonicalJson,
         private TicketReadModelResultBinding $resultBinding,
         private Redactor $redactor,
+        private TicketInventory $ticketInventory,
+        private TicketValidationConfiguration $ticketValidation,
     ) {}
 
     public function advance(ControlOperation $operation, int $attemptToken): bool
@@ -96,12 +100,28 @@ final readonly class TicketReadModelRefresher
             $this->managedPaths->repositoryDirectory((string) $project->project_identifier),
         );
         $context = new RedactionContext((string) $project->getKey(), null, 'ticket-read-model:'.$parameters['relative_path']);
-        $blob = $this->git->readRegularBlob(
+        $inventory = $this->ticketInventory->inspect(
             $repository,
             (string) $operation->expected_control_commit,
-            $parameters['relative_path'],
+            $parameters['refresh_base_path'],
+            $this->ticketValidation->profile,
+            $this->ticketValidation->profile,
             $context,
         );
+        $blob = $inventory->blobs[$parameters['relative_path']] ?? null;
+        $projection = $inventory->projectionFor($parameters['relative_path']);
+        if ($blob !== null && $inventory->hasInvalidUtf8($parameters['relative_path'])) {
+            throw new ControlOperationTerminalConflict(
+                'refresh_blob_not_utf8',
+                'Der gebundene Git-Blob enthält kein gültiges UTF-8.',
+            );
+        }
+        if ($blob === null || $projection === null) {
+            throw new ControlOperationTerminalConflict(
+                'refresh_path_not_ticket_candidate',
+                'Der angeforderte Pfad ist am gebundenen Commit kein Ticketkandidat.',
+            );
+        }
         if (! $this->lease->owns($operation->id, $operation->project_id, $attemptToken)) {
             throw new ControlOperationRetryableConflict('lease_lost', 'The refresh operation lost its lease after reading Git.');
         }
@@ -130,10 +150,14 @@ final readonly class TicketReadModelRefresher
         $redactionState = $matches === []
             ? TicketReadModelRedactionState::CLEAR
             : TicketReadModelRedactionState::CONTENT_REDACTED;
-        $blockers = [TicketDocumentState::UNPARSED->value];
+        $blockers = $projection->sourceBlockers;
         if ($redactionState === TicketReadModelRedactionState::CONTENT_REDACTED) {
-            $blockers[] = $redactionState->value;
+            $blockers[] = TicketSourceBlockers::CONTENT_REDACTED;
         }
+        $blockers = TicketSourceBlockers::canonicalize($blockers);
+        $editorEligible = $redactionState === TicketReadModelRedactionState::CLEAR
+            && array_diff($blockers, [TicketSourceBlockers::INVALID]) === [];
+        $approvalEligible = $editorEligible && $projection->state === TicketDocumentState::VALID;
 
         DB::transaction(function () use (
             $operation,
@@ -144,6 +168,9 @@ final readonly class TicketReadModelRefresher
             $matches,
             $redactionState,
             $blockers,
+            $projection,
+            $editorEligible,
+            $approvalEligible,
         ): void {
             $currentOperation = ControlOperation::query()->findOrFail($operation->id);
             $currentProject = Project::query()->findOrFail($operation->project_id);
@@ -174,14 +201,20 @@ final readonly class TicketReadModelRefresher
                     'control_commit' => $result->controlCommit,
                     'blob_sha' => $result->blobSha,
                     'control_generation' => $currentProject->control_generation,
-                    'validation_profile' => null,
-                    'document_state' => TicketDocumentState::UNPARSED,
-                    'ticket_contract_sha256' => null,
+                    'validation_profile' => $projection->profile->value,
+                    'document_state' => $projection->state,
+                    'ticket_contract_sha256' => $projection->contractHash,
+                    'validation_errors' => array_map(
+                        static fn ($error): array => $error->jsonSerialize(),
+                        $projection->errors,
+                    ),
                     'redacted_content' => $redaction->text,
                     'redaction_state' => $redactionState,
                     'redaction_matches' => $matches,
                     'source_blockers' => $blockers,
                     'approval_editor_eligible' => false,
+                    'editor_eligible' => $editorEligible,
+                    'approval_eligible' => $approvalEligible,
                     'generated_at' => $generatedAt,
                 ],
             );

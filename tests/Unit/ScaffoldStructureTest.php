@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_006f(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_007(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -158,6 +158,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Git/GitConfigurationFactory.php',
             'app/AI6/Git/GitRemotePolicy.php',
             'app/AI6/Git/GitRemoteRejected.php',
+            'app/AI6/Git/GitTreeEntry.php',
             'app/AI6/Git/HardenedControlRemoteProbe.php',
             'app/AI6/Git/HardenedGitEnvironment.php',
             'app/AI6/Git/HardenedGitRunner.php',
@@ -269,7 +270,28 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Shared/Security/SecurityPolicyFactory.php',
             'app/AI6/Shared/Security/SecurityPolicyHasher.php',
             'app/AI6/Shared/Security/SecurityProfile.php',
+            'app/AI6/Shared/Yaml/RestrictedYaml.php',
+            'app/AI6/Shared/Yaml/RestrictedYamlException.php',
+            'app/AI6/Shared/Yaml/YamlError.php',
             'app/AI6/Tickets/.gitkeep',
+            'app/AI6/Tickets/Ai6DetailV1TicketValidator.php',
+            'app/AI6/Tickets/Console/ReprojectUnparsedTicketsCommand.php',
+            'app/AI6/Tickets/GenericV1TicketValidator.php',
+            'app/AI6/Tickets/LegacyTicketDocument.php',
+            'app/AI6/Tickets/LegacyTicketReader.php',
+            'app/AI6/Tickets/TicketContractHasher.php',
+            'app/AI6/Tickets/TicketDependencyGraph.php',
+            'app/AI6/Tickets/TicketDocument.php',
+            'app/AI6/Tickets/TicketInventory.php',
+            'app/AI6/Tickets/TicketInventoryResult.php',
+            'app/AI6/Tickets/TicketParseException.php',
+            'app/AI6/Tickets/TicketProjection.php',
+            'app/AI6/Tickets/TicketReadModelProjector.php',
+            'app/AI6/Tickets/TicketSourceBlockers.php',
+            'app/AI6/Tickets/TicketV1Parser.php',
+            'app/AI6/Tickets/TicketValidationConfiguration.php',
+            'app/AI6/Tickets/TicketValidationError.php',
+            'app/AI6/Tickets/TicketValidationProfile.php',
         ], $files);
     }
 
@@ -313,6 +335,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertSame('^13.8', $composer['require']['laravel/framework'] ?? null);
         self::assertSame('~2.2.0', $composer['require']['lbuchs/webauthn'] ?? null);
         self::assertSame('~9.0.0', $composer['require']['pragmarx/google2fa'] ?? null);
+        self::assertSame('^8.0', $composer['require']['symfony/yaml'] ?? null);
         self::assertSame('^12.5.12', $composer['require-dev']['phpunit/phpunit'] ?? null);
         self::assertSame('8.5.0', $composer['config']['platform']['php'] ?? null);
 
@@ -515,7 +538,7 @@ final class ScaffoldStructureTest extends TestCase
         }
     }
 
-    public function test_migrations_match_the_approved_state_through_ai6_006f(): void
+    public function test_migrations_match_the_approved_state_through_ai6_007(): void
     {
         $migrations = glob($this->path('database/migrations/*.php'));
         self::assertIsArray($migrations);
@@ -541,6 +564,7 @@ final class ScaffoldStructureTest extends TestCase
             '2026_08_09_000000_add_clone_fetch_control_operation_contract.php',
             '2026_08_10_000000_add_control_branch_change_operation_contract.php',
             '2026_08_10_010000_add_ticket_refresh_read_model_contract.php',
+            '2026_08_11_000000_add_ticket_validation_projection_contract.php',
         ], $migrations);
     }
 

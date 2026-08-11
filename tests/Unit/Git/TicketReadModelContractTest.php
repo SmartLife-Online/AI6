@@ -15,32 +15,51 @@ use App\AI6\Projects\TicketDocumentState;
 use App\AI6\Projects\TicketReadModelFreshness;
 use App\AI6\Projects\TicketReadModelRedactionState;
 use App\AI6\Projects\TicketReadModelUsePolicy;
+use App\AI6\Tickets\TicketValidationConfiguration;
+use App\AI6\Tickets\TicketValidationProfile;
 use PHPUnit\Framework\TestCase;
 
 final class TicketReadModelContractTest extends TestCase
 {
-    public function test_approval_and_editor_policy_fails_closed_for_unparsed_or_redacted_models(): void
+    public function test_approval_and_editor_policy_is_split_and_fails_closed(): void
     {
-        $policy = new TicketReadModelUsePolicy;
+        $policy = new TicketReadModelUsePolicy(new TicketValidationConfiguration(TicketValidationProfile::GENERIC_V1));
 
-        self::assertFalse($policy->allowsApprovalOrEditor($this->readModel(
+        $unparsed = $this->readModel(
             TicketDocumentState::UNPARSED,
             TicketReadModelRedactionState::CLEAR,
-            false,
+            false, false,
             ['unparsed'],
-        )));
-        self::assertFalse($policy->allowsApprovalOrEditor($this->readModel(
+        );
+        self::assertFalse($policy->allowsEditor($unparsed, true));
+        self::assertFalse($policy->allowsApproval($unparsed, true));
+
+        $redacted = $this->readModel(
             TicketDocumentState::VALID,
             TicketReadModelRedactionState::CONTENT_REDACTED,
-            false,
+            false, false,
             ['content_redacted'],
-        )));
-        self::assertTrue($policy->allowsApprovalOrEditor($this->readModel(
+        );
+        self::assertFalse($policy->allowsEditor($redacted, true));
+        self::assertFalse($policy->allowsApproval($redacted, true));
+
+        $invalid = $this->readModel(
+            TicketDocumentState::INVALID,
+            TicketReadModelRedactionState::CLEAR,
+            true, false,
+            ['invalid'],
+        );
+        self::assertTrue($policy->allowsEditor($invalid, true));
+        self::assertFalse($policy->allowsApproval($invalid, true));
+
+        $valid = $this->readModel(
             TicketDocumentState::VALID,
             TicketReadModelRedactionState::CLEAR,
-            true,
+            true, true,
             [],
-        )));
+        );
+        self::assertTrue($policy->allowsEditor($valid, true));
+        self::assertTrue($policy->allowsApproval($valid, true));
     }
 
     public function test_staleness_predicates_are_independent_read_time_comparisons(): void
@@ -121,7 +140,8 @@ final class TicketReadModelContractTest extends TestCase
         $view = file_get_contents($root.'/resources/views/projects/show.blade.php');
         self::assertIsString($status);
         self::assertIsString($view);
-        self::assertStringContainsString('allowsApprovalOrEditor($readModel)', $status);
+        self::assertStringContainsString('allowsEditor($readModel', $status);
+        self::assertStringContainsString('allowsApproval($readModel', $status);
         self::assertStringNotContainsString('->approval_editor_eligible', $view);
     }
 
@@ -129,13 +149,18 @@ final class TicketReadModelContractTest extends TestCase
     private function readModel(
         TicketDocumentState $documentState,
         TicketReadModelRedactionState $redactionState,
-        bool $eligible,
+        bool $editorEligible,
+        bool $approvalEligible,
         array $blockers,
     ): TicketReadModel {
         return (new TicketReadModel)->forceFill([
             'document_state' => $documentState,
+            'validation_profile' => 'generic_v1',
+            'ticket_contract_sha256' => $documentState === TicketDocumentState::VALID ? str_repeat('a', 64) : null,
             'redaction_state' => $redactionState,
-            'approval_editor_eligible' => $eligible,
+            'approval_editor_eligible' => false,
+            'editor_eligible' => $editorEligible,
+            'approval_eligible' => $approvalEligible,
             'source_blockers' => $blockers,
         ]);
     }

@@ -14,9 +14,7 @@ final readonly class Redactor
     /** @throws InvalidRedactionInputException */
     public function redact(string $text, RedactionContext $context): RedactionResult
     {
-        if (preg_match('//u', $text) !== 1) {
-            throw new InvalidRedactionInputException('Redaction input must be valid UTF-8.');
-        }
+        $this->assertValidInput($text);
 
         $candidates = [];
 
@@ -87,6 +85,14 @@ final readonly class Redactor
         $output .= substr($text, $cursor);
 
         return new RedactionResult($output, $redactions);
+    }
+
+    /** @throws InvalidRedactionInputException */
+    public function assertValidInput(string $text): void
+    {
+        if (preg_match('//u', $text) !== 1) {
+            throw new InvalidRedactionInputException('Redaction input must be valid UTF-8.');
+        }
     }
 
     private function isKnownMarker(string $value): bool

@@ -95,4 +95,8 @@ return [
         'reconciliation_budget' => env('AI6_CONTROL_OPERATION_RECONCILIATION_BUDGET', '8'),
         'refresh_base_path' => env('AI6_CONTROL_OPERATION_REFRESH_BASE_PATH', 'tickets'),
     ],
+    'tickets' => [
+        'validation_profile' => env('AI6_TICKET_VALIDATION_PROFILE', 'generic_v1'),
+        'max_candidates' => env('AI6_TICKET_MAX_CANDIDATES', '100'),
+    ],
 ];

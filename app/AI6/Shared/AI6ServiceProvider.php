@@ -25,6 +25,8 @@ use App\AI6\Git\HardenedGitRunner;
 use App\AI6\Git\KnownHostsVerifier;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Policies\ProjectPolicy;
+use App\AI6\Shared\Config\StrictEnumParser;
+use App\AI6\Shared\Config\StrictPositiveIntegerParser;
 use App\AI6\Shared\Doctor\DoctorCommand;
 use App\AI6\Shared\Doctor\RedactionKeyringDoctorCheck;
 use App\AI6\Shared\Doctor\SecurityPolicyDoctorCheck;
@@ -44,6 +46,8 @@ use App\AI6\Shared\Redaction\RedactionRuleSet;
 use App\AI6\Shared\Redaction\Redactor;
 use App\AI6\Shared\Security\SecurityPolicy;
 use App\AI6\Shared\Security\SecurityPolicyFactory;
+use App\AI6\Shared\Yaml\RestrictedYaml;
+use App\AI6\Tickets\TicketValidationConfiguration;
 use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Encryption\Encrypter;
@@ -58,6 +62,14 @@ final class AI6ServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        $this->app->singleton(RestrictedYaml::class);
+        $this->app->singleton(
+            TicketValidationConfiguration::class,
+            static fn (Application $app): TicketValidationConfiguration => TicketValidationConfiguration::fromConfiguredValues(
+                $app->make(StrictEnumParser::class),
+                $app->make(StrictPositiveIntegerParser::class),
+            ),
+        );
         $this->app->singleton(AuthConfigurationFactory::class);
         $this->app->singleton(
             AuthConfiguration::class,

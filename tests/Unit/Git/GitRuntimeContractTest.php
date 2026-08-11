@@ -192,31 +192,45 @@ final class GitRuntimeContractTest extends TestCase
         }
     }
 
-    public function test_symfony_process_is_already_locked_and_composer_files_match_the_rebase_base(): void
+    public function test_symfony_process_remains_transitive_and_yaml_is_directly_locked(): void
     {
         $root = dirname(__DIR__, 3);
         $composer = json_decode((string) file_get_contents($root.'/composer.json'), true, flags: JSON_THROW_ON_ERROR);
         self::assertIsArray($composer);
         self::assertArrayNotHasKey('symfony/process', $composer['require']);
+        self::assertSame('^8.0', $composer['require']['symfony/yaml'] ?? null);
 
         $lock = json_decode((string) file_get_contents($root.'/composer.lock'), true, flags: JSON_THROW_ON_ERROR);
         self::assertIsArray($lock);
         $versions = [];
         foreach ($lock['packages'] as $package) {
-            if ($package['name'] === 'symfony/process') {
+            if (in_array($package['name'], ['symfony/process', 'symfony/yaml'], true)) {
                 $versions[] = $package['version'];
             }
         }
-        self::assertSame(['v7.4.13'], $versions);
+        self::assertSame(['v7.4.13', 'v8.1.2'], $versions);
 
-        $worktree = new Process(['git', 'rev-parse', '--is-inside-work-tree'], $root);
-        $worktree->run();
-        if ($worktree->getExitCode() !== 0) {
-            self::markTestSkipped('The composer base-snapshot comparison requires the Git worktree metadata.');
+        $baseComposerProcess = new Process(['git', 'show', 'b29d802:composer.json'], $root);
+        $baseLockProcess = new Process(['git', 'show', 'b29d802:composer.lock'], $root);
+        $baseComposerProcess->run();
+        $baseLockProcess->run();
+        if (! $baseComposerProcess->isSuccessful() || ! $baseLockProcess->isSuccessful()) {
+            self::markTestSkipped('The composer provenance comparison requires commit b29d802.');
         }
 
-        $diff = new Process(['git', 'diff', '--exit-code', 'b29d802', '--', 'composer.json', 'composer.lock'], $root);
-        $diff->run();
-        self::assertSame(0, $diff->getExitCode(), $diff->getErrorOutput().$diff->getOutput());
+        $baseComposer = json_decode($baseComposerProcess->getOutput(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($baseComposer);
+        $baseComposer['require']['symfony/yaml'] = '^8.0';
+        self::assertSame($baseComposer, $composer);
+
+        $baseLock = json_decode($baseLockProcess->getOutput(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($baseLock);
+        $lockWithoutYaml = $lock;
+        $lockWithoutYaml['packages'] = array_values(array_filter(
+            $lockWithoutYaml['packages'],
+            static fn (array $package): bool => $package['name'] !== 'symfony/yaml',
+        ));
+        $baseLock['content-hash'] = $lockWithoutYaml['content-hash'];
+        self::assertSame($baseLock, $lockWithoutYaml);
     }
 }

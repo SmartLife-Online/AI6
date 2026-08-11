@@ -260,10 +260,10 @@ final class RuntimeScriptsTest extends TestCase
         }
     }
 
-    public function test_composer_contract_and_installed_packages_match_the_ai6_005a_platform_contract(): void
+    public function test_composer_contract_and_installed_packages_match_the_ai6_007_platform_contract(): void
     {
-        self::assertSame('09d3c8abe5ae0fd01e8cab2a266ab87ecf648844ef72bd6ceeacd46348d5cea8', hash_file('sha256', $this->path('composer.json')));
-        self::assertSame('3f0ac9af6a8b47de3895ae1585e0fb95abb9827f36d55dcd2fa7d6c1c1adb312', hash_file('sha256', $this->path('composer.lock')));
+        self::assertSame('540c4f0c070a25620700a2800e5c9aefa8205164f486bea6a8de1534ae972d2d', hash_file('sha256', $this->path('composer.json')));
+        self::assertSame('5e14da6d14b0aefaf1966ec2cd2ed00a158705edfeb9d8d53b59e9fa79a18768', hash_file('sha256', $this->path('composer.lock')));
 
         $lock = $this->decodeJson($this->path('composer.lock'));
         self::assertSame('*', $lock['platform']['ext-intl'] ?? null);
@@ -282,6 +282,7 @@ final class RuntimeScriptsTest extends TestCase
 
         self::assertSame('v2.2.0', $lockedVersions['lbuchs/webauthn'] ?? null);
         self::assertSame('v9.0.0', $lockedVersions['pragmarx/google2fa'] ?? null);
+        self::assertSame('v8.1.2', $lockedVersions['symfony/yaml'] ?? null);
 
         foreach ($installed['packages'] ?? [] as $package) {
             if (! is_array($package) || ! is_string($package['name'] ?? null) || $package['name'] === 'ai6/ai6') {

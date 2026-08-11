@@ -41,13 +41,18 @@ use App\AI6\Projects\TicketReadModelRedactionState;
 use App\AI6\Shared\Process\ControlProcessRunner;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
+use App\AI6\Tickets\TicketInventory;
+use App\AI6\Tickets\TicketValidationConfiguration;
+use App\AI6\Tickets\TicketValidationProfile;
 use Illuminate\Database\QueryException;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Http\Request;
 use Illuminate\Session\ArraySessionHandler;
 use Illuminate\Session\Store;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
 
@@ -83,12 +88,15 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
         self::assertSame($fixture['control_oid'], $readModel->control_commit);
         self::assertSame($fixture['blob_sha'], $readModel->blob_sha);
         self::assertSame(0, $readModel->control_generation);
-        self::assertNull($readModel->validation_profile);
-        self::assertSame(TicketDocumentState::UNPARSED, $readModel->document_state);
+        self::assertSame('generic_v1', $readModel->validation_profile);
+        self::assertSame(TicketDocumentState::INVALID, $readModel->document_state);
         self::assertNull($readModel->ticket_contract_sha256);
+        self::assertNotSame([], $readModel->validation_errors);
         self::assertSame(TicketReadModelRedactionState::CONTENT_REDACTED, $readModel->redaction_state);
         self::assertFalse($readModel->approval_editor_eligible);
-        self::assertSame(['unparsed', 'content_redacted'], $readModel->source_blockers);
+        self::assertFalse($readModel->editor_eligible);
+        self::assertFalse($readModel->approval_eligible);
+        self::assertSame(['invalid', 'content_redacted'], $readModel->source_blockers);
         self::assertStringContainsString('[REDACTED:SECRET]', $readModel->redacted_content);
         self::assertStringNotContainsString('hunter2', $readModel->redacted_content);
         self::assertCount(1, $readModel->redaction_matches);
@@ -119,19 +127,27 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
         DB::table('jobs')->delete();
         $secondToken = $lease->claim($secondOperation, str_repeat('f', 32));
         self::assertIsInt($secondToken);
-        self::assertTrue($refresher->advance($secondOperation->refresh(), $secondToken));
-        self::assertTrue($refresher->advance($secondOperation->refresh(), $secondToken));
-        self::assertSame(2, TicketReadModel::query()->count());
+        try {
+            $refresher->advance($secondOperation->refresh(), $secondToken);
+            self::fail('A nested non-candidate path was refreshed.');
+        } catch (ControlOperationTerminalConflict $exception) {
+            self::assertSame('refresh_path_not_ticket_candidate', $exception->conflict);
+        }
+        self::assertSame(1, TicketReadModel::query()->count());
 
         $this->actingAs($administrator)->get(route('projects.show', $project))
             ->assertOk()
             ->assertSee('tickets/AI6-006F.md')
-            ->assertSee('tickets/subdir/nested.md')
             ->assertSee($fixture['control_oid'])
             ->assertSee($fixture['blob_sha'])
+            ->assertSee('Validierungsprofil')
+            ->assertSee('generic_v1')
+            ->assertSee('Editorquelle')
+            ->assertSee('Approvalquelle')
+            ->assertDontSee('Approval-/Editorquelle')
             ->assertSee('Aktuell');
         $statusReadModels = $this->app->make(ProjectReadModelStatus::class)->for($project->refresh())['readModels'];
-        self::assertCount(2, $statusReadModels);
+        self::assertCount(1, $statusReadModels);
         self::assertSame([
             'id',
             'project_id',
@@ -139,10 +155,14 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
             'control_commit',
             'blob_sha',
             'control_generation',
+            'validation_profile',
             'document_state',
+            'ticket_contract_sha256',
             'redaction_state',
             'source_blockers',
             'approval_editor_eligible',
+            'editor_eligible',
+            'approval_eligible',
             'generated_at',
         ], array_keys($statusReadModels[0]['readModel']->getAttributes()));
 
@@ -168,7 +188,7 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
         $runner = $this->app->make(HardenedGitRunner::class);
         $context = new RedactionContext((string) $project->getKey(), null, 'ticket-read-model-fixture');
 
-        foreach (['tickets/link.md', 'tickets/subdir', 'tickets/ai6-006f.md'] as $path) {
+        foreach (['tickets/AI6-100.md', 'tickets/AI6-101.md', 'tickets/subdir', 'tickets/AI6-006f.md'] as $path) {
             try {
                 $runner->readRegularBlob($fixture['repository'], $fixture['control_oid'], $path, $context);
                 self::fail('An unsafe or case-inexact Git path was accepted.');
@@ -180,7 +200,140 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
             }
         }
 
+        $inventory = $this->app->make(TicketInventory::class)->inspect(
+            $fixture['repository'],
+            $fixture['control_oid'],
+            'tickets',
+            TicketValidationProfile::GENERIC_V1,
+            TicketValidationProfile::GENERIC_V1,
+            $context,
+        );
+        self::assertSame([
+            'tickets/AI6-006F.md',
+            'tickets/AI6-007.md',
+            'tickets/AI6-099.md',
+        ], array_keys($inventory->projections));
+        self::assertSame(['tickets/M169.md'], $inventory->invalidUtf8Paths);
+        $codes = array_map(static fn ($error): string => $error->code, $inventory->projectErrors);
+        self::assertSame(2, count(array_filter(
+            $codes,
+            static fn (string $code): bool => $code === 'candidate_case_fold_collision',
+        )));
+        self::assertContains('declared_id_duplicate', $codes);
+        self::assertContains('filename_id_mismatch', $codes);
+        self::assertArrayNotHasKey('tickets/README.md', $inventory->projections);
+        self::assertArrayNotHasKey('tickets/AI6-008.md.bak', $inventory->projections);
+        self::assertArrayNotHasKey('tickets/AI6-100.md', $inventory->projections);
+        self::assertArrayNotHasKey('tickets/AI6-101.md', $inventory->projections);
+        $fields = array_map(static fn ($error): string => $error->field, $inventory->projectErrors);
+        self::assertContains('AI6-006F.md, ai6-006f.md', $fields);
+        self::assertContains('AI6-099.md, ai6-099.md', $fields);
+        self::assertTrue((bool) array_filter($fields, static fn (string $field): bool => str_contains($field, 'AI6-006F.md')));
+        self::assertTrue((bool) array_filter($fields, static fn (string $field): bool => str_contains($field, 'AI6-007.md')));
+
         self::assertSame(0, TicketReadModel::query()->count());
+    }
+
+    public function test_refresh_publishes_valid_profile_bound_union_and_guards_reject_impossible_combinations(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $this->configureRepository($project, withCandidateConflicts: false);
+        $readModel = $this->refreshPath($administrator, $project, 'tickets/AI6-006F.md');
+
+        self::assertSame(TicketDocumentState::VALID, $readModel->document_state);
+        self::assertSame('generic_v1', $readModel->validation_profile);
+        self::assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/D', $readModel->ticket_contract_sha256 ?? '');
+        self::assertSame([], $readModel->validation_errors);
+        self::assertSame(['content_redacted'], $readModel->source_blockers);
+        self::assertFalse($readModel->editor_eligible);
+        self::assertFalse($readModel->approval_eligible);
+
+        $clean = $this->refreshPath($administrator, $project, 'tickets/AI6-099.md');
+        self::assertSame(TicketDocumentState::VALID, $clean->document_state);
+        self::assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/D', $clean->ticket_contract_sha256 ?? '');
+        self::assertSame([], $clean->validation_errors);
+        self::assertSame([], $clean->source_blockers);
+        self::assertTrue($clean->editor_eligible);
+        self::assertTrue($clean->approval_eligible);
+
+        try {
+            DB::table('ticket_read_models')->where('id', $clean->getKey())->update(['generated_at' => now()->addSecond()]);
+            self::fail('A completed operation mutated a non-unparsed read model.');
+        } catch (QueryException) {
+        }
+
+        foreach ([
+            ['ticket_contract_sha256' => null],
+            ['document_state' => 'invalid'],
+            ['validation_profile' => null],
+        ] as $invalid) {
+            try {
+                DB::table('ticket_read_models')->where('id', $readModel->getKey())->update($invalid);
+                self::fail('An impossible read-model state passed the SQLite guards: '.json_encode($invalid, JSON_THROW_ON_ERROR));
+            } catch (QueryException) {
+            }
+        }
+    }
+
+    public function test_worker_backfill_reprojects_redacted_unparsed_rows_and_is_idempotent(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $fixture = $this->configureRepository($project);
+        $this->insertHistoricalUnparsed($administrator, $project, $fixture);
+        $this->configureBackfillWorker();
+
+        self::assertSame(0, Artisan::call('ai6:tickets:reproject-unparsed'), Artisan::output());
+        $readModel = TicketReadModel::query()->sole();
+        self::assertSame(TicketDocumentState::INVALID, $readModel->document_state);
+        self::assertSame('generic_v1', $readModel->validation_profile);
+        self::assertNull($readModel->ticket_contract_sha256);
+        self::assertNotSame([], $readModel->validation_errors);
+        self::assertSame(['invalid', 'content_redacted'], $readModel->source_blockers);
+        self::assertSame(TicketReadModelRedactionState::CONTENT_REDACTED, $readModel->redaction_state);
+        self::assertFalse($readModel->editor_eligible);
+        self::assertFalse($readModel->approval_eligible);
+        self::assertSame(0, Artisan::call('ai6:tickets:reproject-unparsed'), Artisan::output());
+        self::assertSame(0, TicketReadModel::query()->whereNull('validation_profile')->count());
+    }
+
+    #[DataProvider('backfillConflictProvider')]
+    public function test_backfill_compare_and_swap_reports_newer_blob_generation_and_profile_conflicts(string $conflict): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $fixture = $this->configureRepository($project);
+        $readModel = $this->insertHistoricalUnparsed(
+            $administrator,
+            $project,
+            $fixture,
+            $conflict === 'blob' ? str_repeat('d', 64) : null,
+        );
+        $this->configureBackfillWorker();
+
+        if ($conflict === 'generation') {
+            $project->forceFill(['control_generation' => 1])->save();
+        } elseif ($conflict === 'profile') {
+            $this->app->instance(
+                TicketValidationConfiguration::class,
+                new TicketValidationConfiguration(TicketValidationProfile::GENERIC_V1),
+            );
+            config(['ai6.tickets.validation_profile' => 'ai6_detail_v1']);
+        }
+
+        self::assertSame(1, Artisan::call('ai6:tickets:reproject-unparsed'));
+        self::assertStringContainsString('Konflikt', Artisan::output());
+        self::assertSame(TicketDocumentState::UNPARSED, $readModel->refresh()->document_state);
+        self::assertNull($readModel->validation_profile);
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function backfillConflictProvider(): iterable
+    {
+        yield 'newer blob' => ['blob'];
+        yield 'higher generation' => ['generation'];
+        yield 'profile switch' => ['profile'];
     }
 
     public function test_repository_configuration_cannot_select_a_path_outside_the_server_base(): void
@@ -213,7 +366,7 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
         $operation = $this->app->make(QueueTicketReadModelRefresh::class)->handle(
             $administrator,
             $project->refresh(),
-            'tickets/invalid-utf8.md',
+            'tickets/M169.md',
             (string) Str::uuid(),
         );
         DB::table('jobs')->delete();
@@ -230,6 +383,38 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
 
         self::assertSame(0, TicketReadModel::query()->count());
         self::assertSame(ControlOperationPhase::CLAIMED, $operation->refresh()->phase);
+    }
+
+    public function test_inventory_candidate_limit_is_a_named_terminal_conflict_before_blob_reads(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $this->configureRepository($project, withCandidateConflicts: false);
+        $this->app->instance(
+            TicketValidationConfiguration::class,
+            new TicketValidationConfiguration(TicketValidationProfile::GENERIC_V1, 2),
+        );
+        foreach ([TicketInventory::class, TicketReadModelRefresher::class] as $service) {
+            $this->app->forgetInstance($service);
+        }
+        $operation = $this->app->make(QueueTicketReadModelRefresh::class)->handle(
+            $administrator,
+            $project->refresh(),
+            'tickets/AI6-099.md',
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $token = $this->app->make(ProjectOperationLease::class)->claim($operation, str_repeat('9', 32));
+        self::assertIsInt($token);
+
+        try {
+            $this->app->make(TicketReadModelRefresher::class)->advance($operation->refresh(), $token);
+            self::fail('An over-limit ticket inventory was read.');
+        } catch (ControlOperationTerminalConflict $exception) {
+            self::assertSame('refresh_ticket_candidate_limit_exceeded', $exception->conflict);
+        }
+
+        self::assertSame(0, TicketReadModel::query()->count());
     }
 
     public function test_non_utf8_refresh_is_terminalized_by_the_real_executor(): void
@@ -252,7 +437,7 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
         $invalidRefresh = $this->app->make(QueueTicketReadModelRefresh::class)->handle(
             $fixture['administrator'],
             $project->refresh(),
-            'tickets/invalid-utf8.md',
+            'tickets/M169.md',
             (string) Str::uuid(),
         );
         DB::table('jobs')->delete();
@@ -265,7 +450,7 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
         self::assertSame(ControlOperationOutcome::FAILED, $invalidResult->outcome);
         self::assertSame('Der gebundene Git-Blob enthält kein gültiges UTF-8.', $invalidResult->safe_summary);
         self::assertNull($project->refresh()->operation_lock_operation_id);
-        self::assertFalse(TicketReadModel::query()->where('relative_path', 'tickets/invalid-utf8.md')->exists());
+        self::assertFalse(TicketReadModel::query()->where('relative_path', 'tickets/M169.md')->exists());
     }
 
     public function test_outcome_published_binding_cas_loss_uses_only_read_time_freshness_through_recovery(): void
@@ -288,12 +473,12 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
         $refresh = $this->app->make(QueueTicketReadModelRefresh::class)->handle(
             $fixture['administrator'],
             $project->refresh(),
-            'tickets/read-model.md',
+            'tickets/AI6-099.md',
             (string) Str::uuid(),
         );
         DB::table('jobs')->delete();
         $this->app->make(ControlOperationExecutor::class)->execute($refresh->id);
-        $readModel = TicketReadModel::query()->where('relative_path', 'tickets/read-model.md')->sole();
+        $readModel = TicketReadModel::query()->where('relative_path', 'tickets/AI6-099.md')->sole();
         $generatedAt = $readModel->generated_at->toJSON();
         $freshness = $this->app->make(TicketReadModelFreshness::class);
         self::assertSame(['stale' => false, 'reasons' => []], $freshness->for($project->refresh(), $readModel));
@@ -454,7 +639,7 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
     }
 
     /** @return array{repository: string, control_oid: string, blob_sha: string} */
-    private function configureRepository(Project $project): array
+    private function configureRepository(Project $project, bool $withCandidateConflicts = true): array
     {
         $gitBinary = (new ExecutableFinder)->find('git');
         $executablePath = getenv('PATH');
@@ -479,13 +664,35 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
         $this->git(['config', 'user.name', 'Refresh Fixture'], $source);
         self::assertTrue(mkdir($source.DIRECTORY_SEPARATOR.'tickets'.DIRECTORY_SEPARATOR.'subdir', 0700, true));
         self::assertTrue(mkdir($source.DIRECTORY_SEPARATOR.'.ai6', 0700));
-        self::assertNotFalse(file_put_contents($source.DIRECTORY_SEPARATOR.'tickets'.DIRECTORY_SEPARATOR.'AI6-006F.md', "title\npassword=hunter2\n"));
-        self::assertNotFalse(file_put_contents($source.DIRECTORY_SEPARATOR.'tickets'.DIRECTORY_SEPARATOR.'invalid-utf8.md', "\xC3\x28"));
+        self::assertNotFalse(file_put_contents(
+            $source.DIRECTORY_SEPARATOR.'tickets'.DIRECTORY_SEPARATOR.'AI6-006F.md',
+            "---\nschema: ai6.ticket.v1\nid: AI6-006F\ntitle: \"Refresh prüfen\"\nstatus: todo\ndepends_on: []\n---\n\n## Goal\n\nRefresh prüfen.\n\npassword=hunter2\n",
+        ));
+        self::assertNotFalse(file_put_contents(
+            $source.DIRECTORY_SEPARATOR.'tickets'.DIRECTORY_SEPARATOR.'AI6-099.md',
+            "---\nschema: ai6.ticket.v1\nid: AI6-099\ntitle: \"Saubere Projektion\"\nstatus: todo\ndepends_on: []\n---\n\n## Goal\n\nSaubere Projektion prüfen.\n",
+        ));
+        self::assertNotFalse(file_put_contents($source.DIRECTORY_SEPARATOR.'tickets'.DIRECTORY_SEPARATOR.'README.md', "inventory view\n"));
+        self::assertNotFalse(file_put_contents($source.DIRECTORY_SEPARATOR.'tickets'.DIRECTORY_SEPARATOR.'AI6-008.md.bak', "multiple extension\n"));
+        self::assertNotFalse(file_put_contents($source.DIRECTORY_SEPARATOR.'tickets'.DIRECTORY_SEPARATOR.'AI6-007.md', "---\nschema: ai6.ticket.v1\nid: AI6-006F\ntitle: \"Doppelte ID\"\nstatus: todo\ndepends_on: []\n---\n\n## Goal\n\nKonflikt prüfen.\n"));
+        self::assertNotFalse(file_put_contents(
+            $source.DIRECTORY_SEPARATOR.'tickets'.DIRECTORY_SEPARATOR.'M169.md',
+            "---\nschema: ai6.ticket.v1\nid: M169\ntitle: \"UTF-8 prüfen\"\nstatus: todo\ndepends_on: []\n---\n\n## Goal\n\nUngültige Bodybytes prüfen: \xC3\x28\n",
+        ));
         self::assertNotFalse(file_put_contents($source.DIRECTORY_SEPARATOR.'tickets'.DIRECTORY_SEPARATOR.'subdir'.DIRECTORY_SEPARATOR.'nested.md', "nested\n"));
         self::assertNotFalse(file_put_contents($source.DIRECTORY_SEPARATOR.'.ai6'.DIRECTORY_SEPARATOR.'config.yaml', "refresh_base_path: .ai6\n"));
-        $this->git(['add', 'tickets/AI6-006F.md', 'tickets/invalid-utf8.md', 'tickets/subdir/nested.md', '.ai6/config.yaml'], $source);
+        $this->git(['add', 'tickets/AI6-006F.md', 'tickets/AI6-099.md', 'tickets/README.md', 'tickets/AI6-008.md.bak', 'tickets/AI6-007.md', 'tickets/M169.md', 'tickets/subdir/nested.md', '.ai6/config.yaml'], $source);
+        $lowerCaseBlob = trim((string) $this->git(['hash-object', '-w', '--stdin'], $source, "ignored lower-case name\n"));
+        $this->git(['update-index', '--add', '--cacheinfo', '100644,'.$lowerCaseBlob.',tickets/ai6-006f.md'], $source);
+        $this->git(['update-index', '--add', '--cacheinfo', '100644,'.$lowerCaseBlob.',tickets/ai6-099.md'], $source);
+        if (! $withCandidateConflicts) {
+            $this->git(['rm', '--cached', '-f', '--', 'tickets/AI6-007.md', 'tickets/ai6-006f.md', 'tickets/ai6-099.md'], $source);
+        }
         $symlinkBlob = trim((string) $this->git(['hash-object', '-w', '--stdin'], $source, "target\n"));
-        $this->git(['update-index', '--add', '--cacheinfo', '120000,'.$symlinkBlob.',tickets/link.md'], $source);
+        $this->git(['update-index', '--add', '--cacheinfo', '120000,'.$symlinkBlob.',tickets/AI6-100.md'], $source);
+        $emptyTree = trim((string) $this->git(['mktree'], $source, ''));
+        $gitlinkCommit = trim((string) $this->git(['commit-tree', $emptyTree, '-m', 'gitlink fixture'], $source));
+        $this->git(['update-index', '--add', '--cacheinfo', '160000,'.$gitlinkCommit.',tickets/AI6-101.md'], $source);
         $this->git(['commit', '-m', 'refresh fixture'], $source);
         $controlOid = trim((string) $this->git(['rev-parse', 'HEAD'], $source));
         $blobSha = trim((string) $this->git(['rev-parse', 'HEAD:tickets/AI6-006F.md'], $source));
@@ -549,7 +756,7 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
         $this->app->instance(ProjectOperationLease::class, $lease);
         $this->app->instance(ManagedProjectPath::class, new ManagedProjectPath($operationConfiguration));
         $this->app->instance(HardenedGitRunner::class, $runner);
-        foreach ([QueueTicketReadModelRefresh::class, TicketReadModelRefresher::class] as $service) {
+        foreach ([QueueTicketReadModelRefresh::class, TicketReadModelRefresher::class, TicketInventory::class] as $service) {
             $this->app->forgetInstance($service);
         }
 
@@ -561,6 +768,74 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
         ])->save();
 
         return ['repository' => (string) realpath($repository), 'control_oid' => $controlOid, 'blob_sha' => $blobSha];
+    }
+
+    /** @param array{repository: string, control_oid: string, blob_sha: string} $fixture */
+    private function insertHistoricalUnparsed(
+        User $administrator,
+        Project $project,
+        array $fixture,
+        ?string $blobShaOverride = null,
+    ): TicketReadModel {
+        $operation = $this->app->make(QueueTicketReadModelRefresh::class)->handle(
+            $administrator,
+            $project->refresh(),
+            'tickets/AI6-006F.md',
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $token = $this->app->make(ProjectOperationLease::class)->claim($operation, str_repeat('7', 32));
+        self::assertIsInt($token);
+        $context = new RedactionContext((string) $project->getKey(), null, 'ticket-read-model:tickets/AI6-006F.md');
+        $blob = $this->app->make(HardenedGitRunner::class)->readRegularBlob(
+            $fixture['repository'], $fixture['control_oid'], 'tickets/AI6-006F.md', $context,
+        );
+        $redaction = $this->app->make(Redactor::class)->redact($blob->content, $context);
+
+        $readModel = TicketReadModel::query()->create([
+            'project_id' => $project->getKey(),
+            'control_operation_id' => $operation->id,
+            'relative_path' => 'tickets/AI6-006F.md',
+            'control_commit' => $fixture['control_oid'],
+            'blob_sha' => $blobShaOverride ?? $fixture['blob_sha'],
+            'control_generation' => 0,
+            'validation_profile' => null,
+            'document_state' => TicketDocumentState::UNPARSED,
+            'ticket_contract_sha256' => null,
+            'redacted_content' => $redaction->text,
+            'redaction_state' => TicketReadModelRedactionState::CONTENT_REDACTED,
+            'redaction_matches' => array_map(static fn ($match): array => $match->jsonSerialize(), $redaction->matches),
+            'source_blockers' => ['unparsed', 'content_redacted'],
+            'approval_editor_eligible' => false,
+            'editor_eligible' => false,
+            'approval_eligible' => false,
+            'generated_at' => now(),
+        ]);
+        ControlOperationResult::query()->create([
+            'control_operation_id' => $operation->id,
+            'outcome' => ControlOperationOutcome::SUCCEEDED,
+            'result_binding' => str_repeat('c', 64),
+            'safe_summary' => 'Historische Projektion abgeschlossen.',
+        ]);
+        self::assertSame(1, ControlOperation::query()
+            ->whereKey($operation->id)
+            ->where('state', ControlOperationState::RUNNING)
+            ->where('phase', ControlOperationPhase::CLAIMED)
+            ->update([
+                'state' => ControlOperationState::COMPLETED,
+                'phase' => ControlOperationPhase::ATTEMPT_COMPLETED,
+                'completed_at' => now(),
+                'version' => DB::raw('version + 1'),
+                'updated_at' => now(),
+            ]));
+        self::assertTrue($this->app->make(ProjectOperationLease::class)->release($operation->id, $project->getKey(), $token));
+
+        return $readModel;
+    }
+
+    private function configureBackfillWorker(): void
+    {
+        config(['ai6.runtime_role' => 'worker']);
     }
 
     private function refreshPath(User $administrator, Project $project, string $relativePath): TicketReadModel

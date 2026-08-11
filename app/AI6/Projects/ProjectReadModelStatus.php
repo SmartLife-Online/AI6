@@ -17,7 +17,7 @@ final readonly class ProjectReadModelStatus
         private TicketReadModelUsePolicy $usePolicy,
     ) {}
 
-    /** @return array{latestRefresh: ControlOperation|null, readModels: list<array{readModel: TicketReadModel, isStale: bool, staleReasons: list<string>, approvalEditorEligible: bool}>, refreshBasePath: string} */
+    /** @return array{latestRefresh: ControlOperation|null, readModels: list<array{readModel: TicketReadModel, isStale: bool, staleReasons: list<string>, validationProfile: string|null, editorEligible: bool, approvalEligible: bool}>, refreshBasePath: string} */
     public function for(Project $project): array
     {
         $latestRefresh = ControlOperation::query()
@@ -35,10 +35,14 @@ final readonly class ProjectReadModelStatus
                     'control_commit',
                     'blob_sha',
                     'control_generation',
+                    'validation_profile',
                     'document_state',
+                    'ticket_contract_sha256',
                     'redaction_state',
                     'source_blockers',
                     'approval_editor_eligible',
+                    'editor_eligible',
+                    'approval_eligible',
                     'generated_at',
                 ])->orderBy('relative_path');
             },
@@ -51,7 +55,9 @@ final readonly class ProjectReadModelStatus
                     'readModel' => $readModel,
                     'isStale' => $freshness['stale'],
                     'staleReasons' => $freshness['reasons'],
-                    'approvalEditorEligible' => $this->usePolicy->allowsApprovalOrEditor($readModel),
+                    'validationProfile' => $readModel->validation_profile,
+                    'editorEligible' => $this->usePolicy->allowsEditor($readModel, ! $freshness['stale']),
+                    'approvalEligible' => $this->usePolicy->allowsApproval($readModel, ! $freshness['stale']),
                 ];
             })
             ->values()

@@ -49,9 +49,9 @@ trait BuildsManagedControlRuntimeFixture
         $this->managedFixtureGit(['config', 'user.email', 'ai6@example.invalid'], $source);
         self::assertTrue(mkdir($source.'/tickets', 0700));
         self::assertNotFalse(file_put_contents($source.'/ticket.md', "first\n"));
-        self::assertNotFalse(file_put_contents($source.'/tickets/invalid-utf8.md', "\xC3\x28"));
-        self::assertNotFalse(file_put_contents($source.'/tickets/read-model.md', "read model\n"));
-        $this->managedFixtureGit(['add', 'ticket.md', 'tickets/invalid-utf8.md', 'tickets/read-model.md'], $source);
+        self::assertNotFalse(file_put_contents($source.'/tickets/M169.md', "\xC3\x28"));
+        self::assertNotFalse(file_put_contents($source.'/tickets/AI6-099.md', "read model\n"));
+        $this->managedFixtureGit(['add', 'ticket.md', 'tickets/M169.md', 'tickets/AI6-099.md'], $source);
         $this->managedFixtureGit(['commit', '-m', 'first'], $source);
         $firstOid = trim($this->managedFixtureGit(['rev-parse', 'HEAD'], $source));
         self::assertTrue(mkdir($remote, 0700));

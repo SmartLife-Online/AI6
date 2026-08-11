@@ -62,8 +62,9 @@ final class ControlBranchArchitectureTest extends TestCase
             }
         }
         $generationFile = str_replace('\\', '/', $root.'/app/AI6/Projects/ControlGeneration.php');
+        $backfillFile = str_replace('\\', '/', $root.'/app/AI6/Tickets/Console/ReprojectUnparsedTicketsCommand.php');
         self::assertSame([$generationFile], $generationMethods);
-        self::assertSame([$generationFile], $generationComparisons);
+        self::assertSame([$generationFile, $backfillFile], $generationComparisons);
         self::assertSame([], $staleMarkerWrites);
 
         $freshness = file_get_contents($root.'/app/AI6/Projects/TicketReadModelFreshness.php');

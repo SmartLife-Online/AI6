@@ -78,14 +78,18 @@
             <dd>{{ $readModel->generated_at->toIso8601String() }}</dd>
             <dt>Dokumentzustand</dt>
             <dd>{{ $readModel->document_state->value }}</dd>
+            <dt>Validierungsprofil</dt>
+            <dd>{{ $readModelStatus['validationProfile'] ?? 'Nicht profiliert' }}</dd>
             <dt>Redactionzustand</dt>
             <dd>{{ $readModel->redaction_state->value }}</dd>
             <dt>Aktualität</dt>
             <dd>{{ $readModelStatus['isStale'] ? 'Veraltet' : 'Aktuell' }}</dd>
             <dt>Staleness-Prädikate</dt>
             <dd>{{ $readModelStatus['staleReasons'] === [] ? 'Keine' : implode(', ', $readModelStatus['staleReasons']) }}</dd>
-            <dt>Approval-/Editorquelle</dt>
-            <dd>{{ $readModelStatus['approvalEditorEligible'] ? 'Zulässig' : 'Fail-closed gesperrt' }}</dd>
+            <dt>Editorquelle</dt>
+            <dd>{{ $readModelStatus['editorEligible'] ? 'Zulässig' : 'Fail-closed gesperrt' }}</dd>
+            <dt>Approvalquelle</dt>
+            <dd>{{ $readModelStatus['approvalEligible'] ? 'Zulässig' : 'Fail-closed gesperrt' }}</dd>
         </dl>
         @endforeach
     @else

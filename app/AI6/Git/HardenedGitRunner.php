@@ -258,6 +258,71 @@ final class HardenedGitRunner
         return new TicketBlob($returnedPath, $blobSha, $blob->output);
     }
 
+    /** @return list<GitTreeEntry> */
+    public function listDirectTreeEntries(
+        string $repository,
+        string $controlCommit,
+        string $basePath,
+        RedactionContext $redactionContext,
+    ): array {
+        $this->assertOid($controlCommit);
+        if (RefreshPathPolicy::canonicalBasePath($basePath) !== $basePath) {
+            throw new ControlOperationTerminalConflict(
+                'refresh_base_path_not_canonical',
+                'Der Inventur-Basispfad ist nicht kanonisch.',
+            );
+        }
+        $variables = $this->environment->variables();
+        $preflight = $this->repositoryConfiguration($repository, $variables, $redactionContext);
+        if ($preflight instanceof ProcessResult) {
+            throw new ControlOperationTerminalConflict(
+                'refresh_repository_configuration_rejected',
+                'Die Git-Konfiguration des verwalteten Repositorys wurde abgelehnt.',
+            );
+        }
+        $result = $this->processes->run($this->request([
+            ...$this->environment->commandPrefix(), ...$preflight,
+            'ls-tree', '-z', '--full-name', $controlCommit.':'.$basePath,
+        ], $repository, $variables, $redactionContext));
+        if (! $result->succeeded()) {
+            throw new ControlOperationTerminalConflict(
+                'refresh_tree_inventory_failed',
+                'Der Ticketbestand konnte am gebundenen Commit nicht inventarisiert werden.',
+            );
+        }
+        if ($result->output === '') {
+            return [];
+        }
+        if (! str_ends_with($result->output, "\0")) {
+            throw new ControlOperationTerminalConflict(
+                'refresh_tree_inventory_malformed',
+                'Git lieferte eine ungültige Bauminventur.',
+            );
+        }
+
+        $entries = [];
+        foreach (explode("\0", substr($result->output, 0, -1)) as $record) {
+            $tab = strpos($record, "\t");
+            if ($tab === false
+                || preg_match('/\A([0-7]{6}) (blob|tree|commit) ([0-9a-f]{64})\z/D', substr($record, 0, $tab), $matches) !== 1) {
+                throw new ControlOperationTerminalConflict(
+                    'refresh_tree_inventory_malformed',
+                    'Git lieferte eine ungültige Bauminventur.',
+                );
+            }
+            $name = substr($record, $tab + 1);
+            if ($name === '' || str_contains($name, '/') || str_contains($name, "\0")) {
+                throw new ControlOperationTerminalConflict(
+                    'refresh_tree_inventory_malformed',
+                    'Git lieferte einen ungültigen direkten Kindpfad.',
+                );
+            }
+            $entries[] = new GitTreeEntry($name, $matches[1], $matches[2], $matches[3]);
+        }
+
+        return $entries;
+    }
+
     private function resolveRepositoryRef(string $repository, string $ref, RedactionContext $redactionContext): ProcessResult
     {
         $variables = $this->environment->variables();

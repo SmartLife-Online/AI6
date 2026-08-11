@@ -295,6 +295,7 @@ The Git workflow AI6 will later run for **managed projects** — branch per run,
 | Wrote an AC as "works correctly" | Observable behavior with input, action and expected output (template §8). |
 | Filled the `## AC Coverage` table with a test that only proves a precondition — a job was queued, a column exists, a file contains a string | A `TC-` is met only when the test reaches the end state its text names. A placeholder behind a green suite is a finding, not evidence (§7 item 4). |
 | Made a security control pass by changing what it reads instead of what it decides | Leave the control's input authentic and add the missing fact as a separately named, peer-authenticated assertion (§6). |
+| Parsed, normalized or hashed untrusted repository bytes before they crossed the central UTF-8/redaction boundary, so malformed input surfaced as an untyped exception and retry storm | Pass every untrusted byte through `Redactor` and its typed UTF-8 gate first; parsing, normalization and hashing run only after that gate, and failure becomes a named terminal conflict (§6). |
 | Wrote the AC text in English | Section headings are English, the text under them is German (§3.1). |
 | Wrote `titel`, or a German section heading | `title` and the twelve English headings from §3.1. |
 | Normalized ` — ` to a hyphen in `spec_refs` or a scope marker | Em dash with spaces (§3.1). |

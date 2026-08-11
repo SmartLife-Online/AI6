@@ -20,11 +20,14 @@ use Illuminate\Support\Carbon;
  * @property string|null $validation_profile
  * @property TicketDocumentState $document_state
  * @property string|null $ticket_contract_sha256
+ * @property list<array{code: string, field: string, message: string}> $validation_errors
  * @property string $redacted_content
  * @property TicketReadModelRedactionState $redaction_state
  * @property list<array<string, int|string>> $redaction_matches
  * @property list<string> $source_blockers
  * @property bool $approval_editor_eligible
+ * @property bool $editor_eligible
+ * @property bool $approval_eligible
  * @property Carbon $generated_at
  */
 final class TicketReadModel extends Model
@@ -52,8 +55,11 @@ final class TicketReadModel extends Model
             'document_state' => TicketDocumentState::class,
             'redaction_state' => TicketReadModelRedactionState::class,
             'redaction_matches' => 'array',
+            'validation_errors' => 'array',
             'source_blockers' => 'array',
             'approval_editor_eligible' => 'boolean',
+            'editor_eligible' => 'boolean',
+            'approval_eligible' => 'boolean',
             'generated_at' => 'datetime',
         ];
     }
