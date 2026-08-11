@@ -1,7 +1,7 @@
 schema: ai6.ticket-manifest.v1
 source: docs/AI6_IMPLEMENTATION_PLAN.md
-plan_revision: "V1.6.21"
-blueprint_count: 44
+plan_revision: "V1.7.0"
+blueprint_count: 49
 blueprints:
   - id: "AI6-001"
     title: "Laravel-Grundgerüst und Qualitätsbaseline"
@@ -138,7 +138,7 @@ blueprints:
     risk: "medium"
     kind: "feature"
     depends_on: ["AI6-003", "AI6-004"]
-    requirement_refs: ["CFG-001", "AGT-001", "AGT-002", "AGT-008", "AGT-009", "RUN-006"]
+    requirement_refs: ["CFG-001", "AGT-001", "AGT-002", "AGT-008", "AGT-009", "REV-011", "RUN-006"]
   - id: "AI6-012"
     title: "Ticketprüfung, Approval-Snapshot und Multi-Reviewer-Auswahl"
     milestone: "M2"
@@ -146,7 +146,7 @@ blueprints:
     risk: "high"
     kind: "feature"
     depends_on: ["AI6-008", "AI6-009", "AI6-010", "AI6-011"]
-    requirement_refs: ["RUN-002", "RUN-006", "RUN-008", "REV-001", "UI-003", "AGT-002", "AGT-008", "AGT-009", "GIT-001", "GIT-007", "TKT-009"]
+    requirement_refs: ["RUN-002", "RUN-006", "RUN-008", "REV-001", "REV-011", "UI-003", "AGT-002", "AGT-008", "AGT-009", "GIT-001", "GIT-007", "TKT-009"]
   - id: "AI6-013"
     title: "Run-State-Machine, Persistenz und Projektsperre"
     milestone: "M2"
@@ -259,6 +259,30 @@ blueprints:
     kind: "feature"
     depends_on: ["AI6-018", "AI6-025"]
     requirement_refs: ["RUN-006", "REV-007", "HUM-005", "UI-005"]
+  - id: "AI6-039"
+    title: "Review-only-Runvertrag: Claim und report-only Abschluss-Saga"
+    milestone: "M4"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-013", "AI6-026"]
+    requirement_refs: ["RUN-010", "RUN-001", "RUN-002", "RUN-005", "GIT-008", "TKT-005"]
+  - id: "AI6-040"
+    title: "Review-only-Quellbindung, Ausführung, Bericht und Bedienung"
+    milestone: "M4"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-014", "AI6-021", "AI6-024", "AI6-039"]
+    requirement_refs: ["GIT-011", "RUN-010", "GIT-010", "REV-002", "REV-011", "AGT-005", "RUN-004", "SEC-011", "UI-004"]
+  - id: "AI6-043"
+    title: "Quellenabhängige advisory Finding-Verifikation"
+    milestone: "M4"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-011", "AI6-024", "AI6-026"]
+    requirement_refs: ["REV-010", "REV-003", "REV-006", "REV-011", "RUN-006", "AGT-002", "HUM-001"]
   - id: "AI6-027"
     title: "Finalchecks, Publish-Kandidat und deterministische Provenienz"
     milestone: "M5"
@@ -314,7 +338,7 @@ blueprints:
     risk: "high"
     kind: "feature"
     depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032"]
-    requirement_refs: ["AGT-001", "AGT-002", "AGT-003", "AGT-004", "AGT-007", "AGT-009", "GIT-010", "RUN-006", "SEC-005"]
+    requirement_refs: ["AGT-001", "AGT-002", "AGT-003", "AGT-004", "AGT-007", "AGT-009", "AGT-010", "GIT-010", "RUN-006", "SEC-005"]
   - id: "AI6-034"
     title: "Claude-CLI-Adapter"
     milestone: "M6"
@@ -329,8 +353,24 @@ blueprints:
     initial_status: "todo"
     risk: "high"
     kind: "feature"
-    depends_on: ["AI6-003", "AI6-005A", "AI6-033", "AI6-034"]
-    requirement_refs: ["AGT-002", "AGT-007", "OPS-003", "SEC-005"]
+    depends_on: ["AI6-003", "AI6-005A", "AI6-033", "AI6-041", "AI6-042"]
+    requirement_refs: ["AGT-002", "AGT-007", "AGT-010", "OPS-003", "SEC-005"]
+  - id: "AI6-041"
+    title: "Grok-CLI-Adapter"
+    milestone: "M6"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032"]
+    requirement_refs: ["AGT-001", "AGT-002", "AGT-003", "AGT-004", "AGT-007", "AGT-009", "AGT-010", "GIT-010", "RUN-006", "SEC-005"]
+  - id: "AI6-042"
+    title: "GitHub-Copilot-CLI-Adapter"
+    milestone: "M6"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032"]
+    requirement_refs: ["AGT-001", "AGT-002", "AGT-003", "AGT-004", "AGT-007", "AGT-009", "AGT-010", "GIT-010", "RUN-006", "SEC-005"]
   - id: "AI6-036"
     title: "Installation, Backup/Restore und Security-Release-Gate"
     milestone: "M7"
@@ -354,4 +394,4 @@ blueprints:
     risk: "high"
     kind: "spike"
     depends_on: ["AI6-032", "AI6-035", "AI6-036", "AI6-037"]
-    requirement_refs: ["PROD-001", "AGT-001", "REV-001", "HUM-002", "RUN-009", "OPS-005"]
+    requirement_refs: ["PROD-001", "AGT-001", "RUN-010", "REV-001", "HUM-002", "RUN-009", "OPS-005"]

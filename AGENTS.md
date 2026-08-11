@@ -15,35 +15,33 @@ AI6/
 ├── CLAUDE.md                        imports AGENTS.md only
 ├── README.md                        runtime, security and operations documentation, bound by tests
 ├── composer.json / composer.lock    Laravel 13 dependency baseline on PHP 8.5
-├── artisan, app/, bootstrap/ ...    integrated AI6-001 … AI6-006B plus the AI6-006C implementation
-├── Dockerfile, docker-compose.yml    single image, process roles, worker volume, proxy net (AI6-002…AI6-006C)
+├── artisan, app/, bootstrap/ ...    integrated AI6-001 … AI6-006F
+├── Dockerfile, docker-compose.yml    single image, process roles, worker volume, proxy net (AI6-002…AI6-006F)
 ├── docker/, deploy/                  role dispatcher with init provisioning; Caddy reverse-proxy profile
 ├── tests/                            PHPUnit suite; part of it requires the Linux runtime and skips elsewhere
 ├── docs/
-│   ├── AI6_IMPLEMENTATION_PLAN.md   normative source, revision V1.6.21, German
+│   ├── AI6_IMPLEMENTATION_PLAN.md   normative source, revision V1.7.0, German
 │   ├── AI6_TICKET_TEMPLATE_V1.md    ticket generation and implementation contract, German
-│   └── AI6-004_VERIFICATION.md, AI6-005B_MG-01_…, AI6-006C_MG-01/02_…   human gate protocols; AI6-006C forms are result-free
+│   ├── AI6_erweiterungsauftrag_modellrouting_multi_review_pipeline_v2.md   extension mandate integrated by plan revision V1.7.0, German
+│   └── AI6-004_VERIFICATION.md, AI6-005B_MG-01_…, AI6-006C_MG-01/02_…   human gate protocols; the AI6-006C forms are result-free, the AI6-005B form is an unsigned filled draft
 └── tickets/
     ├── README.md                    backlog overview; a view, never a status source
-    ├── AI6-001.md … AI6-006B.md     status done — integrated and human-accepted
-    ├── AI6-006C.md                  status ready — implementation on main, review/gates still open
-    └── AI6-006D.md … AI6-006F.md    status todo — derived ahead of their dependencies (§8.1)
+    └── AI6-001.md … AI6-006F.md     status done — integrated and human-accepted
 ```
 
-`AI6-001` through `AI6-006B` are integrated and human-accepted (`264cf2f`, `29d67fa`, `93d3f44`, `f7d8919`, `ea3476a`, `2877bc1`, `d6e329f`, `e7a9059` plus their acceptance commits); their tickets carry `status: done`.
+`AI6-001` through `AI6-006F` are integrated and human-accepted (`264cf2f`, `29d67fa`, `93d3f44`, `f7d8919`, `ea3476a`, `2877bc1`, `d6e329f`, `e7a9059`, `1f0e6b7` through `0f20819` with the acceptance commit `1631a9a`, then `a200be1`, `16aa69a`, `61db7e6`); all twelve ticket files carry `status: done`. The complete M1 chain therefore exists in code: control-operation core, operation lease, effect lock, deploy-key provisioning, managed clone, clone/fetch, control-branch change, invalidation generation, blob-bound read models and single-path refresh.
 
-`AI6-006C` — the control-operation core, project operation lease, effect-lock consumption and deploy-key provisioning — is implemented on `main` (commits `1f0e6b7` through `feb8185`) after an explicitly human-approved `ahead-derived` rebase against `e7a9059`. Its ticket has `status: ready`: review findings, the Linux verification lane and the manual gates `AI6-006C/MG-01`, `AI6-006C/MG-02` and `AI6-005B/MG-01` are still open. The two AI6-006C gate protocols are result-free templates and carry no human decision. Implementation on `main` does not authorize an agent to change that status.
+The gate-protocol documents in `docs/` kept their documentary state: both `AI6-006C/MG-01` and `AI6-006C/MG-02` forms remain result-free templates, and the `AI6-005B/MG-01` decision protocol is a filled draft without final signature. The `done` statuses are explicit human decisions recorded in Git. Neither state authorizes an agent to do anything with them: never change a status, and never present one of these protocol documents as passed gate evidence (§10).
 
-What does **not** exist yet: managed-project clone/fetch and everything after `AI6-006C` (`AI6-006D` onward), and `.ai6/`.
+What does **not** exist yet: everything from `AI6-007` onward — ticket parser, run/review workflow, provider adapters — and `.ai6/`.
 
-Of the 44 planned tickets twelve exist as files. The other 32 are blueprints in plan §15 — `tickets/AI6-007.md` and everything after it cannot be opened. Plan revisions V1.6.2, V1.6.5, V1.6.7 and V1.6.10 progressively split the former `AI6-005` and `AI6-006`, so M0 ends with `AI6-005A`/`AI6-005B` and the M1 chain is now `AI6-006A` … `AI6-006F`. The IDs `AI6-005` and `AI6-006` no longer exist.
+Of the 49 planned tickets twelve exist as files. The other 37 are blueprints in plan §15 — `tickets/AI6-007.md` and everything after it cannot be opened. Plan revisions V1.6.2, V1.6.5, V1.6.7 and V1.6.10 progressively split the former `AI6-005` and `AI6-006`, so M0 ends with `AI6-005A`/`AI6-005B` and the M1 chain is `AI6-006A` … `AI6-006F`; the IDs `AI6-005` and `AI6-006` no longer exist. Plan revision V1.7.0 integrated `docs/AI6_erweiterungsauftrag_modellrouting_multi_review_pipeline_v2.md` — review-only mode, source-dependent advisory finding verification, review prompt profiles and the first real provider tier Codex/Grok/Copilot — and appended the blueprints `AI6-039` … `AI6-043`; `AI6-034` stays the unchanged Claude blueprint and no longer blocks `AI6-035`.
 
 Consequences for you:
 
 - The Laravel/PHP toolchain commands in §4 are available and must be run when relevant. The external locked-install suite additionally requires the explicit PHP 8.5 and Composer paths documented in `README.md`. A substantial part of the Git/process test suite proves POSIX lock and `exec` semantics and self-skips outside the Linux runtime; a green Windows run is not the full evidence.
-- Verify every path with `rg --files` or `ls` before naming it. Module contracts up to `AI6-006C` exist in code; later module contracts still do not.
-- `AI6-006C` remains a ticket task until its review, gates and integration acceptance are complete; do not infer completion or change its status from the presence of the implementation.
-- `AI6-006D` through `AI6-006F` were derived ahead of dependencies. Their `— existing` markers describe the state their dependencies must produce, not evidence that every named seam exists today. The rebase obligation in §8.1 remains binding for them.
+- Verify every path with `rg --files` or `ls` before naming it. Module contracts up to `AI6-006F` exist in code; later module contracts still do not.
+- The next detail derivation starts at blueprint `AI6-007` (plan §13.3). Deriving any ticket ahead of its dependencies remains a human-ordered exception under §8.1; no currently existing ticket file is in that state.
 
 When this section goes stale, it must be updated — but only when explicitly asked (§10).
 
@@ -53,7 +51,7 @@ When this section goes stale, it must be updated — but only when explicitly as
 
 | File | Role |
 |---|---|
-| `docs/AI6_IMPLEMENTATION_PLAN.md` | Normative source for architecture, requirements, milestones and the 44 ticket blueprints. Requirement IDs such as `TKT-002`, `SEC-005`, `RUN-003` are stable and get referenced, never copied. |
+| `docs/AI6_IMPLEMENTATION_PLAN.md` | Normative source for architecture, requirements, milestones and the 49 ticket blueprints. Requirement IDs such as `TKT-002`, `SEC-005`, `RUN-003` are stable and get referenced, never copied. |
 | `docs/AI6_TICKET_TEMPLATE_V1.md` | Output contract for the ticket-generating LLM, implementation contract for the implementing LLM. |
 | `tickets/<ID>.md` | Individual detail tickets. Git is authoritative for ticket content and status (`TKT-001`). |
 | `tickets/README.md` | Backlog overview: which tickets exist, which are still blueprints, and in what order they unlock. Not a ticket and not a status source (`TKT-010`, `TKT-005`). |
@@ -78,7 +76,7 @@ Entry points in the plan: §3 requirements · §4 architecture · §5 ticket for
 
 ### 3.1 The ticket language boundary
 
-Tickets are deliberately bilingual: **English structure, German prose.** The current plan revision V1.6.21 §5.1 and template §7.5 define the split; it was introduced in revision V1.5.1. Drifting in either direction is an error — an English-thinking model tends to translate the prose, a German-thinking model tends to translate the structure.
+Tickets are deliberately bilingual: **English structure, German prose.** The current plan revision V1.7.0 §5.1 and template §7.5 define the split; it was introduced in revision V1.5.1. Drifting in either direction is an error — an English-thinking model tends to translate the prose, a German-thinking model tends to translate the structure.
 
 **English — everything the validator matches literally:**
 

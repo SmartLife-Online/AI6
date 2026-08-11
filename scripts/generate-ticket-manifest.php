@@ -129,8 +129,8 @@ function generateManifest(string $planPath): string
         ];
     }
 
-    if (count($blueprints) !== 44) {
-        throw new RuntimeException('Expected 44 ticket blueprints, found '.count($blueprints).'.');
+    if (count($blueprints) !== 49) {
+        throw new RuntimeException('Expected 49 ticket blueprints, found '.count($blueprints).'.');
     }
 
     $output = [

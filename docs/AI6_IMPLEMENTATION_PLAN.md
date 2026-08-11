@@ -1,6 +1,8 @@
-# AI6 – Implementierungsplan V1.6.21 – Ticket-Ready, Lean & Secure
+# AI6 – Implementierungsplan V1.7.0 – Ticket-Ready, Lean & Secure
 
-**Stand:** 31. Juli 2026
+**Stand:** 11. August 2026
+
+**Revision V1.7.0:** Der Erweiterungsauftrag `docs/AI6_erweiterungsauftrag_modellrouting_multi_review_pipeline_v2.md` wird als zusammenhängende Vertragsrevision integriert; der Backlog wächst von 44 auf 49 Blueprints. Erstens entsteht der ticket- und approvalgebundene **Review-only-Modus**: Das neue `RUN-010` schließt die bisher offene Vertragslücke eines report-only Laufs ohne Push — Claim über denselben atomaren `ready → in_progress`-CAS, Abschluss über eine eigene absturzsichere Status-Saga mit der neuen, ausschließlich dieser Saga gehörenden Kante `in_progress → ready`, neuer Wartestatus `manual_report`, Lockfreigabe erst nach bestätigtem eigenem Status-CAS; weder `no_change_required` noch ein pushloser `in_progress → review`-Übergang werden dafür wiederverwendet. Das neue `GIT-011` erlaubt als Reviewgegenstand ausschließlich serverseitig gebundene Quellen (verwalteter Branch, Commit-Range beziehungsweise Einzelcommit, importierter validierter Patch, vorhandener Checkpoint), die der Worker in einen wegwerfbaren gitmetadatenfreien Review-Checkpoint normalisiert; freie Arbeitsverzeichnisse, freie Dateiauswahl und PR-URLs bleiben außerhalb. Die neuen Blueprints `AI6-039` (Runvertrag und Abschluss-Saga) und `AI6-040` (Quellbindung, Ausführung, gebundener Abschlussbericht und Bedienung) liefern das in M4, ohne den Modus in `AI6-023` zu verstecken. Zweitens wird die **erste reale Providerstufe** auf Codex-CLI, Grok-Build-CLI und GitHub-Copilot-CLI festgelegt: Das neue `AGT-010` verlangt je Adapter genau einen gepinnten, vom Capability-Doctor für die konkrete CLI-Version nachgewiesenen Headless-Transport ohne TUI-, ACP- oder SDK-/Servermodus, die Validierung jeder extrahierten Providerantwort gegen die zentralen `ai6.agent.v1`-/`ai6.quality-review.v1`-Verträge sowie Nutzungs-/Kostenwerte nur aus belastbarer Quelle mit explizitem `unknown`. Die neuen Blueprints `AI6-041` (Grok als Review-/Verifier-Adapter) und `AI6-042` (Copilot als unabhängiger Reviewer) ergänzen `AI6-033`; der Wortlaut von `AGT-001` nennt die neu freigegebenen Provider, ohne den Adaptervertrag zu ändern. `AI6-034` bleibt unverändert der Claude-Blueprint und wird nicht umgewidmet; `AI6-035` wird auf die drei V1-Profile erweitert, und seine bisherige Abhängigkeit von `AI6-034` wird durch `AI6-041`/`AI6-042` ersetzt, damit Claude die erste Providerstufe nicht blockiert. `AI6-038` pilotiert mit Codex-Implementierung und Grok-/Copilot-Reviews, beginnt mit einem Review-only-Lauf mit manuell bestätigtem report-only Abschluss und verwendet Claude nur optional. Drittens definiert das neue `REV-010` die **quellenabhängige advisory Finding-Verifikation** (`AI6-043`): Ein Verifierresultat ist ein weiteres unveränderliches, quell- und checkpointgebundenes Reviewresultat, hebt kein blockierendes Originalfinding auf, wird nie vom Quellprofil des Findings oder vom Implementierungsslot desselben Stands geliefert und eskaliert Widerspruch sichtbar an HumanLoop; `not_applicable` und `accepted_risk` bleiben nach `REV-006` menschlich autorisiert. Viertens verankert das neue `REV-011` **versionierte Review-Promptprofile und stufengerechte hashgebundene Kontextpakete** im bestehenden Promptkatalog: Approval bindet je Reviewer-Slot Promptprofil, Providerprofil und Auswahlgründe, Pfad-/Risikoregeln wählen nur serverseitig bekannte Profile, und jeder erforderliche Reviewlauf liefert unabhängig vom Profilfokus die vollständige `criterion_coverage`; `AI6-011` und `AI6-012` werden entsprechend ergänzt. `RUN-006` zählt zusätzlich Verifikationsrunden, `GIT-007` erlaubt serverseitigen Risikoregeln nur die Verengung von `automatic_after_gates` auf `manual`, und die Pushmodi bleiben exakt die zwei bestehenden Werte. Ein optionaler finaler Review ist als zusätzlicher regulärer Reviewer-Slot auf dem finalen Checkpoint beschrieben (§8.9) und bleibt bis nach dem Pilot deaktiviert; semantische LLM-Deduplizierung, PR-URL-Eingaben, parallele Providerprozesse, ein frei editierbarer Pipeline-DAG und automatische Routing-Selbstoptimierung sind ausdrücklich keine MVP-Ziele. §13.7 wird auf den realen Stand korrigiert: Plan, Template und die ersten zwölf Ticketdateien sind seit Commit `1aeb20e` veröffentlicht; alle Blueprint-IDs und veröffentlichten `AC-`/`TC-`/`MG-`/`EXT-`-IDs sind damit unveränderlich. Die dokumentierten Anpassungen der veröffentlichten Blueprints `AI6-011`, `AI6-012`, `AI6-033`, `AI6-035` und `AI6-038` sowie die reinen Provider-Namensklarstellungen in ADR-007 und den Ausschlusslisten von `AI6-011` und `AI6-015` sind ausdrücklich genehmigte Erweiterungen ohne Umwidmung; ihre IDs und bestehenden Verträge bleiben erhalten. ADR-016 bis ADR-018 halten die zugrunde liegenden Entscheidungen fest.
 
 **Revision V1.6.21:** Die Laufzeitbaseline wird vor der Integration von `AI6-001` einmalig auf PHP 8.5, Laravel 13 und SQLite 3.53 korrigiert; die Blueprintanzahl bleibt bei 44. `OPS-007` und `AI6-001` verwenden nun `php: ^8.5`, Composer-`config.platform.php: 8.5.0` und den realen Locked-Install-Nachweis unter PHP 8.5. Laravel bleibt auf der Major-Linie 13; die konkrete Paketauflösung bleibt im committed `composer.lock` sichtbar. `AI6-002` baut auf PHP 8.5 und muss zur Laufzeit SQLite `3.53.x` nachweisen sowie die konkrete Image- und Paketauflösung reproduzierbar binden. Das neue `OPS-008` und §13.8 verbieten schwebende „latest“-Auflösungen und beiläufige Versionswechsel: Jede spätere Änderung der gebundenen PHP-, Laravel- oder SQLite-Version beziehungsweise ihrer konkreten Patchauflösung benötigt ein eigenes Upgrade-Ticket mit Kompatibilitäts-, Installations-, Migrations- und Rollbacknachweis. Die bereits veröffentlichten Detailtickets `AI6-001` und `AI6-002` werden als ausdrücklich genehmigte einmalige Baselinekorrektur auf diese Revision nachgezogen; ihre IDs sowie AC-, TC- und Gate-IDs bleiben unverändert. Das ahead-derived Rebase-Gate von `AI6-002` nach §13.6 bleibt davon unberührt und weiterhin offen.
 
@@ -60,7 +62,7 @@
 
 **Ticketquelle:** Markdown-Dateien im Git-Repository des jeweils verwalteten Projekts
 
-**Backlog:** 44 Ticket-Blueprints in acht Meilensteinen; der ab AI6-001 deterministisch erzeugte maschinenlesbare Export liegt in `docs/AI6_TICKET_MANIFEST.yaml`
+**Backlog:** 49 Ticket-Blueprints in acht Meilensteinen; der ab AI6-001 deterministisch erzeugte maschinenlesbare Export liegt in `docs/AI6_TICKET_MANIFEST.yaml`
 
 ---
 
@@ -131,7 +133,7 @@ V1.5 ändert deshalb:
 
 ### 1.1 Ziel
 
-AI6 verwaltet Git-native Softwaretickets, lässt sie menschlich prüfen und orchestriert anschließend getrennte LLM-Sitzungen für Implementierung und einen oder mehrere Reviews. Findings werden in einer begrenzten Fix-/Re-Review-Schleife bearbeitet. Fragen und Freigaben pausieren den Run, erzeugen eine E-Mail und werden im mobilen Admin-Panel beantwortet. Nach grünen Checks kann optional ein getrenntes LLM den exakten Publish-Kandidaten auf schädliche oder nicht autorisierte Änderungen prüfen. Danach erstellt AI6 den finalen Commit und pusht gemäß konfigurierter Policy.
+AI6 verwaltet Git-native Softwaretickets, lässt sie menschlich prüfen und orchestriert anschließend getrennte LLM-Sitzungen für Implementierung und einen oder mehrere Reviews. Findings werden in einer begrenzten Fix-/Re-Review-Schleife bearbeitet. Fragen und Freigaben pausieren den Run, erzeugen eine E-Mail und werden im mobilen Admin-Panel beantwortet. Nach grünen Checks kann optional ein getrenntes LLM den exakten Publish-Kandidaten auf schädliche oder nicht autorisierte Änderungen prüfen. Danach erstellt AI6 den finalen Commit und pusht gemäß konfigurierter Policy. Derselbe Review-Unterbau ist zusätzlich als eigenständiger, ticket- und approvalgebundener Review-only-Modus nutzbar: Ein serverseitig gebundener Stand — etwa ein extern oder lokal entwickelter verwalteter Branch — wird ohne Codeänderung und ohne Push mehrstufig geprüft und endet in einem gebundenen Abschlussbericht (`RUN-010`, `GIT-011`).
 
 ### 1.2 Hauptnutzer
 
@@ -147,7 +149,12 @@ AI6 verwaltet Git-native Softwaretickets, lässt sie menschlich prüfen und orch
 - öffentlicher Multi-Tenant-SaaS-Betrieb;
 - frei definierbare Shellbefehle aus Tickets oder Projektkonfiguration;
 - automatische Pull-Request-Erstellung oder automatisches Merge;
-- direkte OpenAI-/Anthropic-API-Adapter;
+- direkte OpenAI-/xAI-/Anthropic-API-Adapter; die erste Providerstufe läuft ausschließlich über die jeweiligen CLIs;
+- Review-Aufträge außerhalb der Ticket-/Approvalbindung: freie Arbeitsverzeichnisse, freie Dateiauswahl oder PR-URLs als Reviewgegenstand;
+- interaktive Provider-TUIs, ACP-Langzeitprozesse oder SDK-/Servermodi als Adaptertransport;
+- parallele Providerprozesse innerhalb eines Runs sowie ein frei editierbarer Pipeline-DAG-Designer;
+- semantische LLM-Deduplizierung von Findings;
+- automatische Selbstoptimierung von Modell-Routing oder Prompts;
 - Antworten oder Freigaben per Reply-to-Mail;
 - Beweis, dass ein LLM-Sicherheitsreview vollständige Schadcodefreiheit garantiert.
 
@@ -163,7 +170,7 @@ AI6 verwaltet Git-native Softwaretickets, lässt sie menschlich prüfen und orch
 | ADR-004 | Git-native Tickets | Mehrere Entwickler und Geräte teilen Anforderungen über das Projekt-Repository. |
 | ADR-005 | Datenbank nur für Laufzeit | Kein zweiter autoritativer Ticketbestand. |
 | ADR-006 | Ein aktiver Run je Projekt | Verhindert im MVP komplexe Scope-/Worktree-Konflikte ohne verteilte Locks. |
-| ADR-007 | CLI-first-Agentenadapter | Codex und Claude werden über einen gemeinsamen Adaptervertrag eingebunden. |
+| ADR-007 | CLI-first-Agentenadapter | Alle Provider — Codex, Grok, Copilot und später Claude — werden über einen gemeinsamen Adaptervertrag eingebunden. |
 | ADR-008 | Neue Sitzungen je Ticket und Rolle | Kein unkontrollierter Kontextübertrag zwischen Tickets. |
 | ADR-009 | Alle Reviewer prüfen jeden neuen Checkpoint | Einfach, nachvollziehbar und ohne Primary-/Mehrheitslogik. |
 | ADR-010 | Adaptive, policygebundene Scope-Erweiterung | Reale Repositoryarchitektur darf den Ausgangsscope kontrolliert ergänzen. |
@@ -172,6 +179,9 @@ AI6 verwaltet Git-native Softwaretickets, lässt sie menschlich prüfen und orch
 | ADR-013 | Optionales LLM-Security-Gate vor finalem Commit | Zusätzliche Defense in Depth auf exakt gebundenem Candidate. |
 | ADR-014 | Pushmodus manual oder automatic_after_gates | Unterstützt sicheren Standard und den gewünschten vollautomatischen Ablauf. |
 | ADR-015 | Progressive Ticket-Elaboration | Spätere Tickets nutzen echten Code statt spekulativer Pfade und APIs. |
+| ADR-016 | Review-only als ticket- und approvalgebundener Runmodus | Derselbe Check-/Review-/Finding-/Gate-Unterbau prüft serverseitig gebundene Stände ohne Push; freie Reviewaufträge bleiben außerhalb der Run-Grenze. |
+| ADR-017 | Erste reale Providerstufe: Codex-, Grok-Build- und GitHub-Copilot-CLI | Drei Headless-CLI-Adapter mit je genau einem gepinnten, doctor-geprüften Transport; Claude bleibt spätere Erweiterung ohne V1-Blockade. |
+| ADR-018 | Quellenabhängige advisory Finding-Verifikation | Unabhängige Evidenzprüfung ohne Auto-Unblock; wirksame Dispositionen bleiben menschlich autorisiert und checkpointgebunden. |
 
 ---
 
@@ -203,10 +213,11 @@ Die IDs sind stabil. Detaillierte Tickets referenzieren diese IDs unter `spec_re
 - **GIT-004** – Qualitätsreviewer prüfen unveränderliche Checkpoints in getrennten read-only beziehungsweise wegwerfbaren Workspaces.
 - **GIT-005** – Der Publish-Kandidat wird vor dem finalen Commit über Tree-OID und Diff-Hash gebunden.
 - **GIT-006** – Vor Push werden Remote-Basis, erwartete OID, Branch-Allowlist und Provenienz erneut geprüft.
-- **GIT-007** – Push ist konfigurierbar manuell oder automatisch nach allen Gates; automatisches Merge ist kein MVP-Ziel.
+- **GIT-007** – Push ist konfigurierbar manuell oder automatisch nach allen Gates; automatisches Merge ist kein MVP-Ziel. Die Modi bleiben exakt `manual` und `automatic_after_gates`; serverseitige Risikoregeln dürfen ein freigegebenes `automatic_after_gates` für einen Approval-Snapshot nur auf `manual` verengen und niemals erweitern, und Projekt- oder Providerinhalt kann die Auswahl nicht ausdehnen.
 - **GIT-008** – Grobe Ticketstatus-Übergänge werden per Compare-and-Swap auf dem jeweils frisch verifizierten Control-Head veröffentlicht. Der bei Approval gespeicherte Control-Commit bleibt Provenienz und ist nicht dauerhaft die erwartete Branchspitze; ein Run bleibt bis zur erfolgreichen Statussynchronisation gesperrt.
 - **GIT-009** – Browser und App lesen oder mutieren Git ausschließlich über typisierte asynchrone Control Operations. Der Worker bindet jedes Ergebnis an Control-Commit und Blob-SHA und veröffentlicht ein redigiertes, nicht autoritatives Read Model mit getrenntem Parse-/Validierungs- und Redactionstatus; Staleness, Fehler und CAS-Konflikte bleiben sichtbar. Der Contract-Hash existiert nur für gültige Dokumente. Sichere Presentation-Sanitization verändert den Vertragsinhalt nicht, während jede inhaltliche Redaction Approval und Editor fail closed blockiert.
 - **GIT-010** – Agent, Checker und Reviewer erhalten ausschließlich eine exportierte oder overlay-isolierte Tree-Sicht ohne erreichbare `.git`-, Common-Dir-, Alternates-, Ref-, Index- oder Hook-Metadaten des Managed-Clones. Ein optionaler Git-Lesekontext ist separat, bereinigt und technisch read-only; ausschließlich der Worker berechnet und importiert einen anschließend vollständig validierten Patch.
+- **GIT-011** – Ein Review-only-Lauf prüft ausschließlich serverseitig gebundene Reviewgegenstände: einen verwalteten Branch gegen den im Approval gebundenen verifizierten Control-Stand, eine gebundene Commit-Range oder einen Einzelcommit im Managed-Clone mit nachgewiesener Basis, einen durch den Worker importierten und vollständig pfad-, typ-, scope- und diffvalidierten Patch oder einen vorhandenen AI6-Checkpoint samt Bindung. Der Worker normalisiert die Quelle in einen wegwerfbaren, gitmetadatenfreien Review-Checkpoint mit Tree-OID- und Diff-Hash-Bindung. Freie Arbeitsverzeichnisse, frei ausgewählte Dateien und PR-URLs sind keine zulässigen Eingaben; ein Pull Request kann später ausschließlich über seine gebundene Commit-Range abgebildet werden.
 
 ### 3.4 Konfiguration
 - **CFG-001** – Instanzweite Security-, Modell-, Effort- und Prozessprofile liegen ausschließlich in vertrauenswürdiger Serverkonfiguration.
@@ -214,7 +225,7 @@ Die IDs sind stabil. Detaillierte Tickets referenzieren diese IDs unter `spec_re
 - **CFG-003** – Projektkonfiguration referenziert nur serverseitig bekannte Check- und Modellprofile und kann keine Shellstrings definieren.
 
 ### 3.5 Agenten und Ausführung
-- **AGT-001** – Codex CLI, Claude CLI und FakeAgent verwenden denselben AgentAdapter-Vertrag.
+- **AGT-001** – Codex CLI, Grok-Build-CLI, GitHub-Copilot-CLI, Claude CLI und FakeAgent verwenden denselben AgentAdapter-Vertrag.
 - **AGT-002** – Modell und Aufwand werden pro Implementierungs- und Reviewer-Slot aus einer Allowlist gewählt.
 - **AGT-003** – Jedes Ticket startet neue Implementierungs- und Review-Sitzungen; innerhalb eines Runs wird die jeweilige Sitzung fortgesetzt, wenn unterstützt.
 - **AGT-004** – Agentenergebnisse sind versioniertes strukturiertes JSON und werden vor jeder Wirkung schema-validiert.
@@ -223,6 +234,7 @@ Die IDs sind stabil. Detaillierte Tickets referenzieren diese IDs unter `spec_re
 - **AGT-007** – Agent- und Checkprozesse sind von Git-Push-, SMTP-, Websession- und jeweils fremden Provider-Credentials getrennt. Persistente Providercredentials liegen pro Profil in einem dedizierten Store außerhalb des Execution-Home; jeder Agentenprozess erhält ausschließlich eine kurzlebige minimale read-only Authprojektion für genau sein Profil.
 - **AGT-008** – Der zentrale versionierte Promptkatalog und sein kanonischer Prompt-Snapshot-/Hashvertrag existieren vor Approval. Runs, Agenten und Reviews verwenden ausschließlich den freigegebenen Prompt-Snapshot.
 - **AGT-009** – Provider-native Instruktionsauflösung und Runtime-Erweiterungen bilden einen freigegebenen, versionierten Vertrag: relevante Repository-Instruktionspfade, Blob-SHAs, Reihenfolge, Geltungsbereiche, der effektive Hash und das versiegelte Provider-Runtime-Profil werden vor Approval ermittelt. Isolierte Providerprozesse sehen bei nativer Autodiscovery ausschließlich diese read-only Snapshotversionen und keine Host-/Parent-Instruktionen. Workspace-/Home-Konfiguration, MCP-Server, Plugins, Skills, Hooks, Commands und sonstige Autoload-Erweiterungen sind aus, sofern sie nicht aus einem vertrauenswürdigen serverseitigen Allowlistprofil stammen und dessen Hash mitfreigegeben ist; Projektinhalt kann sie nie aktivieren. Änderungen invalidieren die Bindung. Während eines aktiven Runs sind Instruction- und Runtime-Profil-Amendments verboten; Fortsetzung verlangt kontrollierte Rücksetzung auf `todo`, eine neue Approval, einen neuen Run und neue Agentensitzungen.
+- **AGT-010** – Jeder reale Provideradapter der ersten Providerstufe — `codex_cli`, `grok_cli`, `github_copilot_cli` — läuft nicht-interaktiv über genau einen gepinnten, vom Capability-Doctor für die konkrete CLI-Version nachgewiesenen Headless-Transport; TUI-Sitzungen, ACP-Langzeitprozesse und SDK-/Servermodi sind kein V1-Transport. Der Adapter extrahiert die finale Providerantwort aus dem providereigenen Event- beziehungsweise Textformat und validiert sie gegen die zentralen `ai6.agent.v1`-/`ai6.quality-review.v1`-Verträge; ein fremdes Providerschema wird nie zweiter Fachvertrag, und ein ungültiges Ergebnis ist ein sichtbarer Fehler, niemals ein impliziter Erfolg. Vollzugriffs- und Auto-Approve-Optionen sind kein V1-Default und stammen nie aus Projektinput; nicht nachweisbar abschaltbare Autodiscovery-, Sandbox- oder Toolgrenzen beenden den Start fail closed. Belastbar von der CLI gemeldete Token-, Kosten- und Nutzungswerte werden je Providerturn samt Quelle gespeichert; fehlende Werte bleiben explizit `unknown` und werden nie aus Textlänge oder Laufzeit geschätzt.
 
 ### 3.6 Run-Orchestrierung
 - **RUN-001** – Ein persistenter Run besitzt zentrale state-, phase- und wait_reason-Werte sowie idempotente Übergänge.
@@ -230,10 +242,11 @@ Die IDs sind stabil. Detaillierte Tickets referenzieren diese IDs unter `spec_re
 - **RUN-003** – Implementierung, Scopeprüfung, Checks, Checkpoint, Review, Fix, Finalisierung und Push bilden einen wiederaufnehmbaren Workflow.
 - **RUN-004** – Browserrequests führen niemals direkt Agenten, Git oder Projektchecks aus.
 - **RUN-005** – Workerneustart, Jobwiederholung und Browserwechsel dürfen keine doppelten Seiteneffekte erzeugen.
-- **RUN-006** – Freigegebene Limits für Laufzeit, Agentenaufrufe, Reviewrunden, Fixrunden, zusätzlich freigegebene Scope-Pfade, geänderte Dateien, Changed Bytes, Instruktionsdateien/-einzelbytes/-gesamtbytes/-Importtiefe, finalen Promptinput, Artefaktanzahl, Einzelartefaktgröße, Gesamtartefaktgröße und Provideroutput werden unter unveränderlichen Servermaxima gezählt. Instruktionsimporte erkennen Zyklen und Duplikate kanonisch. Eine Überschreitung stoppt vor Approval beziehungsweise Provideraufruf und vor partieller Wirkung, erzeugt in einem bestehenden Run den gebundenen Wartestatus und bei Bedarf höchstens einen gleichzeitig offenen Human Request.
+- **RUN-006** – Freigegebene Limits für Laufzeit, Agentenaufrufe, Reviewrunden, Verifikationsrunden, Fixrunden, zusätzlich freigegebene Scope-Pfade, geänderte Dateien, Changed Bytes, Instruktionsdateien/-einzelbytes/-gesamtbytes/-Importtiefe, finalen Promptinput, Artefaktanzahl, Einzelartefaktgröße, Gesamtartefaktgröße und Provideroutput werden unter unveränderlichen Servermaxima gezählt. Instruktionsimporte erkennen Zyklen und Duplikate kanonisch. Eine Überschreitung stoppt vor Approval beziehungsweise Provideraufruf und vor partieller Wirkung, erzeugt in einem bestehenden Run den gebundenen Wartestatus und bei Bedarf höchstens einen gleichzeitig offenen Human Request.
 - **RUN-007** – Externe Änderungen an Ticketvertrag, Control-Branch oder Runbasis werden an sicheren Übergängen erkannt und pausieren den Run. Ein freigegebenes Contract Amendment wird per Control-Branch-CAS mit Status `in_progress`, neuem `run_base_sha`, isoliertem Ticketpatch, nachgewiesen unverändertem Codebaum und vollständiger Invalidierung abhängiger Evidenz fortgeführt; unerwarteter Drift führt ohne stilles Rebase zu `git_base_changed`.
 - **RUN-008** – Gültig freigegebene `ready`-Tickets dürfen auch mit unerfüllten Abhängigkeiten in der Approval-Queue liegen. Vor jedem atomaren Claim wird Eligibility nach allen relevanten Git-, Snapshot-, Policy-, Capability-, Dependency-, Runabschluss- und Queueereignissen neu bewertet; erst danach entsteht ein `runs.state=queued` mit neuen Sessions.
 - **RUN-009** – Deklarierte `MG-`-/`EXT-`-Gates sind standardmäßig blockierend. Ein offenes Gate verhindert Candidate, finalen Commit und Push; nur gebundene autorisierte Evidenz schließt es, und Änderungen an Vertrag oder relevantem Checkpoint invalidieren die Evidenz.
+- **RUN-010** – Ein Review-only-Lauf ist ticket- und approvalgebunden, wird über denselben atomaren `ready → in_progress`-Claim beansprucht, verändert weder Code noch verwaltete Refs und endet ohne Push über eine eigene absturzsichere report-only Abschluss-Saga: Nach vollständigen Ergebnissen aller erforderlichen Reviewer- und gegebenenfalls Verifierslots, vollständiger AC-Abdeckung und aufgelösten Human-/Limit-Warteständen wird der Abschluss gemäß gebundenem Abschlussmodus bestätigt (`manual` erzeugt `wait_reason=manual_report`), der Ticketstatus per Compare-and-Swap `in_progress → ready` synchronisiert und erst nach bestätigtem eigenem Status-CAS `runs.state=completed` terminal gesetzt sowie die Projektsperre freigegeben. Wirksam blockierende Findings verhindern den gebundenen Abschlussbericht nicht, sondern bleiben in ihm sichtbar. Weder `no_change_required` noch ein pushloser `in_progress → review`-Übergang noch direktes Setzen von `runs.state` ersetzen diese Saga; Cancel, Crash-Recovery und Wiederanlauf folgen dem gemeinsamen Status-Saga-Vertrag. Ein Fix aus Review-only-Ergebnissen startet nie still im selben Lauf, sondern erfordert einen neuen, eigenständig menschlich freigegebenen Implementierungs-/Fixlauf mit frischer Snapshot-/Scopebindung; die Findings des Review-only-Laufs sind dabei referenzierte Evidenz, keine Mutationsautorität.
 
 ### 3.7 Reviews
 - **REV-001** – Ein Ticket kann mehrere Qualitätsreviewer mit jeweils eigenem Modell und Aufwand besitzen.
@@ -245,6 +258,8 @@ Die IDs sind stabil. Detaillierte Tickets referenzieren diese IDs unter `spec_re
 - **REV-007** – Wiederholte Findings ohne relevanten Diff-Fortschritt und überschrittene Limits führen in einen menschlich lösbaren Wartestatus.
 - **REV-008** – Optional prüft ein separater LLM-Sicherheitsreview den exakten Publish-Kandidaten vor finalem Commit und Push.
 - **REV-009** – Reviewer können wiederverwendbare Instruktionsupdates strukturiert empfehlen, ändern AGENTS.md oder vergleichbare Dateien aber nicht selbst.
+- **REV-010** – Ein Verifierergebnis ist ein eigenes unveränderliches, quell- und checkpointgebundenes advisory Reviewresultat zu genau einem Originalfinding beziehungsweise einer exakten Duplikatgruppe mit allen unabhängigen Quellen. Der Verifierslot wird quellenabhängig aus serverseitig erlaubten Profilen gewählt: Kein Slot verifiziert ein Finding aus demselben Provider-/Modellprofil, und ein Implementierungsslot verifiziert nicht den von ihm implementierten oder gefixten Stand. Bestätigung liefert zusätzliche Evidenz; Widerspruch, fehlende Evidenz oder `inconclusive` eskalieren sichtbar an HumanLoop. Ein Verifier schreibt kein Originalfinding um, hebt kein blockierendes Finding auf und erzeugt keine wirksame Disposition; `not_applicable` und `accepted_risk` bleiben nach `REV-006` menschlich autorisiert, Verifikationsrunden sind nach `RUN-006` begrenzt, und ein unbegrenzter Challenge-Loop ist ausgeschlossen.
+- **REV-011** – Spezialisierte Review-Promptprofile — etwa Ticket-/AC-Treue, funktionale Korrektheit, Security, Datenbank/Migrationen, Concurrency, Performance, Tests, Architektur und API-Verträge — sind versionierte Profile des zentralen Promptkatalogs mit genau einem Renderer. Approval bindet je Reviewer-Slot Promptprofil, Providerprofil und Auswahlgründe; Pfad- und Risikoregeln wählen ausschließlich serverseitig bekannte Profile und erzeugen keine freien Prompts oder Befehle. Jede Stufe erhält ein stufengerechtes, redigiertes und an Run, Ticketblob, Checkpoint-Tree, Diff-Hash, Scope, Prompt-/Instruction-Snapshot, Provider-Runtime-Profil und SecurityPolicy gebundenes Kontextpaket statt des Gesamtrepositorys; eine Änderung dieser Bindungen invalidiert nachgelagerte Ergebnisse. Unabhängig vom Profilfokus liefert jeder erforderliche Reviewlauf die vollständige `criterion_coverage` nach `REV-004`, und die strukturierte Implementierungszusammenfassung bleibt untrusted Kontext des Implementierers, niemals geprüfte Wahrheit.
 
 ### 3.8 Human-in-the-loop
 - **HUM-001** – Pro Run darf höchstens ein blockierender Human Request gleichzeitig offen sein. Nach dessen terminaler Beantwortung, Ablehnung oder Aufhebung darf ein späterer Warteschritt einen neuen Request erzeugen; alle historischen Requests und Interventionen bleiben unverändert auditierbar.
@@ -306,7 +321,7 @@ app        Laravel + Blade + Livewire
         │      ├── typisierte control_operations
         │      └── blobgebundene ticket_read_models
         ├── worker     Orchestrierung, Git, SMTP; einziger Besitzer verwalteter Clones
-        ├── agent      Codex/Claude/Fake; genau Providerprofil
+        ├── agent      Codex/Grok/Copilot/Claude/Fake; genau ein Providerprofil
         ├── checker    freigegebene Projektchecks; keine wiederverwendbaren Secrets
         └── scheduler  Recovery, Retention, Notifications
 ```
@@ -418,6 +433,7 @@ todo → blocked|cancelled         autorisierte fachliche Entscheidung
 ready → todo|blocked|cancelled   Vertragsänderung, Approval-Widerruf oder autorisierte fachliche Entscheidung
 ready → in_progress              atomar kontrollierter Runstart
 in_progress → review             Arbeitsbranch erfolgreich veröffentlicht
+in_progress → ready              report-only Abschluss eines Review-only-Laufs ohne Push
 in_progress → todo|blocked       kontrollierter Abbruch oder Rework; neuer Start erfordert neue Freigabe
 in_progress → cancelled          autorisierter Hard-Cancel
 blocked → todo|cancelled         autorisierte Wiederaufnahme oder Verwerfung
@@ -427,13 +443,13 @@ review → cancelled               autorisierte Verwerfung des veröffentlichten
 done | cancelled                 terminal
 ```
 
-Die Transition-Policy ist actor- und operationsspezifisch. AI6-009 liefert die gehärtete Status-CAS-Primitive und sperrt reservierte Kanten in Editor und allgemeiner Status-UI. `todo → ready` gehört ausschließlich der Approval-Saga aus AI6-012, `ready → in_progress` ausschließlich dem atomaren Run-Claim aus AI6-013, `in_progress → review` ausschließlich der Post-Push-Statussynchronisation aus AI6-029 und Statuswechsel eines aktiven Runs ausschließlich dem `RunOrchestrator`. Die normalen menschlichen Operationen dürfen `todo → blocked|cancelled`, `ready → todo|blocked|cancelled`, `blocked → todo|cancelled` sowie nach bestätigtem externem Merge/Abnahme beziehungsweise bewusster Verwerfung `review → done|todo|cancelled` auslösen; Rollen, Step-up und erwarteter Blob/Control-OID werden je Kante geprüft. Ein Inhaltsedit an einem `ready`-Ticket schreibt im selben CAS zwingend `ready → todo` und macht jede vorhandene Approval und Queue-Eligibility unstartbar. Keine UI darf einen Zielstatus frei übergeben.
+Die Transition-Policy ist actor- und operationsspezifisch. AI6-009 liefert die gehärtete Status-CAS-Primitive und sperrt reservierte Kanten in Editor und allgemeiner Status-UI. `todo → ready` gehört ausschließlich der Approval-Saga aus AI6-012, `ready → in_progress` ausschließlich dem atomaren Run-Claim aus AI6-013 — für Implementierungs- wie für Review-only-Läufe —, `in_progress → review` ausschließlich der Post-Push-Statussynchronisation aus AI6-029, `in_progress → ready` ausschließlich der report-only Abschluss-Saga aus AI6-039 und Statuswechsel eines aktiven Runs ausschließlich dem `RunOrchestrator`. Die normalen menschlichen Operationen dürfen `todo → blocked|cancelled`, `ready → todo|blocked|cancelled`, `blocked → todo|cancelled` sowie nach bestätigtem externem Merge/Abnahme beziehungsweise bewusster Verwerfung `review → done|todo|cancelled` auslösen; Rollen, Step-up und erwarteter Blob/Control-OID werden je Kante geprüft. Ein Inhaltsedit an einem `ready`-Ticket schreibt im selben CAS zwingend `ready → todo` und macht jede vorhandene Approval und Queue-Eligibility unstartbar. Keine UI darf einen Zielstatus frei übergeben.
 
 Jeder Git/DB-Statuswechsel verwendet denselben versionierten Status-Saga-Vertrag. Vor jeder Git-Mutation persistiert die App eine eindeutige `status_operation_id`, Operationstyp, Actor-/Autorisierungsbindung, erwarteten Control-Parent und Ticketblob, Quell-/Zielstatus, Contract-Hash, erwarteten Zielblob/-tree sowie die Sagaphase `prepared`. Der Worker erzeugt einen Commit mit genau einem erwarteten Parent und ausschließlich der autorisierten Status- beziehungsweise ausdrücklich gekoppelten Ticketänderung, bindet ihn an die Operation-ID und persistiert dessen OID in `commit_prepared`, bevor er per Compare-and-Swap pusht. Nach frischer Remotebestätigung folgt `control_confirmed`; erst dann dürfen die jeweiligen DB-Wirkungen atomar finalisiert und Lock/Queue/Runzustand verändert werden. `db_finalized` ist terminal.
 
 Retry und Recovery dürfen nur die gespeicherte Operation fortsetzen. Ist der Parent unverändert, wird der fehlende Schritt ausgeführt; ist der eigene beabsichtigte Commit bereits in der frischen ersten-Eltern-Control-Historie enthalten, werden Parent, Operation-ID, Commit-OID, Zielblob/-tree, exakte erlaubte Änderung und aktueller Nachfolgezustand erneut geprüft und nur die fehlenden DB-Wirkungen vervollständigt. Ein fremder, nur ähnlich aussehender Statuscommit, falscher Parent, History-Rewrite, zusätzliche Treeänderung oder Operation-ID-Replay wird nie übernommen, sondern sichtbar als Konflikt pausiert. Crash-Injection an `prepared`, `commit_prepared`, nach bestätigtem Push vor `control_confirmed`, nach Controlbestätigung vor DB-Finalisierung und nach `db_finalized` ist für jeden Operationstyp Pflicht.
 
-Dieser gemeinsame Vertrag gilt mindestens für Approval, Run-Claim, Soft-/Hard-Cancel beziehungsweise kontrollierte Runrücksetzung und Post-Push-Statussynchronisation. Beim Claim entstehen Run und Projektsperre nach dem bestätigten eigenen `ready → in_progress`-Commit genau einmal. Bei Cancel/Rücksetzung werden DB-Runabschluss und Lockfreigabe erst nach dem bestätigten eigenen Statuscommit terminal. Bei der Post-Push-Synchronisation bleiben der bereits veröffentlichte Branch und die Projektsperre bis zum bestätigten eigenen `in_progress → review`-Commit erhalten; generisches Cancel oder erneuter Branch-Push sind dann verboten.
+Dieser gemeinsame Vertrag gilt mindestens für Approval, Run-Claim, Soft-/Hard-Cancel beziehungsweise kontrollierte Runrücksetzung, Post-Push-Statussynchronisation und den report-only Abschluss eines Review-only-Laufs. Beim Claim entstehen Run und Projektsperre nach dem bestätigten eigenen `ready → in_progress`-Commit genau einmal. Bei Cancel/Rücksetzung werden DB-Runabschluss und Lockfreigabe erst nach dem bestätigten eigenen Statuscommit terminal. Bei der Post-Push-Synchronisation bleiben der bereits veröffentlichte Branch und die Projektsperre bis zum bestätigten eigenen `in_progress → review`-Commit erhalten; generisches Cancel oder erneuter Branch-Push sind dann verboten. Beim report-only Abschluss bleiben Run und Projektsperre bis zum bestätigten eigenen `in_progress → ready`-Commit erhalten; er enthält ausschließlich die autorisierte Statusänderung, veröffentlicht keinen Branch und wird nach Bestätigung wie die Post-Push-Synchronisation ausschließlich per Retry oder autorisierter Konfliktentscheidung abgeschlossen.
 
 Die Approval-Saga speichert zwei ausdrücklich verschiedene Bindungspaare. `reviewed_ticket_blob_sha` und `reviewed_control_sha` binden das `todo`-Dokument, das der Mensch tatsächlich geprüft hat. Ihre `status_operation_id` führt darauf per erwartetem Control-OID ausschließlich den Status-CAS `todo → ready` aus, verifiziert bytegenau, dass kein anderes Ticketfeld und kein anderer Treeeintrag verändert wurde, und speichert den resultierenden Ready-Blob/-Commit als `approved_ticket_blob_sha` und `approved_control_sha`. `ticket_contract_sha256` ist vor und nach diesem CAS identisch, weil ausschließlich das Statusfeld ausgeschlossen wird.
 
@@ -507,12 +523,15 @@ defaults:
   implementation_profile: codex-gpt-5.6-terra
   implementation_effort: medium
   reviewers:
-    - profile: claude-opus-5
+    - profile: grok-cli-review
+      effort: provider_default
+    - profile: copilot-cli-review
       effort: provider_default
 
 limits:
   max_fix_rounds: 3
   max_review_rounds: 4
+  max_verification_rounds: 2
   max_agent_invocations: 20
   max_added_scope_paths: 12
   max_changed_files: 40
@@ -635,11 +654,11 @@ Die letzte Zeile ist ausdrücklich auf den Publish **vor** seinem Außeneffekt e
 | ticket_read_models | verwerfbare, redigierte Projektionen aus Control-Commit und Ticket-Blob; niemals Statusautorität |
 | project_config_snapshots | freigegebene effektive Projektkonfiguration |
 | ticket_approvals | geprüfte Todo- und freigegebene Ready-Blob-/Control-Bindung, Contract-Hash, Config-/Prompt-/Modell-/Scope-Snapshot sowie Queuezustand |
-| runs | state, phase, wait_reason, `claim_parent_control_sha`, unveränderliches `initial_run_base_sha`, aktuelles `run_base_sha`, Git- und Policybindung |
-| run_agents | Implementierungs-, Reviewer- und Security-Slots/Sessions |
+| runs | state, phase, wait_reason, Laufart Implementierung oder Review-only samt gebundenem Reviewgegenstand, `claim_parent_control_sha`, unveränderliches `initial_run_base_sha`, aktuelles `run_base_sha`, Git- und Policybindung |
+| run_agents | Implementierungs-, Reviewer-, Verifier- und Security-Slots/Sessions samt Promptprofil und belastbar gemeldeten Nutzungsdaten |
 | execution_jobs | Control-Metadaten der Mailbox-Aufträge |
 | check_results | profilgebundene Prüfergebnisse |
-| review_results | unveränderte Qualitäts- und Securityresultate |
+| review_results | unveränderte Qualitäts-, Verifier- und Securityresultate |
 | findings | normalisierte, quellgebundene Findings |
 | human_requests | offene Frage oder Freigabe |
 | interventions | menschliche Antwort und Wirkung |
@@ -648,6 +667,8 @@ Die letzte Zeile ist ausdrücklich auf den Publish **vor** seinem Außeneffekt e
 | run_events | redigierte Timeline |
 
 Keine `tickets`-Tabelle ist autoritative Quelle. `ticket_read_models` sind ein notwendiger Sicherheitsübergang für die workspacefreie App, tragen immer Control-Commit, Blob-SHA und die zur Erzeugungszeit gültige `control_generation`, gelten nach den Lesezeit-Prädikaten aus §6.2 als stale — abweichende Generation nach einem Control-Branch-Wechsel, abweichender Control-Commit nach einem Fetch, abweichende Profilbindung nach einem Profilwechsel — und dürfen vollständig gelöscht und aus Git rekonstruiert werden. Ein Stale-Marker wird dabei nicht geschrieben, und ein vor seinem Außeneffekt verlorener Publish-Compare-and-Swap macht keinen Bestand stale, weil er keinen verändert hat; für einen nach `outcome_published` verlorenen Bindungs-Compare-and-Swap gelten stattdessen die Konfliktpfade aus §6.2. Ticketinhalt, dauerhafter Status und Konfliktentscheidung bleiben ausschließlich in Git.
+
+Auch die Multi-Review-, Verifikations- und Review-only-Erweiterungen führen keine zusätzlichen Autoritätstabellen ein: Es entstehen weder `PipelineRun`-/`StageRun`-Modelle noch ein zweiter Orchestrator noch ein Ausführungsledger in der Ticketdatei. Pipeline- und Promptprofile sind versionierte Serverkonfiguration, eine Stufe ist ein Orchestratorschritt, ein Check, ein Review-/Verifierslot oder ein Gate, und Kontextpakete, gebundene Abschlussberichte sowie Roh-/Nutzungsdaten sind `run_artifacts` beziehungsweise Felder der bestehenden Run-, Agenten- und Reviewentitäten.
 
 ### 7.2 Runzustand
 
@@ -658,7 +679,7 @@ wait_reason:
   human_question | scope_approval | contract_change | review_limit |
   resource_limit | provider_error | invalid_json | check_failure |
   manual_gate | security_gate |
-  git_base_changed | git_conflict | manual_push | status_sync
+  git_base_changed | git_conflict | manual_push | manual_report | status_sync
 ```
 
 Der Queuezustand eines noch nicht gestarteten Tickets liegt ausschließlich in `ticket_approvals`. `runs.state=queued` bezeichnet nur einen bereits atomar beanspruchten Run zwischen erfolgreichem `ready → in_progress`-CAS und Beginn seines ersten Workerjobs; vorher existiert kein Run. Alle Übergänge laufen durch den in AI6-013 eingeführten `RunOrchestrator`. Jede mutierende Webaktion übergibt die erwartete `run.version`.
@@ -680,7 +701,8 @@ Jeder Wartestatus besitzt genau einen Producer und allowlistete Resolver:
 | `git_base_changed` | DriftDetector | kontrollierter Abbruch mit Status-CAS und neuer Approval/Run; kein stilles Rebase desselben Candidates |
 | `git_conflict` | ControlOperation/Git-CAS | Refresh mit neuer erwarteter OID und neuer Autorisierung oder Cancel; kein Überschreiben |
 | `manual_push` | PushPolicy | autorisierte Pushaktion auf unverändertem Candidate oder Cancel |
-| `status_sync` | Status-CAS nach bestätigtem Push | idempotenter CAS-Retry oder autorisierte Konfliktentscheidung; Projekt bleibt gesperrt |
+| `manual_report` | ReportPolicy des report-only Abschlusses | autorisierte Abschlussbestätigung auf unverändertem gebundenem Reviewstand oder Cancel |
+| `status_sync` | Status-CAS nach bestätigtem Push beziehungsweise bestätigtem report-only Abschluss | idempotenter CAS-Retry oder autorisierte Konfliktentscheidung; Projekt bleibt gesperrt |
 
 Resolver verändern Zustand ausschließlich über `RunOrchestrator`, sind an `run.version` und die jeweils genannten Hashes gebunden und besitzen für Erfolg, Stale, Replay und Abbruch eigene Testfälle.
 
@@ -689,8 +711,9 @@ Pro Warteereignis wird genau ein Grund nach der folgenden Präzedenz gewählt; d
 | Ereignisgrenze | Exklusiver wait_reason |
 |---|---|
 | aktives Security-Gate ohne gültiges `clear`, einschließlich Provider-, Schema- oder Sandboxfehler | `security_gate` |
-| Arbeitsbranch-Push bestätigt, Ticketstatus-CAS noch nicht bestätigt | `status_sync` |
+| Arbeitsbranch-Push beziehungsweise report-only Abschluss bestätigt, Ticketstatus-CAS noch nicht bestätigt | `status_sync` |
 | manueller Push vor seiner Autorisierung | `manual_push` |
+| report-only Abschluss eines Review-only-Laufs vor seiner Bestätigung | `manual_report` |
 | offenes deklariertes `MG-`-/`EXT-`-Gate vor Candidate | `manual_gate` |
 | überschrittenes Review-/Fixrundenlimit oder Stall-Grenze | `review_limit` |
 | anderes überschrittenes freigegebenes Ressourcenlimit, einschließlich Instruction-/Promptinputlimit und `max_added_scope_paths` | `resource_limit` |
@@ -703,7 +726,7 @@ Pro Warteereignis wird genau ein Grund nach der folgenden Präzedenz gewählt; d
 | fehlgeschlagener Projektcheck | `check_failure` |
 | sonstige strukturierte Agenten- oder Systemfrage | `human_question` |
 
-Diese Tabellen sind der Zielvertrag, keine Erlaubnis für vorgezogene APIs. AI6-013 führt Enum, Transitionen und den zentralen erweiterbaren Registervertrag ein, ohne zukünftige Producer vorzutäuschen. Das jeweilige Verbraucherticket registriert einen produktiven Producer nur gemeinsam mit mindestens einem Resolver oder expliziten Cancelpfad. AI6-026 vervollständigt die einheitliche Interventions-UI für alle bis dahin vorhandenen Gründe; AI6-027 erweitert sie um `manual_gate`, AI6-028 um `security_gate` und AI6-029 um `manual_push` sowie `status_sync`.
+Diese Tabellen sind der Zielvertrag, keine Erlaubnis für vorgezogene APIs. AI6-013 führt Enum, Transitionen und den zentralen erweiterbaren Registervertrag ein, ohne zukünftige Producer vorzutäuschen. Das jeweilige Verbraucherticket registriert einen produktiven Producer nur gemeinsam mit mindestens einem Resolver oder expliziten Cancelpfad. AI6-026 vervollständigt die einheitliche Interventions-UI für alle bis dahin vorhandenen Gründe; AI6-039 erweitert sie um `manual_report` und den report-only `status_sync`-Fall, AI6-027 um `manual_gate`, AI6-028 um `security_gate` und AI6-029 um `manual_push` sowie den Post-Push-`status_sync`-Fall.
 
 Ein Abbruch ist vor bestätigtem Branch-Push eine Git-/DB-Saga, kein lokales Umschalten des Runzustands. Soft-Cancel schreibt das Ticket per aktuellem Control-Head-CAS von `in_progress` nach `todo` und erzwingt vor einem neuen Start eine neue Approval. Eine ausdrücklich durch einen Approver mit Step-up und Begründung autorisierte fachliche Blockierung schreibt `in_progress → blocked`; Hard-Cancel schreibt unter derselben starken Autorisierung nach `cancelled`. In allen drei Fällen wird erst nach bestätigtem eigenen Status-CAS `runs.state=cancelled` terminal und die Projektsperre freigegeben; der Ticketstatus bewahrt die fachliche Unterscheidung. Ein CAS-Konflikt wechselt nach `git_conflict`, bewahrt Run und Sperre und erlaubt nur Refresh plus erneut autorisierte Entscheidung. Nach bestätigtem Branch-Push ist generischer Abbruch verboten: `status_sync` muss den bereits veröffentlichten Zustand per Retry oder autorisierter Konfliktentscheidung abschließen und darf den Push nicht zurückrollen.
 
@@ -770,6 +793,26 @@ Das Panel bietet ausschließlich zustandsabhängige Aktionen: Zusatzprompt, eine
 ### 8.5 Manuelle und externe Gates
 
 Jede im Detailticket deklarierte `MG-`-/`EXT-`-ID ist standardmäßig blockierend. `None.` bedeutet, dass keine solchen Gates existieren; rein informative Hinweise gehören unter `## Notes`. Offene Gates dürfen Qualitätsreview nicht vortäuschen oder als grün erscheinen, blockieren aber spätestens Candidate, finalen Commit und Push. Ein Approver schließt ein Gate ausschließlich im Panel mit typisierter Evidenz; externe Evidenz enthält Quelle, Zeitpunkt und gegebenenfalls Digest/Referenz, niemals eine bloße Agentenbehauptung. Gate-Evidenz ist an Ticketvertrag, Run, relevanten Checkpoint/Candidate und Wirkung gebunden und wird nach Vertrags-, Scope- oder Candidateänderung neu bewertet.
+
+### 8.6 Review-only-Modus
+
+Der Review-only-Modus verwendet denselben Check-, Review-, Finding-, Gate- und HumanLoop-Unterbau wie der Implementierungsworkflow, verändert aber weder Code noch verwaltete Refs und pusht nicht (`RUN-010`). Er bleibt ticketzentriert: Ein Lauf benötigt ein verwaltetes Projekt, einen gültigen Ticketvertrag, einen menschlich freigegebenen Approval-Snapshot und einen darin gebundenen Reviewgegenstand nach `GIT-011`. Eine freie „reviewe dieses Verzeichnis“-Operation außerhalb der Approval-/Run-Grenze ist kein AI6-Lauf.
+
+Ablauf: Die Approval bindet zusätzlich zum Ticket den Reviewgegenstand, die Reviewer-/Verifierslots samt Promptprofilen und den Abschlussmodus (`manual` oder `automatic_after_gates`, sinngemäß für den report-only Abschluss; Risikoregeln dürfen nur auf `manual` verengen). Der Claim ist derselbe atomare `ready → in_progress`-Status-CAS wie beim Implementierungslauf. Der Worker normalisiert die gebundene Quelle in einen wegwerfbaren, gitmetadatenfreien Review-Checkpoint, führt die freigegebenen deterministischen Checks aus und lässt anschließend alle ausgewählten Reviewer seriell denselben unveränderlichen Checkpoint prüfen; Findings, AC-Abdeckung, exakte Duplikatgruppen, advisory Verifikation, Human Requests und Limits folgen unverändert den bestehenden Verträgen. Die Phasen bleiben die vorhandenen Runphasen (`prepare` umfasst die Quellnormalisierung; `implement`, `fix`, `security_review` und `publish` entfallen).
+
+Der Abschluss erzeugt einen gebundenen Abschlussbericht als redigiertes `run_artifact` — Run, Checkpoint-Tree-OID, Diff-Hash, Slots, Checkstatus, AC-Abdeckung, Findings samt wirksamer Dispositionen, Human-/Gate-Entscheidungen und Artefaktverweise — und synchronisiert den Ticketstatus über die report-only Abschluss-Saga `in_progress → ready`. Wirksam blockierende Findings verhindern den Abschluss nicht; sie sind Ergebnis des Berichts. Der Bericht ist eine aus Git- und SQLite-Autoritäten ableitbare Projektion und begründet keine eigene Status- oder Ticketautorität; in die Ticketdatei wird kein Ausführungsledger geschrieben. Ein Fix aus Review-only-Ergebnissen erfordert einen neuen, eigenständig freigegebenen Implementierungs-/Fixlauf.
+
+### 8.7 Quellenabhängige advisory Verifikation
+
+Nach Schema-Validierung und exakter Duplikatgruppierung kann der Orchestrator Findings einzeln oder als exakte Duplikatgruppe an einen Verifierslot übergeben (`REV-010`). Der Slot wird quellenabhängig aus den im Approval-Snapshot erlaubten Profilen gewählt: In der ersten Providerstufe verifiziert standardmäßig Grok die Copilot- und zulässigen Codex-Findings; Grok-Findings gehen an einen unabhängigen Copilot- beziehungsweise zulässigen Codex-Slot oder an den HumanLoop. Ist kein unabhängiges Profil verfügbar, entsteht ein Human Request statt einer Selbstverifikation. Jeder Verifierlauf erhält eine neue Session und ein eigenes Kontextpaket (Finding, Quellen, Evidenz, relevanter Code, betroffene Akzeptanzkriterien, passende Checkausgaben) und liefert ein eigenes unveränderliches advisory Reviewresultat. Es gibt keine freie Modell-zu-Modell-Debatte und keine Mehrheitsentscheidung; Widerspruch oder `inconclusive` eskalieren nach der zentralen Human-/Security-Policy, ein Providerfehler folgt dem bestehenden `provider_error`-Vertrag (begrenzter Retry, allowlisteter Profilwechsel mit neuer Slotrevision, Human Request oder Cancel), und erschöpfte Verifikationsrunden führen in den `review_limit`-Wartestatus.
+
+### 8.8 Stufengerechte Kontextpakete und Implementierungszusammenfassung
+
+Jede Stufe erhält nur den Kontext, den sie benötigt (`REV-011`): Implementierung, Erst-Review je Promptprofil, Verifikation, Fixturn und ein optionaler finaler Review verwenden getrennt zusammengestellte, redigierte und hashgebundene Kontextpakete statt des Gesamtrepositorys oder vollständiger Rohdiskussionen. Reviewer erhalten dabei stets den exportierten, gitmetadatenfreien Tree; das Kontextpaket steuert die Prompteingaben, nicht die Sicherheitsgrenze. Der Implementierungsturn liefert zusätzlich eine strukturierte Implementierungszusammenfassung (geänderte Komponenten, Entscheidungen, Annahmen, Abweichungen vom Ticket, bekannte Grenzen, Tests, besonders reviewbedürftige Bereiche) als Run-Artefakt; Reviewer behandeln sie als untrusted Kontext des Implementierers, prüfen sie gegen Ticket und Code und suchen unerwähnte Seiteneffekte weiterhin selbst. Ein Fixturn erhält ausschließlich wirksam blockierende beziehungsweise ausdrücklich für den Fix autorisierte Findings; verworfenes Feedback wird nicht versehentlich umgesetzt.
+
+### 8.9 Optionaler finaler Review
+
+Ein optionaler finaler Review ist kein eigener Modelltyp und kein zweites Security-Gate, sondern ein zusätzlicher regulärer Reviewer-Slot aus einem serverseitig freigegebenen Providerprofil mit neuer Session, der den finalen Gesamtdiff und die Spezifikation auf dem letzten Checkpoint prüft — ohne die vollständigen Rohdebatten früherer Slots. Er wird nur bei Risiko-, Release- oder Human-Triggern zugeschaltet und unterliegt denselben Coverage-, Finding- und Checkpointverträgen wie jeder andere Reviewer. Ein Codex-Finalreview ist nur zulässig, wenn Codex den zu prüfenden Stand weder implementiert noch gefixt hat. Die Aktivierung bleibt bis nach dem realen Pilot deaktiviert (§18, §19); ein fest verdrahteter Modellname wird dafür nicht vergeben.
 
 ---
 
@@ -859,9 +902,11 @@ Der Server ergänzt Run-, Checkpoint-, Scope-, Session- und Wirkungshashes. Der 
 }
 ```
 
+Ein Verifierlauf verwendet dieselbe versionierte Schemafamilie: Sein Resultat referenziert genau das geprüfte Originalfinding beziehungsweise dessen exakte Duplikatgruppe, liefert eigene Evidenz und eine Empfehlung und wird als weiteres unveränderliches Reviewresultat gespeichert. Eine Empfehlung „nicht zutreffend“ ist keine wirksame Disposition und kann ein fremdes `must_fix` nicht entblocken (`REV-010`).
+
 ### 9.4 Implementierungsergebnis
 
-Das Implementierungsresultat enthält mindestens Entscheidungen, gemeldete Pfade, offene manuelle Gates und optional einen Human Request. `no_change_required` ist ausschließlich für einen Implementierungs- oder Fixturn zulässig, der einen leeren tatsächlichen Diff und eine konkrete Begründung meldet. Der Server bestätigt den leeren Diff selbst; der Status überspringt weder Scopeabgleich, Pflichtchecks, AC-Abdeckung, Reviews noch manuelle oder Security-Gates. Ein nicht leerer Diff mit diesem Status ist ein Schema-/Importfehler. Reviewer können zusätzlich `instruction_recommendations` für wiederverwendbare Regeln melden; diese ändern niemals automatisch `AGENTS.md`. AI6 vertraut niemals den gemeldeten Pfaden ohne Git-Diff-Prüfung.
+Das Implementierungsresultat enthält mindestens Entscheidungen, gemeldete Pfade, offene manuelle Gates, die strukturierte Implementierungszusammenfassung aus §8.8 und optional einen Human Request. `no_change_required` ist ausschließlich für einen Implementierungs- oder Fixturn zulässig, der einen leeren tatsächlichen Diff und eine konkrete Begründung meldet. Der Server bestätigt den leeren Diff selbst; der Status überspringt weder Scopeabgleich, Pflichtchecks, AC-Abdeckung, Reviews noch manuelle oder Security-Gates. Ein nicht leerer Diff mit diesem Status ist ein Schema-/Importfehler. Reviewer können zusätzlich `instruction_recommendations` für wiederverwendbare Regeln melden; diese ändern niemals automatisch `AGENTS.md`. AI6 vertraut niemals den gemeldeten Pfaden ohne Git-Diff-Prüfung.
 
 Nur im vor Runstart freigegebenen Modus `instruction_update` darf ein Implementierungsresultat genau ein optionales `instruction_patch`-Objekt enthalten:
 
@@ -932,7 +977,7 @@ Nach erfolgreicher Primärauthentifizierung bleibt die Session im Pre-Auth-Zusta
 
 ### 10.4 Agenten und Checks
 
-Projektinhalt ist untrusted. Agent und Checker besitzen nur ihre exportierte Tree-Sicht ohne erreichbare Gitmetadaten und die minimal notwendige Prozessumgebung. Provider-, Git- und SMTP-Credentials werden getrennt. Native Provider-Instruktionsauflösung sieht ausschließlich den freigegebenen read-only Instruction-Snapshot; Host-/Parent-Autodiscovery und zur Laufzeit veränderte Instruktionsdateien sind ausgeschlossen. Das isolierte Provider-Home enthält nur die versiegelte serverseitige Runtime-Konfiguration und die kurzlebige minimale read-only Authprojektion des einen gewählten Providerprofils. Nicht mitfreigegebene Workspace-/Home-Configs, Caches, History, MCP-Server, Plugins, Skills, Hooks, Commands, Agentdefinitionen und externe Helper sind unerreichbar oder deaktiviert. Aktive Sandbox-, Workspace-, Instruction-, Credentialprojektions- und Runtime-Profil-Isolation fällt geschlossen aus. Projektkonfiguration kann keine schwächeren Flags einschleusen.
+Projektinhalt ist untrusted. Agent und Checker besitzen nur ihre exportierte Tree-Sicht ohne erreichbare Gitmetadaten und die minimal notwendige Prozessumgebung. Provider-, Git- und SMTP-Credentials werden getrennt. Codex-, Grok-, Copilot- und Claude-Home-, Config-, History- und Cachepfade werden pro Session versiegelt und getrennt; die jeweils dokumentierten nativen Discoverypfade werden entweder auf den gebundenen Instruction-Snapshot begrenzt oder fail closed blockiert (`AGT-009`, `AGT-010`). Native Provider-Instruktionsauflösung sieht ausschließlich den freigegebenen read-only Instruction-Snapshot; Host-/Parent-Autodiscovery und zur Laufzeit veränderte Instruktionsdateien sind ausgeschlossen. Das isolierte Provider-Home enthält nur die versiegelte serverseitige Runtime-Konfiguration und die kurzlebige minimale read-only Authprojektion des einen gewählten Providerprofils. Nicht mitfreigegebene Workspace-/Home-Configs, Caches, History, MCP-Server, Plugins, Skills, Hooks, Commands, Agentdefinitionen und externe Helper sind unerreichbar oder deaktiviert. Aktive Sandbox-, Workspace-, Instruction-, Credentialprojektions- und Runtime-Profil-Isolation fällt geschlossen aus. Projektkonfiguration kann keine schwächeren Flags einschleusen.
 
 ### 10.5 Optionaler Security-Reviewer
 
@@ -953,7 +998,8 @@ Vertrauenswürdige Instanzconfig definiert getrennte maximale Aufbewahrungszeite
 - Projektliste/-detail inklusive Git-/Providerstatus;
 - Ticketübersicht und Ticketdetail;
 - Ticketeditor und Freigabe;
-- Runseite mit Timeline, Diff, Sessions, Checks, Findings, Security und Push;
+- Runseite mit Timeline, Diff, Sessions, Checks, Findings, Verifikation, Security und Push;
+- Review-only-Start mit gebundenem Reviewgegenstand sowie gebundener Abschlussbericht;
 - Attention-Inbox und Human-Request-Detail;
 - Adminseiten für Benutzer, Projektrollen, Profile und Doctorstatus.
 
@@ -1112,7 +1158,7 @@ Dieser Plan bezeichnet Blueprint-IDs als stabil, und Template §7.1 verbietet na
 
 **Veröffentlicht** ist ein Blueprint oder eine Ticketrevision, sobald ihr eigener Stand als Commit in diesem Repository liegt. Maßgeblich ist der Commit des jeweiligen Artefakts, nicht das Alter des Repositorys: Ein Commit, der ausschließlich fremde Dateien enthält, veröffentlicht keinen Blueprint und keine Ticketrevision. Alles davor — auch eine vollständig ausgearbeitete, in einer Sitzung mehrfach überarbeitete Datei im Arbeitsbaum — ist ein **unveröffentlichter Entwurf**. Ein Entwurf darf beliebig umnummeriert, umbenannt, geteilt und neu geschnitten werden; genau davon haben die Revisionen bis einschließlich V1.6.10 Gebrauch gemacht, als der Read-Model-Blueprint von `AI6-006C` über `AI6-006D` und `AI6-006E` nach `AI6-006F` wanderte.
 
-Der aktuelle Stand: Dieses Repository besitzt einen Initial-Commit, der ausschließlich `README.md` enthält. Weder dieser Plan noch das Template noch eine Ticketdatei ist committed, weshalb sämtliche Blueprints und Detailtickets bis heute unveröffentlichte Entwürfe sind.
+Der aktuelle Stand: Commit `1aeb20e` (`Planung`) hat diesen Plan, das Template und die ersten zwölf Ticketdateien erstmals veröffentlicht. Seitdem sind sämtliche Blueprint-IDs dieses Plans sowie alle in veröffentlichten Tickets vergebenen `AC-`-, `TC-`-, `MG-`- und `EXT-`-IDs unveränderlich; der Entwurfsspielraum der Revisionen bis V1.6.10 besteht für sie nicht mehr. Neue Blueprints erhalten ausschließlich die nächste noch nie verwendete ID.
 
 Sobald der Stand eines Artefakts erstmals committed ist, gilt für dieses Artefakt ohne Ausnahme:
 
@@ -1138,9 +1184,9 @@ Erscheint eine neuere Major-, Minor- oder Patchversion einer dieser drei Laufzei
 | M1 | Projekte und Tickets | Projektzugriffe laufen asynchron über Control Operations; blobgebundene Read Models können rekonstruiert werden, und Tickets werden profilgerecht gelesen, validiert, angezeigt und konfliktfest geändert. |
 | M2 | Freigabe und Run-Fundament | Prompt-Snapshot, Approval, Ready-/Queuevertrag, minimaler RunOrchestrator, `run_base_sha`, Worktree, Prozessgrenze und FakeAgent-Grundlagen stehen. |
 | M3 | Human Loop und Implementierung | Fake-Implementierung kann fragen, pausieren, fortsetzen, Limits einhalten, Scope/Contract mit vollständiger Provenienz ändern und Checkpoint erzeugen. |
-| M4 | Review und Fix | Mehrere Fake-Reviewer, unveränderliche Originalfindings, effektive Dispositionen und die vollständige Fix-/Re-Review-Schleife funktionieren. |
+| M4 | Review und Fix | Mehrere Fake-Reviewer, unveränderliche Originalfindings, effektive Dispositionen, quellenabhängige advisory Verifikation und die vollständige Fix-/Re-Review-Schleife funktionieren; ein ticket- und approvalgebundener Review-only-Lauf endet ohne Push in einem gebundenen Abschlussbericht. |
 | M5 | Finalisierung und Fake-E2E | Candidate, manuelle/externe Gates, Security-Gate, Commit, Push, Queue, alle Limits/Wartestatus und Recoverypfade funktionieren vollständig mit FakeAgent. |
-| M6 | Echte Adapter | Codex und Claude sind erst nach dem vollständigen Fake-Workflow capability-geprüft und credentialgetrennt nutzbar. |
+| M6 | Echte Adapter | Codex, Grok-Build und GitHub Copilot sind erst nach dem vollständigen Fake-Workflow capability-geprüft und credentialgetrennt nutzbar; Claude bleibt eine spätere, die erste Providerstufe nicht blockierende Erweiterung. |
 | M7 | Betrieb und Pilot | Fresh install, Restore, Retentionlöschung, Manifestprüfung, Migration und realer Pilot sind abgeschlossen; der Legacy-Leser ist danach abgeschaltet. |
 
 ### 14.1 Topologische Reihenfolge
@@ -1178,18 +1224,23 @@ Erscheint eine neuere Major-, Minor- oder Patchversion einer dieser drei Laufzei
 30. AI6-024 — Findings, AC-Abdeckung und Reviewdarstellung
 31. AI6-025 — Fixturn und vollständige Re-Review-Schleife
 32. AI6-026 — Reviewlimits, Stall-Erkennung und Interventionsaktionen
-33. AI6-027 — Finalchecks, Publish-Kandidat und deterministische Provenienz
-34. AI6-028 — Optionales LLM-Sicherheitsgate
-35. AI6-029 — Finaler Commit, Ticketstatus, Push, Drift und Cleanup
-36. AI6-030 — Projektqueue und abhängigkeitssicherer Auto-Start
-37. AI6-031 — Vollständige Runbeobachtung und mobile Bedienung
-38. AI6-032 — Vollständiger FakeAgent-End-to-End- und Recovery-Test
-39. AI6-033 — Codex-CLI-Adapter
-40. AI6-034 — Claude-CLI-Adapter
-41. AI6-035 — Provider-Onboarding, Credential-Setup und Capability-Doctor
-42. AI6-036 — Installation, Backup/Restore und Security-Release-Gate
-43. AI6-037 — Migration des bisherigen Ticket-Prompt-Tools
-44. AI6-038 — Realer M169-Pilot und MVP-Abnahme
+33. AI6-039 — Review-only-Runvertrag: Claim und report-only Abschluss-Saga
+34. AI6-040 — Review-only-Quellbindung, Ausführung, Bericht und Bedienung
+35. AI6-043 — Quellenabhängige advisory Finding-Verifikation
+36. AI6-027 — Finalchecks, Publish-Kandidat und deterministische Provenienz
+37. AI6-028 — Optionales LLM-Sicherheitsgate
+38. AI6-029 — Finaler Commit, Ticketstatus, Push, Drift und Cleanup
+39. AI6-030 — Projektqueue und abhängigkeitssicherer Auto-Start
+40. AI6-031 — Vollständige Runbeobachtung und mobile Bedienung
+41. AI6-032 — Vollständiger FakeAgent-End-to-End- und Recovery-Test
+42. AI6-033 — Codex-CLI-Adapter
+43. AI6-041 — Grok-CLI-Adapter
+44. AI6-042 — GitHub-Copilot-CLI-Adapter
+45. AI6-035 — Provider-Onboarding, Credential-Setup und Capability-Doctor
+46. AI6-034 — Claude-CLI-Adapter
+47. AI6-036 — Installation, Backup/Restore und Security-Release-Gate
+48. AI6-037 — Migration des bisherigen Ticket-Prompt-Tools
+49. AI6-038 — Realer M169-Pilot und MVP-Abnahme
 ```
 
 Die Reihenfolge ist eine gültige Topologie, aber nicht jede unabhängige Arbeit muss künstlich seriell erfolgen. Innerhalb eines Meilensteins dürfen nur Tickets parallel entwickelt werden, deren `depends_on` vollständig erfüllt ist und die nicht denselben noch instabilen Vertrag definieren.
@@ -2015,7 +2066,7 @@ Versionierte Projektdefaults nutzen, ohne dass Repositoryinhalt die Control-Plan
 - **Risiko:** `medium`
 - **Kind:** `feature`
 - **Depends on:** `AI6-003`, `AI6-004`
-- **Requirement-Refs:** `CFG-001`, `AGT-001`, `AGT-002`, `AGT-008`, `AGT-009`, `RUN-006`
+- **Requirement-Refs:** `CFG-001`, `AGT-001`, `AGT-002`, `AGT-008`, `AGT-009`, `REV-011`, `RUN-006`
 - **Erwartete Module:** `Agents`, `Prompts`, `Shared`
 
 **Ziel**
@@ -2024,11 +2075,12 @@ Zulässige Adapter-, Modell-, Rollen- und Effort-Kombinationen sowie den vor jed
 
 **Deliverables**
 
-- AgentProfile-DTO und Registry.
-- Rollen implementation, quality_review, security_review.
+- AgentProfile-DTO und Registry; serverseitige Providerprofil-Aliase mindestens für `codex_cli`, `grok_cli`, `github_copilot_cli` und `fake` als vertrauenswürdige Konfiguration.
+- Rollen implementation, quality_review, finding_verification, security_review.
 - Modell- und Effort-Allowlist je Adapter.
 - Capability-Status verfügbar/nicht verfügbar/ungeprüft.
-- Versionierter zentraler Promptkatalog für implementation, quality_review, fix, security_review und human_response samt kanonischem Renderer.
+- Versionierter zentraler Promptkatalog für implementation, quality_review, fix, finding_verification, security_review und human_response samt kanonischem Renderer.
+- Versionierte spezialisierte Review-Promptprofile nach `REV-011` als Profile desselben Katalogs und Renderers; kein zweiter Katalog und keine providerindividuellen Templates.
 - Unveränderlicher Prompt-Snapshot mit Katalogversion, gerenderten Rollenprompts und kanonischem Hash.
 - Vertrauenswürdige providerbezogene Instruction-Resolution-Profile mit Discovery-Namen, Rangfolge und Geltungsbereich sowie kanonischer `instruction_snapshot_hash`-Berechnung aus Pfad-/Blob-/Inhaltsbindung.
 - Versionierte, versiegelte Provider-Runtime-Profile mit Hash über effektive Adapterflags, Permissions und serverseitig erlaubte MCP-/Plugin-/Skill-/Hook-/Command-Erweiterungen; Default ist jeweils deaktiviert.
@@ -2058,7 +2110,7 @@ Zulässige Adapter-, Modell-, Rollen- und Effort-Kombinationen sowie den vor jed
 
 **Nicht Teil dieses Tickets**
 
-- Codex-/Claude-Prozessaufrufe.
+- Codex-/Grok-/Copilot-/Claude-Prozessaufrufe.
 - Providerlogin.
 
 ### AI6-012 — Ticketprüfung, Approval-Snapshot und Multi-Reviewer-Auswahl
@@ -2067,7 +2119,7 @@ Zulässige Adapter-, Modell-, Rollen- und Effort-Kombinationen sowie den vor jed
 - **Risiko:** `high`
 - **Kind:** `feature`
 - **Depends on:** `AI6-008`, `AI6-009`, `AI6-010`, `AI6-011`
-- **Requirement-Refs:** `RUN-002`, `RUN-006`, `RUN-008`, `REV-001`, `UI-003`, `AGT-002`, `AGT-008`, `AGT-009`, `GIT-001`, `GIT-007`, `TKT-009`
+- **Requirement-Refs:** `RUN-002`, `RUN-006`, `RUN-008`, `REV-001`, `REV-011`, `UI-003`, `AGT-002`, `AGT-008`, `AGT-009`, `GIT-001`, `GIT-007`, `TKT-009`
 - **Erwartete Module:** `Tickets`, `Runs`, `Reviews`, `Agents`
 
 **Ziel**
@@ -2078,7 +2130,7 @@ Ein geprüftes Ticket mit Implementierungsmodell, Aufwand, mehreren Reviewern, L
 
 - Assessment- und Approval-Datenmodell.
 - Implementierungsprofil plus Effort.
-- Wiederholbarer Reviewer-Editor mit Modell und Effort.
+- Wiederholbarer Reviewer-Editor mit Modell und Effort; je Slot werden zusätzlich das gewählte Review-Promptprofil, das Providerprofil und die serverseitig erzeugten Auswahlgründe nach `REV-011` im Approval-Snapshot persistiert.
 - Sämtliche serverbegrenzt wirksamen Zeit-, Aufruf-, Review-, Fix-, zusätzlichen Scope-Pfad-, Datei-, Byte-, Instruction-Datei/-Byte/-Tiefe-, Promptinput- und Artefaktlimits einschließlich `max_added_scope_paths`, Attention-User und `push_mode` mit ausschließlich `manual` oder `automatic_after_gates`.
 - `reviewed_ticket_blob_sha`, `reviewed_control_sha`, `approved_ticket_blob_sha`, `approved_control_sha` und `ticket_contract_sha256` sowie unveränderliche Snapshots/Hashes für Config, Scope, Prompts, native Instruktionsauflösung, versiegelte Provider-Runtime-Profile, Agentenprofile und SecurityPolicy.
 - Approval-Saga als `status_operation_id`-gebundene Instanz des gemeinsamen Status-Saga-Vertrags mit erwartetem Todo-Parent/-Blob, Ready-Blob/-Tree, beabsichtigtem Commit, expliziten Phasen und Reconciler; sie schreibt per erwartetem Control-OID ausschließlich `todo → ready`, weist unveränderten Resttree und identischen Contract-Hash nach, bindet das resultierende Ready-Paar und weist getrennt davon Queue- sowie aktuelle Startberechtigung aus.
@@ -2265,7 +2317,7 @@ Agenten und Projektchecks über eine kleine, typisierte und credentialgetrennte 
 
 **Nicht Teil dieses Tickets**
 
-- Codex-/Claude-spezifische Flags.
+- Providerspezifische CLI-Flags.
 - Fachliche Prompts.
 - Human Request und `resource_limit`-Runintegration; beides folgt in AI6-019 nach AI6-018.
 
@@ -2769,6 +2821,145 @@ Endlosschleifen und feststeckende Runs kontrolliert an einen Menschen übergeben
 - Automatische unbegrenzte Schleife.
 - Freie Status-/DB-Manipulation.
 
+### AI6-039 — Review-only-Runvertrag: Claim und report-only Abschluss-Saga
+
+- **Initialstatus des späteren Detailtickets:** `todo`
+- **Risiko:** `high`
+- **Kind:** `feature`
+- **Depends on:** `AI6-013`, `AI6-026`
+- **Requirement-Refs:** `RUN-010`, `RUN-001`, `RUN-002`, `RUN-005`, `GIT-008`, `TKT-005`
+- **Erwartete Module:** `Runs`, `Tickets`, `Git`
+
+**Ziel**
+
+Review-only-Läufe als eigene Laufart mit gemeinsamem Claim, gebundenem Abschlussmodus und absturzsicherer report-only Abschluss-Saga normieren.
+
+**Deliverables**
+
+- Laufart `review_only` in `runs` samt Bindung des im Approval festgelegten Reviewgegenstands; die Quellnormalisierung selbst folgt in AI6-040.
+- Approval-Erweiterung um Laufart, Reviewgegenstandsreferenz und Abschlussmodus mit exakt `manual` oder `automatic_after_gates`; serverseitige Risikoregeln dürfen nur auf `manual` verengen.
+- Claim über denselben atomaren `ready → in_progress`-Status-CAS aus AI6-013 mit erweiterter Bedingung statt eines zweiten Anspruchspfads.
+- Report-only Abschluss-Saga als `status_operation_id`-gebundene Instanz des gemeinsamen Status-Saga-Vertrags: Compare-and-Swap `in_progress → ready` mit vorab persistiertem Parent, Zielblob/-tree und beabsichtigtem Commit; `runs.state=completed` und Lockfreigabe erst nach Reconciliation des bestätigten eigenen Statuscommits.
+- Abschlussprädikat: gültige Ergebnisse aller erforderlichen Reviewer- und konfigurierten Verifierslots, vollständige AC-Abdeckung, keine offenen Human-Requests-, Limit- oder Gate-Wartestände; wirksam blockierende Findings verhindern den Abschluss nicht.
+- `manual_report`-Producer und Erweiterung des zentralen Resolverregisters um die autorisierte Abschlussbestätigung auf unverändertem gebundenem Reviewstand beziehungsweise Cancel sowie den report-only `status_sync`-Fall.
+- Unveränderte Weiterverwendung der bestehenden Soft-/Block-/Hard-Cancel-Sagas für Review-only-Läufe.
+
+**Akzeptanzvertrag**
+
+- Ein Review-only-Lauf verändert weder Code noch verwaltete Refs; es entstehen weder Branch-Push noch `in_progress → review`.
+- Der Abschluss läuft ausschließlich über die eigene Saga; direktes Setzen von `runs.state`, Wiederverwendung von `no_change_required` oder ein pushloser `in_progress → review`-Übergang sind technisch nicht möglich.
+- `manual` erzeugt `wait_reason=manual_report`; die Bestätigung wirkt nur auf dem unveränderten gebundenen Reviewstand. `automatic_after_gates` schließt ohne zusätzliche Bestätigung erst nach exakt demselben Abschlussprädikat.
+- Ein Crash an jeder Sagaphase reconciled ausschließlich den eigenen gespeicherten Commit; ein fremder ähnlich aussehender `ready`-Commit erzeugt weder Abschluss noch Lockfreigabe.
+- Nach erfolgreichem Abschluss ist der Ticketstatus `ready`, die verbrauchte Approval ist keiner weiteren Run-Lineage zuordenbar, und ein neuer Lauf erfordert eine neue Approval-Saga nach kontrollierter Rücksetzung auf `todo`.
+- Wiederanlauf nach Worker-Neustart setzt exakt die persistierte Sagaphase fort und erzeugt keine doppelten Wirkungen.
+
+**Mindestens zu erzeugende Testfälle**
+
+- Status-Saga-Crashmatrix des report-only Abschlusses an jeder gemeinsamen Phase einschließlich Replay, CAS-Konflikt und fremdem ähnlich aussehendem `ready`-Commit.
+- Abschlussmodusmatrix `manual`/`automatic_after_gates` einschließlich Verengung durch Risikoregel und stale gewordener Bestätigung.
+- Producer-/Resolver-/Cancel-Tests für `manual_report` und den report-only `status_sync`-Fall.
+- Negativtests gegen Branch-Push, `in_progress → review`, direkten State-Write und `no_change_required`-Missbrauch.
+- Abschlussprädikat mit offenem wirksamem `must_fix` (Abschluss möglich) gegenüber offenem Human Request beziehungsweise Limit-Wartestand (blockiert).
+
+**Nicht Teil dieses Tickets**
+
+- Quellnormalisierung, Bericht und Bedienung.
+- Verifier-Orchestrierung.
+- Echte Provideradapter.
+
+### AI6-040 — Review-only-Quellbindung, Ausführung, Bericht und Bedienung
+
+- **Initialstatus des späteren Detailtickets:** `todo`
+- **Risiko:** `high`
+- **Kind:** `feature`
+- **Depends on:** `AI6-014`, `AI6-021`, `AI6-024`, `AI6-039`
+- **Requirement-Refs:** `GIT-011`, `RUN-010`, `GIT-010`, `REV-002`, `REV-011`, `AGT-005`, `RUN-004`, `SEC-011`, `UI-004`
+- **Erwartete Module:** `Runs`, `Git`, `Reviews`, `HumanLoop`, `Shared`
+
+**Ziel**
+
+Serverseitig gebundene Reviewgegenstände in einen wegwerfbaren Review-Checkpoint normalisieren, die Review-Pipeline mit FakeAgent vollständig ausführen und den gebundenen Abschlussbericht samt Bedienung bereitstellen.
+
+**Deliverables**
+
+- Quellnormalisierung für verwalteten Branch, gebundene Commit-Range beziehungsweise Einzelcommit, durch den Worker importierten validierten Patch und vorhandenen AI6-Checkpoint in einen wegwerfbaren, gitmetadatenfreien Review-Checkpoint mit Tree-OID-/Diff-Hash-Bindung; freie Arbeitsverzeichnisse, freie Dateiauswahl und PR-URLs werden deterministisch abgelehnt.
+- Basisnachweis je Quelle gegen den im Approval gebundenen verifizierten Control-Stand; History-Rewrite und nicht verwandte Historie blockieren sichtbar.
+- Ausführung der freigegebenen deterministischen Checks und aller ausgewählten Reviewer-Slots seriell auf demselben Review-Checkpoint über die bestehenden Verträge aus AI6-021, AI6-023 und AI6-024.
+- Stufengerechte, redigierte und hashgebundene Kontextpakete als `run_artifacts` nach `REV-011`.
+- Gebundener Abschlussbericht als redigiertes, retentionpflichtiges `run_artifact` mit Run-, Ticketblob-, Checkpoint-, Slot-, Check-, Coverage-, Finding-, Dispositions- und Entscheidungsbindung; derselbe Berichtsvertrag ist für den Abschluss von Implementierungsläufen wiederverwendbar.
+- Bedienung im Panel: Review-only-Start mit Auswahl ausschließlich gebundener Gegenstände, Laufbeobachtung und Abschlussbestätigung; jede Wirkung läuft asynchron über Queue und Worker.
+- FakeAgent-End-to-End für Erfolg, Findings, Human Request, Limitüberschreitung, Cancel und Crash-Recovery des Review-only-Modus.
+
+**Akzeptanzvertrag**
+
+- Nur gebundene Quellen sind wählbar; jede Quelle wird unmittelbar vor Ausführung erneut verifiziert, und Drift blockiert sichtbar statt still weiterzulaufen.
+- Reviewer sehen ausschließlich den exportierten Review-Checkpoint ohne erreichbare Gitmetadaten; kein Providerprozess schreibt Code, Refs oder Ticketstatus.
+- Der Bericht ist eine aus Git- und SQLite-Autoritäten rekonstruierbare Projektion, keine Status- oder Ticketautorität; in die Ticketdatei wird kein Ausführungsledger geschrieben.
+- Wirksam blockierende Findings erscheinen vollständig im Bericht und verhindern den report-only Abschluss nicht.
+- Browserrequests starten weder Agenten noch Git noch Checks direkt.
+- Redaction und Retention gelten für Bericht und Kontextpakete wie für jedes andere Runartefakt.
+
+**Mindestens zu erzeugende Testfälle**
+
+- Quellmatrix Branch/Commit-Range/Patch/Checkpoint jeweils mit gültiger und ungültiger Basis sowie Drift zwischen Bindung und Ausführung.
+- Ablehnungstests für PR-URL, freies Arbeitsverzeichnis und freie Dateiliste.
+- Gitmetadaten-/Schreibschutz-Isolationstest des Review-Checkpoints.
+- Berichts-Golden-Test einschließlich Redaction, Retention und Bindungsfeldern.
+- Fake-E2E-Szenariomatrix einschließlich `manual_report`, `automatic_after_gates`, Cancel und Worker-Neustart.
+- Feature-/Autorisierungstests der Bedienung.
+
+**Nicht Teil dieses Tickets**
+
+- Fixturn aus Review-only-Ergebnissen im selben Lauf.
+- Echte Provideradapter.
+- Semantische Deduplizierung.
+
+### AI6-043 — Quellenabhängige advisory Finding-Verifikation
+
+- **Initialstatus des späteren Detailtickets:** `todo`
+- **Risiko:** `high`
+- **Kind:** `feature`
+- **Depends on:** `AI6-011`, `AI6-024`, `AI6-026`
+- **Requirement-Refs:** `REV-010`, `REV-003`, `REV-006`, `REV-011`, `RUN-006`, `AGT-002`, `HUM-001`
+- **Erwartete Module:** `Reviews`, `Runs`, `Agents`, `HumanLoop`
+
+**Ziel**
+
+Normalisierte Findings durch einen unabhängigen, quellenabhängig gewählten Verifierslot advisory prüfen lassen, ohne wirksame Dispositionen oder Auto-Unblock zu erzeugen.
+
+**Deliverables**
+
+- Verifier-Orchestrierungsschritt im bestehenden `RunOrchestrator`; providerunabhängig, kein zweiter Orchestrator, keine Orchestrierungslogik in Adaptern.
+- Quellenabhängige Slotwahl aus den im Approval-Snapshot erlaubten Profilen: nie dasselbe Provider-/Modellprofil wie die Findingquelle, nie der Implementierungs-/Fixslot desselben Stands; ohne verfügbares unabhängiges Profil entsteht ein Human Request statt einer Selbstverifikation.
+- Erweiterung der versionierten Schemafamilie aus AI6-016 um das Verifier-Resultatprofil mit Referenz auf genau ein Originalfinding beziehungsweise eine exakte Duplikatgruppe.
+- Verifier-Kontextpaket nach `REV-011` mit Finding, Quellen, Evidenz, relevantem Code, betroffenen Akzeptanzkriterien und passenden Checkausgaben.
+- Persistenz jedes Verifierergebnisses als weiteres unveränderliches `review_result` mit neuer Session je Lauf; Anzeige der Verifierevidenz in der Finding-UI aus AI6-024 ohne Mutation des Originals.
+- Verifikationsrundenlimit unter dem zentralen `RUN-006`-Vertrag; Erschöpfung führt in `review_limit`, Widerspruch und `inconclusive` eskalieren nach zentraler Policy an HumanLoop.
+- FakeAgent-Szenarien für bestätigt, widersprochen, `inconclusive` und ungültiges Schema.
+
+**Akzeptanzvertrag**
+
+- Ein Verifierergebnis verändert weder Originalfinding noch effektive Blockade; ein `must_fix` bleibt bis zu Fix oder autorisierter Disposition wirksam.
+- Die Unabhängigkeitsmatrix ist nachweisbar: Ein Grok-Finding wird nie durch Grok verifiziert, ein Implementierungsslot verifiziert nie den eigenen Stand.
+- Jede Verifikationsrunde liefert genau ein schema-validiertes, quellgebundenes Ergebnis; es gibt weder freie Debatte noch Mehrheitsentscheidung.
+- Widerspruch oder fehlende Evidenz erzeugt einen sichtbaren HumanLoop-Eintrag und niemals ein automatisches Entblocken.
+- Rundenlimits sind weder durch Retry noch durch Profilwechsel über das Servermaximum hinaus verbrauchbar.
+
+**Mindestens zu erzeugende Testfälle**
+
+- Slotwahl-/Unabhängigkeitsmatrix einschließlich fehlendem unabhängigem Profil.
+- Advisory-Negativtest: Eine Verifierempfehlung „nicht zutreffend“ entblockt kein fremdes `must_fix`.
+- Schema- und Referenzvalidierung positiv/negativ.
+- Grenz- und Eins-darüber-Test des Verifikationsrundenlimits samt `review_limit`-Resolver.
+- UI-Test der Verifierevidenz ohne Originalmutation.
+- HumanLoop-Eskalation bei Widerspruch und `inconclusive`.
+
+**Nicht Teil dieses Tickets**
+
+- Wirksame Finding-Dispositionen.
+- Echte Provideradapter.
+- Modell-zu-Modell-Challenge-Loops.
+
 ## 15.6 M5 – Finalisierung und vollständiger Fake-Workflow
 
 ### AI6-027 — Finalchecks, Publish-Kandidat und deterministische Provenienz
@@ -3069,7 +3260,7 @@ Den gesamten Workflow ohne Providerkosten reproduzierbar gegen Erfolgs-, Fehler-
 - **Risiko:** `high`
 - **Kind:** `feature`
 - **Depends on:** `AI6-011`, `AI6-015`, `AI6-016`, `AI6-032`
-- **Requirement-Refs:** `AGT-001`, `AGT-002`, `AGT-003`, `AGT-004`, `AGT-007`, `AGT-009`, `GIT-010`, `RUN-006`, `SEC-005`
+- **Requirement-Refs:** `AGT-001`, `AGT-002`, `AGT-003`, `AGT-004`, `AGT-007`, `AGT-009`, `AGT-010`, `GIT-010`, `RUN-006`, `SEC-005`
 - **Erwartete Module:** `Agents`
 
 **Ziel**
@@ -3082,6 +3273,9 @@ Codex über den gemeinsamen Adaptervertrag mit strukturiertem Output, Sessionfor
 - Start und Resume.
 - Modell-/Effort-Mapping aus Profil.
 - Strukturierte Ausgabe und Fehlernormalisierung.
+- Genau ein gepinnter Headless-Transport nach `AGT-010`: nicht-interaktiver `exec`-Modus mit JSONL-Ereignissen und schema-gebundener finaler Antwort, ephemerer Session ohne User-Config/-Rules sowie rollenabhängigem expliziten Sandboxprofil; Schreibrechte ausschließlich im wegwerfbaren Export für Implementierungs-/Fixturns, Reviews read-only. Die konkreten Flagformen sind Adapterdetails und werden je CLI-Version durch den Capability-Doctor nachgewiesen.
+- Rollen implementation und fix; zusätzlich quality_review ausschließlich für einen Slot, der weder Implementierung noch Fix desselben Stands ausgeführt hat — praktisch nur in Review-only-Läufen mit neuer Session.
+- Erfassung belastbar gemeldeter Token-/Kosten-/Nutzungswerte je Turn samt Quelle; fehlende Werte bleiben `unknown`.
 - Codex-spezifische native AGENTS-/Discoveryauflösung ausschließlich aus dem gebundenen read-only Instruction-Snapshot in der gitmetadatenfreien Tree-Sicht; Resume prüft Snapshot-/Sessionhash.
 - Codex startet mit versiegeltem serverseitigem Runtime-Profil und isoliertem Home; Repository-/Workspace-/Home-Config, MCP, Plugins, Skills, Hooks, Commands und sonstige Autoload-Helper bleiben aus, sofern sie nicht ausdrücklich serverseitig allowlisted und im freigegebenen Profilhash enthalten sind.
 - Auth wird ausschließlich als kurzlebige read-only Projektion des gewählten persistenten Credential-Stores eingebunden; der Adapter liest oder schreibt keinen übrigen persistenten Homeinhalt.
@@ -3168,27 +3362,28 @@ Claude-Modelle einschließlich aller serverseitig konfigurierten Profile, zum Be
 - **Initialstatus des späteren Detailtickets:** `todo`
 - **Risiko:** `high`
 - **Kind:** `feature`
-- **Depends on:** `AI6-003`, `AI6-005A`, `AI6-033`, `AI6-034`
-- **Requirement-Refs:** `AGT-002`, `AGT-007`, `OPS-003`, `SEC-005`
+- **Depends on:** `AI6-003`, `AI6-005A`, `AI6-033`, `AI6-041`, `AI6-042`
+- **Requirement-Refs:** `AGT-002`, `AGT-007`, `AGT-010`, `OPS-003`, `SEC-005`
 - **Erwartete Module:** `Agents`, `Shared`
 
 **Ziel**
 
-Andere Entwickler sicher durch Providerlogin, Profilprüfung und Adapterfreigabe führen.
+Andere Entwickler sicher durch Providerlogin, Profilprüfung und Adapterfreigabe für die erste Providerstufe führen.
 
 **Deliverables**
 
-- Interaktive CLI-Kommandos für Codex-/Claude-Login im Agent-Prozess.
+- Interaktive CLI-Kommandos für Codex-, Grok- und Copilot-Login im Agent-Prozess; das Claude-Onboarding wird bei Umsetzung von AI6-034 über denselben Vertrag ergänzt, ohne dass dieses Ticket darauf wartet.
 - Persistente, getrennte Provider-Credential-Stores außerhalb jedes Execution-Home sowie pro Session ein frisches versiegeltes Home mit minimaler read-only Authprojektion für genau ein Profil.
-- Capability-Synchronisierung und Profilstatus im Panel.
-- Version-Pinning und Re-Doctor nach Upgrade.
+- Capability-Synchronisierung und Profilstatus im Panel für alle Profile der ersten Providerstufe.
+- Version-Pinning je CLI und Re-Doctor nach Upgrade; der Doctor weist je gepinnter Version den `AGT-010`-Headless-Transport sowie die nachweisbaren Sandbox-, Tool- und Autodiscovery-Grenzen des jeweiligen Adapters nach und setzt andernfalls `unavailable` oder `degraded` statt eines stillen Fallbacks.
 - Negativtests auf Credential-Sichtbarkeit.
 
 **Akzeptanzvertrag**
 
 - Webprozess sieht keine Providercredentials.
 - Ein Profil ist nur auswählbar, wenn Adapter/Modell/Effort verifiziert sind.
-- Doctor unterscheidet unavailable, degraded und ready.
+- Doctor unterscheidet unavailable, degraded und ready; ein nicht nachweisbarer Headless-Transport oder eine nicht nachweisbare Sandbox-/Tool-/Autodiscovery-Grenze macht genau dieses Profil nicht startbar, ohne andere Profile zu blockieren.
+- Ein fehlendes oder nicht eingerichtetes Claude-Profil blockiert weder Onboarding noch Freigabe der drei V1-Profile.
 - Upgrade invalidiert alte Sicherheitsbestätigung.
 - Rotation und Logout invalidieren Authprojektionen, laufende Sessions und Capabilitystatus; Cache, History, Providerconfig oder Pluginzustand werden nicht aus dem Execution-Home in den Credential-Store zurückgeschrieben.
 
@@ -3204,6 +3399,111 @@ Andere Entwickler sicher durch Providerlogin, Profilprüfung und Adapterfreigabe
 
 - Automatische Beschaffung von Abos/API-Keys.
 - Credentialanzeige im Panel.
+
+### AI6-041 — Grok-CLI-Adapter
+
+- **Initialstatus des späteren Detailtickets:** `todo`
+- **Risiko:** `high`
+- **Kind:** `feature`
+- **Depends on:** `AI6-011`, `AI6-015`, `AI6-016`, `AI6-032`
+- **Requirement-Refs:** `AGT-001`, `AGT-002`, `AGT-003`, `AGT-004`, `AGT-007`, `AGT-009`, `AGT-010`, `GIT-010`, `RUN-006`, `SEC-005`
+- **Erwartete Module:** `Agents`
+
+**Ziel**
+
+Die Grok-Build-CLI als unabhängigen Review- und Verifier-Adapter über den gemeinsamen Adaptervertrag anbinden.
+
+**Deliverables**
+
+- Capability-Erkennung.
+- Start und Sessionverwaltung je Slot.
+- Modell-/Effort-Mapping aus Profil.
+- Strukturierte Ausgabe und Fehlernormalisierung.
+- Genau ein gepinnter Headless-Transport nach `AGT-010`: nicht-interaktiver Promptmodus mit Streaming-JSON-Ereignissen, deaktiviertem Auto-Update und begrenzten Turns; für Review und Verifikation ein nachgewiesenes read-only Sandboxprofil und ausschließlich über die Toolallowlist freigegebene Lesetools; Subagenten, Memory und Websuche sind deaktiviert. Die konkreten Flagformen sind Adapterdetails und werden je CLI-Version durch den Capability-Doctor nachgewiesen; ACP bleibt eine spätere, eigenständig zu prüfende Transportoption.
+- Rollen quality_review und finding_verification; keine Implementierungs- oder Fixrolle in der ersten Providerstufe.
+- Grok-spezifische native Discoveryauflösung ausschließlich aus dem gebundenen read-only Instruction-Snapshot in der gitmetadatenfreien Tree-Sicht; versiegeltes serverseitiges Runtime-Profil und isoliertes Home wie bei den übrigen Adaptern.
+- Auth ausschließlich als kurzlebige read-only Projektion des gewählten persistenten Credential-Stores.
+- Providerseitige Voraufrufprüfung über den gemeinsamen Limitvertrag; Überschreitung startet weder Prozess noch partiellen stdin-Transfer.
+- Erfassung belastbar gemeldeter Token-/Kosten-/Nutzungswerte je Turn samt Quelle; fehlende Werte bleiben `unknown`.
+
+**Akzeptanzvertrag**
+
+- Keine freien CLI-Flags aus Projekt oder UI.
+- Der Adapter extrahiert die finale Providerantwort aus dem Streaming-JSON und validiert sie gegen den zentralen `ai6.quality-review.v1`- beziehungsweise Verifier-Vertrag; das Grok-Eventschema wird nie zweiter Fachvertrag, und eine nicht extrahierbare oder ungültige Antwort ist ein kontrollierter Fehler.
+- Ein nicht nachweisbares read-only Sandbox-/Toolprofil, nicht abschaltbare Autodiscovery oder nicht abschaltbare Subagenten-/Memory-/Websuchefunktionen verhindern den Start fail closed.
+- Host-, Parent-, Home- oder zur Laufzeit geänderte Workspace-Instruktionen werden nicht zusätzlich entdeckt; nicht freigegebene MCP-/Plugin-/Skill-/Hook-/Command-/Helpermechanismen bleiben aus.
+- Fremdprofilcredentials, persistentes Providerhome, Cache und History sind unerreichbar; Rotation oder Logout invalidiert die Sessionprojektion.
+- Adapter und Voraufrufprüfung verwenden die zentral gezählten Snapshot-/Promptbytes und können kein Servermaximum umgehen.
+
+**Mindestens zu erzeugende Testfälle**
+
+- Fake-Grok-Binary-Contracttests einschließlich Streaming-JSON-Extraktion, verstümmeltem Stream und finaler Antwort.
+- Timeout/Exitcode/invalid-json.
+- Discovery-Negativtests für Host/Parent/Home, Workspace-Config, MCP, Plugins, Skills, Hooks, Commands, Subagenten, Memory, Websuche, Snapshotdrift und erreichbare `.git`-Metadaten.
+- Authprojektions-Negativtests für Fremdprofil, Persistenz-/Cache-/Historyleck, Schreibversuch und Rotation/Logout.
+- Grenz-/Eins-darüber-Tests für Instruktions-/Promptinput-Maxima ohne Prozessstart.
+- Optionaler echter Smoke-Test hinter explizitem Flag.
+
+**Nicht Teil dieses Tickets**
+
+- Direkte xAI-API.
+- ACP-Langzeitprozesse.
+- Verifier-Orchestrierung und Slotwahl.
+- Implementierungs- oder Fixturns.
+
+### AI6-042 — GitHub-Copilot-CLI-Adapter
+
+- **Initialstatus des späteren Detailtickets:** `todo`
+- **Risiko:** `high`
+- **Kind:** `feature`
+- **Depends on:** `AI6-011`, `AI6-015`, `AI6-016`, `AI6-032`
+- **Requirement-Refs:** `AGT-001`, `AGT-002`, `AGT-003`, `AGT-004`, `AGT-007`, `AGT-009`, `AGT-010`, `GIT-010`, `RUN-006`, `SEC-005`
+- **Erwartete Module:** `Agents`
+
+**Ziel**
+
+Die GitHub-Copilot-CLI als zweiten unabhängigen Review-Adapter über den gemeinsamen Adaptervertrag anbinden, ohne GitHub-Mutationen oder PR-Connector.
+
+**Deliverables**
+
+- Capability-Erkennung.
+- Start und Sessionverwaltung je Slot.
+- Modell-/Effort-Mapping aus Profil.
+- Strukturierte Ausgabe und Fehlernormalisierung.
+- Genau ein gepinnter Headless-Transport nach `AGT-010`: dokumentierter programmatischer Promptmodus ohne Rückfragen und ohne Remote-Export mit finaler Textantwort, aus der der Adapter das AI6-JSON extrahiert und validiert; ein nativer maschinenlesbarer Ausgabemodus wird erst verwendet, wenn der Capability-Doctor ihn für die gepinnte Version nachweist. Der Copilot-SDK-/Servermodus ist kein V1-Transport.
+- Frisches versiegeltes `COPILOT_HOME` je Session als nachweisbare Konfigurationsgrenze ohne MCP-Server-, Plugin-, Skill- oder Hook-Konfiguration; repositorygetriebene Extensions, Hooks und Workspace-MCP bleiben aus.
+- Toolgrenzen ausschließlich über die Tool-Allow-/Excludelist: Shell, Schreibzugriffe, Delegation, Memory, URL-Zugriff und MCP sind für Reviews ausgeschlossen; ein eingebauter GitHub-MCP-Server begründet keine Ausnahme.
+- Rolle quality_review; eine Verwendung als quellenabhängiger advisory Verifierslot für fremde Findings ist über dasselbe Profil nur zulässig, wenn die Serverkonfiguration sie ausdrücklich freigibt.
+- Auth ausschließlich als kurzlebige read-only Projektion des gewählten persistenten Credential-Stores.
+- Providerseitige Voraufrufprüfung über den gemeinsamen Limitvertrag; Überschreitung startet weder Prozess noch partiellen stdin-Transfer.
+- Erfassung belastbar gemeldeter Nutzungswerte je Turn samt Quelle; fehlende Werte bleiben `unknown`.
+
+**Akzeptanzvertrag**
+
+- Keine freien CLI-Flags aus Projekt oder UI.
+- Die finale Textantwort wird gegen den zentralen `ai6.quality-review.v1`-Vertrag validiert; eine fehlende, mehrdeutige oder ungültige eingebettete JSON-Antwort ist ein kontrollierter `invalid_json`-Fehler und niemals ein impliziter Erfolg.
+- Copilot mutiert keine Pull Requests, Issues, Commits, Branches oder Remotes; es existiert kein GitHub-PR-Review-Connector.
+- Mangels dokumentiertem Sandboxmodus sind die Toolallowlist und die Container-/Dateisystemgrenze die maßgeblichen Kontrollen; weist die gepinnte CLI-Version das versiegelte `COPILOT_HOME` oder die Toolgrenzen nicht nach, bleibt das Profil nicht startbar.
+- Host-, Parent-, Home- oder zur Laufzeit geänderte Workspace-Instruktionen werden nicht zusätzlich entdeckt; nicht freigegebene MCP-/Plugin-/Skill-/Hook-/Command-/Helpermechanismen bleiben aus.
+- Fremdprofilcredentials, persistentes Providerhome, Cache und History sind unerreichbar; Rotation oder Logout invalidiert die Sessionprojektion.
+- Adapter und Voraufrufprüfung verwenden die zentral gezählten Snapshot-/Promptbytes und können kein Servermaximum umgehen.
+
+**Mindestens zu erzeugende Testfälle**
+
+- Fake-Copilot-Binary-Contracttests für Textantwort mit gültigem, fehlendem, mehrfachem und ungültigem eingebettetem JSON.
+- Timeout/Exitcode/Abbruch.
+- `COPILOT_HOME`-Sealing- und Discovery-Negativtests für Host/Parent/Home, Workspace-Config, Extensions, MCP, Plugins, Skills, Hooks und erreichbare `.git`-Metadaten.
+- Toolgrenzen-Negativtests für Shell, Schreibzugriff, Delegation, Memory, URL-Zugriff und MCP.
+- Authprojektions-Negativtests für Fremdprofil, Persistenz-/Cache-/Historyleck, Schreibversuch und Rotation/Logout.
+- Grenz-/Eins-darüber-Tests für Instruktions-/Promptinput-Maxima ohne Prozessstart.
+- Optionaler echter Smoke-Test hinter explizitem Flag.
+
+**Nicht Teil dieses Tickets**
+
+- GitHub-PR-Review-Connector oder automatische GitHub-Mutationen.
+- Copilot-SDK-/Servermodus.
+- Implementierungs- oder Fixturns.
+- Verifier-Orchestrierung und Slotwahl.
 
 ## 15.8 M7 – Betrieb, Migration und Pilot
 
@@ -3304,19 +3604,20 @@ Bestehende Ticketdateien und Promptinhalte verlustfrei in die neue Git-native St
 - **Risiko:** `high`
 - **Kind:** `spike`
 - **Depends on:** `AI6-032`, `AI6-035`, `AI6-036`, `AI6-037`
-- **Requirement-Refs:** `PROD-001`, `AGT-001`, `REV-001`, `HUM-002`, `RUN-009`, `OPS-005`
+- **Requirement-Refs:** `PROD-001`, `AGT-001`, `RUN-010`, `REV-001`, `HUM-002`, `RUN-009`, `OPS-005`
 - **Erwartete Module:** `Auth`, `Projects`, `Tickets`, `Runs`, `Agents`, `Reviews`, `HumanLoop`, `Git`, `Checks`, `Prompts`, `Shared`
 
 **Ziel**
 
-AI6 mit einem realen, anspruchsvollen Git-Ticket und echten Codex-/Claude-Sitzungen unter kontrollierten Bedingungen abnehmen.
+AI6 mit einem realen, anspruchsvollen Git-Ticket und echten CLI-Sitzungen der ersten Providerstufe unter kontrollierten Bedingungen abnehmen.
 
 **Deliverables**
 
 - Migriertes M169 als Pilot.
-- Codex- oder konfiguriertes GPT-Profil für Implementierung.
-- Mindestens ein Claude-Reviewer und optional zweiter Reviewer.
-- Realer Review-/Fix-/Security-/Pushablauf auf Testbranch.
+- Codex-Profil für Implementierung und Fixturns.
+- Mindestens zwei unabhängige Qualitätsreviewer über die Grok-Build-CLI und die GitHub-Copilot-CLI; optional zusätzlich ein Claude-Reviewer, sofern AI6-034 umgesetzt ist.
+- Zuerst ein realer Review-only-Pilotlauf auf einem gebundenen Stand mit manuell bestätigtem report-only Abschluss und Messung von Findingqualität, Laufzeit und Providerfehlern; erst danach der vollständige Implementierungsablauf.
+- Realer Review-/Verifikations-/Fix-/Security-/Pushablauf auf Testbranch.
 - Vor Candidate an letzten gültigen Checkpoint, prospektive Tree-OID und Diff-Hash gebundene autorisierte Evidenz für jedes M169-spezifische `MG-`-/`EXT-`-Gate.
 - Nach Candidate getrennte Prüfung des Security-Ergebnisses über `security_gate`; sie ist keine vorgezogene `MG-`-/`EXT-`-Evidenz und ein erforderlicher Human Override bleibt Candidate-gebunden.
 - Nach erfolgreichem Pilotabschluss Abschaltung beziehungsweise Entfernung des Legacy-Lesers, erneuter Read-Model-Aufbau und vollständige V1-Profilvalidierung aller migrierten Pilotickets.
@@ -3368,7 +3669,7 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `TKT-002` | `AI6-007` |
 | `TKT-003` | `AI6-007`, `AI6-037` |
 | `TKT-004` | `AI6-007` |
-| `TKT-005` | `AI6-009`, `AI6-029`, `AI6-037` |
+| `TKT-005` | `AI6-009`, `AI6-029`, `AI6-037`, `AI6-039` |
 | `TKT-006` | `AI6-009` |
 | `TKT-007` | `AI6-010`, `AI6-020`, `AI6-022` |
 | `TKT-008` | `AI6-007`, `AI6-008`, `AI6-030` |
@@ -3382,40 +3683,45 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `GIT-005` | `AI6-027`, `AI6-029` |
 | `GIT-006` | `AI6-027`, `AI6-029` |
 | `GIT-007` | `AI6-012`, `AI6-029` |
-| `GIT-008` | `AI6-009`, `AI6-013`, `AI6-029` |
+| `GIT-008` | `AI6-009`, `AI6-013`, `AI6-029`, `AI6-039` |
 | `GIT-009` | `AI6-006C`, `AI6-006D`, `AI6-006E`, `AI6-006F`, `AI6-008`, `AI6-009` |
-| `GIT-010` | `AI6-014`, `AI6-015`, `AI6-019`, `AI6-021`, `AI6-023`, `AI6-028`, `AI6-032`, `AI6-033`, `AI6-034` |
+| `GIT-010` | `AI6-014`, `AI6-015`, `AI6-019`, `AI6-021`, `AI6-023`, `AI6-028`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-040`, `AI6-041`, `AI6-042` |
+| `GIT-011` | `AI6-040` |
 | `CFG-001` | `AI6-003`, `AI6-011` |
 | `CFG-002` | `AI6-010`, `AI6-020` |
 | `CFG-003` | `AI6-010`, `AI6-021` |
-| `AGT-001` | `AI6-011`, `AI6-016`, `AI6-033`, `AI6-034`, `AI6-038` |
-| `AGT-002` | `AI6-011`, `AI6-012`, `AI6-033`, `AI6-034`, `AI6-035` |
-| `AGT-003` | `AI6-019`, `AI6-023`, `AI6-033`, `AI6-034` |
-| `AGT-004` | `AI6-016`, `AI6-019`, `AI6-033`, `AI6-034` |
-| `AGT-005` | `AI6-016`, `AI6-032` |
+| `AGT-001` | `AI6-011`, `AI6-016`, `AI6-033`, `AI6-034`, `AI6-038`, `AI6-041`, `AI6-042` |
+| `AGT-002` | `AI6-011`, `AI6-012`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-043` |
+| `AGT-003` | `AI6-019`, `AI6-023`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042` |
+| `AGT-004` | `AI6-016`, `AI6-019`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042` |
+| `AGT-005` | `AI6-016`, `AI6-032`, `AI6-040` |
 | `AGT-006` | `AI6-006A`, `AI6-015` |
-| `AGT-007` | `AI6-015`, `AI6-021`, `AI6-033`, `AI6-034`, `AI6-035` |
+| `AGT-007` | `AI6-015`, `AI6-021`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042` |
 | `AGT-008` | `AI6-011`, `AI6-012`, `AI6-016`, `AI6-019` |
-| `AGT-009` | `AI6-011`, `AI6-012`, `AI6-015`, `AI6-016`, `AI6-019`, `AI6-020`, `AI6-023`, `AI6-028`, `AI6-032`, `AI6-033`, `AI6-034` |
-| `RUN-001` | `AI6-013`, `AI6-017` |
-| `RUN-002` | `AI6-012`, `AI6-013` |
+| `AGT-009` | `AI6-011`, `AI6-012`, `AI6-015`, `AI6-016`, `AI6-019`, `AI6-020`, `AI6-023`, `AI6-028`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042` |
+| `AGT-010` | `AI6-033`, `AI6-035`, `AI6-041`, `AI6-042` |
+| `RUN-001` | `AI6-013`, `AI6-017`, `AI6-039` |
+| `RUN-002` | `AI6-012`, `AI6-013`, `AI6-039` |
 | `RUN-003` | `AI6-017`, `AI6-019`, `AI6-021`, `AI6-022`, `AI6-025`, `AI6-027` |
-| `RUN-004` | `AI6-006C`, `AI6-009`, `AI6-015` |
-| `RUN-005` | `AI6-006C`, `AI6-013`, `AI6-017`, `AI6-029`, `AI6-030`, `AI6-032` |
-| `RUN-006` | `AI6-011`, `AI6-012`, `AI6-015`, `AI6-019`, `AI6-020`, `AI6-026`, `AI6-032`, `AI6-033`, `AI6-034` |
+| `RUN-004` | `AI6-006C`, `AI6-009`, `AI6-015`, `AI6-040` |
+| `RUN-005` | `AI6-006C`, `AI6-013`, `AI6-017`, `AI6-029`, `AI6-030`, `AI6-032`, `AI6-039` |
+| `RUN-006` | `AI6-011`, `AI6-012`, `AI6-015`, `AI6-019`, `AI6-020`, `AI6-026`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042`, `AI6-043` |
 | `RUN-007` | `AI6-013`, `AI6-020`, `AI6-022`, `AI6-027` |
 | `RUN-008` | `AI6-012`, `AI6-030` |
 | `RUN-009` | `AI6-022`, `AI6-027`, `AI6-029`, `AI6-032`, `AI6-038` |
+| `RUN-010` | `AI6-038`, `AI6-039`, `AI6-040` |
 | `REV-001` | `AI6-012`, `AI6-023`, `AI6-038` |
-| `REV-002` | `AI6-023`, `AI6-024` |
-| `REV-003` | `AI6-016`, `AI6-024` |
+| `REV-002` | `AI6-023`, `AI6-024`, `AI6-040` |
+| `REV-003` | `AI6-016`, `AI6-024`, `AI6-043` |
 | `REV-004` | `AI6-024` |
 | `REV-005` | `AI6-020`, `AI6-025`, `AI6-032` |
-| `REV-006` | `AI6-024`, `AI6-025` |
+| `REV-006` | `AI6-024`, `AI6-025`, `AI6-043` |
 | `REV-007` | `AI6-026` |
 | `REV-008` | `AI6-027`, `AI6-028` |
 | `REV-009` | `AI6-024` |
-| `HUM-001` | `AI6-016`, `AI6-018`, `AI6-028` |
+| `REV-010` | `AI6-043` |
+| `REV-011` | `AI6-011`, `AI6-012`, `AI6-040`, `AI6-043` |
+| `HUM-001` | `AI6-016`, `AI6-018`, `AI6-028`, `AI6-043` |
 | `HUM-002` | `AI6-018`, `AI6-028`, `AI6-038` |
 | `HUM-003` | `AI6-005A`, `AI6-018` |
 | `HUM-004` | `AI6-018`, `AI6-020`, `AI6-032` |
@@ -3423,20 +3729,20 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `UI-001` | `AI6-008`, `AI6-018`, `AI6-031` |
 | `UI-002` | `AI6-008` |
 | `UI-003` | `AI6-012` |
-| `UI-004` | `AI6-017`, `AI6-019`, `AI6-024`, `AI6-031` |
+| `UI-004` | `AI6-017`, `AI6-019`, `AI6-024`, `AI6-031`, `AI6-040` |
 | `UI-005` | `AI6-018`, `AI6-026` |
 | `UI-006` | `AI6-030` |
 | `SEC-001` | `AI6-003` |
 | `SEC-002` | `AI6-004`, `AI6-005A`, `AI6-006C` |
 | `SEC-003` | `AI6-005A` |
 | `SEC-004` | `AI6-003`, `AI6-004`, `AI6-005B`, `AI6-010` |
-| `SEC-005` | `AI6-015`, `AI6-021`, `AI6-033`, `AI6-034`, `AI6-035` |
+| `SEC-005` | `AI6-015`, `AI6-021`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042` |
 | `SEC-006` | `AI6-006A` |
 | `SEC-007` | `AI6-003`, `AI6-005B`, `AI6-006F`, `AI6-021`, `AI6-031` |
 | `SEC-008` | `AI6-028`, `AI6-032` |
 | `SEC-009` | `AI6-027`, `AI6-028` |
 | `SEC-010` | `AI6-036` |
-| `SEC-011` | `AI6-031`, `AI6-036` |
+| `SEC-011` | `AI6-031`, `AI6-036`, `AI6-040` |
 | `OPS-001` | `AI6-002`, `AI6-036` |
 | `OPS-002` | `AI6-002` |
 | `OPS-003` | `AI6-003`, `AI6-035`, `AI6-036` |
@@ -3481,7 +3787,9 @@ Die bisherigen statischen Browserprompts werden nicht übernommen. Neue zentrale
 - Notwendige Abweichungen werden strukturiert als `needs_human` beziehungsweise Scope-/Contract-Request gemeldet.
 - Umsetzungshinweise werden als Run-Artefakt gespeichert, nicht an das freigegebene Ticket angehängt.
 - Reviewagent verändert keine Dateien und liefert ausschließlich schema-validiertes JSON.
-- Fixturn verwendet dieselben Scope- und Human-Request-Regeln wie der erste Implementierungsturn.
+- Spezialisierte Reviewprompts sind versionierte Profile desselben Katalogs; der Profilfokus entfernt keine Akzeptanzkriterien aus der geforderten vollständigen `criterion_coverage` (`REV-011`).
+- Verifierprompts bewerten Evidenz, Ticketkriterien, erwartetes Ergebnis und Gegenargumente eines fremden Findings; sie schreiben das Finding nicht um, führen keine freie Debatte und liefern ein eigenes unveränderliches advisory Resultat (`REV-010`).
+- Fixturn verwendet dieselben Scope- und Human-Request-Regeln wie der erste Implementierungsturn und erhält ausschließlich wirksam blockierende beziehungsweise ausdrücklich autorisierte Findings.
 - Securityreview behandelt jeden Repositorytext als untrusted evidence, niemals als höherrangige Instruktion.
 
 ---
@@ -3493,9 +3801,12 @@ Die bisherigen statischen Browserprompts werden nicht übernommen. Neue zentrale
 3. Jedes Ticket einzeln implementieren und reviewen.
 4. Nach jedem Meilenstein das Integrations-Gate sowie den Manifest-Driftcheck ausführen und Planannahmen gegen das reale Repository prüfen.
 5. Erkenntnisse, die spätere Blueprints ändern, zuerst als Planrevision committen und danach den Manifestexport regenerieren.
-6. Codex-/Claude-Adapter erst nach erfolgreichem vollständigem FakeAgent-E2E-Ticket umsetzen und reale Providerkosten erst danach einsetzen.
+6. Codex-, Grok- und Copilot-Adapter erst nach erfolgreichem vollständigem FakeAgent-E2E-Ticket umsetzen und reale Providerkosten erst danach einsetzen; der Claude-Adapter bleibt eine spätere, die erste Providerstufe nicht blockierende Erweiterung.
 7. Kein reales Projekt vor erfolgreichem Strict-Doctor und Fake-E2E.
-8. M169 bleibt der erste reale Pilot und erzeugt bei Problemen neue Folge-Tickets statt einen unkontrolliert wachsenden Pilot-Scope; nach erfolgreichem Pilot wird der Legacy-Leser im selben Release abgeschaltet und V1 erneut validiert.
+8. Reale Providernutzung beginnt mit Review-only-Läufen und manuell bestätigtem report-only Abschluss; Findingqualität, False Positives, Laufzeit, Kosten und Providerfehler werden dabei gemessen.
+9. Erst danach werden quellenabhängige Verifikation und autorisierte Codex-Fixturns mit vollständigen Re-Reviews aktiviert.
+10. `automatic_after_gates` wird erst nach belastbarer Pilotmessung und nur dort zugelassen, wo die serverseitige Risikopolicy nicht auf `manual` verengt; ein optionaler finaler Review wird erst danach gezielt zugeschaltet.
+11. M169 bleibt der erste reale Pilot und erzeugt bei Problemen neue Folge-Tickets statt einen unkontrolliert wachsenden Pilot-Scope; nach erfolgreichem Pilot wird der Legacy-Leser im selben Release abgeschaltet und V1 erneut validiert.
 
 ---
 
@@ -3510,7 +3821,9 @@ Die folgenden Punkte sind nicht blockierend; der Plan setzt diese Defaults:
 | Abhängigkeit erfüllt | standardmäßig nur `done` |
 | Ready/Queue | Approval setzt `todo → ready`; nicht erfüllte Abhängigkeiten erlauben Queueing, blockieren aber Claim/Start |
 | Auto-Start | für gültig freigegebene Queue-Tickets aktiv; projektweise abschaltbar und vor jedem Claim vollständig neu bewertet |
-| Pushmodus | `manual`; `automatic_after_gates` optional |
+| Pushmodus | `manual`; `automatic_after_gates` optional; Risikoregeln verengen nur auf `manual` |
+| Review-only-Abschlussmodus | `manual` (`wait_reason=manual_report`); `automatic_after_gates` sinngemäß optional |
+| Review-only-Eingaben | ausschließlich gebundene Quellen nach `GIT-011`; PR-URL-Unterstützung ausdrücklich erst später über gebundene Commit-Ranges |
 | Ticketvalidierungsprofil | `generic_v1` für fremde Projekte; dieses AI6-Repository verwendet explizit `ai6_detail_v1` |
 | Reviewerstrategie | alle ausgewählten Reviewer bei jedem neuen Checkpoint |
 | Reviewerparallelität | seriell |
@@ -3519,14 +3832,21 @@ Die folgenden Punkte sind nicht blockierend; der Plan setzt diese Defaults:
 | Queue | Laravel Database Queue |
 | Frontend | Blade + Livewire + Alpine |
 | SecurityProfile | strict |
+| Erste Providerstufe | `codex_cli` (implementation, fix, eingeschränkt quality_review), `grok_cli` (quality_review, finding_verification), `github_copilot_cli` (quality_review), `fake`; Claude folgt später über `AI6-034`, ohne V1 zu blockieren |
 | Implementierung | Profil `codex-gpt-5.6-terra`, Aufwand `medium` |
-| Review | Profil `claude-opus-5`, Aufwand `provider_default` |
+| Review | zwei unabhängige Slots der ersten Providerstufe, etwa `grok-cli-review` und `copilot-cli-review`; ein Claude-Profil wie `claude-opus-5` bleibt nach Umsetzung von `AI6-034` zulässig |
+| Verifier | advisory only, quellenabhängig: Grok für Copilot-/zulässige Codex-Findings; Grok-Findings an einen unabhängigen Copilot-/Codex-Slot oder HumanLoop; ohne unabhängiges Profil Human Request |
+| Finaler Review | deaktiviert bis nach dem Pilot; danach optionaler zusätzlicher Reviewer-Slot bei Risiko-, Release- oder Human-Triggern, kein fest verdrahteter Modellname |
+| Semantische Finding-Deduplizierung | nicht im MVP; ausschließlich exakte deterministische Duplikatgruppen |
+| Token-/Kostenwerte | nur aus belastbarer CLI-/Providerquelle; fehlende Werte explizit `unknown`, nie geschätzt |
 | Login-E-Mail-Bestätigung | aktiv |
 | LLM-Securityreview | im strict-Profil aktiv |
 | Direkte Provider-APIs | nicht im MVP |
 | Pull Request / Merge | manuell außerhalb des MVP |
 
 Eine Abweichung wird über Config vorgenommen, sofern der entsprechende Vertrag dies erlaubt; andernfalls benötigt sie eine neue Planrevision.
+
+Explizit offen bleiben bis zur Detailableitung von `AI6-035` beziehungsweise bis zum Pilot: die konkret gepinnten CLI-Versionen, Modelle und Effortwerte je Providerprofil samt Re-Doctor-Zyklus; die exakten gepinnten Headless-Flagformen und finalen Ergebnisextraktoren je CLI-Version; ob eine gepinnte Copilot-Version einen nativen maschinenlesbaren Ausgabemodus nachweist oder die textbasierte finale Antwort der V1-Vertrag bleibt; die Kriterien, unter denen ACP (Grok) oder ein SDK-/Servermodus (Copilot) später als eigener Transport geprüft würde; die konkrete Authentifizierungsform und der minimale Credential-Store je CLI im `agent`-Prozess; welche Provider belastbare Token-/Kostenwerte liefern; Kostenbudgets je Ticket oberhalb der `RUN-006`-Limits; sowie die Qualitätsmetriken-Auswertung (Bestätigungsraten, False Positives, Final-Review-Mehrwert), die nach dem Pilot separat geschnitten wird.
 
 ---
 
@@ -3540,7 +3860,9 @@ Der MVP ist erreicht, wenn:
 - Browser/App sämtliche Managed-Git-Zugriffe über asynchrone Control Operations und blobgebundene rekonstruierbare Read Models durchführen;
 - mehrere Reviewmodelle mit jeweils eigenem Aufwand auswählbar sind;
 - FakeAgent alle Erfolgs-, Frage-, Scope-, Contract-Amendment-, Fix-, Ressourcenlimit-, Wartestatus-, Gate-, Security- und Recoverypfade reproduzierbar abdeckt;
-- Codex und Claude über denselben Adaptervertrag laufen;
+- ein ticket- und approvalgebundener Review-only-Lauf einen gebundenen Stand ohne Push prüft und über die report-only Abschluss-Saga in einem gebundenen Abschlussbericht endet;
+- Codex, Grok und Copilot über denselben Adaptervertrag mit je genau einem doctor-nachgewiesenen Headless-Transport laufen; Claude bleibt optional über `AI6-034`;
+- Findings quellenabhängig advisory verifiziert werden können, ohne dass ein Verifier ein blockierendes Finding aufhebt;
 - ein Agenten-Human-Request eine E-Mail erzeugt und mobil im Panel beantwortet wird;
 - alle Reviewer denselben Checkpoint prüfen und Codeänderungen eine vollständige Re-Review-Runde erzwingen;
 - Finalchecks, Candidate, optionaler Securityreview, Commit und Push tree- und provenancegebunden sind;
@@ -3556,4 +3878,4 @@ Der MVP ist erreicht, wenn:
 
 ## 21. Kurzbegründung der Ticketanzahl
 
-44 Tickets sind für den Funktionsumfang bewusst kleiner als die bisherigen zehn Pakete, aber keine künstlichen Mikrotickets. Jeder Blueprint bildet eine reviewbare Grenze: Datenvertrag, vertikaler Benutzerfluss oder sicherheitsrelevante technische Naht. Ein Ticket darf während der Detailerzeugung weiter gesplittet werden, aber nur über eine explizite Planrevision; ein stilles Zusammenlegen mehrerer Blueprints ist nicht zulässig.
+49 Tickets sind für den Funktionsumfang bewusst kleiner als die bisherigen zehn Pakete, aber keine künstlichen Mikrotickets. Jeder Blueprint bildet eine reviewbare Grenze: Datenvertrag, vertikaler Benutzerfluss oder sicherheitsrelevante technische Naht. Die fünf mit V1.7.0 ergänzten Blueprints folgen demselben Schnitt: zwei für den Review-only-Modus (Statusvertrag getrennt von Quellbindung und Bedienung), zwei für die neuen Provideradapter (je CLI ein eigenständig testbarer Adapter) und einer für die providerunabhängige Verifier-Orchestrierung. Ein Ticket darf während der Detailerzeugung weiter gesplittet werden, aber nur über eine explizite Planrevision; ein stilles Zusammenlegen mehrerer Blueprints ist nicht zulässig.
