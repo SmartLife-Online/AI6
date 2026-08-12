@@ -39,6 +39,7 @@
     </main>
 
     @isset($slot)
+        <script src="{{ asset('assets/ai6-livewire-progress-guard.js') }}"></script>
         @livewireScripts
     @endisset
 </body>

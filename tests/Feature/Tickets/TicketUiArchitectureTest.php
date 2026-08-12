@@ -5,6 +5,7 @@ namespace Tests\Feature\Tickets;
 use App\AI6\Git\Actions\QueueTicketReadModelRefresh;
 use App\AI6\Git\ControlOperationState;
 use App\AI6\Git\ProjectOperationLease;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -162,10 +163,20 @@ final class TicketUiArchitectureTest extends TicketUiTestCase
             );
             DB::table('jobs')->delete();
 
+            $refreshQueries = [];
+            DB::listen(static function (QueryExecuted $query) use (&$refreshQueries): void {
+                if (str_contains($query->sql, 'ranked_ticket_refresh_operations')) {
+                    $refreshQueries[] = strtolower($query->sql);
+                }
+            });
+
             $list = $this->actingAs($administrator)->get(route('projects.tickets.index', $project));
             $list->assertOk();
             $list->assertSee('Auftrag läuft');
             $list->assertSee('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+            self::assertNotSame([], $refreshQueries);
+            self::assertStringContainsString('row_number() over', $refreshQueries[0]);
+            self::assertStringContainsString('"refresh_rank" = ?', $refreshQueries[0]);
         } finally {
             Date::setTestNow();
         }

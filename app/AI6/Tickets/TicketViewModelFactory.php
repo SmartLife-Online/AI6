@@ -10,7 +10,6 @@ use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Projects\TicketDocumentState;
 use App\AI6\Projects\TicketReadModelFreshness;
 use App\AI6\Projects\TicketReadModelUsePolicy;
-use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 
 final readonly class TicketViewModelFactory
@@ -180,55 +179,56 @@ final readonly class TicketViewModelFactory
      */
     private function latestRefreshOperationsByPath(Project $project, ?array $paths = null): array
     {
-        $query = ControlOperation::query()
+        $pathExpression = "json_extract(operation_parameters_jcs, '$.relative_path')";
+        $terminalStates = [
+            ControlOperationState::COMPLETED->value,
+            ControlOperationState::FAILED->value,
+            ControlOperationState::ABANDONED->value,
+        ];
+        $ranked = ControlOperation::query()
             ->where('project_id', $project->getKey())
             ->where('operation_type', ControlOperationType::TICKET_REFRESH)
-            ->latest('created_at')
-            ->latest('id');
+            ->select([
+                'id',
+                'project_id',
+                'operation_type',
+                'state',
+                'phase',
+                'created_at',
+                DB::raw($pathExpression.' as refresh_relative_path'),
+            ])
+            ->selectRaw(
+                "ROW_NUMBER() OVER (PARTITION BY {$pathExpression} ORDER BY created_at DESC, CASE WHEN state IN (?, ?, ?) THEN 1 ELSE 0 END, id DESC) as refresh_rank",
+                $terminalStates,
+            );
 
         if ($paths !== null) {
-            $query->whereIn(
-                DB::raw("json_extract(operation_parameters_jcs, '$.relative_path')"),
-                $paths,
-            );
+            $ranked->whereIn(DB::raw($pathExpression), $paths);
         }
 
-        $operations = $query->get([
-            'id',
-            'project_id',
-            'operation_type',
-            'state',
-            'phase',
-            'created_at',
-            DB::raw("json_extract(operation_parameters_jcs, '$.relative_path') as refresh_relative_path"),
-        ]);
+        $rows = DB::query()
+            ->fromSub($ranked, 'ranked_ticket_refresh_operations')
+            ->where('refresh_rank', 1)
+            ->get([
+                'id',
+                'project_id',
+                'operation_type',
+                'state',
+                'phase',
+                'created_at',
+                'refresh_relative_path',
+            ]);
         $byPath = [];
 
-        foreach ($operations as $operation) {
+        foreach ($rows as $row) {
+            $operation = (new ControlOperation)->newFromBuilder((array) $row);
             $path = $operation->getAttribute('refresh_relative_path');
 
             if (! is_string($path)) {
                 continue;
             }
 
-            $current = $byPath[$path] ?? null;
-
-            if ($current === null) {
-                $byPath[$path] = $operation;
-
-                continue;
-            }
-
-            $currentCreatedAt = $current->getAttribute('created_at');
-            $operationCreatedAt = $operation->getAttribute('created_at');
-
-            if ($current->state->terminal()
-                && ! $operation->state->terminal()
-                && $currentCreatedAt instanceof CarbonInterface
-                && $operationCreatedAt instanceof CarbonInterface
-                && $currentCreatedAt->equalTo($operationCreatedAt)) {
-                $byPath[$path] = $operation;
-            }
+            $byPath[$path] = $operation;
         }
 
         return $byPath;

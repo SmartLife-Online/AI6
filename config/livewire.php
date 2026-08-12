@@ -27,8 +27,10 @@ return [
     'inject_assets' => false,
 
     /*
-     * AI6 does not use wire:navigate; the progress bar would inject runtime
-     * style content that the fixed style-src 'self' policy rejects.
+     * AI6 does not use wire:navigate. Livewire still attempts the progress-bar
+     * style injection while evaluating its bundle; the external, hash-bound
+     * AI6 progress guard rejects exactly those known bytes before the fixed
+     * style-src 'self' policy needs to report them.
      */
     'navigate' => [
         'show_progress_bar' => false,

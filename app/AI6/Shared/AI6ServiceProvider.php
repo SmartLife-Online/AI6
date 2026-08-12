@@ -310,6 +310,12 @@ final class AI6ServiceProvider extends ServiceProvider
                 'Configuration key livewire.inject_assets must stay disabled: assets load only as external files from the bound asset path.',
             );
         }
+
+        if (config('livewire.navigate.show_progress_bar') !== false) {
+            throw new ConfigurationException(
+                'Configuration key livewire.navigate.show_progress_bar must stay disabled: AI6 does not permit the Livewire progress bar or its runtime style.',
+            );
+        }
     }
 
     private function mayBootstrapWithoutRedactionKeyring(): bool

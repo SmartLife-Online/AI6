@@ -45,7 +45,7 @@ final class TicketMobileBrowserSmokeTest extends TicketUiTestCase
         [$user, $secret, $project, $detailPath] = $this->seedFileDatabase($password);
         $appPort = $this->freePort();
         $driverPort = $this->freePort();
-        $baseUrl = 'http://127.0.0.1:'.$appPort;
+        $baseUrl = 'http://ai6-smoke.test:'.$appPort;
 
         try {
             $this->startApplicationServer($appPort);
@@ -61,6 +61,7 @@ final class TicketMobileBrowserSmokeTest extends TicketUiTestCase
 
             $this->navigate($baseUrl.'/projects/'.$project->getKey().'/tickets');
             $this->waitForSourceContaining('Fertiges Ziel ohne Scrollen.');
+            $this->assertNonSecureProgressGuardRemovedOnlyTheKnownStyle();
             self::assertStringContainsString('Offenes Ziel ohne Scrollen.', $this->pageSource());
             $this->assertNoHorizontalScrolling('Ticketliste');
 
@@ -84,7 +85,7 @@ final class TicketMobileBrowserSmokeTest extends TicketUiTestCase
             $this->waitForSourceContaining('Fertiges Ziel ohne Scrollen.');
 
             $this->navigate($baseUrl.$detailPath);
-            $this->waitForSourceContaining('Fertiges Ziel ohne Scrollen.');
+            $this->waitForSourceContaining('Ungültiges Ziel ohne Scrollen.');
             $this->assertNoHorizontalScrolling('Ticketdetail');
 
             $this->assertConsoleFreeOfPolicyViolations();
@@ -166,7 +167,7 @@ final class TicketMobileBrowserSmokeTest extends TicketUiTestCase
             public_path(),
             [
                 'APP_ENV' => 'testing',
-                'APP_DEBUG' => 'true',
+                'APP_DEBUG' => 'false',
                 'APP_KEY' => $key,
                 'DB_CONNECTION' => 'sqlite',
                 'DB_DATABASE' => (string) $this->databasePath,
@@ -177,7 +178,9 @@ final class TicketMobileBrowserSmokeTest extends TicketUiTestCase
                 'MAIL_MAILER' => 'array',
                 'AI6_SECURITY_PROFILE' => 'custom',
                 'AI6_SECURITY_ACKNOWLEDGE_REDUCED_MODE' => 'true',
+                'AI6_SECURITY_REQUIRE_HTTPS_OR_PRIVATE_ACCESS' => 'false',
                 'AI6_SECURITY_LOGIN_EMAIL_CONFIRMATION' => 'false',
+                'AI6_HTTP_TRUSTED_HOSTS' => 'localhost,127.0.0.1,::1,ai6-smoke.test',
             ],
         );
         $this->server->setTimeout(null);
@@ -196,7 +199,7 @@ final class TicketMobileBrowserSmokeTest extends TicketUiTestCase
         $this->chromedriver->start();
         $this->driverBase = 'http://127.0.0.1:'.$port;
         $this->waitFor(function (): bool {
-            $status = $this->httpRequest('GET', $this->driverBase.'/status');
+            $status = $this->webDriverHttpRequest('GET', '/status');
 
             return is_string($status) && str_contains($status, '"ready":true');
         }, 'The chromedriver endpoint did not become ready.');
@@ -205,7 +208,14 @@ final class TicketMobileBrowserSmokeTest extends TicketUiTestCase
     private function createBrowserSession(int $driverPort): void
     {
         $chromeOptions = [
-            'args' => ['--headless=new', '--disable-gpu', '--window-size=375,812'],
+            'args' => [
+                '--headless=new',
+                '--disable-gpu',
+                '--window-size=375,812',
+                '--remote-debugging-pipe',
+                '--no-proxy-server',
+                '--host-resolver-rules=MAP ai6-smoke.test 127.0.0.1',
+            ],
             'mobileEmulation' => [
                 'deviceMetrics' => ['width' => 375, 'height' => 812, 'pixelRatio' => 3],
             ],
@@ -245,6 +255,24 @@ final class TicketMobileBrowserSmokeTest extends TicketUiTestCase
         );
     }
 
+    private function assertNonSecureProgressGuardRemovedOnlyTheKnownStyle(): void
+    {
+        self::assertFalse(
+            $this->execute('return window.isSecureContext;'),
+            'The smoke host must exercise the browser path without WebCrypto subtle support.',
+        );
+        self::assertTrue($this->execute('return globalThis.crypto?.subtle === undefined;'));
+        self::assertSame(
+            0,
+            $this->execute('return document.head.querySelectorAll("style").length;'),
+            'The exact Livewire progress style must be stopped before CSP sees an inline node.',
+        );
+        self::assertFalse(
+            $this->execute('return Object.prototype.hasOwnProperty.call(document.head, "appendChild");'),
+            'The one-shot guard must restore the native DOM method after Livewire initializes.',
+        );
+    }
+
     private function assertConsoleFreeOfPolicyViolations(): void
     {
         $log = $this->driverRequest('POST', '/session/'.$this->sessionId.'/log', ['type' => 'browser']);
@@ -252,11 +280,10 @@ final class TicketMobileBrowserSmokeTest extends TicketUiTestCase
         self::assertIsArray($entries);
         $violations = [];
 
-        // Deliberately strict, without any allowlist: livewire/livewire
-        // v4.4.0 unconditionally attempts to inject the progress-bar <style>
-        // during bundle evaluation, which the fixed CSP blocks and reports.
-        // While no Livewire release without that injection exists, this check
-        // fails and TC-03 stays honestly open (ticket AI6-008, Notes).
+        // Deliberately strict, without any console allowlist. The external AI6
+        // guard may suppress only the exact hash-bound bytes of Livewire's
+        // disabled progress-bar style before insertion; any changed injection,
+        // unsafe-eval dependency or other CSP violation remains observable.
         foreach ($entries as $entry) {
             $message = is_array($entry) && is_string($entry['message'] ?? null) ? $entry['message'] : '';
 
@@ -378,7 +405,7 @@ final class TicketMobileBrowserSmokeTest extends TicketUiTestCase
         array|\stdClass|null $body = null,
         bool $allowError = false,
     ): array {
-        $raw = $this->httpRequest($method, $this->driverBase.$path, $body);
+        $raw = $this->webDriverHttpRequest($method, $path, $body);
 
         if (! is_string($raw)) {
             if ($allowError) {
@@ -391,6 +418,93 @@ final class TicketMobileBrowserSmokeTest extends TicketUiTestCase
         $decoded = json_decode($raw, true);
 
         return is_array($decoded) ? $decoded : [];
+    }
+
+    /** @param  array<string, mixed>|\stdClass|null  $body */
+    private function webDriverHttpRequest(string $method, string $path, array|\stdClass|null $body = null): string|false
+    {
+        $url = parse_url($this->driverBase);
+        $host = $url['host'] ?? null;
+        $port = $url['port'] ?? null;
+
+        if (! is_string($host) || ! is_int($port)) {
+            return false;
+        }
+
+        $socket = @stream_socket_client(
+            'tcp://'.$host.':'.$port,
+            $errorCode,
+            $errorMessage,
+            30,
+            STREAM_CLIENT_CONNECT,
+        );
+
+        if ($socket === false) {
+            return false;
+        }
+
+        stream_set_timeout($socket, 30);
+        $content = $body === null ? '' : json_encode($body, JSON_THROW_ON_ERROR);
+        $request = $method.' '.$path." HTTP/1.1\r\n"
+            .'Host: '.$host.':'.$port."\r\n"
+            ."Accept: application/json\r\n"
+            ."Connection: close\r\n"
+            ."Content-Type: application/json\r\n"
+            .'Content-Length: '.strlen($content)."\r\n\r\n"
+            .$content;
+        $written = 0;
+
+        while ($written < strlen($request)) {
+            $bytes = fwrite($socket, substr($request, $written));
+
+            if ($bytes === false || $bytes === 0) {
+                fclose($socket);
+
+                return false;
+            }
+
+            $written += $bytes;
+        }
+
+        $statusLine = fgets($socket);
+
+        if (! is_string($statusLine) || ! preg_match('/^HTTP\/1\.[01] [1-5][0-9]{2}/', $statusLine)) {
+            fclose($socket);
+
+            return false;
+        }
+
+        $contentLength = null;
+
+        while (($header = fgets($socket)) !== false && $header !== "\r\n") {
+            if (preg_match('/^Content-Length:\s*([0-9]+)\s*$/i', trim($header), $matches) === 1) {
+                $contentLength = (int) $matches[1];
+            }
+        }
+
+        if ($contentLength === null) {
+            fclose($socket);
+
+            return false;
+        }
+
+        $response = '';
+
+        while (strlen($response) < $contentLength) {
+            $chunk = fread($socket, $contentLength - strlen($response));
+
+            if ($chunk === false || $chunk === '') {
+                fclose($socket);
+
+                return false;
+            }
+
+            $response .= $chunk;
+        }
+
+        fclose($socket);
+
+        return $response;
     }
 
     /** @param  array<string, mixed>|\stdClass|null  $body */
