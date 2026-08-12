@@ -30,7 +30,7 @@ git rev-parse HEAD
 
 | Feld | Wert |
 |---|---|
-| Geprüfter Commit | 4c589dd469a399de7515f877bd05bd01e43bf76d |
+| Geprüfter Commit | 028f799ae0f64aa9052ebb617557d9863c4cdd11 |
 | Datum und Uhrzeit der Prüfung | 12.08.2026 12:33 |
 
 ## 2. Prüfschritte auf dem Laptop
@@ -63,7 +63,7 @@ ausgefüllt.
 | Feld | Wert |
 |---|---|
 | Gesamtergebnis (bestanden / nicht bestanden) | bestanden |
-| Befunde und Nacharbeiten | Den Browserkonsole Fehler prüfen |
+| Befunde und Nacharbeiten | - |
 
 ## 5. Unterschrift
 
