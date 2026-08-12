@@ -13,6 +13,7 @@ final readonly class ControlOperationRecoveryProcessor
     public function __construct(
         private DeployKeyProvisioner $deployKeys,
         private ManagedCloneSynchronizer $managedClones,
+        private TicketMutationExecutor $ticketMutations,
     ) {}
 
     public function apply(ControlOperation $operation): void
@@ -36,15 +37,23 @@ final readonly class ControlOperationRecoveryProcessor
             ], true)) {
                 throw new RuntimeException('This control operation has no recoverable external effect.');
             }
-            $handler = $operation->operation_type === ControlOperationType::DEPLOY_KEY_PROVISION
-                ? $this->deployKeys
-                : $this->managedClones;
+            $handler = match ($operation->operation_type) {
+                ControlOperationType::DEPLOY_KEY_PROVISION => $this->deployKeys,
+                ControlOperationType::MANAGED_CLONE,
+                ControlOperationType::MANAGED_FETCH => $this->managedClones,
+                ControlOperationType::TICKET_EDIT,
+                ControlOperationType::TICKET_STATUS_CHANGE => $this->ticketMutations,
+            };
             match ($decision->decision) {
                 RecoveryDecisionType::RETRY_RECONCILIATION => $handler->retryRecovery($operation, $decision),
                 RecoveryDecisionType::ADOPT_EXTERNAL_STATE => $handler->adoptExternalState($operation, $decision),
                 RecoveryDecisionType::ABANDON_OPERATION => $this->abandon($operation, $decision),
             };
         } catch (ControlOperationRetryableConflict $exception) {
+            throw $exception;
+        } catch (ControlOperationRecoveryRequired $exception) {
+            $decision->forceFill(['state' => 'rejected', 'applied_at' => Date::now()])->save();
+
             throw $exception;
         } catch (Throwable $exception) {
             $decision->forceFill(['state' => 'rejected', 'applied_at' => Date::now()])->save();
@@ -59,19 +68,16 @@ final readonly class ControlOperationRecoveryProcessor
             throw new RuntimeException('The abandonment decision is missing its required evidence.');
         }
 
-        if ($operation->operation_type === ControlOperationType::DEPLOY_KEY_PROVISION) {
-            $this->deployKeys->abandon($operation, $decision);
-
-            return;
-        }
-
-        if (in_array($operation->operation_type, [
+        match ($operation->operation_type) {
+            ControlOperationType::DEPLOY_KEY_PROVISION => $this->deployKeys->abandon($operation, $decision),
+            ControlOperationType::MANAGED_CLONE,
+            ControlOperationType::MANAGED_FETCH => $this->managedClones->abandon($operation, $decision),
+            ControlOperationType::TICKET_EDIT,
+            ControlOperationType::TICKET_STATUS_CHANGE => $this->ticketMutations->abandon($operation, $decision),
             ControlOperationType::CONTROL_BRANCH_CHANGE,
-            ControlOperationType::TICKET_REFRESH,
-        ], true)) {
-            throw new RuntimeException('This control operation cannot be abandoned through effect recovery.');
-        }
-
-        $this->managedClones->abandon($operation, $decision);
+            ControlOperationType::TICKET_REFRESH => throw new RuntimeException(
+                'This control operation cannot be abandoned through effect recovery.',
+            ),
+        };
     }
 }

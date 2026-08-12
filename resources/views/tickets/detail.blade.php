@@ -6,6 +6,22 @@
         <p><a href="{{ route('projects.tickets.index', $project) }}">Zurück zur Ticketübersicht</a></p>
     </header>
 
+    @if ($errors->any())
+        <section class="ai6-errors" aria-label="Mutationskonflikt">
+            <h2>Statusmutation nicht angenommen</h2>
+            <p>{{ $errors->first() }}</p>
+            <p><a href="{{ route('projects.tickets.show', [$project, $viewModel->readModel]) }}">Aktuellen Stand neu laden</a></p>
+        </section>
+    @endif
+
+    @if (is_array(session('ticket_mutation_conflict')))
+        <section class="ai6-errors" aria-label="Mutationskonflikt">
+            <h2>Statusmutation nicht angenommen</h2>
+            <p><code>{{ session('ticket_mutation_conflict.code') }}</code>: {{ session('ticket_mutation_conflict.message') }}</p>
+            <p><a href="{{ route('projects.tickets.show', [$project, $viewModel->readModel]) }}">Aktuellen Stand neu laden</a></p>
+        </section>
+    @endif
+
     @if ($viewModel->readModel->redaction_state === \App\AI6\Projects\TicketReadModelRedactionState::CONTENT_REDACTED)
         <p class="ai6-masked-note">
             Der Inhalt dieser Projektion ist maskiert. Sie wird niemals als vollständig geprüfter
@@ -58,6 +74,44 @@
             'operationId' => $refreshOperationId,
         ])
     </div>
+
+    @can('changeTicketStatus', $project)
+        @if (!$viewModel->isStale
+            && $viewModel->document !== null
+            && $viewModel->readModel->redaction_state === \App\AI6\Projects\TicketReadModelRedactionState::CLEAR)
+            <section aria-label="Statusmutation">
+                <h2>Status asynchron ändern</h2>
+                <p>Die Auswahl bezeichnet eine feste Operation; ein freier Zielstatus wird nicht angenommen.</p>
+                <form method="POST" action="{{ route('auth.step-up.totp.verify', ['action' => \App\AI6\Tickets\TicketMutationController::STATUS_STEP_UP_ACTION]) }}">
+                    @csrf
+                    <label for="ticket_status_step_up_code">TOTP-Code für Step-up</label>
+                    <input id="ticket_status_step_up_code" name="code" required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}">
+                    <button type="submit">Step-up bestätigen</button>
+                </form>
+                <form method="POST" action="{{ route('projects.tickets.status', [$project, $viewModel->readModel]) }}">
+                    @csrf
+                    <input type="hidden" name="operation_id" value="{{ (string) \Illuminate\Support\Str::uuid() }}">
+                    <input type="hidden" name="expected_control_oid" value="{{ $viewModel->readModel->control_commit }}">
+                    <input type="hidden" name="expected_blob" value="{{ $viewModel->readModel->blob_sha }}">
+                    <textarea name="base_content" hidden>{{ $viewModel->readModel->redacted_content }}</textarea>
+                    <label for="ticket_status_operation">Statusoperation</label>
+                    <select id="ticket_status_operation" name="status_operation" required>
+                        <option value="block">Blockieren</option>
+                        <option value="cancel">Abbrechen</option>
+                        <option value="return_to_todo">Nach Todo zurücksetzen</option>
+                        <option value="complete_review">Review abschließen</option>
+                    </select>
+                    <label for="ticket_status_reason">Auditgrund</label>
+                    <textarea id="ticket_status_reason" name="reason" required maxlength="2000"></textarea>
+                    <label>
+                        <input type="checkbox" name="external_completion_confirmed" value="1">
+                        Externe Zusammenführung beziehungsweise Abnahme ausdrücklich bestätigt
+                    </label>
+                    <button type="submit">Statusmutation starten</button>
+                </form>
+            </section>
+        @endif
+    @endcan
 
     @if ($viewModel->readModel->document_state === \App\AI6\Projects\TicketDocumentState::INVALID)
         <section class="ai6-errors" aria-label="Validierungsfehler">

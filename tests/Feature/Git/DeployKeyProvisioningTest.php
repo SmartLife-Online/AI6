@@ -574,6 +574,7 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
             'app/AI6/Git/DeployKeyProvisioner.php',
             'app/AI6/Git/ManagedCloneSynchronizer.php',
             'app/AI6/Git/ProjectOperationLease.php',
+            'app/AI6/Git/TicketMutationExecutor.php',
         ], $terminalReleaseMethods);
 
         foreach ([

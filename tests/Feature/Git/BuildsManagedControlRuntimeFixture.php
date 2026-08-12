@@ -73,8 +73,11 @@ trait BuildsManagedControlRuntimeFixture
 set -eu
 [ "$#" -eq 2 ]
 [ "$1" = "git@git.fixture.test" ]
-[ "$2" = "git-upload-pack 'acme/control.git'" ]
-exec git-upload-pack __REMOTE__
+case "$2" in
+    "git-upload-pack 'acme/control.git'") exec git-upload-pack __REMOTE__ ;;
+    "git-receive-pack 'acme/control.git'") exec git-receive-pack __REMOTE__ ;;
+    *) exit 64 ;;
+esac
 SH)));
         self::assertTrue(chmod($sshWrapper, 0555));
 

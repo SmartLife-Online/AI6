@@ -12,6 +12,7 @@ use App\AI6\Projects\Http\ProjectController;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Tickets\Livewire\TicketDetail;
 use App\AI6\Tickets\Livewire\TicketList;
+use App\AI6\Tickets\TicketMutationController;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 
@@ -84,6 +85,15 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/projects/{project}/tickets/{readModel}', TicketDetail::class)
         ->middleware('can:view,project')
         ->name('projects.tickets.show');
+    Route::get('/projects/{project}/tickets/{readModel}/edit', [TicketMutationController::class, 'edit'])
+        ->middleware('can:editTicket,project')
+        ->name('projects.tickets.edit');
+    Route::post('/projects/{project}/tickets/{readModel}/edit', [TicketMutationController::class, 'update'])
+        ->middleware('can:editTicket,project')
+        ->name('projects.tickets.update');
+    Route::post('/projects/{project}/tickets/{readModel}/status', [TicketMutationController::class, 'changeStatus'])
+        ->middleware('can:changeTicketStatus,project')
+        ->name('projects.tickets.status');
     Route::post('/projects/{project}/deploy-key', [ControlOperationController::class, 'provision'])
         ->middleware('can:provisionDeployKey,project')
         ->name('projects.deploy-key.provision');

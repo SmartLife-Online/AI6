@@ -99,4 +99,8 @@ return [
         'validation_profile' => env('AI6_TICKET_VALIDATION_PROFILE', 'generic_v1'),
         'max_candidates' => env('AI6_TICKET_MAX_CANDIDATES', '100'),
     ],
+    'ticket_mutations' => [
+        'git_author_name' => env('AI6_TICKET_MUTATION_GIT_AUTHOR_NAME', 'AI6 Control Worker'),
+        'git_author_email' => env('AI6_TICKET_MUTATION_GIT_AUTHOR_EMAIL', 'ai6-control@example.invalid'),
+    ],
 ];

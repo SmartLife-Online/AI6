@@ -26,6 +26,18 @@ final class ExpectedAuthorizationMatrix
                 'operator' => true,
                 'approver' => false,
             ],
+            'edit_ticket' => [
+                'admin' => true,
+                'viewer' => false,
+                'operator' => true,
+                'approver' => false,
+            ],
+            'change_ticket_status' => [
+                'admin' => true,
+                'viewer' => false,
+                'operator' => true,
+                'approver' => true,
+            ],
         ];
     }
 

@@ -9,6 +9,7 @@ use App\AI6\Shared\Process\ProcessRequest;
 use App\AI6\Shared\Process\ProcessResult;
 use App\AI6\Shared\Redaction\RedactionContext;
 use InvalidArgumentException;
+use RuntimeException;
 
 final class HardenedGitRunner
 {
@@ -364,6 +365,224 @@ final class HardenedGitRunner
         return $this->processes->run($this->request($command, $repository, $variables, $redactionContext));
     }
 
+    /** @return array{blob_oid: string, tree_oid: string, mode: string} */
+    public function planSingleFileMutation(
+        string $repository,
+        string $parentOid,
+        string $relativePath,
+        string $content,
+        RedactionContext $redactionContext,
+    ): array {
+        $this->assertOid($parentOid);
+        if (RefreshPathPolicy::canonicalBasePath($relativePath) !== $relativePath) {
+            throw new InvalidArgumentException('The ticket mutation path is not canonical.');
+        }
+        $variables = $this->environment->variables();
+        $preflight = $this->repositoryConfiguration($repository, $variables, $redactionContext);
+        if ($preflight instanceof ProcessResult) {
+            throw new RuntimeException('The managed repository configuration was rejected.');
+        }
+        $result = $this->processes->run($this->request([
+            ...$this->environment->commandPrefix(), ...$preflight,
+            'ls-tree', '-rz', '--full-tree', $parentOid,
+        ], $repository, $variables, $redactionContext));
+        if (! $result->succeeded() || ($result->output !== '' && ! str_ends_with($result->output, "\0"))) {
+            throw new RuntimeException('The parent tree could not be inventoried safely.');
+        }
+
+        $root = [];
+        $targetMode = null;
+        foreach ($result->output === '' ? [] : explode("\0", substr($result->output, 0, -1)) as $record) {
+            $tab = strpos($record, "\t");
+            if ($tab === false
+                || preg_match('/\A(100644|100755|120000|160000) (blob|commit) ([0-9a-f]{64})\z/D', substr($record, 0, $tab), $matches) !== 1) {
+                throw new RuntimeException('The parent tree contains a malformed leaf entry.');
+            }
+            $path = substr($record, $tab + 1);
+            if ($path === '' || str_contains($path, "\0")) {
+                throw new RuntimeException('The parent tree contains an invalid path.');
+            }
+            $this->insertTreeLeaf($root, explode('/', $path), $matches[1], $matches[3]);
+            if (hash_equals($relativePath, $path)) {
+                $targetMode = $matches[1];
+            }
+        }
+        if (! in_array($targetMode, ['100644', '100755'], true)) {
+            throw new TicketMutationGitConflict('ticket_path_not_regular_blob', 'Die Ticketdatei ist kein regulärer Blob.');
+        }
+
+        $blobOid = hash('sha256', 'blob '.strlen($content)."\0".$content);
+        $this->replaceTreeLeaf($root, explode('/', $relativePath), $targetMode, $blobOid);
+
+        return [
+            'blob_oid' => $blobOid,
+            'tree_oid' => $this->treeOid($root),
+            'mode' => $targetMode,
+        ];
+    }
+
+    public function writeSingleFileMutation(
+        string $repository,
+        string $parentOid,
+        string $relativePath,
+        string $content,
+        string $expectedBlobOid,
+        string $expectedTreeOid,
+        string $mode,
+        string $indexPath,
+        RedactionContext $redactionContext,
+    ): void {
+        $this->assertOid($parentOid);
+        $this->assertOid($expectedBlobOid);
+        $this->assertOid($expectedTreeOid);
+        if (! in_array($mode, ['100644', '100755'], true)
+            || RefreshPathPolicy::canonicalBasePath($relativePath) !== $relativePath) {
+            throw new InvalidArgumentException('The ticket mutation tree contract is invalid.');
+        }
+        $variables = [...$this->environment->variables(), 'GIT_INDEX_FILE' => $indexPath];
+        $preflight = $this->repositoryConfiguration($repository, $variables, $redactionContext);
+        if ($preflight instanceof ProcessResult) {
+            throw new RuntimeException('The managed repository configuration was rejected.');
+        }
+
+        $contentPath = $indexPath.'.content';
+        $this->writePrivateAttemptFile($contentPath, $content);
+        $blob = $this->processes->run($this->request([
+            ...$this->environment->commandPrefix(), ...$preflight,
+            'hash-object', '-w', '--', $contentPath,
+        ], $repository, $variables, $redactionContext));
+        if (! $blob->succeeded() || ! hash_equals($expectedBlobOid, trim($blob->output))) {
+            throw new TicketMutationGitConflict('target_blob_mismatch', 'Der erzeugte Zielblob stimmt nicht mit dem vorbereiteten Intent überein.');
+        }
+
+        foreach ([
+            ['read-tree', $parentOid],
+            ['update-index', '--add', '--cacheinfo', $mode.','.$expectedBlobOid.','.$relativePath],
+        ] as $arguments) {
+            $result = $this->processes->run($this->request([
+                ...$this->environment->commandPrefix(), ...$preflight, ...$arguments,
+            ], $repository, $variables, $redactionContext));
+            if (! $result->succeeded()) {
+                throw new RuntimeException('The ticket mutation tree could not be staged.');
+            }
+        }
+        $tree = $this->processes->run($this->request([
+            ...$this->environment->commandPrefix(), ...$preflight, 'write-tree',
+        ], $repository, $variables, $redactionContext));
+        if (! $tree->succeeded() || ! hash_equals($expectedTreeOid, trim($tree->output))) {
+            throw new TicketMutationGitConflict('target_tree_mismatch', 'Der erzeugte Zielbaum stimmt nicht mit dem vorbereiteten Intent überein.');
+        }
+    }
+
+    public function createSingleParentCommit(
+        string $repository,
+        string $treeOid,
+        string $parentOid,
+        string $message,
+        string $authorName,
+        string $authorEmail,
+        int $timestamp,
+        string $messagePath,
+        RedactionContext $redactionContext,
+    ): string {
+        $this->assertOid($treeOid);
+        $this->assertOid($parentOid);
+        if ($authorName === '' || $authorEmail === '' || str_contains($authorName.$authorEmail, "\n")) {
+            throw new InvalidArgumentException('The trusted Git author identity is invalid.');
+        }
+        $date = '@'.$timestamp.' +0000';
+        $variables = [
+            ...$this->environment->variables(),
+            'GIT_AUTHOR_NAME' => $authorName,
+            'GIT_AUTHOR_EMAIL' => $authorEmail,
+            'GIT_AUTHOR_DATE' => $date,
+            'GIT_COMMITTER_NAME' => $authorName,
+            'GIT_COMMITTER_EMAIL' => $authorEmail,
+            'GIT_COMMITTER_DATE' => $date,
+        ];
+        $preflight = $this->repositoryConfiguration($repository, $variables, $redactionContext);
+        if ($preflight instanceof ProcessResult) {
+            throw new RuntimeException('The managed repository configuration was rejected.');
+        }
+        $this->writePrivateAttemptFile($messagePath, $message);
+        $commit = $this->processes->run($this->request([
+            ...$this->environment->commandPrefix(), ...$preflight,
+            '-c', 'commit.gpgSign=false', 'commit-tree', $treeOid, '-p', $parentOid, '-F', $messagePath,
+        ], $repository, $variables, $redactionContext));
+        $oid = trim($commit->output);
+        if (! $commit->succeeded() || ! $this->validOid($oid)) {
+            throw new RuntimeException('The ticket mutation commit could not be created.');
+        }
+
+        return $oid;
+    }
+
+    /** @return array{tree_oid: string, parent_oid: string} */
+    public function inspectSingleParentCommit(
+        string $repository,
+        string $commitOid,
+        RedactionContext $redactionContext,
+    ): array {
+        $this->assertOid($commitOid);
+        $variables = $this->environment->variables();
+        $preflight = $this->repositoryConfiguration($repository, $variables, $redactionContext);
+        if ($preflight instanceof ProcessResult) {
+            throw new RuntimeException('The ticket mutation commit could not be inspected safely.');
+        }
+        $commit = $this->processes->run($this->request([
+            ...$this->environment->commandPrefix(), ...$preflight,
+            'cat-file', 'commit', $commitOid,
+        ], $repository, $variables, $redactionContext));
+        if (! $commit->succeeded()) {
+            throw new RuntimeException('The ticket mutation commit could not be inspected safely.');
+        }
+        $header = explode("\n\n", str_replace("\r\n", "\n", $commit->output), 2)[0];
+        $lines = explode("\n", $header);
+        $tree = array_shift($lines);
+        $parents = array_values(array_filter(
+            $lines,
+            static fn (string $line): bool => str_starts_with($line, 'parent '),
+        ));
+        if (preg_match('/\Atree ([0-9a-f]{64})\z/D', $tree, $treeMatch) !== 1
+            || count($parents) !== 1
+            || preg_match('/\Aparent ([0-9a-f]{64})\z/D', $parents[0], $parentMatch) !== 1) {
+            throw new TicketMutationGitConflict(
+                'prepared_commit_shape_mismatch',
+                'Der vorbereitete Mutationscommit besitzt nicht genau den gebundenen Tree und Parent.',
+            );
+        }
+
+        return ['tree_oid' => $treeMatch[1], 'parent_oid' => $parentMatch[1]];
+    }
+
+    public function pushCommitCas(
+        string $repository,
+        string $remote,
+        string $ref,
+        string $expectedParent,
+        string $commitOid,
+        string $privateKey,
+        string $knownHosts,
+        string $expectedHostKeyFingerprint,
+        RedactionContext $redactionContext,
+    ): ProcessResult {
+        $validated = $this->remotePolicy->validate($remote, $ref, $knownHosts, $expectedHostKeyFingerprint);
+        $this->assertOid($expectedParent);
+        $this->assertOid($commitOid);
+        $variables = $this->environment->variables($privateKey, $knownHosts);
+        $preflight = $this->repositoryConfiguration($repository, $variables, $redactionContext);
+        if ($preflight instanceof ProcessResult) {
+            return $preflight;
+        }
+
+        return $this->processes->run($this->request([
+            ...$this->environment->commandPrefix(), ...$preflight,
+            '-c', 'push.gpgSign=false', 'push', '--porcelain', '--no-recurse-submodules',
+            '--force-with-lease='.$validated->ref.':'.$expectedParent,
+            '--', $validated->remote, $commitOid.':'.$validated->ref,
+        ], $repository, $variables, $redactionContext));
+    }
+
     public function deleteAttemptRef(
         string $repository,
         string $attemptRef,
@@ -383,6 +602,117 @@ final class HardenedGitRunner
             '-c', 'core.logAllRefUpdates=false',
             'update-ref', '--no-deref', '-d', $attemptRef, $expectedOid,
         ], $repository, $variables, $redactionContext));
+    }
+
+    public function createAttemptRef(
+        string $repository,
+        string $attemptRef,
+        string $commitOid,
+        RedactionContext $redactionContext,
+    ): ProcessResult {
+        $this->assertAttemptRef($attemptRef);
+        $this->assertOid($commitOid);
+        $variables = $this->environment->variables();
+        $preflight = $this->repositoryConfiguration($repository, $variables, $redactionContext);
+        if ($preflight instanceof ProcessResult) {
+            return $preflight;
+        }
+
+        return $this->processes->run($this->request([
+            ...$this->environment->commandPrefix(), ...$preflight,
+            '-c', 'core.logAllRefUpdates=false',
+            'update-ref', '--no-deref', $attemptRef, $commitOid, str_repeat('0', 64),
+        ], $repository, $variables, $redactionContext));
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $node
+     * @param  list<string>  $segments
+     */
+    private function insertTreeLeaf(array &$node, array $segments, string $mode, string $oid): void
+    {
+        $name = array_shift($segments);
+        if (! is_string($name) || $name === '') {
+            throw new RuntimeException('The parent tree contains an invalid path segment.');
+        }
+        if ($segments === []) {
+            if (array_key_exists($name, $node)) {
+                throw new RuntimeException('The parent tree contains a duplicate path.');
+            }
+            $node[$name] = ['leaf' => true, 'mode' => $mode, 'oid' => $oid];
+
+            return;
+        }
+        if (! isset($node[$name])) {
+            $node[$name] = ['leaf' => false, 'children' => []];
+        }
+        if (($node[$name]['leaf'] ?? null) !== false || ! is_array($node[$name]['children'] ?? null)) {
+            throw new RuntimeException('The parent tree contains a file/directory collision.');
+        }
+        $this->insertTreeLeaf($node[$name]['children'], $segments, $mode, $oid);
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $node
+     * @param  list<string>  $segments
+     */
+    private function replaceTreeLeaf(array &$node, array $segments, string $mode, string $oid): void
+    {
+        $name = array_shift($segments);
+        if (! is_string($name) || ! isset($node[$name])) {
+            throw new TicketMutationGitConflict('ticket_path_missing', 'Die gebundene Ticketdatei fehlt im Control-Baum.');
+        }
+        if ($segments === []) {
+            if (($node[$name]['leaf'] ?? null) !== true) {
+                throw new TicketMutationGitConflict('ticket_path_not_regular_blob', 'Der Ticketpfad bezeichnet keinen regulären Blob.');
+            }
+            $node[$name] = ['leaf' => true, 'mode' => $mode, 'oid' => $oid];
+
+            return;
+        }
+        if (($node[$name]['leaf'] ?? null) !== false || ! is_array($node[$name]['children'] ?? null)) {
+            throw new TicketMutationGitConflict('ticket_path_not_regular_blob', 'Der Ticketpfad bezeichnet keinen regulären Blob.');
+        }
+        $this->replaceTreeLeaf($node[$name]['children'], $segments, $mode, $oid);
+    }
+
+    /** @param array<string, array<string, mixed>> $node */
+    private function treeOid(array $node): string
+    {
+        $entries = [];
+        foreach ($node as $name => $value) {
+            $leaf = ($value['leaf'] ?? null) === true;
+            $oid = $leaf
+                ? ($value['oid'] ?? null)
+                : (is_array($value['children'] ?? null) ? $this->treeOid($value['children']) : null);
+            $mode = $leaf ? ($value['mode'] ?? null) : '40000';
+            if (! is_string($oid) || ! $this->validOid($oid) || ! is_string($mode)) {
+                throw new RuntimeException('The planned mutation tree is malformed.');
+            }
+            $entries[] = ['name' => $name, 'sort' => $name.($leaf ? '' : '/'), 'mode' => $mode, 'oid' => $oid];
+        }
+        usort($entries, static fn (array $left, array $right): int => strcmp($left['sort'], $right['sort']));
+        $bytes = '';
+        foreach ($entries as $entry) {
+            $binaryOid = hex2bin($entry['oid']);
+            if ($binaryOid === false) {
+                throw new RuntimeException('The planned mutation tree contains an invalid object identifier.');
+            }
+            $bytes .= $entry['mode'].' '.$entry['name']."\0".$binaryOid;
+        }
+
+        return hash('sha256', 'tree '.strlen($bytes)."\0".$bytes);
+    }
+
+    private function writePrivateAttemptFile(string $path, string $content): void
+    {
+        $parent = realpath(dirname($path));
+        if (! is_string($parent) || dirname($path) !== $parent || is_link($path) || (file_exists($path) && ! is_file($path))) {
+            throw new RuntimeException('The ticket mutation attempt file is unsafe.');
+        }
+        if (file_put_contents($path, $content, LOCK_EX) !== strlen($content) || ! chmod($path, 0600)) {
+            throw new RuntimeException('The ticket mutation attempt file could not be written safely.');
+        }
     }
 
     /** @return array<string, string> */

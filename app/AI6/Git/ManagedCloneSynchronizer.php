@@ -517,6 +517,7 @@ final readonly class ManagedCloneSynchronizer
 
     public function retryRecovery(ControlOperation $operation, ControlOperationRecoveryDecision $decision): void
     {
+        $this->assertType($operation);
         $project = $operation->project()->firstOrFail();
         $attemptToken = $this->recoveryAttemptToken($operation);
         $parameters = $this->parameters($operation);
@@ -586,6 +587,7 @@ final readonly class ManagedCloneSynchronizer
 
     public function abandon(ControlOperation $operation, ControlOperationRecoveryDecision $decision): void
     {
+        $this->assertType($operation);
         $project = $operation->project()->firstOrFail();
         $attemptToken = $this->recoveryAttemptToken($operation);
         $lock = $this->acquireEffectLock($operation, $project, $attemptToken, 'managed operation abandonment');

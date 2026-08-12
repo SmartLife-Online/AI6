@@ -198,6 +198,8 @@ Globale Administratorrolle und Projektrollen sind getrennte Autorisierungsgrenze
 |---|---:|---:|---:|---:|---:|---:|
 | Projekt erscheint in der Projektliste | Nein | Ja | Ja | Ja | Ja | Nein |
 | Projektdetail ansehen | Nein | Ja | Ja | Ja | Ja | Nein |
+| Ticket bearbeiten | Nein | Ja | Nein | Ja | Nein | Nein |
+| Ticketstatus human-owned ändern | Nein | Ja | Nein | Ja | Ja | Nein |
 | Benutzer anlegen | Ja | Nein | Nein | Nein | Nein | Nein |
 | Benutzer deaktivieren | Ja | Nein | Nein | Nein | Nein | Nein |
 | Benutzer löschen | Ja | Nein | Nein | Nein | Nein | Nein |
@@ -206,7 +208,13 @@ Globale Administratorrolle und Projektrollen sind getrennte Autorisierungsgrenze
 | Projektmitgliedschaft setzen | Ja | Nein | Nein | Nein | Nein | Nein |
 | Projektmitgliedschaft entziehen | Ja | Nein | Nein | Nein | Nein | Nein |
 
-Ein globaler Administrator benötigt für die sieben Verwaltungsaktionen keine Projektmitgliedschaft, sieht ohne Mitgliedschaft aber weder ein Projekt in der Liste noch dessen Detailansicht. Die Projektrolle `admin` gewährt in diesem Ticket keine instanzweiten Verwaltungsrechte und unterscheidet sich bis zu späteren Projekttickets bei den beiden Leseentscheidungen nicht von `viewer`, `operator` und `approver`.
+Ein globaler Administrator benötigt für die sieben Verwaltungsaktionen keine Projektmitgliedschaft, sieht ohne Mitgliedschaft aber weder ein Projekt in der Liste noch dessen Detailansicht. Die Projektrolle `admin` gewährt keine instanzweiten Verwaltungsrechte. Ticketbearbeitung ist den Projektrollen `admin` und `operator` vorbehalten; human-owned Statusoperationen sind zusätzlich für `approver` erreichbar und werden anschließend je Quellstatus und Operation enger entschieden.
+
+## Ticketbearbeitung und Git-Persistenz
+
+Der Editor lädt ausschließlich frische, unmaskierte Ticketprojektionen im Zustand `invalid` oder `valid`. Das Formular zeigt den gebundenen Blob-SHA und, sofern vorhanden, den kanonischen Contract-Hash. Jeder Auftrag bindet den bytegenauen geladenen Inhalt, den Control-Head und einen zentral redigierten Auditgrund. Ein veralteter oder manipulierter Stand wird als Konflikt abgewiesen und kann über den Neuladepfad erneut geholt werden. Nur ein vollständig gültiger Zielstand darf committed werden. Ein Inhaltsedit eines `ready`-Tickets setzt den Status im selben Git-CAS auf `todo` zurück.
+
+Editor und Statusansicht führen kein Git aus. Sie erzeugen nach CSRF-, Policy- und aktionsgebundenem Step-up-Nachweis eine typisierte asynchrone Control Operation. Der Worker setzt deren persistierte Saga `prepared` → `commit_prepared` → `control_confirmed` → `db_finalized` unter Projektlease und Effekt-Lock fort, erzeugt genau einen Commit mit dem erwarteten Parent, pusht per Compare-and-Swap und bestätigt den Remote-Head. Erst danach werden lokaler Control-Ref, `projects.control_oid`, `control_binding_version` und das Read Model atomar auf den neuen Commit fortgeschrieben; `control_generation` bleibt unverändert. Ein Abbruch darf ausschließlich einen noch nicht veröffentlichten Mutationsversuch verwerfen. Steht der gebundene Mutationscommit bereits am Remote-Control-Ref, bleibt die Operation sichtbar in Recovery und kann vorwärts über `adopt_external_state` konsistent abgeschlossen werden; AI6 schreibt dafür keine veröffentlichte Control-Historie zurück. Human-owned Statusoperationen sind `block`, `cancel`, `return_to_todo` und `complete_review`; sie akzeptieren keinen frei angegebenen Zielstatus. `complete_review` verlangt außerdem die ausdrückliche Bestätigung der externen Zusammenführung beziehungsweise Abnahme. Reservierte Approval-, Run- und Statussync-Kanten besitzen hier keine Route.
 
 ## Projektregistrierung und vertrauenswürdige Metadaten
 

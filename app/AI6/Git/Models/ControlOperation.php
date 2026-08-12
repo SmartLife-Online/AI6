@@ -73,6 +73,12 @@ final class ControlOperation extends Model
         return $this->hasOne(ControlOperationResult::class);
     }
 
+    /** @return HasOne<TicketMutation, $this> */
+    public function ticketMutation(): HasOne
+    {
+        return $this->hasOne(TicketMutation::class, 'status_operation_id');
+    }
+
     /** @return HasOne<ControlOperationRecoveryDecision, $this> */
     public function recoveryDecision(): HasOne
     {

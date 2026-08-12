@@ -16,5 +16,9 @@ enum ControlOperationPhase: string
     case OUTCOME_PUBLISHED = 'outcome_published';
     case BINDING_FINALIZED = 'binding_finalized';
     case ATTEMPT_COMPLETED = 'attempt_completed';
+    case PREPARED = 'prepared';
+    case COMMIT_PREPARED = 'commit_prepared';
+    case CONTROL_CONFIRMED = 'control_confirmed';
+    case DB_FINALIZED = 'db_finalized';
     case RECOVERY_REQUIRED = 'recovery_required';
 }

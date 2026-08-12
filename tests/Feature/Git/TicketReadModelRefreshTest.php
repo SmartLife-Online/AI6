@@ -30,7 +30,9 @@ use App\AI6\Git\Models\ControlOperationRecoveryDecision;
 use App\AI6\Git\Models\ControlOperationResult;
 use App\AI6\Git\ProjectOperationLease;
 use App\AI6\Git\RecoveryDecisionType;
+use App\AI6\Git\TicketReadModelPublisher;
 use App\AI6\Git\TicketReadModelRefresher;
+use App\AI6\Git\TicketReadModelRefreshResult;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Projects\ProjectProvisioningStatus;
@@ -42,6 +44,7 @@ use App\AI6\Shared\Process\ControlProcessRunner;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
 use App\AI6\Tickets\TicketInventory;
+use App\AI6\Tickets\TicketReadModelProjector;
 use App\AI6\Tickets\TicketValidationConfiguration;
 use App\AI6\Tickets\TicketValidationProfile;
 use Illuminate\Database\QueryException;
@@ -61,6 +64,51 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
     use BuildsManagedControlRuntimeFixture;
 
     private ?string $fixtureRoot = null;
+
+    public function test_publisher_maps_invalid_utf8_to_the_named_terminal_conflict(): void
+    {
+        $content = <<<'MARKDOWN'
+        ---
+        schema: ai6.ticket.v1
+        id: AI6-UTF8
+        title: "UTF-8-Test"
+        status: todo
+        depends_on: []
+        ---
+
+        # AI6-UTF8 — UTF-8-Test
+
+        ## Goal
+
+        Gültiger Projektionsstand.
+        MARKDOWN;
+        $projection = $this->app->make(TicketReadModelProjector::class)->project(
+            $content,
+            'tickets/AI6-UTF8.md',
+            TicketValidationProfile::GENERIC_V1,
+        );
+
+        try {
+            $this->app->make(TicketReadModelPublisher::class)->publish(
+                new Project,
+                new ControlOperation,
+                new TicketReadModelRefreshResult(
+                    (string) Str::uuid(),
+                    1,
+                    'tickets/AI6-UTF8.md',
+                    str_repeat('a', 64),
+                    str_repeat('b', 64),
+                    "invalid-\xFF",
+                ),
+                $projection,
+                new RedactionContext('1', null, 'invalid-utf8-publisher'),
+                now(),
+            );
+            self::fail('The publisher let invalid UTF-8 escape without a typed terminal conflict.');
+        } catch (ControlOperationTerminalConflict $exception) {
+            self::assertSame('refresh_blob_not_utf8', $exception->conflict);
+        }
+    }
 
     public function test_worker_projects_redacted_blob_once_and_staleness_stays_a_read_time_comparison(): void
     {

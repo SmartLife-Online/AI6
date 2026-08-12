@@ -46,6 +46,10 @@ final class ControlOperationCrashInjectionTest extends ControlOperationTestCase
             ControlOperationPhase::EFFECT_STAGED,
             ControlOperationPhase::OUTCOME_PUBLISHED,
             ControlOperationPhase::BINDING_FINALIZED,
+            ControlOperationPhase::PREPARED,
+            ControlOperationPhase::COMMIT_PREPARED,
+            ControlOperationPhase::CONTROL_CONFIRMED,
+            ControlOperationPhase::DB_FINALIZED,
         ];
         $expected = array_map(
             static fn (ControlOperationPhase $phase): string => $phase->value,

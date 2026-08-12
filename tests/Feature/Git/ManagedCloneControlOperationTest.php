@@ -377,10 +377,16 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
 
     public function test_migration_chain_restores_the_exact_ai6_006c_contract_on_ordered_down(): void
     {
+        $mutationMigration = require database_path('migrations/2026_08_12_000000_add_ticket_mutation_operation_contract.php');
+        $validationMigration = require database_path('migrations/2026_08_11_000000_add_ticket_validation_projection_contract.php');
+        $refreshMigration = require database_path('migrations/2026_08_10_010000_add_ticket_refresh_read_model_contract.php');
         $branchMigration = require database_path('migrations/2026_08_10_000000_add_control_branch_change_operation_contract.php');
         $cloneMigration = require database_path('migrations/2026_08_09_000000_add_clone_fetch_control_operation_contract.php');
         self::assertTrue(Schema::hasColumn('control_operations', 'target_control_oid'));
 
+        $mutationMigration->down();
+        $validationMigration->down();
+        $refreshMigration->down();
         $branchMigration->down();
         $cloneMigration->down();
         self::assertFalse(Schema::hasColumn('control_operations', 'target_control_oid'));
@@ -401,6 +407,9 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
         self::assertStringContainsString('binding_finalized', $upTrigger);
 
         $branchMigration->up();
+        $refreshMigration->up();
+        $validationMigration->up();
+        $mutationMigration->up();
         $latestTrigger = (string) DB::table('sqlite_master')
             ->where('type', 'trigger')
             ->where('name', 'control_operations_insert_guard')

@@ -31,6 +31,18 @@ final class ProjectPolicy
             'operator' => true,
             'approver' => false,
         ],
+        'edit_ticket' => [
+            'admin' => true,
+            'viewer' => false,
+            'operator' => true,
+            'approver' => false,
+        ],
+        'change_ticket_status' => [
+            'admin' => true,
+            'viewer' => false,
+            'operator' => true,
+            'approver' => true,
+        ],
     ];
 
     public function create(User $user): bool
@@ -71,6 +83,16 @@ final class ProjectPolicy
     public function refreshReadModel(User $user, Project $project): bool
     {
         return $this->decide(ProjectAction::REFRESH_READ_MODEL, $user, $project);
+    }
+
+    public function editTicket(User $user, Project $project): bool
+    {
+        return $this->decide(ProjectAction::EDIT_TICKET, $user, $project);
+    }
+
+    public function changeTicketStatus(User $user, Project $project): bool
+    {
+        return $this->decide(ProjectAction::CHANGE_TICKET_STATUS, $user, $project);
     }
 
     public function decide(ProjectAction $action, User $user, Project $project): bool

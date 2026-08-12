@@ -23,6 +23,8 @@ use App\AI6\Git\HardenedControlRemoteProbe;
 use App\AI6\Git\HardenedGitEnvironment;
 use App\AI6\Git\HardenedGitRunner;
 use App\AI6\Git\KnownHostsVerifier;
+use App\AI6\Git\TicketMutationConfiguration;
+use App\AI6\Git\TicketMutationConfigurationFactory;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Policies\ProjectPolicy;
 use App\AI6\Shared\Config\ConfigurationException;
@@ -163,6 +165,13 @@ final class AI6ServiceProvider extends ServiceProvider
             ControlOperationConfiguration::class,
             static fn (Application $app): ControlOperationConfiguration => $app
                 ->make(ControlOperationConfigurationFactory::class)
+                ->fromConfiguredValues(),
+        );
+        $this->app->singleton(TicketMutationConfigurationFactory::class);
+        $this->app->singleton(
+            TicketMutationConfiguration::class,
+            static fn (Application $app): TicketMutationConfiguration => $app
+                ->make(TicketMutationConfigurationFactory::class)
                 ->fromConfiguredValues(),
         );
         $this->app->singleton(ControlOperationRuntimeIdentityFactory::class);

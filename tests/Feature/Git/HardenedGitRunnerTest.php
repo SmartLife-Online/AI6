@@ -312,6 +312,69 @@ SH);
         self::assertSame('Repository Git configuration was rejected.', $unsafeConfiguration->errorOutput);
     }
 
+    public function test_single_file_mutation_binds_blob_tree_and_exactly_one_parent(): void
+    {
+        $root = $this->createFixtureRoot();
+        $repository = $root.'/sha256-mutation';
+        mkdir($repository);
+        $init = new Process(['git', 'init', '--object-format=sha256', '--initial-branch=main'], $repository);
+        $init->run();
+        if (! $init->isSuccessful()) {
+            self::markTestSkipped('The installed Git runtime does not support SHA-256 repositories.');
+        }
+        $this->git(['config', 'user.name', 'AI6 Test'], $repository);
+        $this->git(['config', 'user.email', 'ai6@example.invalid'], $repository);
+        mkdir($repository.'/tickets');
+        file_put_contents($repository.'/tickets/T9.md', "old\n");
+        file_put_contents($repository.'/unchanged.txt', "unchanged\n");
+        $this->git(['add', 'tickets/T9.md', 'unchanged.txt'], $repository);
+        $this->git(['commit', '-m', 'parent'], $repository);
+        $parent = trim($this->git(['rev-parse', 'HEAD'], $repository));
+        $attempt = $root.'/attempt';
+        mkdir($attempt, 0700);
+        $runner = $this->runner($root.'/runtime');
+        $context = new RedactionContext('project-1', '123e4567-e89b-42d3-a456-426614174000', 'ticket-mutation-test');
+        $content = "new\n";
+
+        $plan = $runner->planSingleFileMutation($repository, $parent, 'tickets/T9.md', $content, $context);
+        $runner->writeSingleFileMutation(
+            $repository,
+            $parent,
+            'tickets/T9.md',
+            $content,
+            $plan['blob_oid'],
+            $plan['tree_oid'],
+            $plan['mode'],
+            $this->canonical($attempt).DIRECTORY_SEPARATOR.'mutation.index',
+            $context,
+        );
+        $commit = $runner->createSingleParentCommit(
+            $repository,
+            $plan['tree_oid'],
+            $parent,
+            "AI6 ticket mutation\n\nAI6-Actor-ID: 7\nAI6-Reason: redigiert\nAI6-Previous-Blob: ".str_repeat('a', 64)."\n",
+            'AI6 Control Worker',
+            'ai6-control@example.invalid',
+            1786492800,
+            $this->canonical($attempt).DIRECTORY_SEPARATOR.'commit.message',
+            $context,
+        );
+        $attemptRef = 'refs/ai6/attempts/123e4567-e89b-42d3-a456-426614174000/1/control';
+        $attemptResult = $runner->createAttemptRef($repository, $attemptRef, $commit, $context);
+
+        self::assertTrue($attemptResult->succeeded(), $attemptResult->errorOutput);
+        self::assertSame($commit, trim($this->git(['rev-parse', $attemptRef], $repository)));
+        self::assertSame($plan['tree_oid'], trim($this->git(['show', '-s', '--format=%T', $commit], $repository)));
+        self::assertSame($parent, trim($this->git(['show', '-s', '--format=%P', $commit], $repository)));
+        self::assertSame(
+            ['tree_oid' => $plan['tree_oid'], 'parent_oid' => $parent],
+            $runner->inspectSingleParentCommit($repository, $commit, $context),
+        );
+        self::assertSame("tickets/T9.md\n", $this->git(['diff-tree', '--no-commit-id', '--name-only', '-r', $commit], $repository));
+        self::assertSame($content, $this->git(['show', $commit.':tickets/T9.md'], $repository));
+        self::assertSame("unchanged\n", $this->git(['show', $commit.':unchanged.txt'], $repository));
+    }
+
     #[After]
     public function removeFixture(): void
     {

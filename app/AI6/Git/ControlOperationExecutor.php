@@ -23,6 +23,7 @@ final readonly class ControlOperationExecutor
         private ManagedCloneSynchronizer $managedClones,
         private ControlBranchChanger $controlBranches,
         private TicketReadModelRefresher $ticketReadModels,
+        private TicketMutationExecutor $ticketMutations,
         private ControlOperationConfiguration $configuration,
         private Redactor $redactor,
         private ControlOperationRecoveryProcessor $recovery,
@@ -34,6 +35,15 @@ final readonly class ControlOperationExecutor
         $operation = ControlOperation::query()->findOrFail($operationId);
         if ($operation->state->terminal()) {
             if ($operation->current_attempt_token !== null) {
+                if (in_array($operation->operation_type, [
+                    ControlOperationType::TICKET_EDIT,
+                    ControlOperationType::TICKET_STATUS_CHANGE,
+                ], true)) {
+                    $this->ticketMutations->cleanupFailedAttempt(
+                        $operation,
+                        $operation->current_attempt_token,
+                    );
+                }
                 $this->releaseTerminalLease(
                     $operation,
                     $operation->current_attempt_token,
@@ -115,6 +125,8 @@ final readonly class ControlOperationExecutor
                     ControlOperationType::MANAGED_FETCH => $this->managedClones->advance($operation, $attemptToken),
                     ControlOperationType::CONTROL_BRANCH_CHANGE => $this->controlBranches->advance($operation, $attemptToken),
                     ControlOperationType::TICKET_REFRESH => $this->ticketReadModels->advance($operation, $attemptToken),
+                    ControlOperationType::TICKET_EDIT,
+                    ControlOperationType::TICKET_STATUS_CHANGE => $this->ticketMutations->advance($operation, $attemptToken),
                 };
                 if ($completed) {
                     return;
@@ -123,6 +135,12 @@ final readonly class ControlOperationExecutor
             }
 
             throw new RuntimeException('The operation exceeded its bounded state transitions.');
+        } catch (TicketMutationGitConflict $exception) {
+            $this->recordTerminalConflict(
+                $operation,
+                $attemptToken,
+                new ControlOperationTerminalConflict($exception->conflict, $exception->getMessage()),
+            );
         } catch (ControlOperationTerminalConflict $exception) {
             $this->recordTerminalConflict($operation, $attemptToken, $exception);
         } catch (ControlOperationRecoveryRequired $exception) {
@@ -153,6 +171,8 @@ final readonly class ControlOperationExecutor
                 ControlOperationType::MANAGED_FETCH => $this->managedClones->recoveryFinding($operation, $attemptToken, $deviation),
                 ControlOperationType::CONTROL_BRANCH_CHANGE => $this->controlBranches->recoveryFinding($operation, $attemptToken, $deviation),
                 ControlOperationType::TICKET_REFRESH => $this->ticketReadModels->recoveryFinding($operation, $attemptToken, $deviation),
+                ControlOperationType::TICKET_EDIT,
+                ControlOperationType::TICKET_STATUS_CHANGE => $this->ticketMutations->recoveryFinding($operation, $attemptToken, $deviation),
             };
         } catch (Throwable $inspectionFailure) {
             $this->recordRecoveryInspectionFailure($operation, $attemptToken, $inspectionFailure);
@@ -301,6 +321,17 @@ final readonly class ControlOperationExecutor
 
                 return;
             }
+        } elseif (in_array($operation->operation_type, [
+            ControlOperationType::TICKET_EDIT,
+            ControlOperationType::TICKET_STATUS_CHANGE,
+        ], true)) {
+            try {
+                $this->ticketMutations->cleanupFailedAttempt($operation, $attemptToken);
+            } catch (Throwable $cleanupFailure) {
+                $this->requireRecovery($operation, $attemptToken, $cleanupFailure);
+
+                return;
+            }
         }
 
         $safe = $this->safeMessage($operation, $exception);
@@ -355,6 +386,8 @@ final readonly class ControlOperationExecutor
                     ControlOperationType::MANAGED_FETCH => $this->managedClones->activeIntentUnderLock($operation, $attemptToken),
                     ControlOperationType::CONTROL_BRANCH_CHANGE => $this->controlBranches->activeIntentUnderLock($operation, $attemptToken),
                     ControlOperationType::TICKET_REFRESH => $this->ticketReadModels->activeIntentUnderLock($operation, $attemptToken),
+                    ControlOperationType::TICKET_EDIT,
+                    ControlOperationType::TICKET_STATUS_CHANGE => $this->ticketMutations->activeIntentUnderLock($operation, $attemptToken),
                 };
             } catch (Throwable $inspectionFailure) {
                 $this->requireRecovery($operation, $attemptToken, $inspectionFailure);
@@ -380,6 +413,11 @@ final readonly class ControlOperationExecutor
                     $this->managedClones->cleanupFailedAttempt($operation, $attemptToken);
                 } elseif ($operation->operation_type === ControlOperationType::CONTROL_BRANCH_CHANGE) {
                     $this->controlBranches->cleanupFailedAttempt($operation, $attemptToken);
+                } elseif (in_array($operation->operation_type, [
+                    ControlOperationType::TICKET_EDIT,
+                    ControlOperationType::TICKET_STATUS_CHANGE,
+                ], true)) {
+                    $this->ticketMutations->cleanupFailedAttempt($operation, $attemptToken);
                 } else {
                     $this->ticketReadModels->cleanupFailedAttempt($operation, $attemptToken);
                 }
@@ -512,6 +550,7 @@ final readonly class ControlOperationExecutor
             'The managed-clone operation has no valid persisted target OID.' => 'Die Managed-Clone-Operation besitzt keine gültige persistierte Ziel-OID.',
             'The managed-clone effect changed after the recovery finding.' => 'Der Managed-Clone-Effekt änderte sich nach dem Recoverybefund.',
             'The managed Git ref could not be resolved safely.' => 'Der verwaltete Git-Ref konnte nicht sicher aufgelöst werden.',
+            'A published ticket mutation commit cannot be abandoned without rewriting control history.' => 'Ein veröffentlichter Ticketmutationscommit kann nicht abgebrochen werden, ohne die Control-Historie umzuschreiben; der gebundene Außenstand kann übernommen werden.',
             default => 'Die sichere Reconciliation konnte Außenstand und persistierten Intent nicht konsistent zusammenführen.',
         };
     }

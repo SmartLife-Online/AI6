@@ -43,6 +43,7 @@ final readonly class ProjectOperationLease
 
     public function claimInitialControlOperation(Project $project, string $operationId): ?int
     {
+        // AI6-013 extends this exact compare-and-swap seam with the active-run guard.
         $now = Date::now();
         $updated = Project::query()
             ->whereKey($project->getKey())

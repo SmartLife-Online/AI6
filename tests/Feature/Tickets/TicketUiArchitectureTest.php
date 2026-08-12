@@ -31,6 +31,7 @@ final class TicketUiArchitectureTest extends TicketUiTestCase
         $sources = [
             app_path('AI6/Tickets/Livewire/TicketList.php'),
             app_path('AI6/Tickets/Livewire/TicketDetail.php'),
+            app_path('AI6/Tickets/TicketMutationController.php'),
             app_path('AI6/Tickets/TicketViewModel.php'),
             app_path('AI6/Tickets/TicketViewModelFactory.php'),
             app_path('AI6/Tickets/DependencyBadge.php'),
