@@ -3,7 +3,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>@yield('title', 'AI6')</title>
+    <title>@yield('title', $title ?? 'AI6')</title>
+    <link rel="stylesheet" href="{{ asset('assets/ai6.css') }}">
 </head>
 <body>
     <header>
@@ -30,7 +31,15 @@
     @endif
 
     <main>
-        @yield('content')
+        @hasSection('content')
+            @yield('content')
+        @else
+            {{ $slot ?? '' }}
+        @endif
     </main>
+
+    @isset($slot)
+        @livewireScripts
+    @endisset
 </body>
 </html>

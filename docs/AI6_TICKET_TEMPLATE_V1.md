@@ -801,7 +801,7 @@ Das Umsetzer-LLM bekommt keinen Chatverlauf und kein Modellgedächtnis. `criteri
 Das Schema `ai6.ticket.v1` und das Generatorprofil dieses Dokuments sind bewusst verschieden:
 
 - Das **Basisschema** ist der allgemeine Parservertrag aus Plan §5.1 und `TKT-002` bis `TKT-004`: `schema: ai6.ticket.v1` identifiziert das Format; mindestens `id`, `title`, `status`, `depends_on` und ein nicht leeres `## Goal` tragen den Ticketvertrag; YAML-Frontmatter, Markdown und deterministische Validierung gelten. Es definiert, was grundsätzlich ein V1-Ticket sein kann.
-- Das **AI6-Generatorprofil** ist der strengere Erzeugungsvertrag für die 44 Blueprints dieses Plans. Es verlangt alle zehn bekannten Frontmatter-Felder, die zwölf Abschnitte, Evidenz-IDs, exakte AC-Abdeckung, kanonische Serialisierung und die Selbstprüfung C01–C17.
+- Das **AI6-Generatorprofil** ist der strengere Erzeugungsvertrag für die 50 Blueprints dieses Plans. Es verlangt alle zehn bekannten Frontmatter-Felder, die zwölf Abschnitte, Evidenz-IDs, exakte AC-Abdeckung, kanonische Serialisierung und die Selbstprüfung C01–C17.
 
 Ein Ticket kann daher das Basisschema erfüllen, ohne vom Generatorprofil neu erzeugt werden zu dürfen. Umgekehrt bleibt jedes profilkonforme Ticket ein `ai6.ticket.v1`-Ticket; das Profil führt keinen zweiten Wert für das Frontmatter-Feld `schema` ein.
 

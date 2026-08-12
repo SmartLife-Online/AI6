@@ -15,7 +15,7 @@ AI6/
 ├── CLAUDE.md                        imports AGENTS.md only
 ├── README.md                        runtime, security and operations documentation, bound by tests
 ├── composer.json / composer.lock    Laravel 13 dependency baseline on PHP 8.5
-├── artisan, app/, bootstrap/ ...    integrated AI6-001 … AI6-006F
+├── artisan, app/, bootstrap/ ...    integrated AI6-001 … AI6-007 plus the implemented, not yet accepted AI6-008
 ├── Dockerfile, docker-compose.yml    single image, process roles, worker volume, proxy net (AI6-002…AI6-006F)
 ├── docker/, deploy/                  role dispatcher with init provisioning; Caddy reverse-proxy profile
 ├── tests/                            PHPUnit suite; part of it requires the Linux runtime and skips elsewhere
@@ -23,25 +23,25 @@ AI6/
 │   ├── AI6_IMPLEMENTATION_PLAN.md   normative source, revision V1.7.0, German
 │   ├── AI6_TICKET_TEMPLATE_V1.md    ticket generation and implementation contract, German
 │   ├── AI6_erweiterungsauftrag_modellrouting_multi_review_pipeline_v2.md   extension mandate integrated by plan revision V1.7.0, German
-│   └── AI6-004_VERIFICATION.md, AI6-005B_MG-01_…, AI6-006C_MG-01/02_…   human gate protocols; the AI6-006C forms are result-free, the AI6-005B form is an unsigned filled draft
+│   └── AI6-004_VERIFICATION.md, AI6-005B_MG-01_…, AI6-006C_MG-01/02_…, AI6-008_MG-01_…   human gate protocols; the AI6-006C and AI6-008 forms are result-free, the AI6-005B form is an unsigned filled draft
 └── tickets/
     ├── README.md                    backlog overview; a view, never a status source
-    └── AI6-001.md … AI6-006F.md     status done — integrated and human-accepted
+    └── AI6-001.md … AI6-010.md      AI6-001…AI6-007 status done; AI6-008 rebased and implemented, acceptance open; AI6-009/AI6-010 ahead-derived todo
 ```
 
-`AI6-001` through `AI6-006F` are integrated and human-accepted (`264cf2f`, `29d67fa`, `93d3f44`, `f7d8919`, `ea3476a`, `2877bc1`, `d6e329f`, `e7a9059`, `1f0e6b7` through `0f20819` with the acceptance commit `1631a9a`, then `a200be1`, `16aa69a`, `61db7e6`); all twelve ticket files carry `status: done`. The complete M1 chain therefore exists in code: control-operation core, operation lease, effect lock, deploy-key provisioning, managed clone, clone/fetch, control-branch change, invalidation generation, blob-bound read models and single-path refresh.
+`AI6-001` through `AI6-007` are integrated and human-accepted (`264cf2f`, `29d67fa`, `93d3f44`, `f7d8919`, `ea3476a`, `2877bc1`, `d6e329f`, `e7a9059`, `1f0e6b7` through `0f20819` with the acceptance commit `1631a9a`, then `a200be1`, `16aa69a`, `61db7e6`, and `25b78fe` with the acceptance commit `16e5e53`); those thirteen ticket files carry `status: done`. The M1 chain through the ticket parser therefore exists in code: control-operation core, operation lease, effect lock, deploy-key provisioning, managed clone, clone/fetch, control-branch change, invalidation generation, blob-bound read models, single-path refresh, and the V1 parser/validator projection with the split editor/approval availability decisions in `TicketReadModelUsePolicy`. `AI6-008` was rebased against `16e5e53` on 12 August 2026 with explicit human approval and implemented in the same change-set: responsive ticket list and detail as Livewire v4.4.0 page components under the unchanged CSP (`csp_safe` bundle, hash-bound script route under `/assets/`, unused package endpoints neutralized to 404, inventory pinned by `tests/Feature/Shared/Http/PublicRouteInventoryTest.php`). Its human acceptance and gate MG-01 stay open; the ticket file stays on `status: todo` until that decision.
 
-The gate-protocol documents in `docs/` kept their documentary state: both `AI6-006C/MG-01` and `AI6-006C/MG-02` forms remain result-free templates, and the `AI6-005B/MG-01` decision protocol is a filled draft without final signature. The `done` statuses are explicit human decisions recorded in Git. Neither state authorizes an agent to do anything with them: never change a status, and never present one of these protocol documents as passed gate evidence (§10).
+The gate-protocol documents in `docs/` kept their documentary state: the `AI6-006C/MG-01`, `AI6-006C/MG-02` and `AI6-008/MG-01` forms remain result-free templates, and the `AI6-005B/MG-01` decision protocol is a filled draft without final signature. The `done` statuses are explicit human decisions recorded in Git. Neither state authorizes an agent to do anything with them: never change a status, and never present one of these protocol documents as passed gate evidence (§10).
 
-What does **not** exist yet: everything from `AI6-007` onward — ticket parser, run/review workflow, provider adapters — and `.ai6/`.
+What does **not** exist yet: everything from `AI6-009` onward — ticket editing, approval saga, run workflow, provider adapters — and `.ai6/`. `AI6-009` and `AI6-010` exist only as ahead-derived ticket files on `status: todo` whose rebase gates are still open; they may be neither released nor claimed (§8.1).
 
-Of the 49 planned tickets twelve exist as files. The other 37 are blueprints in plan §15 — `tickets/AI6-007.md` and everything after it cannot be opened. Plan revisions V1.6.2, V1.6.5, V1.6.7 and V1.6.10 progressively split the former `AI6-005` and `AI6-006`, so M0 ends with `AI6-005A`/`AI6-005B` and the M1 chain is `AI6-006A` … `AI6-006F`; the IDs `AI6-005` and `AI6-006` no longer exist. Plan revision V1.7.0 integrated `docs/AI6_erweiterungsauftrag_modellrouting_multi_review_pipeline_v2.md` — review-only mode, source-dependent advisory finding verification, review prompt profiles and the first real provider tier Codex/Grok/Copilot — and appended the blueprints `AI6-039` … `AI6-043`; `AI6-034` stays the unchanged Claude blueprint and no longer blocks `AI6-035`.
+Of the 49 planned tickets sixteen exist as files. The other 33 are blueprints in plan §15 — `tickets/AI6-011.md` and everything after it cannot be opened. Plan revisions V1.6.2, V1.6.5, V1.6.7 and V1.6.10 progressively split the former `AI6-005` and `AI6-006`, so M0 ends with `AI6-005A`/`AI6-005B` and the M1 chain is `AI6-006A` … `AI6-006F`; the IDs `AI6-005` and `AI6-006` no longer exist. Plan revision V1.7.0 integrated `docs/AI6_erweiterungsauftrag_modellrouting_multi_review_pipeline_v2.md` — review-only mode, source-dependent advisory finding verification, review prompt profiles and the first real provider tier Codex/Grok/Copilot — and appended the blueprints `AI6-039` … `AI6-043`; `AI6-034` stays the unchanged Claude blueprint and no longer blocks `AI6-035`.
 
 Consequences for you:
 
 - The Laravel/PHP toolchain commands in §4 are available and must be run when relevant. The external locked-install suite additionally requires the explicit PHP 8.5 and Composer paths documented in `README.md`. A substantial part of the Git/process test suite proves POSIX lock and `exec` semantics and self-skips outside the Linux runtime; a green Windows run is not the full evidence.
-- Verify every path with `rg --files` or `ls` before naming it. Module contracts up to `AI6-006F` exist in code; later module contracts still do not.
-- The next detail derivation starts at blueprint `AI6-007` (plan §13.3). Deriving any ticket ahead of its dependencies remains a human-ordered exception under §8.1; no currently existing ticket file is in that state.
+- Verify every path with `rg --files` or `ls` before naming it. Module contracts up to `AI6-007` exist in code, and the `AI6-008` ticket-UI seams exist in the current change-set with acceptance open; module contracts from `AI6-009` onward still do not.
+- The next new detail derivation starts at blueprint `AI6-011` (plan §13.3). Deriving any ticket ahead of its dependencies remains a human-ordered exception under §8.1; `AI6-009` and `AI6-010` are currently in that state with open rebase gates.
 
 When this section goes stale, it must be updated — but only when explicitly asked (§10).
 

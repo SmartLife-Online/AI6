@@ -474,9 +474,9 @@ final readonly class ControlOperationExecutor
         }
 
         return match (true) {
-            $exception->conflict === 'lease_lost' => 'Die Operation hat ihre Projektsperre verloren und wird erneut versucht.',
-            $exception->conflict === 'fencing_conflict' => 'Der Publish wurde durch einen neueren Operationsversuch verworfen.',
-            str_starts_with($exception->conflict, 'effect_lock_') => 'Der Effekt-Lock ist für diese Operation derzeit nicht sicher verfügbar; sie wird erneut versucht.',
+            $exception->conflict === 'lease_lost' => ControlOperationPublicFailureText::LEASE_LOST,
+            $exception->conflict === 'fencing_conflict' => ControlOperationPublicFailureText::FENCING_CONFLICT,
+            str_starts_with($exception->conflict, 'effect_lock_') => ControlOperationPublicFailureText::EFFECT_LOCK_UNAVAILABLE,
             default => $this->safeMessage($operation, $exception),
         };
     }

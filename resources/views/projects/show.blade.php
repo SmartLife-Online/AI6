@@ -64,12 +64,13 @@
     @endcan
 
     <h2>Blobgebundenes Read Model</h2>
+    <p><a href="{{ route('projects.tickets.index', $project) }}">Zur Ticketübersicht</a></p>
     @if ($readModels !== [])
         @foreach ($readModels as $readModelStatus)
         @php($readModel = $readModelStatus['readModel'])
         <dl>
             <dt>Pfad</dt>
-            <dd>{{ $readModel->relative_path }}</dd>
+            <dd><a href="{{ route('projects.tickets.show', [$project, $readModel]) }}">{{ $readModel->relative_path }}</a></dd>
             <dt>Control-Commit</dt>
             <dd>{{ $readModel->control_commit }}</dd>
             <dt>Blob-SHA</dt>
@@ -158,7 +159,7 @@
                 – {{ $latestSynchronization->result->safe_summary }}
             @endif
             @if ($latestSynchronization->last_error !== null)
-                – Letzter Fehler: {{ $latestSynchronization->last_error }}
+                – {{ \App\AI6\Git\ControlOperationPublicFailureText::displayable($latestSynchronization->last_error) ?? 'Der letzte Versuch meldete einen intern protokollierten Fehler.' }}
             @endif
         </p>
     @endif

@@ -192,13 +192,14 @@ final class GitRuntimeContractTest extends TestCase
         }
     }
 
-    public function test_symfony_process_remains_transitive_and_yaml_is_directly_locked(): void
+    public function test_symfony_process_remains_transitive_and_direct_dependencies_are_locked(): void
     {
         $root = dirname(__DIR__, 3);
         $composer = json_decode((string) file_get_contents($root.'/composer.json'), true, flags: JSON_THROW_ON_ERROR);
         self::assertIsArray($composer);
         self::assertArrayNotHasKey('symfony/process', $composer['require']);
         self::assertSame('^8.0', $composer['require']['symfony/yaml'] ?? null);
+        self::assertSame('^4.4', $composer['require']['livewire/livewire'] ?? null);
 
         $lock = json_decode((string) file_get_contents($root.'/composer.lock'), true, flags: JSON_THROW_ON_ERROR);
         self::assertIsArray($lock);
@@ -220,17 +221,23 @@ final class GitRuntimeContractTest extends TestCase
 
         $baseComposer = json_decode($baseComposerProcess->getOutput(), true, flags: JSON_THROW_ON_ERROR);
         self::assertIsArray($baseComposer);
+        // AI6-007 approved symfony/yaml and AI6-008 approved livewire/livewire
+        // as the only direct additions on top of the M1 provenance base.
         $baseComposer['require']['symfony/yaml'] = '^8.0';
-        self::assertSame($baseComposer, $composer);
+        $baseComposer['require']['livewire/livewire'] = '^4.4';
+        $normalizedComposer = $composer;
+        ksort($baseComposer['require']);
+        ksort($normalizedComposer['require']);
+        self::assertSame($baseComposer, $normalizedComposer);
 
         $baseLock = json_decode($baseLockProcess->getOutput(), true, flags: JSON_THROW_ON_ERROR);
         self::assertIsArray($baseLock);
-        $lockWithoutYaml = $lock;
-        $lockWithoutYaml['packages'] = array_values(array_filter(
-            $lockWithoutYaml['packages'],
-            static fn (array $package): bool => $package['name'] !== 'symfony/yaml',
+        $lockWithoutAdditions = $lock;
+        $lockWithoutAdditions['packages'] = array_values(array_filter(
+            $lockWithoutAdditions['packages'],
+            static fn (array $package): bool => ! in_array($package['name'], ['symfony/yaml', 'livewire/livewire'], true),
         ));
-        $baseLock['content-hash'] = $lockWithoutYaml['content-hash'];
-        self::assertSame($baseLock, $lockWithoutYaml);
+        $baseLock['content-hash'] = $lockWithoutAdditions['content-hash'];
+        self::assertSame($baseLock, $lockWithoutAdditions);
     }
 }

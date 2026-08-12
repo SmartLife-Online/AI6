@@ -1,7 +1,7 @@
 schema: ai6.ticket-manifest.v1
 source: docs/AI6_IMPLEMENTATION_PLAN.md
-plan_revision: "V1.7.0"
-blueprint_count: 49
+plan_revision: "V1.7.1"
+blueprint_count: 50
 blueprints:
   - id: "AI6-001"
     title: "Laravel-Grundgerüst und Qualitätsbaseline"
@@ -139,6 +139,14 @@ blueprints:
     kind: "feature"
     depends_on: ["AI6-003", "AI6-004"]
     requirement_refs: ["CFG-001", "AGT-001", "AGT-002", "AGT-008", "AGT-009", "REV-011", "RUN-006"]
+  - id: "AI6-044"
+    title: "Manuelle Prompt-Hilfe für Codex und Claude"
+    milestone: "M2"
+    initial_status: "todo"
+    risk: "medium"
+    kind: "feature"
+    depends_on: ["AI6-008", "AI6-011"]
+    requirement_refs: ["AGT-008", "AGT-011", "UI-001", "UI-007", "SEC-004", "SEC-007"]
   - id: "AI6-012"
     title: "Ticketprüfung, Approval-Snapshot und Multi-Reviewer-Auswahl"
     milestone: "M2"

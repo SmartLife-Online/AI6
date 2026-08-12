@@ -25,6 +25,7 @@ use App\AI6\Git\HardenedGitRunner;
 use App\AI6\Git\KnownHostsVerifier;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Policies\ProjectPolicy;
+use App\AI6\Shared\Config\ConfigurationException;
 use App\AI6\Shared\Config\StrictEnumParser;
 use App\AI6\Shared\Config\StrictPositiveIntegerParser;
 use App\AI6\Shared\Doctor\DoctorCommand;
@@ -47,14 +48,20 @@ use App\AI6\Shared\Redaction\Redactor;
 use App\AI6\Shared\Security\SecurityPolicy;
 use App\AI6\Shared\Security\SecurityPolicyFactory;
 use App\AI6\Shared\Yaml\RestrictedYaml;
+use App\AI6\Tickets\Livewire\TicketDetail;
+use App\AI6\Tickets\Livewire\TicketList;
 use App\AI6\Tickets\TicketValidationConfiguration;
 use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Encryption\Encrypter;
+use Illuminate\Routing\Route as RegisteredRoute;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use League\CommonMark\Environment\Environment;
 use League\CommonMark\Extension\CommonMark\CommonMarkCoreExtension;
 use League\CommonMark\MarkdownConverter;
+use Livewire\Livewire;
+use Livewire\Mechanisms\HandleRequests\EndpointResolver;
 use LogicException;
 use PragmaRX\Google2FA\Google2FA;
 
@@ -247,6 +254,62 @@ final class AI6ServiceProvider extends ServiceProvider
     {
         $gate->policy(User::class, UserPolicy::class);
         $gate->policy(Project::class, ProjectPolicy::class);
+
+        self::assertLivewireContentSecurityConfiguration();
+
+        // The fixed CSP binds script-src to the server-side "/assets/" path;
+        // the Livewire bundle therefore loads exclusively through this
+        // hash-bound route while inline asset injection stays disabled.
+        Livewire::setScriptRoute(
+            /** @param  array{class-string, string}  $handle */
+            static fn (array $handle): RegisteredRoute => Route::get('/assets/livewire/livewire.js', $handle),
+        );
+        self::neutralizeUnusedLivewireEndpoints();
+
+        Livewire::component('ai6.tickets.ticket-list', TicketList::class);
+        Livewire::component('ai6.tickets.ticket-detail', TicketDetail::class);
+    }
+
+    /**
+     * Livewire registers its endpoints under an APP_KEY-derived prefix during
+     * package boot. AI6 uses exactly one of them — the CSRF-protected update
+     * endpoint. Every other package endpoint (default bundle, source maps,
+     * per-component JS/CSS modules, file upload and preview) is unused and
+     * re-registered here with the same URI so it answers 404 instead of
+     * exposing surface; the bundle loads exclusively through the hash-bound
+     * "/assets/" route. The public route inventory test pins this contract.
+     */
+    private static function neutralizeUnusedLivewireEndpoints(): void
+    {
+        foreach ([
+            EndpointResolver::scriptPath(minified: false),
+            EndpointResolver::scriptPath(minified: true),
+            EndpointResolver::mapPath(csp: false),
+            EndpointResolver::mapPath(csp: true),
+            EndpointResolver::componentJsPath(),
+            EndpointResolver::componentCssPath(),
+            EndpointResolver::componentGlobalCssPath(),
+            EndpointResolver::previewPath(),
+        ] as $unusedEndpoint) {
+            Route::get($unusedEndpoint, static fn () => abort(404));
+        }
+
+        Route::post(EndpointResolver::uploadPath(), static fn () => abort(404));
+    }
+
+    public static function assertLivewireContentSecurityConfiguration(): void
+    {
+        if (config('livewire.csp_safe') !== true) {
+            throw new ConfigurationException(
+                'Configuration key livewire.csp_safe must stay enabled: the regular Livewire bundle requires unsafe-eval, which the fixed AI6 CSP never grants.',
+            );
+        }
+
+        if (config('livewire.inject_assets') !== false) {
+            throw new ConfigurationException(
+                'Configuration key livewire.inject_assets must stay disabled: assets load only as external files from the bound asset path.',
+            );
+        }
     }
 
     private function mayBootstrapWithoutRedactionKeyring(): bool

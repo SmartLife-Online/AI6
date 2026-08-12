@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_007(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_008(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -142,6 +142,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Git/ControlOperationHasher.php',
             'app/AI6/Git/ControlOperationOutcome.php',
             'app/AI6/Git/ControlOperationPhase.php',
+            'app/AI6/Git/ControlOperationPublicFailureText.php',
             'app/AI6/Git/ControlOperationReconciler.php',
             'app/AI6/Git/ControlOperationRecoveryProcessor.php',
             'app/AI6/Git/ControlOperationRecoveryRequired.php',
@@ -276,9 +277,12 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Tickets/.gitkeep',
             'app/AI6/Tickets/Ai6DetailV1TicketValidator.php',
             'app/AI6/Tickets/Console/ReprojectUnparsedTicketsCommand.php',
+            'app/AI6/Tickets/DependencyBadge.php',
             'app/AI6/Tickets/GenericV1TicketValidator.php',
             'app/AI6/Tickets/LegacyTicketDocument.php',
             'app/AI6/Tickets/LegacyTicketReader.php',
+            'app/AI6/Tickets/Livewire/TicketDetail.php',
+            'app/AI6/Tickets/Livewire/TicketList.php',
             'app/AI6/Tickets/TicketContractHasher.php',
             'app/AI6/Tickets/TicketDependencyGraph.php',
             'app/AI6/Tickets/TicketDocument.php',
@@ -292,6 +296,8 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Tickets/TicketValidationConfiguration.php',
             'app/AI6/Tickets/TicketValidationError.php',
             'app/AI6/Tickets/TicketValidationProfile.php',
+            'app/AI6/Tickets/TicketViewModel.php',
+            'app/AI6/Tickets/TicketViewModelFactory.php',
         ], $files);
     }
 
@@ -334,6 +340,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertSame('*', $composer['require']['ext-openssl'] ?? null);
         self::assertSame('^13.8', $composer['require']['laravel/framework'] ?? null);
         self::assertSame('~2.2.0', $composer['require']['lbuchs/webauthn'] ?? null);
+        self::assertSame('^4.4', $composer['require']['livewire/livewire'] ?? null);
         self::assertSame('~9.0.0', $composer['require']['pragmarx/google2fa'] ?? null);
         self::assertSame('^8.0', $composer['require']['symfony/yaml'] ?? null);
         self::assertSame('^12.5.12', $composer['require-dev']['phpunit/phpunit'] ?? null);
@@ -538,7 +545,7 @@ final class ScaffoldStructureTest extends TestCase
         }
     }
 
-    public function test_migrations_match_the_approved_state_through_ai6_007(): void
+    public function test_migrations_match_the_approved_state_through_ai6_008(): void
     {
         $migrations = glob($this->path('database/migrations/*.php'));
         self::assertIsArray($migrations);

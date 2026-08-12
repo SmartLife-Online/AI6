@@ -245,6 +245,7 @@ final class HttpHardeningTest extends AuthFeatureTestCase
             $this->get('/missing-page'),
             $this->actingAs($user)->get('/projects'),
             $this->actingAs($user)->get('/projects/'.$project->getKey()),
+            $this->actingAs($user)->get('/projects/'.$project->getKey().'/tickets'),
         ];
 
         foreach ($responses as $response) {

@@ -9,6 +9,7 @@ use App\AI6\Shared\Http\HttpSecurityConfigurationFactory;
 use App\AI6\Shared\Security\SecurityMeasure;
 use Illuminate\Foundation\Http\Kernel;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
+use Livewire\Mechanisms\HandleRequests\EndpointResolver;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
 use Tests\Feature\Auth\AuthFeatureTestCase;
@@ -27,7 +28,9 @@ final class CsrfAndArchitectureTest extends AuthFeatureTestCase
             ['POST', '/projects/1/managed-clone'],
             ['POST', '/projects/1/managed-fetch'],
             ['POST', '/projects/1/control-branch'],
+            ['POST', '/projects/1/ticket-read-model'],
             ['POST', '/projects/1/operations/00000000-0000-0000-0000-000000000000/recovery'],
+            ['POST', EndpointResolver::updatePath()],
         ] as [$method, $path]) {
             $actualToken = bin2hex(random_bytes(20));
             $this->withSession(['_token' => $actualToken])

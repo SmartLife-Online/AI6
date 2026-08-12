@@ -10,6 +10,8 @@ use App\AI6\Auth\Models\User;
 use App\AI6\Git\Http\ControlOperationController;
 use App\AI6\Projects\Http\ProjectController;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Tickets\Livewire\TicketDetail;
+use App\AI6\Tickets\Livewire\TicketList;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 
@@ -76,6 +78,12 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/projects/{project}', [ProjectController::class, 'show'])
         ->middleware('can:view,project')
         ->name('projects.show');
+    Route::get('/projects/{project}/tickets', TicketList::class)
+        ->middleware('can:view,project')
+        ->name('projects.tickets.index');
+    Route::get('/projects/{project}/tickets/{readModel}', TicketDetail::class)
+        ->middleware('can:view,project')
+        ->name('projects.tickets.show');
     Route::post('/projects/{project}/deploy-key', [ControlOperationController::class, 'provision'])
         ->middleware('can:provisionDeployKey,project')
         ->name('projects.deploy-key.provision');

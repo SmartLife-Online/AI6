@@ -247,13 +247,24 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
             'operation_lock_heartbeat_at' => null,
         ])->save();
 
+        // Even the redacted internal diagnostic never becomes response
+        // content: both project and operation views show only the generic
+        // failure state and the bound safe summary.
         $this->actingAs($administrator)
             ->get(route('projects.show', $project))
             ->assertOk()
             ->assertSee('failed / attempt_completed')
-            ->assertSee('Letzter Fehler: '.$safeError)
+            ->assertSee('Der letzte Versuch meldete einen intern protokollierten Fehler.')
+            ->assertDontSee($safeError)
             ->assertDontSee($secret)
             ->assertSee($completedAt->toIso8601String());
+        $this->actingAs($administrator)
+            ->get(route('projects.operations.show', [$project, $failed]))
+            ->assertOk()
+            ->assertSee('Der letzte Versuch meldete einen intern protokollierten Fehler.')
+            ->assertSee('Die Managed-Clone-Synchronisierung ist fehlgeschlagen.')
+            ->assertDontSee($safeError)
+            ->assertDontSee($secret);
 
         $this->travel(300)->seconds();
         $this->actingAs($administrator)

@@ -29,7 +29,7 @@
     @endif
 
     @if ($operation->last_error !== null)
-        <p>Letzter Fehler: {{ $operation->last_error }}</p>
+        <p>{{ \App\AI6\Git\ControlOperationPublicFailureText::displayable($operation->last_error) ?? 'Der letzte Versuch meldete einen intern protokollierten Fehler.' }}</p>
     @endif
 
     @if ($operation->state->value === 'recovery_required')
