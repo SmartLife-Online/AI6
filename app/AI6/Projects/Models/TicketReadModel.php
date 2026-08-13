@@ -18,6 +18,7 @@ use Illuminate\Support\Carbon;
  * @property string $blob_sha
  * @property int $control_generation
  * @property string|null $validation_profile
+ * @property string|null $effective_config_hash
  * @property TicketDocumentState $document_state
  * @property string|null $ticket_contract_sha256
  * @property list<array{code: string, field: string, message: string}> $validation_errors

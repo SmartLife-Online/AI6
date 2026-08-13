@@ -4,21 +4,13 @@ namespace App\AI6\Git;
 
 use Normalizer;
 
-final readonly class RefreshPathPolicy
+final class RefreshPathPolicy
 {
-    public function __construct(private ControlOperationConfiguration $configuration) {}
-
-    public function basePath(): string
-    {
-        return $this->configuration->refreshBasePath;
-    }
-
-    public function canonicalizeCandidate(string $candidate): string
+    public static function canonicalizeCandidateForBase(string $candidate, string $basePath): string
     {
         $normalized = self::normalize($candidate);
-        if ($normalized === null
-            || $normalized === $this->configuration->refreshBasePath
-            || ! str_starts_with($normalized, $this->configuration->refreshBasePath.'/')) {
+        if ($normalized === null || self::canonicalBasePath($basePath) !== $basePath
+            || $normalized === $basePath || ! str_starts_with($normalized, $basePath.'/')) {
             throw new ControlOperationConflict('The refresh path is outside the configured base path.');
         }
 

@@ -35,8 +35,8 @@ final class TicketArchitectureTest extends TestCase
         $command = $php[str_replace('\\', '/', $root.'/app/AI6/Tickets/Console/ReprojectUnparsedTicketsCommand.php')];
         self::assertIsString($command);
         self::assertStringContainsString('ControlOperationRuntimeIdentity', $command);
-        self::assertStringContainsString('RefreshPathPolicy', $command);
+        self::assertStringContainsString('EffectiveProjectConfiguration', $command);
         self::assertStringNotContainsString("config('ai6.runtime_role')", $command);
-        self::assertStringNotContainsString("config('ai6.control_operations.refresh_base_path')", $command);
+        self::assertStringNotContainsString('TicketValidationConfiguration', $command);
     }
 }

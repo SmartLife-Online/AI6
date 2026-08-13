@@ -6,6 +6,7 @@ use App\AI6\Auth\Models\User;
 use App\AI6\Auth\StepUpGuard;
 use App\AI6\Git\Actions\QueueTicketMutation;
 use App\AI6\Git\ControlOperationConflict;
+use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Projects\TicketReadModelFreshness;
@@ -23,10 +24,10 @@ final readonly class TicketMutationController
 
     public const STATUS_STEP_UP_ACTION = 'ticket.status';
 
-    public function edit(Project $project, string $readModel, TicketReadModelFreshness $freshness, TicketReadModelUsePolicy $usePolicy): View
+    public function edit(Project $project, string $readModel, TicketReadModelFreshness $freshness, TicketReadModelUsePolicy $usePolicy, EffectiveProjectConfiguration $configuration): View
     {
         $model = $this->readModel($project, $readModel);
-        abort_unless($usePolicy->allowsEditor($model, ! $freshness->for($project, $model)['stale']), 409);
+        abort_unless($usePolicy->allowsEditor($model, ! $freshness->for($project, $model)['stale'], $configuration->for($project)->configuration->ticketValidationProfile()), 409);
 
         return view('tickets.edit', [
             'project' => $project,

@@ -28,13 +28,22 @@ use App\AI6\Git\ManagedProjectPath;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\ControlOperationRecoveryDecision;
 use App\AI6\Git\Models\ControlOperationResult;
+use App\AI6\Git\ProjectConfigRefresher;
 use App\AI6\Git\ProjectOperationLease;
 use App\AI6\Git\RecoveryDecisionType;
 use App\AI6\Git\TicketReadModelPublisher;
 use App\AI6\Git\TicketReadModelRefresher;
 use App\AI6\Git\TicketReadModelRefreshResult;
+use App\AI6\Projects\Actions\ApproveProjectConfiguration;
+use App\AI6\Projects\Actions\QueueProjectConfigRefresh;
+use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Projects\Models\ProjectConfigDraft;
+use App\AI6\Projects\Models\ProjectConfigSnapshot;
 use App\AI6\Projects\Models\TicketReadModel;
+use App\AI6\Projects\ProjectConfiguration;
+use App\AI6\Projects\ProjectConfigurationHasher;
+use App\AI6\Projects\ProjectConfigurationSource;
 use App\AI6\Projects\ProjectProvisioningStatus;
 use App\AI6\Projects\ProjectReadModelStatus;
 use App\AI6\Projects\TicketDocumentState;
@@ -64,6 +73,88 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
     use BuildsManagedControlRuntimeFixture;
 
     private ?string $fixtureRoot = null;
+
+    public function test_config_refresh_publishes_a_valid_blob_bound_draft(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $fixture = $this->configureRepository($project, false, $this->validProjectConfigYaml());
+        $operation = $this->app->make(QueueProjectConfigRefresh::class)->handle(
+            $administrator,
+            $project->refresh(),
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $token = $this->app->make(ProjectOperationLease::class)->claim($operation, str_repeat('4', 32));
+        self::assertIsInt($token);
+
+        self::assertTrue($this->app->make(ProjectConfigRefresher::class)->advance($operation->refresh(), $token));
+
+        $draft = ProjectConfigDraft::query()->sole();
+        self::assertSame('valid', $draft->state);
+        self::assertSame($fixture['control_oid'], $draft->control_commit);
+        self::assertSame($fixture['config_blob_sha'], $draft->blob_sha);
+        self::assertSame(0, $draft->control_generation);
+        self::assertSame([], $draft->validation_errors);
+        self::assertSame([], $draft->redaction_matches);
+        self::assertSame('project-tickets', $draft->normalized_config['tickets_path']);
+        self::assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/D', (string) $draft->config_hash);
+        self::assertSame(ControlOperationState::COMPLETED, $operation->refresh()->state);
+        self::assertSame(ControlOperationPhase::ATTEMPT_COMPLETED, $operation->phase);
+    }
+
+    public function test_config_refresh_publishes_absence_and_selects_server_defaults_without_a_blob(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $this->configureRepository($project, false, null);
+        $operation = $this->app->make(QueueProjectConfigRefresh::class)->handle(
+            $administrator,
+            $project->refresh(),
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $token = $this->app->make(ProjectOperationLease::class)->claim($operation, str_repeat('5', 32));
+        self::assertIsInt($token);
+
+        self::assertTrue($this->app->make(ProjectConfigRefresher::class)->advance($operation->refresh(), $token));
+
+        $draft = ProjectConfigDraft::query()->sole();
+        self::assertSame('absent', $draft->state);
+        self::assertNull($draft->blob_sha);
+        self::assertNull($draft->config_hash);
+        self::assertNull($draft->normalized_config);
+        self::assertSame([], $draft->validation_errors);
+        $binding = $this->app->make(EffectiveProjectConfiguration::class)->for($project->refresh());
+        self::assertSame(ProjectConfigurationSource::SERVER_DEFAULTS, $binding->source);
+        self::assertNull($binding->blobSha);
+        self::assertSame('tickets', $binding->configuration->ticketsPath());
+        self::assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/D', $binding->configHash);
+    }
+
+    public function test_config_refresh_keeps_redaction_matches_as_a_fail_closed_raw_input_boundary(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $this->configureRepository($project, false, "# diagnostic path: /home/operator/private\n".$this->validProjectConfigYaml());
+        $operation = $this->app->make(QueueProjectConfigRefresh::class)->handle(
+            $administrator,
+            $project->refresh(),
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $token = $this->app->make(ProjectOperationLease::class)->claim($operation, str_repeat('5', 32));
+        self::assertIsInt($token);
+
+        self::assertTrue($this->app->make(ProjectConfigRefresher::class)->advance($operation->refresh(), $token));
+
+        $draft = ProjectConfigDraft::query()->sole();
+        self::assertSame('invalid', $draft->state);
+        self::assertContains('config_content_redacted', array_column($draft->validation_errors, 'code'));
+        self::assertNotSame([], $draft->redaction_matches);
+        self::assertNull($draft->config_hash);
+        self::assertNull($draft->normalized_config);
+    }
 
     public function test_publisher_maps_invalid_utf8_to_the_named_terminal_conflict(): void
     {
@@ -204,6 +295,7 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
             'blob_sha',
             'control_generation',
             'validation_profile',
+            'effective_config_hash',
             'document_state',
             'ticket_contract_sha256',
             'redaction_state',
@@ -346,6 +438,58 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
         self::assertSame(0, TicketReadModel::query()->whereNull('validation_profile')->count());
     }
 
+    public function test_project_config_reprojection_applies_an_approved_profile_and_is_idempotent(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $this->configureRepository($project, false, $this->validProjectConfigYaml('tickets'));
+        $readModel = $this->refreshPath($administrator, $project, 'tickets/AI6-099.md');
+        self::assertSame(TicketValidationProfile::GENERIC_V1->value, $readModel->validation_profile);
+
+        $configRefresh = $this->app->make(QueueProjectConfigRefresh::class)->handle(
+            $administrator,
+            $project->refresh(),
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $token = $this->app->make(ProjectOperationLease::class)->claim($configRefresh, str_repeat('6', 32));
+        self::assertIsInt($token);
+        self::assertTrue($this->app->make(ProjectConfigRefresher::class)->advance($configRefresh->refresh(), $token));
+        $draft = ProjectConfigDraft::query()->sole();
+        self::assertSame('valid', $draft->state);
+
+        DB::table('project_memberships')
+            ->where('project_id', $project->getKey())
+            ->where('user_id', $administrator->getKey())
+            ->update(['role' => 'approver']);
+        $snapshot = $this->app->make(ApproveProjectConfiguration::class)->handle(
+            $administrator,
+            $project->refresh(),
+            $draft,
+            (string) Str::uuid(),
+            $draft->control_commit,
+            (string) $draft->blob_sha,
+            (string) $draft->config_hash,
+            $draft->control_generation,
+        );
+        $binding = $this->app->make(EffectiveProjectConfiguration::class)->for($project->refresh());
+        self::assertSame($snapshot->getKey(), $binding->snapshotId);
+        self::assertContains('validation_profile_mismatch', $this->app->make(TicketReadModelFreshness::class)
+            ->for($project->refresh(), $readModel->refresh())['reasons']);
+
+        $this->configureBackfillWorker();
+        self::assertSame(0, Artisan::call('ai6:tickets:reproject-unparsed', ['--project-config' => true]), Artisan::output());
+        $readModel->refresh();
+        self::assertSame(TicketValidationProfile::AI6_DETAIL_V1->value, $readModel->validation_profile);
+        self::assertSame($binding->configHash, $readModel->effective_config_hash);
+        self::assertSame([], $this->app->make(TicketReadModelFreshness::class)
+            ->for($project->refresh(), $readModel)['reasons']);
+        $generatedAt = $readModel->generated_at->toJSON();
+
+        self::assertSame(0, Artisan::call('ai6:tickets:reproject-unparsed', ['--project-config' => true]), Artisan::output());
+        self::assertSame($generatedAt, $readModel->refresh()->generated_at->toJSON());
+    }
+
     #[DataProvider('backfillConflictProvider')]
     public function test_backfill_compare_and_swap_reports_newer_blob_generation_and_profile_conflicts(string $conflict): void
     {
@@ -363,11 +507,7 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
         if ($conflict === 'generation') {
             $project->forceFill(['control_generation' => 1])->save();
         } elseif ($conflict === 'profile') {
-            $this->app->instance(
-                TicketValidationConfiguration::class,
-                new TicketValidationConfiguration(TicketValidationProfile::GENERIC_V1),
-            );
-            config(['ai6.tickets.validation_profile' => 'ai6_detail_v1']);
+            $this->publishProfileSnapshotDuringSecondProjectRead($administrator, $project);
         }
 
         self::assertSame(1, Artisan::call('ai6:tickets:reproject-unparsed'));
@@ -440,7 +580,7 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
         $this->configureRepository($project, withCandidateConflicts: false);
         $this->app->instance(
             TicketValidationConfiguration::class,
-            new TicketValidationConfiguration(TicketValidationProfile::GENERIC_V1, 2),
+            new TicketValidationConfiguration(2),
         );
         foreach ([TicketInventory::class, TicketReadModelRefresher::class] as $service) {
             $this->app->forgetInstance($service);
@@ -686,9 +826,12 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
         self::assertSame($generatedAt, $readModel->generated_at->toJSON());
     }
 
-    /** @return array{repository: string, control_oid: string, blob_sha: string} */
-    private function configureRepository(Project $project, bool $withCandidateConflicts = true): array
-    {
+    /** @return array{repository: string, control_oid: string, blob_sha: string, config_blob_sha: ?string} */
+    private function configureRepository(
+        Project $project,
+        bool $withCandidateConflicts = true,
+        ?string $projectConfig = "refresh_base_path: .ai6\n",
+    ): array {
         $gitBinary = (new ExecutableFinder)->find('git');
         $executablePath = getenv('PATH');
         if (! is_string($gitBinary) || ! is_string($executablePath)) {
@@ -711,7 +854,9 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
         $this->git(['config', 'user.email', 'refresh@example.test'], $source);
         $this->git(['config', 'user.name', 'Refresh Fixture'], $source);
         self::assertTrue(mkdir($source.DIRECTORY_SEPARATOR.'tickets'.DIRECTORY_SEPARATOR.'subdir', 0700, true));
-        self::assertTrue(mkdir($source.DIRECTORY_SEPARATOR.'.ai6', 0700));
+        if ($projectConfig !== null) {
+            self::assertTrue(mkdir($source.DIRECTORY_SEPARATOR.'.ai6', 0700));
+        }
         self::assertNotFalse(file_put_contents(
             $source.DIRECTORY_SEPARATOR.'tickets'.DIRECTORY_SEPARATOR.'AI6-006F.md',
             "---\nschema: ai6.ticket.v1\nid: AI6-006F\ntitle: \"Refresh prüfen\"\nstatus: todo\ndepends_on: []\n---\n\n## Goal\n\nRefresh prüfen.\n\npassword=hunter2\n",
@@ -728,8 +873,12 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
             "---\nschema: ai6.ticket.v1\nid: M169\ntitle: \"UTF-8 prüfen\"\nstatus: todo\ndepends_on: []\n---\n\n## Goal\n\nUngültige Bodybytes prüfen: \xC3\x28\n",
         ));
         self::assertNotFalse(file_put_contents($source.DIRECTORY_SEPARATOR.'tickets'.DIRECTORY_SEPARATOR.'subdir'.DIRECTORY_SEPARATOR.'nested.md', "nested\n"));
-        self::assertNotFalse(file_put_contents($source.DIRECTORY_SEPARATOR.'.ai6'.DIRECTORY_SEPARATOR.'config.yaml', "refresh_base_path: .ai6\n"));
-        $this->git(['add', 'tickets/AI6-006F.md', 'tickets/AI6-099.md', 'tickets/README.md', 'tickets/AI6-008.md.bak', 'tickets/AI6-007.md', 'tickets/M169.md', 'tickets/subdir/nested.md', '.ai6/config.yaml'], $source);
+        $trackedPaths = ['tickets/AI6-006F.md', 'tickets/AI6-099.md', 'tickets/README.md', 'tickets/AI6-008.md.bak', 'tickets/AI6-007.md', 'tickets/M169.md', 'tickets/subdir/nested.md'];
+        if ($projectConfig !== null) {
+            self::assertNotFalse(file_put_contents($source.DIRECTORY_SEPARATOR.'.ai6'.DIRECTORY_SEPARATOR.'config.yaml', $projectConfig));
+            $trackedPaths[] = '.ai6/config.yaml';
+        }
+        $this->git(['add', ...$trackedPaths], $source);
         $lowerCaseBlob = trim((string) $this->git(['hash-object', '-w', '--stdin'], $source, "ignored lower-case name\n"));
         $this->git(['update-index', '--add', '--cacheinfo', '100644,'.$lowerCaseBlob.',tickets/ai6-006f.md'], $source);
         $this->git(['update-index', '--add', '--cacheinfo', '100644,'.$lowerCaseBlob.',tickets/ai6-099.md'], $source);
@@ -744,6 +893,9 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
         $this->git(['commit', '-m', 'refresh fixture'], $source);
         $controlOid = trim((string) $this->git(['rev-parse', 'HEAD'], $source));
         $blobSha = trim((string) $this->git(['rev-parse', 'HEAD:tickets/AI6-006F.md'], $source));
+        $configBlobSha = $projectConfig === null
+            ? null
+            : trim((string) $this->git(['rev-parse', 'HEAD:.ai6/config.yaml'], $source));
 
         $identifier = (string) $project->project_identifier;
         $repository = $root.DIRECTORY_SEPARATOR.'projects'.DIRECTORY_SEPARATOR.$identifier.DIRECTORY_SEPARATOR.'repository';
@@ -778,7 +930,6 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
             ['refs/heads/main', 'refs/heads/next'],
             300,
             8,
-            'tickets',
         );
         $gitConfiguration = new GitConfiguration(
             $gitBinary,
@@ -815,7 +966,117 @@ final class TicketReadModelRefreshTest extends ControlOperationTestCase
             'control_oid' => $controlOid,
         ])->save();
 
-        return ['repository' => (string) realpath($repository), 'control_oid' => $controlOid, 'blob_sha' => $blobSha];
+        return [
+            'repository' => (string) realpath($repository),
+            'control_oid' => $controlOid,
+            'blob_sha' => $blobSha,
+            'config_blob_sha' => $configBlobSha,
+        ];
+    }
+
+    private function validProjectConfigYaml(string $ticketsPath = 'project-tickets'): string
+    {
+        return <<<YAML
+version: 1
+tickets_path: {$ticketsPath}
+ticket_validation_profile: ai6_detail_v1
+push_mode: manual
+auto_start_next: false
+dependency_satisfied_statuses:
+  - done
+defaults:
+  implementation_profile: codex-gpt-5.6-terra
+  implementation_effort: medium
+  reviewers:
+    - profile: grok-cli-review
+      effort: provider_default
+limits:
+  max_fix_rounds: 3
+  max_review_rounds: 4
+  max_verification_rounds: 2
+  max_agent_invocations: 20
+  max_added_scope_paths: 12
+  max_changed_files: 40
+  max_changed_bytes: 2000000
+  max_artifacts: 20
+  max_artifact_bytes: 5000000
+  max_total_artifact_bytes: 20000000
+  max_provider_output_bytes: 2000000
+  max_run_minutes: 180
+scope:
+  auto_allow:
+    - app/**
+  require_approval:
+    - .ai6/**
+checks:
+  before_review:
+    - php-targeted
+  final:
+    - php-all
+    - git-diff-check
+YAML;
+    }
+
+    private function publishProfileSnapshotDuringSecondProjectRead(User $actor, Project $project): void
+    {
+        $values = config('ai6.project_config.server_defaults');
+        self::assertIsArray($values);
+        $values['ticket_validation_profile'] = TicketValidationProfile::AI6_DETAIL_V1->value;
+        $configuration = new ProjectConfiguration($values);
+        $hash = $this->app->make(ProjectConfigurationHasher::class)->hash($configuration);
+        $operation = ControlOperation::query()->create([
+            'id' => (string) Str::uuid(),
+            'project_id' => $project->getKey(),
+            'actor_id' => $actor->getKey(),
+            'operation_type' => ControlOperationType::CONFIG_REFRESH,
+            'schema_version' => 1,
+            'authorization_snapshot' => [],
+            'authorization_snapshot_jcs' => '{}',
+            'expected_control_commit' => $project->control_oid,
+            'operation_parameters_jcs' => json_encode(['config_path' => QueueProjectConfigRefresh::CONFIG_PATH], JSON_THROW_ON_ERROR),
+            'request_hash' => hash('sha256', random_bytes(16)),
+            'phase' => ControlOperationPhase::CLAIMED,
+            'state' => ControlOperationState::RUNNING,
+            'attempts' => 1,
+            'current_attempt_token' => 1,
+        ]);
+        $draft = ProjectConfigDraft::query()->create([
+            'project_id' => $project->getKey(),
+            'control_operation_id' => $operation->id,
+            'control_commit' => $project->control_oid,
+            'blob_sha' => hash('sha256', $operation->id),
+            'control_generation' => $project->control_generation,
+            'state' => 'valid',
+            'config_hash' => $hash,
+            'normalized_config' => $configuration->values,
+            'validation_errors' => [],
+            'redaction_matches' => [],
+        ]);
+        $reads = 0;
+        $published = false;
+        Project::retrieved(function (Project $retrieved) use ($actor, $project, $draft, $hash, &$reads, &$published): void {
+            if ($published || $retrieved->getKey() !== $project->getKey()) {
+                return;
+            }
+            $reads++;
+            if ($reads !== 2) {
+                return;
+            }
+            ProjectConfigSnapshot::query()->create([
+                'id' => (string) Str::uuid(),
+                'project_id' => $project->getKey(),
+                'approval_id' => (string) Str::uuid(),
+                'draft_id' => $draft->getKey(),
+                'control_commit' => $draft->control_commit,
+                'blob_sha' => $draft->blob_sha,
+                'config_hash' => $hash,
+                'normalized_config' => $draft->normalized_config,
+                'control_generation' => $draft->control_generation,
+                'approved_by' => $actor->getKey(),
+                'approved_at' => now(),
+            ]);
+            $published = true;
+        });
     }
 
     /** @param array{repository: string, control_oid: string, blob_sha: string} $fixture */

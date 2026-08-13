@@ -4,6 +4,7 @@ namespace Tests\Feature\Git;
 
 use App\AI6\Git\ControlOperationType;
 use App\AI6\Git\Models\ControlOperation;
+use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\ProjectProvisioningStatus;
 use App\AI6\Projects\ProjectRole;
 use Illuminate\Support\Facades\DB;
@@ -33,8 +34,14 @@ final class TicketReadModelRefreshWebTest extends ControlOperationTestCase
         self::assertSame(ControlOperationType::TICKET_REFRESH, $operation->operation_type);
         self::assertSame(str_repeat('a', 64), $operation->expected_control_commit);
         self::assertNull($operation->process_id);
+        $binding = $this->app->make(EffectiveProjectConfiguration::class)->for($project->refresh());
         self::assertSame(
-            ['refresh_base_path' => 'tickets', 'relative_path' => 'tickets/AI6-006F.md'],
+            [
+                'effective_config_hash' => $binding->configHash,
+                'refresh_base_path' => 'tickets',
+                'relative_path' => 'tickets/AI6-006F.md',
+                'validation_profile' => $binding->configuration->ticketValidationProfile()->value,
+            ],
             json_decode($operation->operation_parameters_jcs, true, 8, JSON_THROW_ON_ERROR),
         );
         self::assertSame(1, DB::table('jobs')->count());

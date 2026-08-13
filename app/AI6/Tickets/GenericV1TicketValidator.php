@@ -32,7 +32,7 @@ final class GenericV1TicketValidator
             $errors[] = $this->error('title_empty', 'title', 'Der Tickettitel darf nicht leer sein.');
         }
         if (is_string($frontmatter['status'] ?? null)
-            && ! in_array($frontmatter['status'], ['todo', 'ready', 'in_progress', 'blocked', 'review', 'done', 'cancelled'], true)) {
+            && TicketStatus::tryFrom($frontmatter['status']) === null) {
             $errors[] = $this->error('status_invalid', 'status', 'Der Ticketstatus ist nicht zulässig.');
         }
 

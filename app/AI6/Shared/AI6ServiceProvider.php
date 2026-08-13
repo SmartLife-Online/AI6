@@ -2,6 +2,7 @@
 
 namespace App\AI6\Shared;
 
+use App\AI6\Agents\ModelProfileAllowlist;
 use App\AI6\Auth\AuthenticationHmac;
 use App\AI6\Auth\Config\AuthConfiguration;
 use App\AI6\Auth\Config\AuthConfigurationFactory;
@@ -11,6 +12,7 @@ use App\AI6\Auth\PasskeyCeremony;
 use App\AI6\Auth\PasskeyRelyingParty;
 use App\AI6\Auth\PasskeyRelyingPartyFactory;
 use App\AI6\Auth\Policies\UserPolicy;
+use App\AI6\Checks\CheckProfileAllowlist;
 use App\AI6\Git\ControlOperationConfiguration;
 use App\AI6\Git\ControlOperationConfigurationFactory;
 use App\AI6\Git\ControlOperationRuntimeIdentity;
@@ -25,10 +27,10 @@ use App\AI6\Git\HardenedGitRunner;
 use App\AI6\Git\KnownHostsVerifier;
 use App\AI6\Git\TicketMutationConfiguration;
 use App\AI6\Git\TicketMutationConfigurationFactory;
+use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Policies\ProjectPolicy;
 use App\AI6\Shared\Config\ConfigurationException;
-use App\AI6\Shared\Config\StrictEnumParser;
 use App\AI6\Shared\Config\StrictPositiveIntegerParser;
 use App\AI6\Shared\Doctor\DoctorCommand;
 use App\AI6\Shared\Doctor\RedactionKeyringDoctorCheck;
@@ -50,6 +52,7 @@ use App\AI6\Shared\Redaction\Redactor;
 use App\AI6\Shared\Security\SecurityPolicy;
 use App\AI6\Shared\Security\SecurityPolicyFactory;
 use App\AI6\Shared\Yaml\RestrictedYaml;
+use App\AI6\Tickets\DependencySatisfiedStatusAllowlist;
 use App\AI6\Tickets\Livewire\TicketDetail;
 use App\AI6\Tickets\Livewire\TicketList;
 use App\AI6\Tickets\TicketValidationConfiguration;
@@ -72,10 +75,13 @@ final class AI6ServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(RestrictedYaml::class);
+        $this->app->singleton(CheckProfileAllowlist::class, static fn (): CheckProfileAllowlist => CheckProfileAllowlist::fromConfiguredValues());
+        $this->app->singleton(ModelProfileAllowlist::class, static fn (): ModelProfileAllowlist => ModelProfileAllowlist::fromConfiguredValues());
+        $this->app->singleton(DependencySatisfiedStatusAllowlist::class, static fn (): DependencySatisfiedStatusAllowlist => DependencySatisfiedStatusAllowlist::fromConfiguredValues());
+        $this->app->singleton(EffectiveProjectConfiguration::class);
         $this->app->singleton(
             TicketValidationConfiguration::class,
             static fn (Application $app): TicketValidationConfiguration => TicketValidationConfiguration::fromConfiguredValues(
-                $app->make(StrictEnumParser::class),
                 $app->make(StrictPositiveIntegerParser::class),
             ),
         );

@@ -8,6 +8,7 @@ use App\AI6\Auth\Http\PrimaryAuthenticationController;
 use App\AI6\Auth\Http\StepUpController;
 use App\AI6\Auth\Models\User;
 use App\AI6\Git\Http\ControlOperationController;
+use App\AI6\Projects\Http\ProjectConfigurationController;
 use App\AI6\Projects\Http\ProjectController;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Tickets\Livewire\TicketDetail;
@@ -109,6 +110,12 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/projects/{project}/ticket-read-model', [ControlOperationController::class, 'refreshReadModel'])
         ->middleware('can:refreshReadModel,project')
         ->name('projects.ticket-read-model.refresh');
+    Route::post('/projects/{project}/configuration/refresh', [ProjectConfigurationController::class, 'refresh'])
+        ->middleware('can:refreshConfiguration,project')
+        ->name('projects.configuration.refresh');
+    Route::post('/projects/{project}/configuration/drafts/{draft}/approve', [ProjectConfigurationController::class, 'approve'])
+        ->middleware('can:approveConfiguration,project')
+        ->name('projects.configuration.approve');
     Route::get('/projects/{project}/operations/{operation}', [ControlOperationController::class, 'show'])
         ->middleware('can:view,project')
         ->name('projects.operations.show');

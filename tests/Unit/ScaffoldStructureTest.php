@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_009(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_010(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -58,6 +58,7 @@ final class ScaffoldStructureTest extends TestCase
         sort($files);
         self::assertSame([
             'app/AI6/Agents/.gitkeep',
+            'app/AI6/Agents/ModelProfileAllowlist.php',
             'app/AI6/Auth/.gitkeep',
             'app/AI6/Auth/Actions/CreateUser.php',
             'app/AI6/Auth/Actions/DeactivateUser.php',
@@ -125,6 +126,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Auth/TotpSecretAuthenticationException.php',
             'app/AI6/Auth/TotpSecretCipher.php',
             'app/AI6/Checks/.gitkeep',
+            'app/AI6/Checks/CheckProfileAllowlist.php',
             'app/AI6/Git/.gitkeep',
             'app/AI6/Git/Actions/QueueControlBranchChange.php',
             'app/AI6/Git/Actions/QueueDeployKeyProvisioning.php',
@@ -174,6 +176,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Git/Models/ControlOperationRecoveryDecision.php',
             'app/AI6/Git/Models/ControlOperationResult.php',
             'app/AI6/Git/Models/TicketMutation.php',
+            'app/AI6/Git/ProjectConfigRefresher.php',
             'app/AI6/Git/ProjectEffectLockName.php',
             'app/AI6/Git/ProjectOperationLease.php',
             'app/AI6/Git/RecoveryDecisionType.php',
@@ -192,16 +195,32 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Git/generate-deploy-key.sh',
             'app/AI6/HumanLoop/.gitkeep',
             'app/AI6/Projects/.gitkeep',
+            'app/AI6/Projects/Actions/ApproveProjectConfiguration.php',
+            'app/AI6/Projects/Actions/QueueProjectConfigRefresh.php',
             'app/AI6/Projects/Actions/RegisterProject.php',
             'app/AI6/Projects/ControlGeneration.php',
+            'app/AI6/Projects/EffectiveProjectConfiguration.php',
+            'app/AI6/Projects/Http/ProjectConfigurationController.php',
             'app/AI6/Projects/Http/ProjectController.php',
             'app/AI6/Projects/Models/ControlBranchAuditEntry.php',
             'app/AI6/Projects/Models/Project.php',
+            'app/AI6/Projects/Models/ProjectConfigDraft.php',
+            'app/AI6/Projects/Models/ProjectConfigSnapshot.php',
             'app/AI6/Projects/Models/ProjectMembership.php',
             'app/AI6/Projects/Models/TicketReadModel.php',
             'app/AI6/Projects/PendingControlBinding.php',
             'app/AI6/Projects/Policies/ProjectPolicy.php',
             'app/AI6/Projects/ProjectAction.php',
+            'app/AI6/Projects/ProjectConfiguration.php',
+            'app/AI6/Projects/ProjectConfigurationBinding.php',
+            'app/AI6/Projects/ProjectConfigurationConflict.php',
+            'app/AI6/Projects/ProjectConfigurationDiff.php',
+            'app/AI6/Projects/ProjectConfigurationError.php',
+            'app/AI6/Projects/ProjectConfigurationHasher.php',
+            'app/AI6/Projects/ProjectConfigurationParseResult.php',
+            'app/AI6/Projects/ProjectConfigurationParser.php',
+            'app/AI6/Projects/ProjectConfigurationSource.php',
+            'app/AI6/Projects/ProjectConfigurationStatus.php',
             'app/AI6/Projects/ProjectIdentifierGenerator.php',
             'app/AI6/Projects/ProjectProvisioningStatus.php',
             'app/AI6/Projects/ProjectReadModelStatus.php',
@@ -285,6 +304,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Tickets/Ai6DetailV1TicketValidator.php',
             'app/AI6/Tickets/Console/ReprojectUnparsedTicketsCommand.php',
             'app/AI6/Tickets/DependencyBadge.php',
+            'app/AI6/Tickets/DependencySatisfiedStatusAllowlist.php',
             'app/AI6/Tickets/GenericV1TicketValidator.php',
             'app/AI6/Tickets/LegacyTicketDocument.php',
             'app/AI6/Tickets/LegacyTicketReader.php',
@@ -302,6 +322,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Tickets/TicketProjection.php',
             'app/AI6/Tickets/TicketReadModelProjector.php',
             'app/AI6/Tickets/TicketSourceBlockers.php',
+            'app/AI6/Tickets/TicketStatus.php',
             'app/AI6/Tickets/TicketStatusOperation.php',
             'app/AI6/Tickets/TicketStatusTransitionPolicy.php',
             'app/AI6/Tickets/TicketV1Parser.php',
@@ -557,7 +578,7 @@ final class ScaffoldStructureTest extends TestCase
         }
     }
 
-    public function test_migrations_match_the_approved_state_through_ai6_009(): void
+    public function test_migrations_match_the_approved_state_through_ai6_010(): void
     {
         $migrations = glob($this->path('database/migrations/*.php'));
         self::assertIsArray($migrations);
@@ -585,6 +606,7 @@ final class ScaffoldStructureTest extends TestCase
             '2026_08_10_010000_add_ticket_refresh_read_model_contract.php',
             '2026_08_11_000000_add_ticket_validation_projection_contract.php',
             '2026_08_12_000000_add_ticket_mutation_operation_contract.php',
+            '2026_08_13_000000_add_project_configuration_snapshot_contract.php',
         ], $migrations);
     }
 

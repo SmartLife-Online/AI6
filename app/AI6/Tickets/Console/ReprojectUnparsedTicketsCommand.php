@@ -4,19 +4,16 @@ namespace App\AI6\Tickets\Console;
 
 use App\AI6\Git\ControlOperationRuntimeIdentityFactory;
 use App\AI6\Git\ManagedProjectPath;
-use App\AI6\Git\RefreshPathPolicy;
+use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Projects\TicketDocumentState;
 use App\AI6\Projects\TicketReadModelRedactionState;
-use App\AI6\Shared\Config\StrictEnumParser;
-use App\AI6\Shared\Config\StrictPositiveIntegerParser;
 use App\AI6\Shared\Redaction\InvalidRedactionInputException;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
 use App\AI6\Tickets\TicketInventory;
 use App\AI6\Tickets\TicketSourceBlockers;
-use App\AI6\Tickets\TicketValidationConfiguration;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Date;
@@ -25,15 +22,14 @@ use Throwable;
 
 final class ReprojectUnparsedTicketsCommand extends Command
 {
-    protected $signature = 'ai6:tickets:reproject-unparsed';
+    protected $signature = 'ai6:tickets:reproject-unparsed {--project-config : Reprojiziert auch abweichende Profil- und Config-Bindungen}';
 
     protected $description = 'Reproject legacy unparsed ticket read models under the configured server profile';
 
     public function __construct(
         private readonly Application $app,
-        private readonly TicketValidationConfiguration $validation,
         private readonly ControlOperationRuntimeIdentityFactory $runtimeIdentityFactory,
-        private readonly RefreshPathPolicy $refreshPaths,
+        private readonly EffectiveProjectConfiguration $projectConfiguration,
     ) {
         parent::__construct();
     }
@@ -47,9 +43,11 @@ final class ReprojectUnparsedTicketsCommand extends Command
         }
 
         $conflicts = 0;
-        $ids = TicketReadModel::query()
-            ->where('document_state', TicketDocumentState::UNPARSED)
-            ->whereNull('validation_profile')
+        $query = TicketReadModel::query();
+        if (! $this->option('project-config')) {
+            $query->where('document_state', TicketDocumentState::UNPARSED)->whereNull('validation_profile');
+        }
+        $ids = $query
             ->orderBy('id')
             ->pluck('id');
         foreach ($ids as $id) {
@@ -58,6 +56,9 @@ final class ReprojectUnparsedTicketsCommand extends Command
                 $conflicts++;
                 $this->warn('Konflikt: Eine Projektion wurde zwischenzeitlich entfernt.');
 
+                continue;
+            }
+            if ($this->option('project-config') && $this->hasCurrentConfigurationBinding($readModel)) {
                 continue;
             }
             try {
@@ -72,10 +73,8 @@ final class ReprojectUnparsedTicketsCommand extends Command
             }
         }
 
-        $remaining = TicketReadModel::query()
-            ->where('document_state', TicketDocumentState::UNPARSED)
-            ->whereNull('validation_profile')
-            ->count();
+        $remaining = $this->option('project-config') ? 0 : TicketReadModel::query()
+            ->where('document_state', TicketDocumentState::UNPARSED)->whereNull('validation_profile')->count();
         if ($conflicts > 0 || $remaining > 0) {
             $this->error(sprintf('%d Konflikt(e); %d unparsed Read Model(s) verbleiben.', $conflicts, $remaining));
 
@@ -98,11 +97,13 @@ final class ReprojectUnparsedTicketsCommand extends Command
             $managedPaths->repositoryDirectory($project->project_identifier),
         );
         $context = new RedactionContext((string) $project->getKey(), null, 'ticket-read-model:'.$readModel->relative_path);
-        $profile = $this->validation->profile;
+        $binding = $this->projectConfiguration->for($project);
+        $profile = $binding->configuration->ticketValidationProfile();
+        $basePath = $binding->configuration->ticketsPath();
         $inventory = $this->app->make(TicketInventory::class)->inspect(
             $repository,
             $readModel->control_commit,
-            $this->refreshPaths->basePath(),
+            $basePath,
             $profile,
             $profile,
             $context,
@@ -131,15 +132,13 @@ final class ReprojectUnparsedTicketsCommand extends Command
 
         return DB::transaction(function () use (
             $readModel, $project, $profile, $projection, $redaction, $redactionState,
-            $matches, $blockers, $editorEligible, $approvalEligible, $generation,
+            $matches, $blockers, $editorEligible, $approvalEligible, $generation, $binding,
         ): bool {
             $currentProject = Project::query()->findOrFail($project->getKey());
-            $currentProfile = TicketValidationConfiguration::fromConfiguredValues(
-                $this->app->make(StrictEnumParser::class),
-                $this->app->make(StrictPositiveIntegerParser::class),
-            )->profile;
+            $currentBinding = $this->projectConfiguration->for($currentProject);
             if ($currentProject->control_generation !== $generation
-                || $currentProfile !== $profile) {
+                || $currentBinding->configuration->ticketValidationProfile() !== $profile
+                || ! hash_equals($currentBinding->configHash, $binding->configHash)) {
                 return false;
             }
 
@@ -150,10 +149,12 @@ final class ReprojectUnparsedTicketsCommand extends Command
                 ->where('control_commit', $readModel->control_commit)
                 ->where('blob_sha', $readModel->blob_sha)
                 ->where('control_generation', $generation)
-                ->where('document_state', TicketDocumentState::UNPARSED->value)
-                ->whereNull('validation_profile')
+                ->where('document_state', $readModel->document_state->value)
+                ->where('validation_profile', $readModel->validation_profile)
+                ->where('effective_config_hash', $readModel->effective_config_hash)
                 ->update([
                     'validation_profile' => $profile->value,
+                    'effective_config_hash' => $binding->configHash,
                     'document_state' => $projection->state->value,
                     'ticket_contract_sha256' => $projection->contractHash,
                     'validation_errors' => json_encode(array_map(static fn ($error): array => $error->jsonSerialize(), $projection->errors), JSON_THROW_ON_ERROR),
@@ -168,5 +169,19 @@ final class ReprojectUnparsedTicketsCommand extends Command
                     'updated_at' => Date::now(),
                 ]) === 1;
         });
+    }
+
+    private function hasCurrentConfigurationBinding(TicketReadModel $readModel): bool
+    {
+        $project = Project::query()->find($readModel->project_id);
+        if (! $project instanceof Project) {
+            return false;
+        }
+        $binding = $this->projectConfiguration->for($project);
+
+        return is_string($readModel->validation_profile)
+            && hash_equals($binding->configuration->ticketValidationProfile()->value, $readModel->validation_profile)
+            && is_string($readModel->effective_config_hash)
+            && hash_equals($binding->configHash, $readModel->effective_config_hash);
     }
 }

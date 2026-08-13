@@ -3,9 +3,9 @@
 namespace Tests\Feature\Tickets;
 
 use App\AI6\Auth\Models\User;
+use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
-use App\AI6\Tickets\TicketValidationConfiguration;
 use App\AI6\Tickets\TicketValidationProfile;
 
 final class TicketUiStateMatrixTest extends TicketUiTestCase
@@ -81,13 +81,14 @@ final class TicketUiStateMatrixTest extends TicketUiTestCase
 
         $this->assertEntries($administrator, $project, $valid, edit: true, approval: true);
 
-        // The availability lives exclusively in TicketReadModelUsePolicy: once
-        // its bound configuration demands the detail profile, the very same
-        // projection loses both entries without any view or component change.
-        $this->app->instance(
-            TicketValidationConfiguration::class,
-            new TicketValidationConfiguration(TicketValidationProfile::AI6_DETAIL_V1),
-        );
+        // The availability consumes the effective project configuration: once
+        // the trusted default demands the detail profile, the same projection
+        // becomes stale and loses both entries without a view change.
+        $defaults = config('ai6.project_config.server_defaults');
+        self::assertIsArray($defaults);
+        $defaults['ticket_validation_profile'] = TicketValidationProfile::AI6_DETAIL_V1->value;
+        config()->set('ai6.project_config.server_defaults', $defaults);
+        $this->app->forgetInstance(EffectiveProjectConfiguration::class);
 
         $this->assertEntries($administrator, $project, $valid, edit: false, approval: false);
     }

@@ -63,6 +63,69 @@
         @endif
     @endcan
 
+    <h2>Projektkonfiguration</h2>
+    <dl>
+        <dt>Wirksame Quelle</dt>
+        <dd>{{ $binding->source->value }}</dd>
+        <dt>Wirksamer Hash</dt>
+        <dd>{{ $binding->configHash }}</dd>
+        <dt>Wirksamer Blob</dt>
+        <dd>{{ $binding->blobSha ?? 'Kein Repositoryblob (Serverdefaults)' }}</dd>
+        <dt>Tickets-Pfad</dt>
+        <dd>{{ $binding->configuration->ticketsPath() }}</dd>
+        <dt>Ticketvalidierungsprofil</dt>
+        <dd>{{ $binding->configuration->ticketValidationProfile()->value }}</dd>
+    </dl>
+    @can('refreshConfiguration', $project)
+        @if ($project->provisioning_status->value === 'provisioned' && $project->control_oid !== null && $project->pending_control_oid === null)
+            <form method="POST" action="{{ route('projects.configuration.refresh', $project) }}">
+                @csrf
+                <input type="hidden" name="operation_id" value="{{ $configRefreshOperationId }}">
+                <button type="submit">.ai6/config.yaml aktualisieren</button>
+            </form>
+        @endif
+    @endcan
+    @if ($draft !== null)
+        <p>Letzter Entwurf: {{ $draft->state }} / Generation {{ $draft->control_generation }}</p>
+        @if ($draft->validation_errors !== [])
+            <ul>
+                @foreach ($draft->validation_errors as $error)
+                    <li>{{ $error['code'] }} ({{ $error['field'] }}): {{ $error['message'] }}</li>
+                @endforeach
+            </ul>
+        @endif
+        @if ($changes !== [])
+            <table>
+                <thead><tr><th>Wert</th><th>Bisher</th><th>Entwurf</th></tr></thead>
+                <tbody>
+                @foreach ($changes as $change)
+                    <tr><td>{{ $change['path'] }}</td><td>{{ json_encode($change['before'], JSON_UNESCAPED_UNICODE) }}</td><td>{{ json_encode($change['after'], JSON_UNESCAPED_UNICODE) }}</td></tr>
+                @endforeach
+                </tbody>
+            </table>
+        @endif
+        @can('approveConfiguration', $project)
+            @if ($draft->state === 'valid' && $draft->control_generation === $project->control_generation && $draft->control_commit === $project->control_oid)
+                <p>Die Freigabe erfordert ein frisches Step-up für <code>project_config.approve</code>.</p>
+                <form method="POST" action="{{ route('auth.step-up.totp.verify', ['action' => 'project_config.approve']) }}">
+                    @csrf
+                    <label for="config_step_up_code">TOTP-Code</label>
+                    <input id="config_step_up_code" name="code" required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}">
+                    <button type="submit">Step-up bestätigen</button>
+                </form>
+                <form method="POST" action="{{ route('projects.configuration.approve', [$project, $draft]) }}">
+                    @csrf
+                    <input type="hidden" name="approval_id" value="{{ $configApprovalId }}">
+                    <input type="hidden" name="expected_control_commit" value="{{ $draft->control_commit }}">
+                    <input type="hidden" name="expected_blob_sha" value="{{ $draft->blob_sha }}">
+                    <input type="hidden" name="expected_config_hash" value="{{ $draft->config_hash }}">
+                    <input type="hidden" name="expected_control_generation" value="{{ $draft->control_generation }}">
+                    <button type="submit">Konfiguration freigeben</button>
+                </form>
+            @endif
+        @endcan
+    @endif
+
     <h2>Blobgebundenes Read Model</h2>
     <p><a href="{{ route('projects.tickets.index', $project) }}">Zur Ticketübersicht</a></p>
     @if ($readModels !== [])

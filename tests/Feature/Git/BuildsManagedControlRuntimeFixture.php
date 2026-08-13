@@ -123,7 +123,6 @@ SH)));
             ['refs/heads/main', 'refs/heads/next', 'refs/heads/missing'],
             300,
             8,
-            'tickets',
         );
         $lease = new ProjectOperationLease($operationConfiguration);
         $paths = new ManagedProjectPath($operationConfiguration);

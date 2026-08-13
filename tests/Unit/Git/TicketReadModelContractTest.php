@@ -8,22 +8,35 @@ use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\TicketBlob;
 use App\AI6\Git\TicketReadModelRefreshResult;
 use App\AI6\Git\TicketReadModelResultBinding;
-use App\AI6\Projects\ControlGeneration;
+use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Projects\TicketDocumentState;
 use App\AI6\Projects\TicketReadModelFreshness;
 use App\AI6\Projects\TicketReadModelRedactionState;
 use App\AI6\Projects\TicketReadModelUsePolicy;
-use App\AI6\Tickets\TicketValidationConfiguration;
 use App\AI6\Tickets\TicketValidationProfile;
-use PHPUnit\Framework\TestCase;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
+use Tests\TestCase;
 
 final class TicketReadModelContractTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config([
+            'database.default' => 'sqlite',
+            'database.connections.sqlite.database' => ':memory:',
+        ]);
+        DB::purge('sqlite');
+        self::assertSame(0, Artisan::call('migrate:fresh'), Artisan::output());
+    }
+
     public function test_approval_and_editor_policy_is_split_and_fails_closed(): void
     {
-        $policy = new TicketReadModelUsePolicy(new TicketValidationConfiguration(TicketValidationProfile::GENERIC_V1));
+        $policy = new TicketReadModelUsePolicy;
 
         $unparsed = $this->readModel(
             TicketDocumentState::UNPARSED,
@@ -31,8 +44,8 @@ final class TicketReadModelContractTest extends TestCase
             false, false,
             ['unparsed'],
         );
-        self::assertFalse($policy->allowsEditor($unparsed, true));
-        self::assertFalse($policy->allowsApproval($unparsed, true));
+        self::assertFalse($policy->allowsEditor($unparsed, true, TicketValidationProfile::GENERIC_V1));
+        self::assertFalse($policy->allowsApproval($unparsed, true, TicketValidationProfile::GENERIC_V1));
 
         $redacted = $this->readModel(
             TicketDocumentState::VALID,
@@ -40,8 +53,8 @@ final class TicketReadModelContractTest extends TestCase
             false, false,
             ['content_redacted'],
         );
-        self::assertFalse($policy->allowsEditor($redacted, true));
-        self::assertFalse($policy->allowsApproval($redacted, true));
+        self::assertFalse($policy->allowsEditor($redacted, true, TicketValidationProfile::GENERIC_V1));
+        self::assertFalse($policy->allowsApproval($redacted, true, TicketValidationProfile::GENERIC_V1));
 
         $invalid = $this->readModel(
             TicketDocumentState::INVALID,
@@ -49,8 +62,8 @@ final class TicketReadModelContractTest extends TestCase
             true, false,
             ['invalid'],
         );
-        self::assertTrue($policy->allowsEditor($invalid, true));
-        self::assertFalse($policy->allowsApproval($invalid, true));
+        self::assertTrue($policy->allowsEditor($invalid, true, TicketValidationProfile::GENERIC_V1));
+        self::assertFalse($policy->allowsApproval($invalid, true, TicketValidationProfile::GENERIC_V1));
 
         $valid = $this->readModel(
             TicketDocumentState::VALID,
@@ -58,21 +71,24 @@ final class TicketReadModelContractTest extends TestCase
             true, true,
             [],
         );
-        self::assertTrue($policy->allowsEditor($valid, true));
-        self::assertTrue($policy->allowsApproval($valid, true));
+        self::assertTrue($policy->allowsEditor($valid, true, TicketValidationProfile::GENERIC_V1));
+        self::assertTrue($policy->allowsApproval($valid, true, TicketValidationProfile::GENERIC_V1));
     }
 
     public function test_staleness_predicates_are_independent_read_time_comparisons(): void
     {
-        $freshness = new TicketReadModelFreshness(new ControlGeneration);
-        $project = (new Project)->forceFill([
-            'id' => 7,
+        $freshness = $this->app->make(TicketReadModelFreshness::class);
+        $project = Project::query()->create([
+            'name' => 'Freshness project',
             'control_generation' => 4,
             'control_oid' => str_repeat('a', 64),
         ]);
+        $binding = $this->app->make(EffectiveProjectConfiguration::class)->for($project);
         $model = (new TicketReadModel)->forceFill([
             'control_generation' => 4,
             'control_commit' => str_repeat('a', 64),
+            'validation_profile' => $binding->configuration->ticketValidationProfile()->value,
+            'effective_config_hash' => $binding->configHash,
         ]);
 
         self::assertSame(['stale' => false, 'reasons' => []], $freshness->for($project, $model));

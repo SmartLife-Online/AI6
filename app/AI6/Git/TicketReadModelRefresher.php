@@ -4,12 +4,13 @@ namespace App\AI6\Git;
 
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\ControlOperationResult;
+use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Policies\ProjectPolicy;
 use App\AI6\Projects\ProjectProvisioningStatus;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Tickets\TicketInventory;
-use App\AI6\Tickets\TicketValidationConfiguration;
+use App\AI6\Tickets\TicketValidationProfile;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use JsonException;
@@ -19,7 +20,6 @@ final readonly class TicketReadModelRefresher
 {
     public function __construct(
         private ManagedProjectPath $managedPaths,
-        private RefreshPathPolicy $refreshPaths,
         private ProjectOperationLease $lease,
         private ProjectPolicy $projectPolicy,
         private ControlOperationAuthorizationSnapshot $authorizationSnapshots,
@@ -27,7 +27,7 @@ final readonly class TicketReadModelRefresher
         private TicketReadModelResultBinding $resultBinding,
         private TicketReadModelPublisher $publisher,
         private TicketInventory $ticketInventory,
-        private TicketValidationConfiguration $ticketValidation,
+        private EffectiveProjectConfiguration $projectConfiguration,
     ) {}
 
     public function advance(ControlOperation $operation, int $attemptToken): bool
@@ -79,6 +79,8 @@ final readonly class TicketReadModelRefresher
         $actor = $operation->actor()->firstOrFail();
         $parameters = $this->parameters($operation);
         $this->assertExecutionContract($operation, $project, $parameters);
+        $binding = $this->projectConfiguration->for($project);
+        $this->assertConfigurationBinding($parameters, $binding->configuration->ticketsPath(), $binding->configuration->ticketValidationProfile(), $binding->configHash);
         if (! $this->projectPolicy->refreshReadModel($actor, $project)
             || ! $this->authorizationSnapshots->matchesCurrent($operation, $actor, $project)) {
             throw new ControlOperationTerminalConflict(
@@ -98,8 +100,8 @@ final readonly class TicketReadModelRefresher
             $repository,
             (string) $operation->expected_control_commit,
             $parameters['refresh_base_path'],
-            $this->ticketValidation->profile,
-            $this->ticketValidation->profile,
+            $binding->configuration->ticketValidationProfile(),
+            $binding->configuration->ticketValidationProfile(),
             $context,
         );
         $blob = $inventory->blobs[$parameters['relative_path']] ?? null;
@@ -146,6 +148,8 @@ final readonly class TicketReadModelRefresher
                 $result,
             );
             $this->assertExecutionContract($currentOperation, $currentProject, $parameters);
+            $currentBinding = $this->projectConfiguration->for($currentProject);
+            $this->assertConfigurationBinding($parameters, $currentBinding->configuration->ticketsPath(), $currentBinding->configuration->ticketValidationProfile(), $currentBinding->configHash);
             if ($currentOperation->state !== ControlOperationState::RUNNING
                 || $currentOperation->phase !== ControlOperationPhase::CLAIMED
                 || $currentOperation->current_attempt_token !== $attemptToken
@@ -162,6 +166,7 @@ final readonly class TicketReadModelRefresher
                 $projection,
                 new RedactionContext((string) $currentProject->getKey(), null, 'ticket-read-model:'.$result->relativePath),
                 $generatedAt,
+                $parameters['effective_config_hash'],
             );
 
             $binding = hash(
@@ -201,7 +206,7 @@ final readonly class TicketReadModelRefresher
         return true;
     }
 
-    /** @return array{refresh_base_path: string, relative_path: string} */
+    /** @return array{refresh_base_path: string, relative_path: string, validation_profile: string, effective_config_hash: string} */
     private function parameters(ControlOperation $operation): array
     {
         try {
@@ -216,8 +221,10 @@ final readonly class TicketReadModelRefresher
         $parameters = $operation->operation_type->parameters($decoded);
         if (! is_string($parameters['refresh_base_path'])
             || ! is_string($parameters['relative_path'])
-            || ! hash_equals($this->refreshPaths->basePath(), $parameters['refresh_base_path'])
-            || ! hash_equals($parameters['relative_path'], $this->refreshPaths->canonicalizeCandidate($parameters['relative_path']))
+            || ! is_string($parameters['validation_profile'])
+            || ! is_string($parameters['effective_config_hash'])
+            || preg_match('/\A[0-9a-f]{64}\z/D', $parameters['effective_config_hash']) !== 1
+            || ! hash_equals($parameters['relative_path'], RefreshPathPolicy::canonicalizeCandidateForBase($parameters['relative_path'], $parameters['refresh_base_path']))
             || ! hash_equals($operation->operation_parameters_jcs, $this->canonicalJson->normalizeAndEncode($parameters))) {
             throw new ControlOperationTerminalConflict(
                 'refresh_parameters_not_canonical',
@@ -228,7 +235,7 @@ final readonly class TicketReadModelRefresher
         return $parameters;
     }
 
-    /** @param array{refresh_base_path: string, relative_path: string} $parameters */
+    /** @param array{refresh_base_path: string, relative_path: string, validation_profile: string, effective_config_hash: string} $parameters */
     private function assertExecutionContract(ControlOperation $operation, Project $project, array $parameters): void
     {
         if ($project->provisioning_status !== ProjectProvisioningStatus::PROVISIONED
@@ -236,11 +243,23 @@ final readonly class TicketReadModelRefresher
             || $project->pending_control_oid !== null
             || $project->control_oid === null
             || $operation->expected_control_commit === null
-            || ! hash_equals($project->control_oid, $operation->expected_control_commit)
-            || ! hash_equals($parameters['refresh_base_path'], $this->refreshPaths->basePath())) {
+            || ! hash_equals($project->control_oid, $operation->expected_control_commit)) {
             throw new ControlOperationTerminalConflict(
                 'refresh_control_binding_changed',
                 'Die aktive Control-Bindung des Refresh-Auftrags ist nicht mehr aktuell.',
+            );
+        }
+    }
+
+    /** @param array{refresh_base_path: string, relative_path: string, validation_profile: string, effective_config_hash: string} $parameters */
+    private function assertConfigurationBinding(array $parameters, string $ticketsPath, TicketValidationProfile $profile, string $configHash): void
+    {
+        if (! hash_equals($parameters['refresh_base_path'], $ticketsPath)
+            || ! hash_equals($parameters['validation_profile'], $profile->value)
+            || ! hash_equals($parameters['effective_config_hash'], $configHash)) {
+            throw new ControlOperationTerminalConflict(
+                'refresh_project_configuration_changed',
+                'Die wirksame Projektkonfiguration des Refresh-Auftrags ist nicht mehr aktuell.',
             );
         }
     }

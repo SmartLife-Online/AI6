@@ -5,8 +5,10 @@ namespace App\AI6\Tickets;
 use App\AI6\Git\ControlOperationState;
 use App\AI6\Git\ControlOperationType;
 use App\AI6\Git\Models\ControlOperation;
+use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
+use App\AI6\Projects\ProjectConfigurationBinding;
 use App\AI6\Projects\TicketDocumentState;
 use App\AI6\Projects\TicketReadModelFreshness;
 use App\AI6\Projects\TicketReadModelUsePolicy;
@@ -18,6 +20,7 @@ final readonly class TicketViewModelFactory
         private TicketV1Parser $parser,
         private TicketReadModelFreshness $freshness,
         private TicketReadModelUsePolicy $usePolicy,
+        private EffectiveProjectConfiguration $projectConfiguration,
     ) {}
 
     /**
@@ -30,6 +33,7 @@ final readonly class TicketViewModelFactory
      */
     public function listFor(Project $project): array
     {
+        $binding = $this->projectConfiguration->for($project);
         $readModels = $this->readModels($project);
         $latestRefreshByPath = $this->latestRefreshOperationsByPath($project);
         $viewModels = [];
@@ -41,6 +45,7 @@ final readonly class TicketViewModelFactory
                 $project,
                 $readModel,
                 $latestRefreshByPath[$readModel->relative_path] ?? null,
+                $binding,
             );
             $viewModels[] = $viewModel;
             $entries[] = [$viewModel->ticketId, $viewModel->ticketStatus, $readModel->relative_path];
@@ -74,12 +79,14 @@ final readonly class TicketViewModelFactory
 
     public function forReadModel(Project $project, TicketReadModel $readModel): TicketViewModel
     {
+        $binding = $this->projectConfiguration->for($project);
         $latestRefreshByPath = $this->latestRefreshOperationsByPath($project, [$readModel->relative_path]);
 
         return $this->viewModel(
             $project,
             $readModel,
             $latestRefreshByPath[$readModel->relative_path] ?? null,
+            $binding,
         );
     }
 
@@ -116,8 +123,10 @@ final readonly class TicketViewModelFactory
         Project $project,
         TicketReadModel $readModel,
         ?ControlOperation $latestRefresh,
+        ProjectConfigurationBinding $binding,
     ): TicketViewModel {
-        $freshness = $this->freshness->for($project, $readModel);
+        $freshness = $this->freshness->for($project, $readModel, $binding);
+        $profile = $binding->configuration->ticketValidationProfile();
         $document = $this->documentFor($readModel);
         $frontmatter = $document->frontmatter ?? [];
         $dependsOn = is_array($frontmatter['depends_on'] ?? null)
@@ -135,8 +144,8 @@ final readonly class TicketViewModelFactory
             goal: is_string($goal) ? $goal : null,
             isStale: $freshness['stale'],
             staleReasons: $freshness['reasons'],
-            allowsEditor: $this->usePolicy->allowsEditor($readModel, ! $freshness['stale']),
-            allowsApproval: $this->usePolicy->allowsApproval($readModel, ! $freshness['stale']),
+            allowsEditor: $this->usePolicy->allowsEditor($readModel, ! $freshness['stale'], $profile),
+            allowsApproval: $this->usePolicy->allowsApproval($readModel, ! $freshness['stale'], $profile),
             latestRefresh: $latestRefresh,
         );
     }

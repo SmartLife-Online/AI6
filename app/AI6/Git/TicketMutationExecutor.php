@@ -6,6 +6,7 @@ use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\ControlOperationRecoveryDecision;
 use App\AI6\Git\Models\ControlOperationResult;
 use App\AI6\Git\Models\TicketMutation;
+use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\ProjectMembership;
 use App\AI6\Projects\Models\TicketReadModel;
@@ -26,7 +27,6 @@ use App\AI6\Tickets\TicketReadModelProjector;
 use App\AI6\Tickets\TicketStatusOperation;
 use App\AI6\Tickets\TicketStatusTransitionPolicy;
 use App\AI6\Tickets\TicketV1Parser;
-use App\AI6\Tickets\TicketValidationConfiguration;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use JsonException;
@@ -47,11 +47,10 @@ final readonly class TicketMutationExecutor
         private TicketReadModelUsePolicy $usePolicy,
         private TicketReadModelProjector $projector,
         private TicketReadModelPublisher $publisher,
-        private TicketValidationConfiguration $validation,
+        private EffectiveProjectConfiguration $projectConfiguration,
         private TicketV1Parser $parser,
         private TicketStatusTransitionPolicy $transitions,
         private Redactor $redactor,
-        private RefreshPathPolicy $refreshPaths,
         private CanonicalJson $canonicalJson,
         private ControlOperationConfiguration $controlConfiguration,
         private TicketMutationConfiguration $configuration,
@@ -339,7 +338,11 @@ final readonly class TicketMutationExecutor
             || ! hash_equals($readModel->blob_sha, $blob->blobSha)
             || ! hash_equals($readModel->redacted_content, $blob->content)
             || $readModel->redaction_state !== TicketReadModelRedactionState::CLEAR
-            || ! $this->usePolicy->allowsEditor($readModel, ! $this->freshness->for($project, $readModel)['stale'])) {
+            || ! $this->usePolicy->allowsEditor(
+                $readModel,
+                ! $this->freshness->for($project, $readModel)['stale'],
+                $this->projectConfiguration->for($project)->configuration->ticketValidationProfile(),
+            )) {
             throw new ControlOperationTerminalConflict(
                 'ticket_blob_changed',
                 'Die bytegenaue, unmaskierte Ticketbasis ist nicht mehr aktuell.',
@@ -355,7 +358,7 @@ final readonly class TicketMutationExecutor
         $projection = $this->projector->project(
             $mutation->target_content,
             $mutation->relative_path,
-            $this->validation->profile,
+            $this->projectConfiguration->for($project)->configuration->ticketValidationProfile(),
         );
         if ($projection->state !== TicketDocumentState::VALID
             || $projection->contractHash === null
@@ -524,7 +527,8 @@ final readonly class TicketMutationExecutor
             }
         }
 
-        $projection = $this->projector->project($confirmedBlob->content, $mutation->relative_path, $this->validation->profile);
+        $binding = $this->projectConfiguration->for($project);
+        $projection = $this->projector->project($confirmedBlob->content, $mutation->relative_path, $binding->configuration->ticketValidationProfile());
         if ($projection->state !== TicketDocumentState::VALID || $projection->contractHash === null) {
             throw new ControlOperationRecoveryRequired('The confirmed ticket content no longer produces its safe valid projection.');
         }
@@ -537,7 +541,7 @@ final readonly class TicketMutationExecutor
             $confirmedBlob->content,
         );
 
-        DB::transaction(function () use ($operation, $attemptToken, $project, $mutation, $commitOid, $projection, $refreshResult, $context): void {
+        DB::transaction(function () use ($operation, $attemptToken, $project, $mutation, $commitOid, $projection, $refreshResult, $context, $binding): void {
             $now = Date::now();
             $current = ControlOperation::query()->findOrFail($operation->id);
             $currentProject = Project::query()->findOrFail($project->getKey());
@@ -573,6 +577,7 @@ final readonly class TicketMutationExecutor
                 $projection,
                 $context,
                 $now,
+                $binding->configHash,
             );
             if ($published->document_state !== TicketDocumentState::VALID
                 || $published->redaction_state !== TicketReadModelRedactionState::CLEAR
@@ -667,7 +672,10 @@ final readonly class TicketMutationExecutor
             throw new ControlOperationTerminalConflict('mutation_parameters_not_canonical', 'Die Mutationsparameter sind nicht kanonisch gebunden.');
         }
         try {
-            $canonicalPath = $this->refreshPaths->canonicalizeCandidate($parameters['relative_path']);
+            $canonicalPath = RefreshPathPolicy::canonicalizeCandidateForBase(
+                $parameters['relative_path'],
+                $this->projectConfiguration->for($operation->project()->firstOrFail())->configuration->ticketsPath(),
+            );
         } catch (ControlOperationConflict) {
             throw new ControlOperationTerminalConflict('mutation_path_outside_ticket_base', 'Der Mutationspfad liegt außerhalb der konfigurierten Ticketbasis.');
         }

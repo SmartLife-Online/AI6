@@ -34,6 +34,7 @@ final readonly class ControlOperationRecoveryProcessor
             if (in_array($operation->operation_type, [
                 ControlOperationType::CONTROL_BRANCH_CHANGE,
                 ControlOperationType::TICKET_REFRESH,
+                ControlOperationType::CONFIG_REFRESH,
             ], true)) {
                 throw new RuntimeException('This control operation has no recoverable external effect.');
             }
@@ -75,7 +76,8 @@ final readonly class ControlOperationRecoveryProcessor
             ControlOperationType::TICKET_EDIT,
             ControlOperationType::TICKET_STATUS_CHANGE => $this->ticketMutations->abandon($operation, $decision),
             ControlOperationType::CONTROL_BRANCH_CHANGE,
-            ControlOperationType::TICKET_REFRESH => throw new RuntimeException(
+            ControlOperationType::TICKET_REFRESH,
+            ControlOperationType::CONFIG_REFRESH => throw new RuntimeException(
                 'This control operation cannot be abandoned through effect recovery.',
             ),
         };

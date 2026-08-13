@@ -18,6 +18,5 @@ final readonly class ControlOperationConfiguration
         public array $managedRefAllowlist,
         public int $staleSeconds,
         public int $reconciliationBudget,
-        public string $refreshBasePath,
     ) {}
 }

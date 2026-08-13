@@ -9,4 +9,6 @@ enum ProjectAction: string
     case REFRESH_READ_MODEL = 'refresh_read_model';
     case EDIT_TICKET = 'edit_ticket';
     case CHANGE_TICKET_STATUS = 'change_ticket_status';
+    case REFRESH_CONFIGURATION = 'refresh_configuration';
+    case APPROVE_CONFIGURATION = 'approve_configuration';
 }

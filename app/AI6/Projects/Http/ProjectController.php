@@ -5,6 +5,7 @@ namespace App\AI6\Projects\Http;
 use App\AI6\Auth\Models\User;
 use App\AI6\Projects\Actions\RegisterProject;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Projects\ProjectConfigurationStatus;
 use App\AI6\Projects\ProjectReadModelStatus;
 use App\AI6\Projects\ProjectRegistrationRejected;
 use App\AI6\Projects\ProjectSynchronizationStatus;
@@ -68,6 +69,7 @@ final class ProjectController
         Project $project,
         ProjectSynchronizationStatus $synchronizationStatus,
         ProjectReadModelStatus $readModelStatus,
+        ProjectConfigurationStatus $configurationStatus,
     ): View {
         return view('projects.show', [
             'project' => $project,
@@ -80,8 +82,11 @@ final class ProjectController
             'fetchOperationId' => (string) Str::uuid(),
             'branchOperationId' => (string) Str::uuid(),
             'refreshOperationId' => (string) Str::uuid(),
+            'configRefreshOperationId' => (string) Str::uuid(),
+            'configApprovalId' => (string) Str::uuid(),
             ...$synchronizationStatus->for($project),
             ...$readModelStatus->for($project),
+            ...$configurationStatus->for($project),
         ]);
     }
 

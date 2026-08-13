@@ -38,6 +38,18 @@ final class ExpectedAuthorizationMatrix
                 'operator' => true,
                 'approver' => true,
             ],
+            'refresh_configuration' => [
+                'admin' => true,
+                'viewer' => false,
+                'operator' => true,
+                'approver' => false,
+            ],
+            'approve_configuration' => [
+                'admin' => false,
+                'viewer' => false,
+                'operator' => false,
+                'approver' => true,
+            ],
         ];
     }
 

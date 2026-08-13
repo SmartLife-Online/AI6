@@ -57,11 +57,6 @@ final class ControlOperationConfigurationFactory
             return $managedRefs;
         }
 
-        $refreshBasePath = RefreshPathPolicy::canonicalBasePath($configuration['refresh_base_path'] ?? null);
-        if ($refreshBasePath === null) {
-            return new ConfigurationViolation('Configuration key AI6_CONTROL_OPERATION_REFRESH_BASE_PATH must be a canonical repository-relative directory.');
-        }
-
         $parser = new StrictPositiveIntegerParser;
         $integers = [];
         foreach (['lease_seconds', 'heartbeat_seconds', 'reconciler_seconds', 'max_attempts', 'stale_seconds', 'reconciliation_budget'] as $field) {
@@ -100,7 +95,6 @@ final class ControlOperationConfigurationFactory
             $managedRefs,
             $integers['stale_seconds'],
             $integers['reconciliation_budget'],
-            $refreshBasePath,
         );
     }
 

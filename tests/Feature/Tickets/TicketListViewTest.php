@@ -2,7 +2,11 @@
 
 namespace Tests\Feature\Tickets;
 
+use App\AI6\Projects\ProjectReadModelStatus;
 use App\AI6\Tickets\Livewire\TicketList;
+use App\AI6\Tickets\TicketViewModelFactory;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
 final class TicketListViewTest extends TicketUiTestCase
@@ -96,5 +100,35 @@ final class TicketListViewTest extends TicketUiTestCase
             ->assertSee('Fertiges Ticket.')
             ->assertSee('Offenes Ticket.')
             ->assertDontSee('Unzulässiger Status.');
+    }
+
+    public function test_list_and_project_status_resolve_effective_configuration_once_per_render(): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->provisionedProject($administrator);
+
+        foreach (['T1', 'T2', 'T3'] as $ticketId) {
+            $this->publishReadModel(
+                $administrator,
+                $project,
+                'tickets/'.$ticketId.'.md',
+                $this->validTicketMarkdown($ticketId, 'todo', '[]', 'Konstante Konfigurationsabfragen.'),
+            );
+        }
+
+        $configurationQueries = [];
+        DB::listen(static function (QueryExecuted $query) use (&$configurationQueries): void {
+            if (str_contains($query->sql, 'project_config_drafts')
+                || str_contains($query->sql, 'project_config_snapshots')) {
+                $configurationQueries[] = $query->sql;
+            }
+        });
+
+        $this->app->make(TicketViewModelFactory::class)->listFor($project->refresh());
+        self::assertCount(2, $configurationQueries);
+
+        $configurationQueries = [];
+        $this->app->make(ProjectReadModelStatus::class)->for($project->refresh());
+        self::assertCount(2, $configurationQueries);
     }
 }

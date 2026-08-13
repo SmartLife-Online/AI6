@@ -25,6 +25,7 @@ final readonly class TicketReadModelPublisher
         TicketProjection $projection,
         RedactionContext $context,
         DateTimeInterface $generatedAt,
+        ?string $effectiveConfigHash = null,
     ): TicketReadModel {
         try {
             $redaction = $this->redactor->redact($result->content, $context);
@@ -61,6 +62,7 @@ final readonly class TicketReadModelPublisher
                 'blob_sha' => $result->blobSha,
                 'control_generation' => $project->control_generation,
                 'validation_profile' => $projection->profile->value,
+                'effective_config_hash' => $effectiveConfigHash,
                 'document_state' => $projection->state,
                 'ticket_contract_sha256' => $projection->contractHash,
                 'validation_errors' => array_map(

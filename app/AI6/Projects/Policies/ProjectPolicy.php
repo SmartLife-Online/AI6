@@ -43,6 +43,18 @@ final class ProjectPolicy
             'operator' => true,
             'approver' => true,
         ],
+        'refresh_configuration' => [
+            'admin' => true,
+            'viewer' => false,
+            'operator' => true,
+            'approver' => false,
+        ],
+        'approve_configuration' => [
+            'admin' => false,
+            'viewer' => false,
+            'operator' => false,
+            'approver' => true,
+        ],
     ];
 
     public function create(User $user): bool
@@ -93,6 +105,16 @@ final class ProjectPolicy
     public function changeTicketStatus(User $user, Project $project): bool
     {
         return $this->decide(ProjectAction::CHANGE_TICKET_STATUS, $user, $project);
+    }
+
+    public function refreshConfiguration(User $user, Project $project): bool
+    {
+        return $this->decide(ProjectAction::REFRESH_CONFIGURATION, $user, $project);
+    }
+
+    public function approveConfiguration(User $user, Project $project): bool
+    {
+        return $this->decide(ProjectAction::APPROVE_CONFIGURATION, $user, $project);
     }
 
     public function decide(ProjectAction $action, User $user, Project $project): bool

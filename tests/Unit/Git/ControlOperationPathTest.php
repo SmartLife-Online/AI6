@@ -27,7 +27,6 @@ final class ControlOperationPathTest extends TestCase
             ['refs/heads/main'],
             300,
             8,
-            'tickets',
         ));
 
         foreach ([

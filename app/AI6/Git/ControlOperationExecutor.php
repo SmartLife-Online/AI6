@@ -23,6 +23,7 @@ final readonly class ControlOperationExecutor
         private ManagedCloneSynchronizer $managedClones,
         private ControlBranchChanger $controlBranches,
         private TicketReadModelRefresher $ticketReadModels,
+        private ProjectConfigRefresher $projectConfigs,
         private TicketMutationExecutor $ticketMutations,
         private ControlOperationConfiguration $configuration,
         private Redactor $redactor,
@@ -125,6 +126,7 @@ final readonly class ControlOperationExecutor
                     ControlOperationType::MANAGED_FETCH => $this->managedClones->advance($operation, $attemptToken),
                     ControlOperationType::CONTROL_BRANCH_CHANGE => $this->controlBranches->advance($operation, $attemptToken),
                     ControlOperationType::TICKET_REFRESH => $this->ticketReadModels->advance($operation, $attemptToken),
+                    ControlOperationType::CONFIG_REFRESH => $this->projectConfigs->advance($operation, $attemptToken),
                     ControlOperationType::TICKET_EDIT,
                     ControlOperationType::TICKET_STATUS_CHANGE => $this->ticketMutations->advance($operation, $attemptToken),
                 };
@@ -171,6 +173,7 @@ final readonly class ControlOperationExecutor
                 ControlOperationType::MANAGED_FETCH => $this->managedClones->recoveryFinding($operation, $attemptToken, $deviation),
                 ControlOperationType::CONTROL_BRANCH_CHANGE => $this->controlBranches->recoveryFinding($operation, $attemptToken, $deviation),
                 ControlOperationType::TICKET_REFRESH => $this->ticketReadModels->recoveryFinding($operation, $attemptToken, $deviation),
+                ControlOperationType::CONFIG_REFRESH => $this->projectConfigs->recoveryFinding($operation, $attemptToken, $deviation),
                 ControlOperationType::TICKET_EDIT,
                 ControlOperationType::TICKET_STATUS_CHANGE => $this->ticketMutations->recoveryFinding($operation, $attemptToken, $deviation),
             };
@@ -386,6 +389,7 @@ final readonly class ControlOperationExecutor
                     ControlOperationType::MANAGED_FETCH => $this->managedClones->activeIntentUnderLock($operation, $attemptToken),
                     ControlOperationType::CONTROL_BRANCH_CHANGE => $this->controlBranches->activeIntentUnderLock($operation, $attemptToken),
                     ControlOperationType::TICKET_REFRESH => $this->ticketReadModels->activeIntentUnderLock($operation, $attemptToken),
+                    ControlOperationType::CONFIG_REFRESH => $this->projectConfigs->activeIntentUnderLock($operation, $attemptToken),
                     ControlOperationType::TICKET_EDIT,
                     ControlOperationType::TICKET_STATUS_CHANGE => $this->ticketMutations->activeIntentUnderLock($operation, $attemptToken),
                 };
@@ -418,6 +422,8 @@ final readonly class ControlOperationExecutor
                     ControlOperationType::TICKET_STATUS_CHANGE,
                 ], true)) {
                     $this->ticketMutations->cleanupFailedAttempt($operation, $attemptToken);
+                } elseif ($operation->operation_type === ControlOperationType::CONFIG_REFRESH) {
+                    $this->projectConfigs->cleanupFailedAttempt($operation, $attemptToken);
                 } else {
                     $this->ticketReadModels->cleanupFailedAttempt($operation, $attemptToken);
                 }

@@ -9,3 +9,5 @@ parameters:
     parallel:
         maximumNumberOfProcesses: 1
     tmpDir: storage/framework/cache/phpstan
+    bootstrapFiles:
+        - scripts/phpstan-memory-limit.php

@@ -3,7 +3,6 @@
 namespace Tests\Unit\Tickets;
 
 use App\AI6\Shared\Config\ConfigurationException;
-use App\AI6\Shared\Config\StrictEnumParser;
 use App\AI6\Shared\Config\StrictPositiveIntegerParser;
 use App\AI6\Tickets\Ai6DetailV1TicketValidator;
 use App\AI6\Tickets\GenericV1TicketValidator;
@@ -124,7 +123,7 @@ final class TicketParserAndValidationTest extends TestCase
         $document = $this->app->make(TicketV1Parser::class)->parse($this->fixture('generic-v1.md'));
         self::assertSame([], $this->app->make(GenericV1TicketValidator::class)->validate($document, 'tickets/M169.md'));
         self::assertNotSame([], $this->app->make(Ai6DetailV1TicketValidator::class)->validate($document, 'tickets/M169.md'));
-        self::assertSame('generic_v1', config('ai6.tickets.validation_profile'));
+        self::assertSame('generic_v1', config('ai6.project_config.server_defaults.ticket_validation_profile'));
     }
 
     public function test_generic_spec_refs_are_structural_while_ai6_detail_refs_are_plan_canonical(): void
@@ -156,14 +155,13 @@ final class TicketParserAndValidationTest extends TestCase
 
     public function test_ticket_candidate_limit_is_positive_bounded_server_configuration(): void
     {
-        $enum = new StrictEnumParser;
         $integer = new StrictPositiveIntegerParser;
-        $configuration = TicketValidationConfiguration::fromConfiguredValues($enum, $integer);
+        $configuration = TicketValidationConfiguration::fromConfiguredValues($integer);
         self::assertSame(100, $configuration->maxCandidates);
 
         config(['ai6.tickets.max_candidates' => '0']);
         $this->expectException(ConfigurationException::class);
-        TicketValidationConfiguration::fromConfiguredValues($enum, $integer);
+        TicketValidationConfiguration::fromConfiguredValues($integer);
     }
 
     public function test_ai6_007_scope_and_candidate_limit_operations_contract_stay_synchronized(): void

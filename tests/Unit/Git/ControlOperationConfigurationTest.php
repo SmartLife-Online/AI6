@@ -24,7 +24,6 @@ final class ControlOperationConfigurationTest extends TestCase
         self::assertSame(['refs/heads/main', 'refs/heads/release'], $result->managedRefAllowlist);
         self::assertSame(300, $result->staleSeconds);
         self::assertSame(8, $result->reconciliationBudget);
-        self::assertSame('tickets', $result->refreshBasePath);
     }
 
     public function test_key_root_escape_and_non_strict_or_incoherent_intervals_are_rejected(): void
@@ -44,10 +43,6 @@ final class ControlOperationConfigurationTest extends TestCase
             ['managed_ref_allowlist' => 'refs/heads/.hidden'],
             ['stale_seconds' => 0],
             ['reconciliation_budget' => 0],
-            ['refresh_base_path' => ''],
-            ['refresh_base_path' => '/tickets'],
-            ['refresh_base_path' => 'tickets/../other'],
-            ['refresh_base_path' => 'tickets\\nested'],
         ] as $overrides) {
             self::assertInstanceOf(
                 ConfigurationViolation::class,
@@ -139,7 +134,6 @@ final class ControlOperationConfigurationTest extends TestCase
             'max_attempts' => '3',
             'stale_seconds' => '300',
             'reconciliation_budget' => '8',
-            'refresh_base_path' => 'tickets',
         ];
     }
 }

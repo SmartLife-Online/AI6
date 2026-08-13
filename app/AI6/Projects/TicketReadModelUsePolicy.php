@@ -4,20 +4,15 @@ namespace App\AI6\Projects;
 
 use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Tickets\TicketSourceBlockers;
-use App\AI6\Tickets\TicketValidationConfiguration;
 use App\AI6\Tickets\TicketValidationProfile;
 
 final readonly class TicketReadModelUsePolicy
 {
-    public function __construct(private TicketValidationConfiguration $configuration) {}
-
     public function allowsEditor(
         TicketReadModel $readModel,
         bool $isFresh,
-        ?TicketValidationProfile $requiredProfile = null,
+        TicketValidationProfile $requiredProfile,
     ): bool {
-        $requiredProfile ??= $this->configuration->profile;
-
         return $readModel->editor_eligible
             && $isFresh
             && in_array($readModel->document_state, [TicketDocumentState::INVALID, TicketDocumentState::VALID], true)
@@ -29,10 +24,8 @@ final readonly class TicketReadModelUsePolicy
     public function allowsApproval(
         TicketReadModel $readModel,
         bool $isFresh,
-        ?TicketValidationProfile $requiredProfile = null,
+        TicketValidationProfile $requiredProfile,
     ): bool {
-        $requiredProfile ??= $this->configuration->profile;
-
         return $readModel->approval_eligible
             && $isFresh
             && $readModel->document_state === TicketDocumentState::VALID

@@ -62,6 +62,8 @@ abstract class TicketUiTestCase extends ControlOperationTestCase
         DB::table('jobs')->delete();
         $attemptToken = $this->app->make(ProjectOperationLease::class)->claim($operation, str_repeat('b', 32));
         self::assertIsInt($attemptToken);
+        $operationParameters = json_decode($operation->operation_parameters_jcs, true, 8, JSON_THROW_ON_ERROR);
+        self::assertIsArray($operationParameters);
 
         $projection = $this->app->make(TicketReadModelProjector::class)->project(
             $content,
@@ -78,6 +80,7 @@ abstract class TicketUiTestCase extends ControlOperationTestCase
             'blob_sha' => hash('sha256', $content),
             'control_generation' => 0,
             'validation_profile' => $projection->profile->value,
+            'effective_config_hash' => $operationParameters['effective_config_hash'],
             'document_state' => $projection->state,
             'ticket_contract_sha256' => $projection->contractHash,
             'validation_errors' => $projection->errors,

@@ -15,6 +15,7 @@ use App\AI6\Git\ManagedProjectPath;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\ProjectOperationLease;
 use App\AI6\Git\RefreshPathPolicy;
+use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Policies\ProjectPolicy;
 use App\AI6\Projects\ProjectProvisioningStatus;
@@ -30,7 +31,7 @@ final readonly class QueueTicketReadModelRefresh
         private ProjectPolicy $projectPolicy,
         private ControlOperationAuthorizationSnapshot $authorizationSnapshots,
         private ProjectOperationLease $lease,
-        private RefreshPathPolicy $paths,
+        private EffectiveProjectConfiguration $projectConfiguration,
     ) {}
 
     public function handle(
@@ -46,14 +47,16 @@ final readonly class QueueTicketReadModelRefresh
             throw new AuthorizationException;
         }
 
-        $relativePath = $this->paths->canonicalizeCandidate($candidatePath);
         $operationId = strtolower($operationId);
 
-        return DB::transaction(function () use ($actor, $project, $relativePath, $operationId): ControlOperation {
+        return DB::transaction(function () use ($actor, $project, $candidatePath, $operationId): ControlOperation {
             $currentProject = Project::query()->findOrFail($project->getKey());
             if (! $this->projectPolicy->refreshReadModel($actor, $currentProject)) {
                 throw new AuthorizationException;
             }
+
+            $binding = $this->projectConfiguration->for($currentProject);
+            $relativePath = RefreshPathPolicy::canonicalizeCandidateForBase($candidatePath, $binding->configuration->ticketsPath());
             if ($currentProject->provisioning_status !== ProjectProvisioningStatus::PROVISIONED
                 || $currentProject->project_identifier === null
                 || $currentProject->control_oid === null
@@ -65,8 +68,10 @@ final readonly class QueueTicketReadModelRefresh
             $snapshot = $this->authorizationSnapshots->capture($actor, $currentProject);
             $snapshotJcs = $this->canonicalJson->normalizeAndEncode($snapshot);
             $parameters = ControlOperationType::TICKET_REFRESH->parameters([
-                'refresh_base_path' => $this->paths->basePath(),
+                'refresh_base_path' => $binding->configuration->ticketsPath(),
                 'relative_path' => $relativePath,
+                'validation_profile' => $binding->configuration->ticketValidationProfile()->value,
+                'effective_config_hash' => $binding->configHash,
             ]);
             $parametersJcs = $this->canonicalJson->normalizeAndEncode($parameters);
             $hash = $this->hasher->hash(

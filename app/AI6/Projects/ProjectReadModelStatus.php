@@ -2,7 +2,6 @@
 
 namespace App\AI6\Projects;
 
-use App\AI6\Git\ControlOperationConfiguration;
 use App\AI6\Git\ControlOperationType;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Projects\Models\Project;
@@ -12,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 final readonly class ProjectReadModelStatus
 {
     public function __construct(
-        private ControlOperationConfiguration $configuration,
+        private EffectiveProjectConfiguration $projectConfiguration,
         private TicketReadModelFreshness $freshness,
         private TicketReadModelUsePolicy $usePolicy,
     ) {}
@@ -20,6 +19,7 @@ final readonly class ProjectReadModelStatus
     /** @return array{latestRefresh: ControlOperation|null, readModels: list<array{readModel: TicketReadModel, isStale: bool, staleReasons: list<string>, validationProfile: string|null, editorEligible: bool, approvalEligible: bool}>, refreshBasePath: string} */
     public function for(Project $project): array
     {
+        $binding = $this->projectConfiguration->for($project);
         $latestRefresh = ControlOperation::query()
             ->with('result')
             ->where('project_id', $project->getKey())
@@ -36,6 +36,7 @@ final readonly class ProjectReadModelStatus
                     'blob_sha',
                     'control_generation',
                     'validation_profile',
+                    'effective_config_hash',
                     'document_state',
                     'ticket_contract_sha256',
                     'redaction_state',
@@ -48,16 +49,16 @@ final readonly class ProjectReadModelStatus
             },
         ]);
         $readModels = $project->ticketReadModels
-            ->map(function (TicketReadModel $readModel) use ($project): array {
-                $freshness = $this->freshness->for($project, $readModel);
+            ->map(function (TicketReadModel $readModel) use ($project, $binding): array {
+                $freshness = $this->freshness->for($project, $readModel, $binding);
 
                 return [
                     'readModel' => $readModel,
                     'isStale' => $freshness['stale'],
                     'staleReasons' => $freshness['reasons'],
                     'validationProfile' => $readModel->validation_profile,
-                    'editorEligible' => $this->usePolicy->allowsEditor($readModel, ! $freshness['stale']),
-                    'approvalEligible' => $this->usePolicy->allowsApproval($readModel, ! $freshness['stale']),
+                    'editorEligible' => $this->usePolicy->allowsEditor($readModel, ! $freshness['stale'], $binding->configuration->ticketValidationProfile()),
+                    'approvalEligible' => $this->usePolicy->allowsApproval($readModel, ! $freshness['stale'], $binding->configuration->ticketValidationProfile()),
                 ];
             })
             ->values()
@@ -66,7 +67,7 @@ final readonly class ProjectReadModelStatus
         return [
             'latestRefresh' => $latestRefresh,
             'readModels' => $readModels,
-            'refreshBasePath' => $this->configuration->refreshBasePath,
+            'refreshBasePath' => $binding->configuration->ticketsPath(),
         ];
     }
 }

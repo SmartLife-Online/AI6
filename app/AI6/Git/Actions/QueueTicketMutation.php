@@ -15,6 +15,7 @@ use App\AI6\Git\ManagedProjectPath;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\TicketMutation;
 use App\AI6\Git\ProjectOperationLease;
+use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\ProjectMembership;
 use App\AI6\Projects\Models\TicketReadModel;
@@ -34,7 +35,6 @@ use App\AI6\Tickets\TicketReadModelProjector;
 use App\AI6\Tickets\TicketStatusOperation;
 use App\AI6\Tickets\TicketStatusTransitionPolicy;
 use App\AI6\Tickets\TicketV1Parser;
-use App\AI6\Tickets\TicketValidationConfiguration;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -50,7 +50,7 @@ final readonly class QueueTicketMutation
         private TicketReadModelUsePolicy $usePolicy,
         private TicketReadModelFreshness $freshness,
         private TicketReadModelProjector $projector,
-        private TicketValidationConfiguration $validation,
+        private EffectiveProjectConfiguration $projectConfiguration,
         private TicketV1Parser $parser,
         private TicketContentStatus $statuses,
         private TicketStatusTransitionPolicy $transitions,
@@ -141,7 +141,8 @@ final readonly class QueueTicketMutation
             throw new AuthorizationException;
         }
         $freshness = $this->freshness->for($project, $readModel);
-        if (! $this->usePolicy->allowsEditor($readModel, ! $freshness['stale'])) {
+        $binding = $this->projectConfiguration->for($project);
+        if (! $this->usePolicy->allowsEditor($readModel, ! $freshness['stale'], $binding->configuration->ticketValidationProfile())) {
             throw new TicketMutationConflict('editor_unavailable', 'Diese Ticketprojektion darf nicht als Editorquelle verwendet werden.');
         }
         if ($readModel->redaction_state !== TicketReadModelRedactionState::CLEAR
@@ -165,6 +166,7 @@ final readonly class QueueTicketMutation
         ): ControlOperation {
             $currentProject = Project::query()->findOrFail($project->getKey());
             $currentReadModel = TicketReadModel::query()->findOrFail($readModel->getKey());
+            $binding = $this->projectConfiguration->for($currentProject);
             if ($currentProject->provisioning_status !== ProjectProvisioningStatus::PROVISIONED
                 || $currentProject->control_oid === null
                 || ! hash_equals($expectedControlOid, $currentProject->control_oid)
@@ -177,6 +179,7 @@ final readonly class QueueTicketMutation
                 || ! $this->usePolicy->allowsEditor(
                     $currentReadModel,
                     ! $this->freshness->for($currentProject, $currentReadModel)['stale'],
+                    $binding->configuration->ticketValidationProfile(),
                 )) {
                 throw new TicketMutationConflict('mutation_binding_changed', 'Die Ticket- oder Control-Bindung hat sich geändert.');
             }
@@ -233,7 +236,7 @@ final readonly class QueueTicketMutation
             $projection = $this->projector->project(
                 $targetContent,
                 $currentReadModel->relative_path,
-                $this->validation->profile,
+                $binding->configuration->ticketValidationProfile(),
             );
             if ($projection->state !== TicketDocumentState::VALID || $projection->contractHash === null) {
                 throw new TicketMutationConflict('target_validation_failed', 'Der neue Ticketstand ist nicht vollständig gültig.');

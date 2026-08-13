@@ -37,17 +37,17 @@ final class TicketProjectionPolicyTest extends TestCase
     {
         $policy = $this->app->make(TicketReadModelUsePolicy::class);
         $invalid = $this->readModel('invalid', null, ['invalid'], true, false);
-        self::assertTrue($policy->allowsEditor($invalid, true));
-        self::assertFalse($policy->allowsApproval($invalid, true));
-        self::assertFalse($policy->allowsEditor($invalid, false));
+        self::assertTrue($policy->allowsEditor($invalid, true, TicketValidationProfile::GENERIC_V1));
+        self::assertFalse($policy->allowsApproval($invalid, true, TicketValidationProfile::GENERIC_V1));
+        self::assertFalse($policy->allowsEditor($invalid, false, TicketValidationProfile::GENERIC_V1));
         self::assertFalse($policy->allowsEditor($invalid, true, TicketValidationProfile::AI6_DETAIL_V1));
 
         $valid = $this->readModel('valid', str_repeat('a', 64), [], true, true);
-        self::assertTrue($policy->allowsEditor($valid, true));
-        self::assertTrue($policy->allowsApproval($valid, true));
+        self::assertTrue($policy->allowsEditor($valid, true, TicketValidationProfile::GENERIC_V1));
+        self::assertTrue($policy->allowsApproval($valid, true, TicketValidationProfile::GENERIC_V1));
         $valid->setRawAttributes([...$valid->getAttributes(), 'redaction_state' => 'content_redacted'], true);
-        self::assertFalse($policy->allowsEditor($valid, true));
-        self::assertFalse($policy->allowsApproval($valid, true));
+        self::assertFalse($policy->allowsEditor($valid, true, TicketValidationProfile::GENERIC_V1));
+        self::assertFalse($policy->allowsApproval($valid, true, TicketValidationProfile::GENERIC_V1));
     }
 
     /** @param list<string> $blockers */

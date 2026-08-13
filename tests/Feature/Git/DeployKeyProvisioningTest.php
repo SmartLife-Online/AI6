@@ -1092,7 +1092,6 @@ final class DeployKeyProvisioningTest extends ControlOperationTestCase
             $current->managedRefAllowlist,
             $current->staleSeconds,
             $current->reconciliationBudget,
-            $current->refreshBasePath,
         );
         $this->app->instance(ControlOperationConfiguration::class, $slow);
         $this->app->instance(ManagedProjectPath::class, new ManagedProjectPath($slow));

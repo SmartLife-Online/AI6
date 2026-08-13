@@ -84,7 +84,6 @@ final class ControlOperationWebTest extends ControlOperationTestCase
             $configuration->managedRefAllowlist,
             $configuration->staleSeconds,
             $configuration->reconciliationBudget,
-            $configuration->refreshBasePath,
         );
         $this->app->instance(ControlOperationConfiguration::class, $singleAttempt);
         $this->app->instance(ManagedProjectPath::class, new ManagedProjectPath($singleAttempt));
