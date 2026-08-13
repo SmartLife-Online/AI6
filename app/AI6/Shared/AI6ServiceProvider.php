@@ -2,7 +2,12 @@
 
 namespace App\AI6\Shared;
 
+use App\AI6\Agents\AgentInputLimits;
+use App\AI6\Agents\AgentProfileRegistry;
+use App\AI6\Agents\InstructionProfileRegistry;
+use App\AI6\Agents\InstructionSnapshotResolver;
 use App\AI6\Agents\ModelProfileAllowlist;
+use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Auth\AuthenticationHmac;
 use App\AI6\Auth\Config\AuthConfiguration;
 use App\AI6\Auth\Config\AuthConfigurationFactory;
@@ -13,6 +18,7 @@ use App\AI6\Auth\PasskeyRelyingParty;
 use App\AI6\Auth\PasskeyRelyingPartyFactory;
 use App\AI6\Auth\Policies\UserPolicy;
 use App\AI6\Checks\CheckProfileAllowlist;
+use App\AI6\Git\CanonicalJson;
 use App\AI6\Git\ControlOperationConfiguration;
 use App\AI6\Git\ControlOperationConfigurationFactory;
 use App\AI6\Git\ControlOperationRuntimeIdentity;
@@ -30,7 +36,10 @@ use App\AI6\Git\TicketMutationConfigurationFactory;
 use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Policies\ProjectPolicy;
+use App\AI6\Prompts\PromptCatalog;
+use App\AI6\Prompts\PromptRenderer;
 use App\AI6\Shared\Config\ConfigurationException;
+use App\AI6\Shared\Config\StrictEnumParser;
 use App\AI6\Shared\Config\StrictPositiveIntegerParser;
 use App\AI6\Shared\Doctor\DoctorCommand;
 use App\AI6\Shared\Doctor\RedactionKeyringDoctorCheck;
@@ -76,7 +85,30 @@ final class AI6ServiceProvider extends ServiceProvider
     {
         $this->app->singleton(RestrictedYaml::class);
         $this->app->singleton(CheckProfileAllowlist::class, static fn (): CheckProfileAllowlist => CheckProfileAllowlist::fromConfiguredValues());
-        $this->app->singleton(ModelProfileAllowlist::class, static fn (): ModelProfileAllowlist => ModelProfileAllowlist::fromConfiguredValues());
+        $this->app->singleton(
+            AgentInputLimits::class,
+            static fn (Application $app): AgentInputLimits => AgentInputLimits::fromConfiguredValues(
+                $app->make(StrictPositiveIntegerParser::class),
+            ),
+        );
+        $this->app->singleton(
+            AgentProfileRegistry::class,
+            static fn (Application $app): AgentProfileRegistry => AgentProfileRegistry::fromConfiguredValues(
+                $app->make(StrictEnumParser::class),
+            ),
+        );
+        $this->app->singleton(
+            ProviderRuntimeProfileRegistry::class,
+            static fn (Application $app): ProviderRuntimeProfileRegistry => ProviderRuntimeProfileRegistry::fromConfiguredValues(
+                $app->make(StrictPositiveIntegerParser::class),
+                $app->make(CanonicalJson::class),
+            ),
+        );
+        $this->app->singleton(InstructionProfileRegistry::class);
+        $this->app->singleton(InstructionSnapshotResolver::class);
+        $this->app->singleton(ModelProfileAllowlist::class);
+        $this->app->singleton(PromptCatalog::class, static fn (): PromptCatalog => PromptCatalog::defaults());
+        $this->app->singleton(PromptRenderer::class);
         $this->app->singleton(DependencySatisfiedStatusAllowlist::class, static fn (): DependencySatisfiedStatusAllowlist => DependencySatisfiedStatusAllowlist::fromConfiguredValues());
         $this->app->singleton(EffectiveProjectConfiguration::class);
         $this->app->singleton(
@@ -250,6 +282,14 @@ final class AI6ServiceProvider extends ServiceProvider
         );
 
         $this->app->make(SecurityPolicy::class);
+        $agentProfiles = $this->app->make(AgentProfileRegistry::class);
+        $runtimeProfiles = $this->app->make(ProviderRuntimeProfileRegistry::class);
+        $instructionProfiles = $this->app->make(InstructionProfileRegistry::class);
+        $this->app->make(AgentInputLimits::class);
+        foreach ($agentProfiles->all() as $agentProfile) {
+            $runtimeProfiles->get($agentProfile->runtimeProfileId);
+            $instructionProfiles->get($agentProfile->providerProfileAlias);
+        }
         $authConfiguration = $this->app->make(AuthConfiguration::class);
         $httpConfiguration = $this->app->make(HttpSecurityConfiguration::class);
         config([

@@ -12,6 +12,7 @@
         @auth
             <nav aria-label="Hauptnavigation">
                 <a href="{{ route('projects.index') }}">Projekte</a>
+                <a href="{{ route('agents.profiles') }}">Agentenprofile</a>
                 <form method="post" action="{{ route('logout') }}">
                     @csrf
                     <button type="submit">Abmelden</button>

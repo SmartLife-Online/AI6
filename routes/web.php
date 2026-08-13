@@ -1,5 +1,6 @@
 <?php
 
+use App\AI6\Agents\Http\AgentProfileController;
 use App\AI6\Auth\Http\AdministrativeController;
 use App\AI6\Auth\Http\EnrollmentController;
 use App\AI6\Auth\Http\LoginConfirmationController;
@@ -28,6 +29,7 @@ Route::middleware('guest')->group(function (): void {
 
 Route::middleware('auth')->group(function (): void {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
+    Route::get('/agents/profiles', AgentProfileController::class)->name('agents.profiles');
 
     Route::prefix('auth')->name('auth.')->group(function (): void {
         Route::get('/factor', [PrimaryAuthenticationController::class, 'factor'])

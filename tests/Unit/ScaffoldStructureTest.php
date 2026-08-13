@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_010(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_011(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -58,7 +58,30 @@ final class ScaffoldStructureTest extends TestCase
         sort($files);
         self::assertSame([
             'app/AI6/Agents/.gitkeep',
+            'app/AI6/Agents/AgentInputLimits.php',
+            'app/AI6/Agents/AgentProfile.php',
+            'app/AI6/Agents/AgentProfileRegistry.php',
+            'app/AI6/Agents/AgentProfileSelectionError.php',
+            'app/AI6/Agents/AgentProfileSelectionException.php',
+            'app/AI6/Agents/AgentRole.php',
+            'app/AI6/Agents/AgentSelection.php',
+            'app/AI6/Agents/CapabilityStatus.php',
+            'app/AI6/Agents/Http/AgentProfileController.php',
+            'app/AI6/Agents/InstructionCandidate.php',
+            'app/AI6/Agents/InstructionCandidateOrigin.php',
+            'app/AI6/Agents/InstructionDiscovery.php',
+            'app/AI6/Agents/InstructionFileType.php',
+            'app/AI6/Agents/InstructionProfileRegistry.php',
+            'app/AI6/Agents/InstructionResolutionError.php',
+            'app/AI6/Agents/InstructionResolutionException.php',
+            'app/AI6/Agents/InstructionResolutionProfile.php',
+            'app/AI6/Agents/InstructionSnapshot.php',
+            'app/AI6/Agents/InstructionSnapshotEntry.php',
+            'app/AI6/Agents/InstructionSnapshotResolver.php',
             'app/AI6/Agents/ModelProfileAllowlist.php',
+            'app/AI6/Agents/ProviderRuntimeProfile.php',
+            'app/AI6/Agents/ProviderRuntimeProfileRegistry.php',
+            'app/AI6/Agents/RuntimeExtensionType.php',
             'app/AI6/Auth/.gitkeep',
             'app/AI6/Auth/Actions/CreateUser.php',
             'app/AI6/Auth/Actions/DeactivateUser.php',
@@ -232,6 +255,15 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Projects/TicketReadModelRedactionState.php',
             'app/AI6/Projects/TicketReadModelUsePolicy.php',
             'app/AI6/Prompts/.gitkeep',
+            'app/AI6/Prompts/PromptCatalog.php',
+            'app/AI6/Prompts/PromptEntry.php',
+            'app/AI6/Prompts/PromptRenderRequest.php',
+            'app/AI6/Prompts/PromptRenderer.php',
+            'app/AI6/Prompts/PromptRenderingError.php',
+            'app/AI6/Prompts/PromptRenderingException.php',
+            'app/AI6/Prompts/PromptSnapshot.php',
+            'app/AI6/Prompts/PromptVariables.php',
+            'app/AI6/Prompts/ReviewPromptProfile.php',
             'app/AI6/Reviews/.gitkeep',
             'app/AI6/Runs/.gitkeep',
             'app/AI6/Shared/AI6Marker.php',

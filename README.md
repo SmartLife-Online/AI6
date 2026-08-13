@@ -435,7 +435,7 @@ Serverseitig erforderlich sind exakte, kommaseparierte Werte:
 
 `.ai6/config.yaml` ist versionierter, nicht vertrauenswürdiger Repositoryinhalt. Ausschließlich die asynchrone Worker-Operation `config_refresh` liest den festen Pfad am aktiven Control-Commit. Sie veröffentlicht entweder einen strukturiert validierten, redigierten Entwurf oder den sichtbaren, fehlerfreien Zustand `absent`; Browser und App lesen die Datei nie direkt.
 
-Das geschlossene Schema erlaubt nur `version`, `tickets_path`, `ticket_validation_profile`, `push_mode`, `auto_start_next`, `dependency_satisfied_statuses`, `defaults`, `limits`, `scope` und `checks`. Check- und Modellnamen sind reine Referenzen auf serverseitige Allowlists. Auch erfüllende Abhängigkeitsstatus werden gegen eine vertrauenswürdige serverseitige Allowlist geprüft: Ausgeliefert sind ausschließlich `review` und `done`, während `done` der Serverdefault bleibt. Damit können blockierte oder verworfene Tickets nie allein durch Projektinhalt als erfüllte Abhängigkeit gelten; jede instanzweite Verbreiterung ist eine bewusste Änderung der vertrauenswürdigen Serverkonfiguration. Shellstrings, Security-, Credential-, Remote-, Control-Branch- und Managed-Path-Schlüssel sind strukturell ausgeschlossen. Limits müssen positive Ganzzahlen unter den unveränderlichen Servermaxima sein; Scope-Globs bleiben reine Policywerte.
+Das geschlossene Schema erlaubt nur `version`, `tickets_path`, `ticket_validation_profile`, `push_mode`, `auto_start_next`, `dependency_satisfied_statuses`, `defaults`, `limits`, `scope` und `checks`. Checknamen sind reine Referenzen auf eine serverseitige Allowlist; Modellprofil und Effort referenzieren gemeinsam eine für die jeweilige Rolle zulässige Kombination aus dem zentralen Agentenprofilregister. Auch erfüllende Abhängigkeitsstatus werden gegen eine vertrauenswürdige serverseitige Allowlist geprüft: Ausgeliefert sind ausschließlich `review` und `done`, während `done` der Serverdefault bleibt. Damit können blockierte oder verworfene Tickets nie allein durch Projektinhalt als erfüllte Abhängigkeit gelten; jede instanzweite Verbreiterung ist eine bewusste Änderung der vertrauenswürdigen Serverkonfiguration. Shellstrings, Security-, Credential-, Remote-, Control-Branch- und Managed-Path-Schlüssel sind strukturell ausgeschlossen. Limits müssen positive Ganzzahlen unter den unveränderlichen Servermaxima sein; Scope-Globs bleiben reine Policywerte.
 
 Die konservativen Serverdefaults setzen derzeit `auto_start_next=false` und genau den Reviewer `grok-cli-review`. Das weicht sichtbar von den in Plan §19 festgelegten Produktdefaults „Auto-Start aktiv“ und zwei unabhängigen Reviewer-Slots ab. Diese Dokumentation ist keine Planrevision und keine Freigabe der Abweichung: Die Umstellung auf automatischen Start und den zusätzlichen externen `copilot-cli-review`-Slot bleibt bis zu einer ausdrücklichen menschlichen Betriebsentscheidung offen.
 
@@ -450,6 +450,28 @@ AI6_RUNTIME_ROLE=worker php artisan ai6:tickets:reproject-unparsed --project-con
 ```
 
 Auch der historische Unparsed-Backfill ohne `--project-config` verwendet `tickets_path`, Validierungsprofil und Config-Hash ausschließlich aus der effektiven Projektbindung. Separate Instanzwerte für Refresh-Basispfad oder Ticketvalidierungsprofil existieren nicht mehr.
+
+## Agentenprofile, Promptkatalog und Instruktionsgrenzen
+
+`config/ai6.php` enthält als einzige vertrauenswürdige Quelle die Profile `codex-gpt-5.6-terra`, `grok-cli-review`, `copilot-cli-review` und `fake`. Jedes Profil bindet genau einen Provideralias (`codex_cli`, `grok_cli`, `github_copilot_cli` oder `fake`), den Adapter, erlaubte Modelle, Efforts und Rollen sowie ein versiegeltes Runtimeprofil. Eine Auswahl wird serverseitig als vollständige Kombination geprüft. Die Zustände `unchecked` und `unavailable` bleiben sichtbar und sind nicht auswählbar; nur `available` darf aufgelöst werden. Das credential-, netzwerk- und prozessfreie Profil `fake` ist für alle vier Rollen verfügbar. Die authentifizierte Seite `/agents/profiles` zeigt den Vertrag ausschließlich lesend.
+
+Alle Runtimeprofile beginnen mit deaktivierten MCP-Servern, Plugins, Skills, Hooks, Commands, Agentdefinitionen und externen Helpern. Eine Erweiterung kann ausschließlich durch eine Änderung der vertrauenswürdigen Serverkonfiguration in die abschließende Liste gelangen. Version, effektive Adapterflags, Permissions und Erweiterungslisten werden über die Domäne `AI6-PROVIDER-RUNTIME-PROFILE-V1` und die zentrale kanonische JSON-Naht mit SHA-256 gebunden.
+
+Der zentrale Promptkatalog besitzt die Katalogversion `1` und genau einen `PromptRenderer`. Seine sechs Zwecke sind `implementation`, `quality_review`, `fix`, `finding_verification`, `security_review` und `human_response`. Die spezialisierten Reviewprofile decken Ticket-/AC-Treue, funktionale Korrektheit, Security, Datenbank/Migrationen, Concurrency, Performance, Tests, Architektur und API-Verträge ab. Katalogeinträge und Reviewprofile tragen eigene Versionen. Ein Prompt-Snapshot enthält Katalogversion, ausgewählte Reviewprofile und gerenderte Promptbytes; sein SHA-256 verwendet die Domäne `AI6-PROMPT-SNAPSHOT-V1` und kanonisches JSON. Providerindividuelle Templates oder ein zweiter Renderer existieren nicht.
+
+Native Instruktionskandidaten werden als bereits typisierte Ergebnisliste übergeben; der Resolver liest weder Git noch Dateisystem oder Prozesse. Ausschließlich serverseitig konfigurierte Discoverynamen, Rangfolge und Geltungsbereiche sind zulässig. Host-/Parentquellen, fehlende Dateien, Symlinks, absolute oder traversierende Pfade, unbekannte Discoverynamen, ungültiges UTF-8, kanonische Duplikate und Importzyklen schließen ohne Teilsnapshot. Effektiver Inhalt passiert vor Importauswertung und Hashbildung den zentralen `Redactor`; `AI6-INSTRUCTION-SNAPSHOT-V1` bindet Providerprofil, Reihenfolge, Geltungsbereich, Pfad, Blob-SHA, Imports und die tatsächlich verwendeten redigierten Bytes.
+
+Die unveränderlichen Servermaxima lauten:
+
+| Grenze | Maximum |
+|---|---:|
+| Instruktionsdateien | `16` |
+| Bytes je Instruktionsdatei | `262144` |
+| Instruktionsbytes gesamt | `1048576` |
+| Instruktions-Importtiefe | `8` |
+| finaler Promptinput | `2097152` Bytes |
+
+Exakt das jeweilige Maximum wird akzeptiert; eins darüber endet mit einem typisierten, wertfreien Fehler ohne Snapshot oder Prompt. Instruktions-Rohbytes werden vor der Redaction gegen Einzel- und Gesamtgrenze geprüft. Beim Prompt gelten dieselbe Grenze sowohl für die Summe der rohen Variablenwerte vor der Redaction als auch für den vollständig assemblierten finalen Prompt. Repository-, Provider- und Browsereingaben können diese Werte nicht erhöhen.
 
 ## Ticketmanifest
 

@@ -2,6 +2,7 @@
 
 namespace App\AI6\Projects;
 
+use App\AI6\Agents\AgentRole;
 use App\AI6\Agents\ModelProfileAllowlist;
 use App\AI6\Checks\CheckProfileAllowlist;
 use App\AI6\Shared\Yaml\RestrictedYaml;
@@ -110,7 +111,10 @@ final readonly class ProjectConfigurationParser
         if ($profile !== null && ! $this->modelProfiles->allows($profile)) {
             $errors[] = $this->error('model_profile_unknown', 'defaults.implementation_profile', 'Das referenzierte Modellprofil ist serverseitig nicht bekannt.');
         }
-        $effort = $this->enum($value['implementation_effort'], 'defaults.implementation_effort', $this->efforts(), $errors);
+        $effort = $this->enum($value['implementation_effort'], 'defaults.implementation_effort', $this->modelProfiles->efforts(), $errors);
+        if ($profile !== null && $effort !== null && ! $this->modelProfiles->supportsRoleEffort($profile, AgentRole::IMPLEMENTATION, $effort)) {
+            $errors[] = $this->error('model_profile_combination_invalid', 'defaults', 'Die Kombination aus Modellprofil, Rolle und Effort ist serverseitig nicht zulässig.');
+        }
         $reviewers = [];
         if (! is_array($value['reviewers']) || ! array_is_list($value['reviewers']) || $value['reviewers'] === []) {
             $errors[] = $this->error('reviewers_invalid', 'defaults.reviewers', 'Mindestens ein Reviewerprofil ist erforderlich.');
@@ -126,7 +130,10 @@ final readonly class ProjectConfigurationParser
                 if ($reviewerProfile !== null && ! $this->modelProfiles->allows($reviewerProfile)) {
                     $errors[] = $this->error('model_profile_unknown', $field.'.profile', 'Das referenzierte Modellprofil ist serverseitig nicht bekannt.');
                 }
-                $reviewerEffort = $this->enum($reviewer['effort'], $field.'.effort', $this->efforts(), $errors);
+                $reviewerEffort = $this->enum($reviewer['effort'], $field.'.effort', $this->modelProfiles->efforts(), $errors);
+                if ($reviewerProfile !== null && $reviewerEffort !== null && ! $this->modelProfiles->supportsRoleEffort($reviewerProfile, AgentRole::QUALITY_REVIEW, $reviewerEffort)) {
+                    $errors[] = $this->error('model_profile_combination_invalid', $field, 'Die Kombination aus Modellprofil, Rolle und Effort ist serverseitig nicht zulässig.');
+                }
                 if ($reviewerProfile !== null && $reviewerEffort !== null) {
                     $reviewers[] = ['profile' => $reviewerProfile, 'effort' => $reviewerEffort];
                 }
@@ -351,14 +358,6 @@ final readonly class ProjectConfigurationParser
     {
         return count($value) === count($keys)
             && array_diff(array_keys($value), $keys) === [];
-    }
-
-    /** @return list<string> */
-    private function efforts(): array
-    {
-        $efforts = config('ai6.project_config.efforts');
-
-        return is_array($efforts) ? array_values(array_filter($efforts, 'is_string')) : [];
     }
 
     private function error(string $code, string $field, string $message): ProjectConfigurationError

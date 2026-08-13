@@ -4,24 +4,26 @@ namespace App\AI6\Agents;
 
 final readonly class ModelProfileAllowlist
 {
-    /** @var list<string> */
-    private array $profiles;
-
-    /** @param list<string> $profiles */
-    public function __construct(array $profiles)
-    {
-        $this->profiles = array_values(array_unique($profiles));
-    }
-
-    public static function fromConfiguredValues(): self
-    {
-        $profiles = config('ai6.project_config.model_profiles');
-
-        return new self(is_array($profiles) ? array_values(array_filter($profiles, 'is_string')) : []);
-    }
+    public function __construct(private AgentProfileRegistry $registry) {}
 
     public function allows(string $profile): bool
     {
-        return in_array($profile, $this->profiles, true);
+        return $this->registry->has($profile);
+    }
+
+    /** @return list<string> */
+    public function efforts(): array
+    {
+        return $this->registry->allEfforts();
+    }
+
+    public function supportsCombination(string $profile, AgentRole $role, string $model, string $effort): bool
+    {
+        return $this->registry->supportsCombination($profile, $role, $model, $effort);
+    }
+
+    public function supportsRoleEffort(string $profile, AgentRole $role, string $effort): bool
+    {
+        return $this->registry->supportsRoleEffort($profile, $role, $effort);
     }
 }

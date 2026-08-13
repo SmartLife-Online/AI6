@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Projects;
 
+use App\AI6\Agents\AgentInputLimits;
 use App\AI6\Projects\ProjectConfiguration;
 use App\AI6\Projects\ProjectConfigurationHasher;
 use App\AI6\Projects\ProjectConfigurationParser;
@@ -116,6 +117,101 @@ final class ProjectConfigurationParserTest extends TestCase
         new DependencySatisfiedStatusAllowlist(['done', 'unknown']);
     }
 
+    public function test_model_profile_names_efforts_and_role_combinations_come_from_the_agent_registry(): void
+    {
+        $parser = $this->app->make(ProjectConfigurationParser::class);
+        $invalidImplementation = $parser->parse($this->replace(
+            $this->validYaml(),
+            'implementation_profile: codex-gpt-5.6-terra',
+            'implementation_profile: grok-cli-review',
+        ));
+        self::assertFalse($invalidImplementation->valid());
+        self::assertContains('model_profile_combination_invalid', array_column($invalidImplementation->errors, 'code'));
+
+        $invalidReviewer = $parser->parse($this->replace(
+            $this->validYaml(),
+            'profile: grok-cli-review',
+            'profile: codex-gpt-5.6-terra',
+        ));
+        self::assertFalse($invalidReviewer->valid());
+        self::assertContains('model_profile_combination_invalid', array_column($invalidReviewer->errors, 'code'));
+
+        $allowlist = file_get_contents(dirname(__DIR__, 3).'/app/AI6/Agents/ModelProfileAllowlist.php');
+        $projectParser = file_get_contents(dirname(__DIR__, 3).'/app/AI6/Projects/ProjectConfigurationParser.php');
+        self::assertIsString($allowlist);
+        self::assertIsString($projectParser);
+        self::assertArrayNotHasKey('model_profiles', config('ai6.project_config'));
+        self::assertArrayNotHasKey('efforts', config('ai6.project_config'));
+        self::assertStringContainsString('AgentProfileRegistry', $allowlist);
+
+        $root = dirname(__DIR__, 3).'/app/AI6';
+        $allowedSelectionSources = [
+            strtr($root.'/Agents/AgentProfileRegistry.php', '\\', '/'),
+            strtr($root.'/Agents/ProviderRuntimeProfileRegistry.php', '\\', '/'),
+        ];
+        $agentProfileReaders = [];
+        $runtimeProfileReaders = [];
+        $secondarySelectionSources = [];
+        self::assertSame(
+            ['ai6.direct_models', 'ai6.facade_efforts', 'ai6.fluent_adapter_flags'],
+            $this->configurationKeys(<<<'PHP'
+            config('ai6.direct_models');
+            Config::get('ai6.facade_efforts');
+            config()->get('ai6.fluent_adapter_flags');
+            PHP),
+        );
+        self::assertTrue($this->usesInjectedConfigurationRepository(
+            'use Illuminate\Contracts\Config\Repository as ConfigRepository;',
+        ));
+        $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root));
+        foreach ($iterator as $file) {
+            if (! $file->isFile() || $file->getExtension() !== 'php') {
+                continue;
+            }
+            $source = file_get_contents($file->getPathname());
+            self::assertIsString($source);
+            $path = strtr($file->getPathname(), '\\', '/');
+            foreach ($this->configurationKeys($source) as $configurationKey) {
+                if ($configurationKey === 'ai6.agent_profiles') {
+                    $agentProfileReaders[] = $path;
+                }
+                if ($configurationKey === 'ai6.provider_runtime_profiles') {
+                    $runtimeProfileReaders[] = $path;
+                }
+                if (preg_match('/(?:models?|efforts?|adapter[_-]?flags?)/i', $configurationKey) === 1
+                    && ! in_array($path, $allowedSelectionSources, true)) {
+                    $secondarySelectionSources[] = $path;
+                }
+            }
+            if ((str_contains($source, 'config(') || str_contains($source, 'Config::'))
+                && preg_match('/[\'\"](?:models|efforts|adapter_flags)[\'\"]/', $source) === 1
+                && ! in_array($path, $allowedSelectionSources, true)) {
+                $secondarySelectionSources[] = $path;
+            }
+            if ($this->usesInjectedConfigurationRepository($source)
+                && ! in_array($path, $allowedSelectionSources, true)) {
+                $secondarySelectionSources[] = $path;
+            }
+        }
+        self::assertSame([$allowedSelectionSources[0]], $agentProfileReaders);
+        self::assertSame([$allowedSelectionSources[1]], $runtimeProfileReaders);
+        self::assertSame([], array_values(array_unique($secondarySelectionSources)));
+    }
+
+    public function test_project_configuration_cannot_raise_agent_input_limits(): void
+    {
+        $limits = $this->app->make(AgentInputLimits::class);
+        $yaml = $this->validYaml()."\nagent_input_limits:\n  max_instruction_files: ".($limits->maxInstructionFiles + 1)
+            ."\n  max_prompt_input_bytes: ".($limits->maxPromptInputBytes + 1)."\n";
+
+        $result = $this->app->make(ProjectConfigurationParser::class)->parse($yaml);
+
+        self::assertFalse($result->valid());
+        self::assertContains('yaml_unknown_key', array_column($result->errors, 'code'));
+        self::assertSame($limits->maxInstructionFiles, config('ai6.agent_input_limits.max_instruction_files'));
+        self::assertSame($limits->maxPromptInputBytes, config('ai6.agent_input_limits.max_prompt_input_bytes'));
+    }
+
     public function test_project_config_has_one_repository_read_path_and_one_effective_default_resolver(): void
     {
         $repositoryRoot = dirname(__DIR__, 3);
@@ -228,5 +324,26 @@ final class ProjectConfigurationParserTest extends TestCase
         }
 
         return substr($input, 0, $position).$replacement.substr($input, $position + strlen($search));
+    }
+
+    /** @return list<string> */
+    private function configurationKeys(string $source): array
+    {
+        $keys = [];
+        foreach ([
+            '/\bconfig\s*\(\s*[\'\"]([^\'\"]+)[\'\"]/',
+            '/\bConfig\s*::\s*get\s*\(\s*[\'\"]([^\'\"]+)[\'\"]/',
+            '/\bconfig\s*\(\s*\)\s*->\s*get\s*\(\s*[\'\"]([^\'\"]+)[\'\"]/',
+        ] as $pattern) {
+            preg_match_all($pattern, $source, $matches);
+            $keys = [...$keys, ...$matches[1]];
+        }
+
+        return array_values(array_unique($keys));
+    }
+
+    private function usesInjectedConfigurationRepository(string $source): bool
+    {
+        return str_contains($source, 'Illuminate\Contracts\Config\Repository');
     }
 }

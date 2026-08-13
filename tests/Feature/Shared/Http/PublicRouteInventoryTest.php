@@ -40,6 +40,7 @@ final class PublicRouteInventoryTest extends TestCase
             'DELETE /admin/users/{user}/memberships/{project} [web, auth, can:removeMembership,user]',
             'DELETE /admin/users/{user}/sessions/{session} [web, auth, can:revokeSession,user]',
             'GET / [web]',
+            'GET /agents/profiles [web, auth]',
             'GET /assets/livewire/livewire.js []',
             'GET /auth/confirmation [web, auth]',
             'GET /auth/enrollment/passkey [web, auth]',
