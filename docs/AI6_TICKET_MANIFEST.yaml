@@ -1,6 +1,6 @@
 schema: ai6.ticket-manifest.v1
 source: docs/AI6_IMPLEMENTATION_PLAN.md
-plan_revision: "V1.7.1"
+plan_revision: "V1.7.2"
 blueprint_count: 50
 blueprints:
   - id: "AI6-001"
