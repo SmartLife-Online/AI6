@@ -459,7 +459,7 @@ Alle Runtimeprofile beginnen mit deaktivierten MCP-Servern, Plugins, Skills, Hoo
 
 Der zentrale Promptkatalog besitzt die Katalogversion `1` und genau einen `PromptRenderer`. Seine sechs Zwecke sind `implementation`, `quality_review`, `fix`, `finding_verification`, `security_review` und `human_response`. Die spezialisierten Reviewprofile decken Ticket-/AC-Treue, funktionale Korrektheit, Security, Datenbank/Migrationen, Concurrency, Performance, Tests, Architektur und API-Verträge ab. Katalogeinträge und Reviewprofile tragen eigene Versionen. Ein Prompt-Snapshot enthält Katalogversion, ausgewählte Reviewprofile und gerenderte Promptbytes; sein SHA-256 verwendet die Domäne `AI6-PROMPT-SNAPSHOT-V1` und kanonisches JSON. Providerindividuelle Templates oder ein zweiter Renderer existieren nicht.
 
-Native Instruktionskandidaten werden als bereits typisierte Ergebnisliste übergeben; der Resolver liest weder Git noch Dateisystem oder Prozesse. Ausschließlich serverseitig konfigurierte Discoverynamen, Rangfolge und Geltungsbereiche sind zulässig. Host-/Parentquellen, fehlende Dateien, Symlinks, absolute oder traversierende Pfade, unbekannte Discoverynamen, ungültiges UTF-8, kanonische Duplikate und Importzyklen schließen ohne Teilsnapshot. Effektiver Inhalt passiert vor Importauswertung und Hashbildung den zentralen `Redactor`; `AI6-INSTRUCTION-SNAPSHOT-V1` bindet Providerprofil, Reihenfolge, Geltungsbereich, Pfad, Blob-SHA, Imports und die tatsächlich verwendeten redigierten Bytes.
+Native Instruktionskandidaten werden als bereits typisierte Ergebnisliste übergeben; der Resolver liest weder Git noch Dateisystem oder Prozesse. Ausschließlich serverseitig konfigurierte Discoverynamen, Rangfolge und Geltungsbereiche sind zulässig. Host-/Parentquellen, fehlende Dateien, Symlinks, absolute oder traversierende Pfade, unbekannte Discoverynamen, ungültiges UTF-8, kanonische Duplikate und Importzyklen schließen ohne Teilsnapshot. Effektiver Inhalt passiert vor Importauswertung und Hashbildung den zentralen `Redactor`; `AI6-INSTRUCTION-SNAPSHOT-V1` bindet Providerprofil, Reihenfolge, Geltungsbereich, Pfad, Blob-SHA, Imports, den SHA-256 des effektiven Inhalts je Eintrag und die tatsächlich verwendeten redigierten Bytes.
 
 Die unveränderlichen Servermaxima lauten:
 
@@ -472,6 +472,18 @@ Die unveränderlichen Servermaxima lauten:
 | finaler Promptinput | `2097152` Bytes |
 
 Exakt das jeweilige Maximum wird akzeptiert; eins darüber endet mit einem typisierten, wertfreien Fehler ohne Snapshot oder Prompt. Instruktions-Rohbytes werden vor der Redaction gegen Einzel- und Gesamtgrenze geprüft. Beim Prompt gelten dieselbe Grenze sowohl für die Summe der rohen Variablenwerte vor der Redaction als auch für den vollständig assemblierten finalen Prompt. Repository-, Provider- und Browsereingaben können diese Werte nicht erhöhen.
+
+## Ticketfreigabe und Approval-Queue
+
+Eine Ticketfreigabe ist die reservierte, asynchrone Control-Operation `ticket_approval`. Nur ein Projektmitglied mit Rolle `approver` kann sie nach frischem, aktionsgebundenem Step-up auslösen. Die allgemeine Statusoberfläche kennt die interne Operation `approve` nicht. Der Worker verwendet den bestehenden Einzeldatei-Mutationspfad und weist vor dem Compare-and-Swap nach, dass `todo` ausschließlich zu `ready` geändert wurde, der Ticketvertrag identisch bleibt und der übrige Tree unverändert ist.
+
+Auch Snapshot-Vorschau und aktuelle Startberechtigungsprüfung bleiben aus dem Browserprozess heraus: Die Seiten persistieren ausschließlich gebundene Arbeitsaufträge in der Datenbank. Erst der Worker liest die native Instruktionsauflösung aus Git, erzeugt beziehungsweise vergleicht die Snapshotbindungen und schreibt ein sicher anzeigbares Ergebnis zurück. Die HTTP-Antwort konsumiert nur diesen persistierten Stand und startet weder Git noch einen Prozess oder Run synchron.
+
+`ticket_approvals` bewahrt die menschlich geprüfte Todo-Bindung (`reviewed_ticket_blob_sha`, `reviewed_control_sha`) getrennt von der erst nach dem bestätigten Push gesetzten Ready-Bindung (`approved_ticket_blob_sha`, `approved_control_sha`). Außerdem bindet der unveränderliche Datensatz Control-Generation, Config, Scope, zentral gerenderte Prompts, native Instruktionsauflösung, versiegelte Runtimeprofile, Agentenprofile, SecurityPolicy, sämtliche wirksamen Limits, Attention-User und Pushmodus. Reviewer-Slots besitzen stabile UUIDs; Profil, Modell, Effort und Review-Promptprofil werden ausschließlich serverseitig aufgelöst, inhaltliche Duplikate werden abgelehnt.
+
+Die Sagaphasen `prepared`, `commit_prepared`, `control_confirmed` und `complete` werden vor beziehungsweise nach jeder äußeren Wirkung persistiert und idempotent abgeglichen. Ein fremder Ready-Commit, falscher Parent, abweichender Tree oder Operation-ID-Replay wird nicht adoptiert. Approval-Staleness entsteht ausschließlich beim Lesen durch abweichende Generation, Ticketblob, Ticketvertrag oder Config-, Scope-, Prompt-, Instruction-, Runtime-, Profil- beziehungsweise Policyhashes.
+
+`queue_state=queued` bedeutet nur, dass die Approval aufgenommen wurde. Die Startberechtigung ist davon getrennt und wird jeweils aktuell aus Staleness, Provider-Capabilities, Abhängigkeiten, unfertigen Runs und Queuezustand abgeleitet. Unerfüllte Abhängigkeiten verhindern damit weder die Freigabe noch `ready` oder die Queueaufnahme; sie liefern lediglich einen sichtbaren Startblocker. AI6-012 legt weder einen Run an noch startet es einen Providerprozess.
 
 ## Ticketmanifest
 
@@ -525,7 +537,7 @@ final readonly class NormalizeValueData
 
 ## Projektdokumentation
 
-- [Implementierungsplan V1.7.1](docs/AI6_IMPLEMENTATION_PLAN.md) — normative Quelle für Anforderungen, Architektur, Meilensteine und Ticket-Blueprints.
+- [Implementierungsplan V1.7.2](docs/AI6_IMPLEMENTATION_PLAN.md) — normative Quelle für Anforderungen, Architektur, Meilensteine und Ticket-Blueprints.
 - [Ticket-Template V1](docs/AI6_TICKET_TEMPLATE_V1.md) — verbindliches Format sowie Erzeugungs- und Umsetzungsvertrag für Detailtickets.
 - [Ticketübersicht](tickets/README.md) — Erzeugungsstand und Abhängigkeiten; keine autoritative Statusquelle.
 - [Agentenanweisungen](AGENTS.md) — verbindliche Regeln für agentische LLMs in diesem Repository.

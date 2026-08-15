@@ -428,13 +428,55 @@ pre {
     white-space: pre-wrap;
 }
 
+.ai6-approval-form,
+.ai6-approval-form fieldset,
+.ai6-approval-form section {
+    min-width: 0;
+}
+
+.ai6-approval-form fieldset,
+.ai6-approval-form > section {
+    margin: 1rem 0;
+    padding: 1rem;
+    border: 1px solid var(--ai6-border);
+    border-radius: 0.5rem;
+}
+
+.ai6-approval-form label {
+    display: grid;
+    gap: 0.25rem;
+    margin: 0.65rem 0;
+}
+
+.ai6-approval-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: 0 1rem;
+}
+
+.ai6-approval-form input,
+.ai6-approval-form select,
+.ai6-approval-form textarea,
+.ai6-approval-form pre {
+    box-sizing: border-box;
+    max-width: 100%;
+}
+
+.ai6-approval-form pre {
+    padding: 0.75rem;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+    background: var(--ai6-neutral-surface);
+}
+
 @media (max-width: 480px) {
     body {
         padding: 0 0.6rem 2rem;
     }
 
     .ai6-state,
-    .ai6-required-fields {
+    .ai6-required-fields,
+    .ai6-approval-grid {
         grid-template-columns: 1fr;
     }
 

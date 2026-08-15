@@ -12,6 +12,9 @@ use App\AI6\Git\Http\ControlOperationController;
 use App\AI6\Projects\Http\ProjectConfigurationController;
 use App\AI6\Projects\Http\ProjectController;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Runs\ApprovalStatusPage;
+use App\AI6\Runs\TicketApprovalController;
+use App\AI6\Runs\TicketApprovalPage;
 use App\AI6\Tickets\Livewire\TicketDetail;
 use App\AI6\Tickets\Livewire\TicketList;
 use App\AI6\Tickets\TicketMutationController;
@@ -97,6 +100,15 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/projects/{project}/tickets/{readModel}/status', [TicketMutationController::class, 'changeStatus'])
         ->middleware('can:changeTicketStatus,project')
         ->name('projects.tickets.status');
+    Route::get('/projects/{project}/tickets/{readModel}/approval', TicketApprovalPage::class)
+        ->middleware('can:approveTicket,project')
+        ->name('projects.tickets.approval');
+    Route::post('/projects/{project}/tickets/{readModel}/approval', [TicketApprovalController::class, 'store'])
+        ->middleware('can:approveTicket,project')
+        ->name('projects.tickets.approval.store');
+    Route::get('/projects/{project}/approvals/{approvalId}', ApprovalStatusPage::class)
+        ->middleware('can:view,project')
+        ->name('projects.approvals.show');
     Route::post('/projects/{project}/deploy-key', [ControlOperationController::class, 'provision'])
         ->middleware('can:provisionDeployKey,project')
         ->name('projects.deploy-key.provision');

@@ -43,7 +43,8 @@ final readonly class ControlOperationRecoveryProcessor
                 ControlOperationType::MANAGED_CLONE,
                 ControlOperationType::MANAGED_FETCH => $this->managedClones,
                 ControlOperationType::TICKET_EDIT,
-                ControlOperationType::TICKET_STATUS_CHANGE => $this->ticketMutations,
+                ControlOperationType::TICKET_STATUS_CHANGE,
+                ControlOperationType::TICKET_APPROVAL => $this->ticketMutations,
             };
             match ($decision->decision) {
                 RecoveryDecisionType::RETRY_RECONCILIATION => $handler->retryRecovery($operation, $decision),
@@ -74,7 +75,8 @@ final readonly class ControlOperationRecoveryProcessor
             ControlOperationType::MANAGED_CLONE,
             ControlOperationType::MANAGED_FETCH => $this->managedClones->abandon($operation, $decision),
             ControlOperationType::TICKET_EDIT,
-            ControlOperationType::TICKET_STATUS_CHANGE => $this->ticketMutations->abandon($operation, $decision),
+            ControlOperationType::TICKET_STATUS_CHANGE,
+            ControlOperationType::TICKET_APPROVAL => $this->ticketMutations->abandon($operation, $decision),
             ControlOperationType::CONTROL_BRANCH_CHANGE,
             ControlOperationType::TICKET_REFRESH,
             ControlOperationType::CONFIG_REFRESH => throw new RuntimeException(

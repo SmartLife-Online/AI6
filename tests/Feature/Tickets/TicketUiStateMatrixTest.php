@@ -6,6 +6,7 @@ use App\AI6\Auth\Models\User;
 use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
+use App\AI6\Projects\ProjectRole;
 use App\AI6\Tickets\TicketValidationProfile;
 
 final class TicketUiStateMatrixTest extends TicketUiTestCase
@@ -13,7 +14,9 @@ final class TicketUiStateMatrixTest extends TicketUiTestCase
     public function test_only_fresh_profile_qualified_clear_projections_own_entries_per_state(): void
     {
         $administrator = $this->createUser(['is_global_admin' => true]);
+        $approver = $this->createUser();
         $project = $this->provisionedProject($administrator);
+        $this->addMembership($approver, $project, ProjectRole::APPROVER);
 
         $unparsed = $this->publishUnparsedReadModel(
             $administrator,
@@ -59,7 +62,8 @@ final class TicketUiStateMatrixTest extends TicketUiTestCase
 
         $this->assertEntries($administrator, $project, $unparsed, edit: false, approval: false);
         $this->assertEntries($administrator, $project, $invalid, edit: true, approval: false);
-        $this->assertEntries($administrator, $project, $valid, edit: true, approval: true);
+        $this->assertEntries($administrator, $project, $valid, edit: true, approval: false);
+        $this->assertEntries($approver, $project, $valid, edit: false, approval: true);
         $this->assertEntries($administrator, $project, $mismatch, edit: false, approval: false);
         $this->assertEntries($administrator, $project, $masked, edit: false, approval: false);
 
@@ -71,7 +75,9 @@ final class TicketUiStateMatrixTest extends TicketUiTestCase
     public function test_a_changed_central_policy_decision_flips_the_display(): void
     {
         $administrator = $this->createUser(['is_global_admin' => true]);
+        $approver = $this->createUser();
         $project = $this->provisionedProject($administrator);
+        $this->addMembership($approver, $project, ProjectRole::APPROVER);
         $valid = $this->publishReadModel(
             $administrator,
             $project,
@@ -79,7 +85,8 @@ final class TicketUiStateMatrixTest extends TicketUiTestCase
             $this->validTicketMarkdown('T1', 'todo', '[]', 'Politikgebundenes Ziel.'),
         );
 
-        $this->assertEntries($administrator, $project, $valid, edit: true, approval: true);
+        $this->assertEntries($administrator, $project, $valid, edit: true, approval: false);
+        $this->assertEntries($approver, $project, $valid, edit: false, approval: true);
 
         // The availability consumes the effective project configuration: once
         // the trusted default demands the detail profile, the same projection
@@ -90,7 +97,7 @@ final class TicketUiStateMatrixTest extends TicketUiTestCase
         config()->set('ai6.project_config.server_defaults', $defaults);
         $this->app->forgetInstance(EffectiveProjectConfiguration::class);
 
-        $this->assertEntries($administrator, $project, $valid, edit: false, approval: false);
+        $this->assertEntries($approver, $project, $valid, edit: false, approval: false);
     }
 
     private function assertEntries(

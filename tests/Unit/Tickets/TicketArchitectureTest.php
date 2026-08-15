@@ -8,6 +8,22 @@ use RecursiveIteratorIterator;
 
 final class TicketArchitectureTest extends TestCase
 {
+    public function test_approval_http_entry_points_do_not_execute_git_or_snapshot_resolution(): void
+    {
+        $root = dirname(__DIR__, 3);
+        foreach ([
+            'app/AI6/Runs/ApprovalStatusPage.php',
+            'app/AI6/Runs/TicketApprovalController.php',
+            'app/AI6/Runs/TicketApprovalPage.php',
+        ] as $relativePath) {
+            $content = file_get_contents($root.'/'.$relativePath);
+            self::assertIsString($content);
+            self::assertStringNotContainsString('ApprovalSnapshotFactory', $content, $relativePath);
+            self::assertStringNotContainsString('InstructionCandidateSource', $content, $relativePath);
+            self::assertStringNotContainsString('HardenedGitRunner', $content, $relativePath);
+        }
+    }
+
     public function test_yaml_jcs_and_contract_hash_each_have_one_authorized_seam(): void
     {
         $root = dirname(__DIR__, 3);

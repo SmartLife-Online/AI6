@@ -72,6 +72,6 @@ final class TicketDetailViewTest extends TicketUiTestCase
         $response->assertSee('<strong>hervorgehobenem</strong>', false);
         $response->assertSee($readModel->ticket_contract_sha256);
         $response->assertSee('data-ai6-entry="edit"', false);
-        $response->assertSee('data-ai6-entry="approval"', false);
+        $response->assertDontSee('data-ai6-entry="approval"', false);
     }
 }

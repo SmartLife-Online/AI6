@@ -70,7 +70,7 @@ final readonly class TicketMutationController
         abort_unless($actor instanceof User, 403);
         $model = $this->readModel($project, $readModel);
         $validated = $request->validate($this->baseRules() + [
-            'status_operation' => ['required', Rule::enum(TicketStatusOperation::class)],
+            'status_operation' => ['required', Rule::enum(TicketStatusOperation::class)->except(TicketStatusOperation::APPROVE)],
             'external_completion_confirmed' => ['sometimes', 'accepted'],
         ]);
         $stepUp->consumeFresh($request, $actor, self::STATUS_STEP_UP_ACTION);

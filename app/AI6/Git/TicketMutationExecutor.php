@@ -2,6 +2,8 @@
 
 namespace App\AI6\Git;
 
+use App\AI6\Agents\AgentProfileSelectionException;
+use App\AI6\Agents\InstructionResolutionException;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\ControlOperationRecoveryDecision;
 use App\AI6\Git\Models\ControlOperationResult;
@@ -16,6 +18,10 @@ use App\AI6\Projects\TicketDocumentState;
 use App\AI6\Projects\TicketReadModelFreshness;
 use App\AI6\Projects\TicketReadModelRedactionState;
 use App\AI6\Projects\TicketReadModelUsePolicy;
+use App\AI6\Prompts\PromptRenderingException;
+use App\AI6\Runs\ApprovalSelectionFactory;
+use App\AI6\Runs\ApprovalSnapshotFactory;
+use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Shared\Process\EffectLock;
 use App\AI6\Shared\Process\EffectLockHandle;
 use App\AI6\Shared\Process\EffectLockOutcome;
@@ -29,6 +35,7 @@ use App\AI6\Tickets\TicketStatusTransitionPolicy;
 use App\AI6\Tickets\TicketV1Parser;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 use JsonException;
 use RuntimeException;
 
@@ -54,6 +61,8 @@ final readonly class TicketMutationExecutor
         private CanonicalJson $canonicalJson,
         private ControlOperationConfiguration $controlConfiguration,
         private TicketMutationConfiguration $configuration,
+        private ApprovalSelectionFactory $approvalSelections,
+        private ApprovalSnapshotFactory $approvalSnapshots,
     ) {}
 
     public function advance(ControlOperation $operation, int $attemptToken): bool
@@ -131,6 +140,32 @@ final readonly class TicketMutationExecutor
             if ($anchorAttemptToken !== $attemptToken) {
                 $this->paths->removeOwnedAttempt($project->project_identifier, $operation->id, $attemptToken);
             }
+        }
+    }
+
+    public function cancelApprovalEffect(ControlOperation $operation): void
+    {
+        if ($operation->operation_type !== ControlOperationType::TICKET_APPROVAL) {
+            return;
+        }
+
+        $updated = TicketApproval::query()
+            ->where('status_operation_id', $operation->id)
+            ->whereIn('saga_phase', ['prepared', 'commit_prepared', 'control_confirmed'])
+            ->where('queue_state', 'pending_approval_effect')
+            ->update([
+                'saga_phase' => 'conflict',
+                'queue_state' => 'cancelled',
+                'version' => DB::raw('version + 1'),
+                'updated_at' => Date::now(),
+            ]);
+        if ($updated === 1) {
+            return;
+        }
+
+        $approval = TicketApproval::query()->where('status_operation_id', $operation->id)->firstOrFail();
+        if ($approval->saga_phase !== 'conflict' || $approval->queue_state !== 'cancelled') {
+            throw new RuntimeException('The ticket approval could not be cancelled idempotently.');
         }
     }
 
@@ -276,6 +311,7 @@ final readonly class TicketMutationExecutor
             }
 
             DB::transaction(function () use ($operation, $decision, $attemptToken): void {
+                $this->cancelApprovalEffect($operation);
                 $binding = hash('sha256', "AI6-CONTROL-RESULT-V1\0".$operation->id.$operation->request_hash.'abandoned');
                 $result = ControlOperationResult::query()->firstOrCreate(
                     ['control_operation_id' => $operation->id],
@@ -332,21 +368,41 @@ final readonly class TicketMutationExecutor
             ->where('project_id', $project->getKey())
             ->where('relative_path', $mutation->relative_path)
             ->firstOrFail();
+        $fresh = ! $this->freshness->for($project, $readModel)['stale'];
+        $profile = $this->projectConfiguration->for($project)->configuration->ticketValidationProfile();
+        $sourceAllowed = $operation->operation_type === ControlOperationType::TICKET_APPROVAL
+            ? $this->usePolicy->allowsApproval($readModel, $fresh, $profile)
+            : $this->usePolicy->allowsEditor($readModel, $fresh, $profile);
         if (! hash_equals($mutation->expected_ticket_blob_sha, $blob->blobSha)
             || ! hash_equals($mutation->base_content_sha256, hash('sha256', $blob->content))
             || ! hash_equals($mutation->base_content, $blob->content)
             || ! hash_equals($readModel->blob_sha, $blob->blobSha)
             || ! hash_equals($readModel->redacted_content, $blob->content)
             || $readModel->redaction_state !== TicketReadModelRedactionState::CLEAR
-            || ! $this->usePolicy->allowsEditor(
-                $readModel,
-                ! $this->freshness->for($project, $readModel)['stale'],
-                $this->projectConfiguration->for($project)->configuration->ticketValidationProfile(),
-            )) {
+            || ! $sourceAllowed) {
             throw new ControlOperationTerminalConflict(
                 'ticket_blob_changed',
                 'Die bytegenaue, unmaskierte Ticketbasis ist nicht mehr aktuell.',
             );
+        }
+        if ($operation->operation_type === ControlOperationType::TICKET_APPROVAL) {
+            $approval = TicketApproval::query()->where('status_operation_id', $operation->id)->firstOrFail();
+            try {
+                $currentSnapshot = $this->approvalSnapshots->create(
+                    $project,
+                    $readModel,
+                    $this->approvalSelections->fromArray($approval->agent_profile_snapshot),
+                    $approval->snapshot_context_id,
+                );
+            } catch (AgentProfileSelectionException|InstructionResolutionException|PromptRenderingException|InvalidArgumentException) {
+                throw new ControlOperationTerminalConflict(
+                    'approval_snapshot_changed',
+                    'Der bestätigte Approval-Snapshot ist nicht mehr aktuell.',
+                );
+            }
+            if (! hash_equals($approval->approval_snapshot_hash, $currentSnapshot->aggregateHash)) {
+                throw new ControlOperationTerminalConflict('approval_snapshot_changed', 'Der bestätigte Approval-Snapshot ist nicht mehr aktuell.');
+            }
         }
         $targetRedaction = $this->redactor->redact($mutation->target_content, $context);
         if ($targetRedaction->matches !== [] || ! hash_equals($targetRedaction->text, $mutation->target_content)) {
@@ -450,6 +506,7 @@ final readonly class TicketMutationExecutor
                 throw new ControlOperationRecoveryRequired('The prepared mutation commit changed before persistence.');
             }
         }
+        $this->progressApproval($operation, 'prepared', 'commit_prepared', $commitOid);
         $this->progress($operation, $attemptToken, ControlOperationPhase::PREPARED, [
             'phase' => ControlOperationPhase::COMMIT_PREPARED,
             'target_control_oid' => $commitOid,
@@ -490,6 +547,7 @@ final readonly class TicketMutationExecutor
         if (! hash_equals($this->remote->resolve($project, (string) $project->control_branch, $context), $commitOid)) {
             throw new ControlOperationRecoveryRequired('The remote did not confirm the prepared ticket mutation commit.');
         }
+        $this->progressApproval($operation, 'commit_prepared', 'control_confirmed', $commitOid);
         $this->progress($operation, $attemptToken, ControlOperationPhase::COMMIT_PREPARED, [
             'phase' => ControlOperationPhase::CONTROL_CONFIRMED,
         ]);
@@ -585,6 +643,30 @@ final readonly class TicketMutationExecutor
                 || ! hash_equals($mutation->target_contract_sha256, $published->ticket_contract_sha256)) {
                 throw new ControlOperationRecoveryRequired('The confirmed ticket content no longer produces its safe valid projection.');
             }
+            if ($operation->operation_type === ControlOperationType::TICKET_APPROVAL) {
+                $approvalUpdated = TicketApproval::query()
+                    ->where('status_operation_id', $operation->id)
+                    ->whereIn('saga_phase', ['prepared', 'commit_prepared', 'control_confirmed'])
+                    ->whereNull('approved_ticket_blob_sha')
+                    ->whereNull('approved_control_sha')
+                    ->update([
+                        'approved_ticket_blob_sha' => $refreshResult->blobSha,
+                        'approved_control_sha' => $commitOid,
+                        'intended_commit_sha' => $commitOid,
+                        'saga_phase' => 'complete',
+                        'queue_state' => 'queued',
+                        'version' => DB::raw('version + 1'),
+                        'updated_at' => $now,
+                    ]);
+                if ($approvalUpdated !== 1) {
+                    $approval = TicketApproval::query()->where('status_operation_id', $operation->id)->firstOrFail();
+                    if (! hash_equals((string) $approval->approved_ticket_blob_sha, $refreshResult->blobSha)
+                        || ! hash_equals((string) $approval->approved_control_sha, $commitOid)
+                        || $approval->saga_phase !== 'complete') {
+                        throw new ControlOperationRecoveryRequired('The ticket approval binding could not be finalized idempotently.');
+                    }
+                }
+            }
             $binding = hash('sha256', "AI6-TICKET-MUTATION-RESULT-V1\0".$operation->id.$operation->request_hash.$commitOid.$refreshResult->blobSha);
             $result = ControlOperationResult::query()->firstOrCreate(
                 ['control_operation_id' => $operation->id],
@@ -625,9 +707,11 @@ final readonly class TicketMutationExecutor
         $actor = $operation->actor()->firstOrFail();
         $mutation = $operation->ticketMutation()->firstOrFail();
         $parameters = $this->parameters($operation);
-        $authorized = $operation->operation_type === ControlOperationType::TICKET_EDIT
-            ? $this->projectPolicy->editTicket($actor, $project)
-            : $this->projectPolicy->changeTicketStatus($actor, $project);
+        $authorized = match ($operation->operation_type) {
+            ControlOperationType::TICKET_EDIT => $this->projectPolicy->editTicket($actor, $project),
+            ControlOperationType::TICKET_APPROVAL => $this->projectPolicy->approveTicket($actor, $project),
+            default => $this->projectPolicy->changeTicketStatus($actor, $project),
+        };
         if (! $authorized || ! $this->authorizationSnapshots->matchesCurrent($operation, $actor, $project)) {
             throw new ControlOperationTerminalConflict('authorization_changed', 'Die Autorisierung der Ticketmutation ist nicht mehr aktuell.');
         }
@@ -1009,9 +1093,31 @@ final readonly class TicketMutationExecutor
         }
     }
 
+    private function progressApproval(ControlOperation $operation, string $from, string $to, string $commitOid): void
+    {
+        if ($operation->operation_type !== ControlOperationType::TICKET_APPROVAL) {
+            return;
+        }
+        $updated = TicketApproval::query()
+            ->where('status_operation_id', $operation->id)
+            ->where('saga_phase', $from)
+            ->update([
+                'saga_phase' => $to,
+                'intended_commit_sha' => $commitOid,
+                'version' => DB::raw('version + 1'),
+                'updated_at' => Date::now(),
+            ]);
+        if ($updated !== 1) {
+            $approval = TicketApproval::query()->where('status_operation_id', $operation->id)->firstOrFail();
+            if ($approval->saga_phase !== $to || ! hash_equals((string) $approval->intended_commit_sha, $commitOid)) {
+                throw new ControlOperationRecoveryRequired('The ticket approval saga phase could not be reconciled.');
+            }
+        }
+    }
+
     private function assertType(ControlOperation $operation): void
     {
-        if (! in_array($operation->operation_type, [ControlOperationType::TICKET_EDIT, ControlOperationType::TICKET_STATUS_CHANGE], true)) {
+        if (! in_array($operation->operation_type, [ControlOperationType::TICKET_EDIT, ControlOperationType::TICKET_STATUS_CHANGE, ControlOperationType::TICKET_APPROVAL], true)) {
             throw new RuntimeException('The operation is not a ticket mutation.');
         }
     }

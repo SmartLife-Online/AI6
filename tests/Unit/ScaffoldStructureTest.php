@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_011(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_012(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -265,7 +265,26 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Prompts/PromptVariables.php',
             'app/AI6/Prompts/ReviewPromptProfile.php',
             'app/AI6/Reviews/.gitkeep',
+            'app/AI6/Reviews/ReviewerSlot.php',
+            'app/AI6/Reviews/ReviewerSlotFactory.php',
             'app/AI6/Runs/.gitkeep',
+            'app/AI6/Runs/ApprovalFreshness.php',
+            'app/AI6/Runs/ApprovalLimits.php',
+            'app/AI6/Runs/ApprovalSelection.php',
+            'app/AI6/Runs/ApprovalSelectionFactory.php',
+            'app/AI6/Runs/ApprovalSnapshot.php',
+            'app/AI6/Runs/ApprovalSnapshotFactory.php',
+            'app/AI6/Runs/ApprovalStartEligibility.php',
+            'app/AI6/Runs/ApprovalStatusPage.php',
+            'app/AI6/Runs/InstructionCandidateCollector.php',
+            'app/AI6/Runs/InstructionCandidateSource.php',
+            'app/AI6/Runs/Jobs/BuildTicketApprovalPreview.php',
+            'app/AI6/Runs/Jobs/EvaluateTicketApproval.php',
+            'app/AI6/Runs/Models/TicketApproval.php',
+            'app/AI6/Runs/Models/TicketApprovalEvaluation.php',
+            'app/AI6/Runs/Models/TicketApprovalPreview.php',
+            'app/AI6/Runs/TicketApprovalController.php',
+            'app/AI6/Runs/TicketApprovalPage.php',
             'app/AI6/Shared/AI6Marker.php',
             'app/AI6/Shared/AI6ServiceProvider.php',
             'app/AI6/Shared/Config/ConfigurationException.php',
@@ -610,7 +629,7 @@ final class ScaffoldStructureTest extends TestCase
         }
     }
 
-    public function test_migrations_match_the_approved_state_through_ai6_010(): void
+    public function test_migrations_match_the_approved_state_through_ai6_012(): void
     {
         $migrations = glob($this->path('database/migrations/*.php'));
         self::assertIsArray($migrations);
@@ -639,6 +658,7 @@ final class ScaffoldStructureTest extends TestCase
             '2026_08_11_000000_add_ticket_validation_projection_contract.php',
             '2026_08_12_000000_add_ticket_mutation_operation_contract.php',
             '2026_08_13_000000_add_project_configuration_snapshot_contract.php',
+            '2026_08_14_000000_add_ticket_approval_contract.php',
         ], $migrations);
     }
 

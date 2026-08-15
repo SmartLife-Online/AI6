@@ -18,7 +18,10 @@ final readonly class InstructionSnapshot implements JsonSerializable
     {
         return [
             'provider_profile_alias' => $this->providerProfileAlias,
-            'entries' => $this->entries,
+            'entries' => array_map(
+                static fn (InstructionSnapshotEntry $entry): array => $entry->jsonSerialize(),
+                $this->entries,
+            ),
             'instruction_snapshot_hash' => $this->hash,
         ];
     }

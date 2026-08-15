@@ -11,4 +11,5 @@ enum ProjectAction: string
     case CHANGE_TICKET_STATUS = 'change_ticket_status';
     case REFRESH_CONFIGURATION = 'refresh_configuration';
     case APPROVE_CONFIGURATION = 'approve_configuration';
+    case APPROVE_TICKET = 'approve_ticket';
 }

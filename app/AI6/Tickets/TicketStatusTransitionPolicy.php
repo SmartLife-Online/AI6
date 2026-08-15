@@ -8,6 +8,7 @@ final class TicketStatusTransitionPolicy
 {
     /** @var array<string, list<ProjectRole>> */
     private const ROLES = [
+        'todo:approve' => [ProjectRole::APPROVER],
         'todo:block' => [ProjectRole::ADMIN, ProjectRole::OPERATOR],
         'todo:cancel' => [ProjectRole::ADMIN, ProjectRole::OPERATOR],
         'ready:block' => [ProjectRole::ADMIN, ProjectRole::OPERATOR],

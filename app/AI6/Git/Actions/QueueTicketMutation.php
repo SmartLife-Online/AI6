@@ -25,6 +25,9 @@ use App\AI6\Projects\TicketDocumentState;
 use App\AI6\Projects\TicketReadModelFreshness;
 use App\AI6\Projects\TicketReadModelRedactionState;
 use App\AI6\Projects\TicketReadModelUsePolicy;
+use App\AI6\Runs\ApprovalSelection;
+use App\AI6\Runs\ApprovalSnapshot;
+use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\RedactionMatchType;
 use App\AI6\Shared\Redaction\Redactor;
@@ -82,6 +85,7 @@ final readonly class QueueTicketMutation
             $freshStepUp,
             null,
             false,
+            null,
         );
     }
 
@@ -111,6 +115,40 @@ final readonly class QueueTicketMutation
             $freshStepUp,
             $statusOperation,
             $externalCompletionConfirmed,
+            null,
+        );
+    }
+
+    public function approve(
+        User $actor,
+        Project $project,
+        TicketReadModel $readModel,
+        string $operationId,
+        string $expectedControlOid,
+        string $expectedBlob,
+        string $baseContent,
+        string $reason,
+        bool $freshStepUp,
+        ApprovalSelection $selection,
+        ApprovalSnapshot $confirmedSnapshot,
+        string $snapshotContextId,
+    ): ControlOperation {
+        return $this->queue(
+            $actor,
+            $project,
+            $readModel,
+            $operationId,
+            $expectedControlOid,
+            $expectedBlob,
+            $baseContent,
+            $baseContent,
+            $reason,
+            $freshStepUp,
+            TicketStatusOperation::APPROVE,
+            false,
+            $selection,
+            $confirmedSnapshot,
+            $snapshotContextId,
         );
     }
 
@@ -127,6 +165,9 @@ final readonly class QueueTicketMutation
         bool $freshStepUp,
         ?TicketStatusOperation $statusOperation,
         bool $externalCompletionConfirmed,
+        ?ApprovalSelection $approvalSelection,
+        ?ApprovalSnapshot $confirmedApprovalSnapshot = null,
+        ?string $snapshotContextId = null,
     ): ControlOperation {
         if (! ManagedProjectPath::validOperationIdentifier($operationId)) {
             throw new TicketMutationConflict('operation_id_invalid', 'Die Mutations-ID ist ungültig.');
@@ -137,12 +178,18 @@ final readonly class QueueTicketMutation
         if ($statusOperation === null && ! $this->projectPolicy->editTicket($actor, $project)) {
             throw new AuthorizationException;
         }
-        if ($statusOperation !== null && ! $this->projectPolicy->changeTicketStatus($actor, $project)) {
+        if ($statusOperation === TicketStatusOperation::APPROVE && ! $this->projectPolicy->approveTicket($actor, $project)) {
+            throw new AuthorizationException;
+        }
+        if ($statusOperation !== null && $statusOperation !== TicketStatusOperation::APPROVE && ! $this->projectPolicy->changeTicketStatus($actor, $project)) {
             throw new AuthorizationException;
         }
         $freshness = $this->freshness->for($project, $readModel);
         $binding = $this->projectConfiguration->for($project);
-        if (! $this->usePolicy->allowsEditor($readModel, ! $freshness['stale'], $binding->configuration->ticketValidationProfile())) {
+        $sourceAllowed = $statusOperation === TicketStatusOperation::APPROVE
+            ? $this->usePolicy->allowsApproval($readModel, ! $freshness['stale'], $binding->configuration->ticketValidationProfile())
+            : $this->usePolicy->allowsEditor($readModel, ! $freshness['stale'], $binding->configuration->ticketValidationProfile());
+        if (! $sourceAllowed) {
             throw new TicketMutationConflict('editor_unavailable', 'Diese Ticketprojektion darf nicht als Editorquelle verwendet werden.');
         }
         if ($readModel->redaction_state !== TicketReadModelRedactionState::CLEAR
@@ -163,6 +210,7 @@ final readonly class QueueTicketMutation
         return DB::transaction(function () use (
             $actor, $project, $readModel, $operationId, $expectedControlOid, $expectedBlob,
             $baseContent, $targetContent, $reason, $statusOperation, $externalCompletionConfirmed,
+            $approvalSelection, $confirmedApprovalSnapshot, $snapshotContextId,
         ): ControlOperation {
             $currentProject = Project::query()->findOrFail($project->getKey());
             $currentReadModel = TicketReadModel::query()->findOrFail($readModel->getKey());
@@ -176,11 +224,9 @@ final readonly class QueueTicketMutation
                 || ! hash_equals($expectedBlob, $currentReadModel->blob_sha)
                 || ! hash_equals($baseContent, $currentReadModel->redacted_content)
                 || $currentReadModel->redaction_state !== TicketReadModelRedactionState::CLEAR
-                || ! $this->usePolicy->allowsEditor(
-                    $currentReadModel,
-                    ! $this->freshness->for($currentProject, $currentReadModel)['stale'],
-                    $binding->configuration->ticketValidationProfile(),
-                )) {
+                || ! ($statusOperation === TicketStatusOperation::APPROVE
+                    ? $this->usePolicy->allowsApproval($currentReadModel, ! $this->freshness->for($currentProject, $currentReadModel)['stale'], $binding->configuration->ticketValidationProfile())
+                    : $this->usePolicy->allowsEditor($currentReadModel, ! $this->freshness->for($currentProject, $currentReadModel)['stale'], $binding->configuration->ticketValidationProfile()))) {
                 throw new TicketMutationConflict('mutation_binding_changed', 'Die Ticket- oder Control-Bindung hat sich geändert.');
             }
             $membership = ProjectMembership::query()
@@ -230,7 +276,9 @@ final readonly class QueueTicketMutation
                     $externalCompletionConfirmed,
                 );
                 $targetContent = $this->statuses->replace($baseContent, $sourceStatus, $targetStatus);
-                $type = ControlOperationType::TICKET_STATUS_CHANGE;
+                $type = $statusOperation === TicketStatusOperation::APPROVE
+                    ? ControlOperationType::TICKET_APPROVAL
+                    : ControlOperationType::TICKET_STATUS_CHANGE;
             }
 
             $projection = $this->projector->project(
@@ -240,6 +288,11 @@ final readonly class QueueTicketMutation
             );
             if ($projection->state !== TicketDocumentState::VALID || $projection->contractHash === null) {
                 throw new TicketMutationConflict('target_validation_failed', 'Der neue Ticketstand ist nicht vollständig gültig.');
+            }
+            if ($statusOperation === TicketStatusOperation::APPROVE
+                && (! is_string($currentReadModel->ticket_contract_sha256)
+                    || ! hash_equals($currentReadModel->ticket_contract_sha256, $projection->contractHash))) {
+                throw new TicketMutationConflict('approval_contract_changed', 'Die Status-only-Freigabe hat den Ticketvertrag verändert.');
             }
             $audit = $this->redactor->redact(
                 $reason,
@@ -251,6 +304,25 @@ final readonly class QueueTicketMutation
             $auditReason = preg_replace('/\s+/u', ' ', trim($audit->text));
             if (! is_string($auditReason) || $auditReason === '') {
                 throw new TicketMutationConflict('audit_reason_invalid', 'Der redigierte Auditgrund ist ungültig.');
+            }
+            $approvalSnapshot = null;
+            $approvalTicketId = null;
+            if ($statusOperation === TicketStatusOperation::APPROVE) {
+                if (! $approvalSelection instanceof ApprovalSelection) {
+                    throw new TicketMutationConflict('approval_selection_missing', 'Die Approval-Auswahl fehlt.');
+                }
+                $document = $this->parser->parse($baseContent);
+                $approvalTicketId = $document->frontmatter['id'] ?? null;
+                if (! is_string($approvalTicketId) || $approvalTicketId === '') {
+                    throw new TicketMutationConflict('approval_ticket_id_missing', 'Die Ticket-ID fehlt.');
+                }
+                if (! $confirmedApprovalSnapshot instanceof ApprovalSnapshot
+                    || ! is_string($snapshotContextId)
+                    || ! ManagedProjectPath::validOperationIdentifier($snapshotContextId)
+                    || ! hash_equals($binding->configHash, $confirmedApprovalSnapshot->configHash)) {
+                    throw new TicketMutationConflict('approval_snapshot_changed', 'Der gemeinsam bestätigte Approval-Snapshot ist nicht mehr aktuell.');
+                }
+                $approvalSnapshot = $confirmedApprovalSnapshot;
             }
             $parameters = $type->parameters(array_filter([
                 'relative_path' => $currentReadModel->relative_path,
@@ -270,7 +342,10 @@ final readonly class QueueTicketMutation
                 $parameters,
             );
             $targetBlob = hash('sha256', 'blob '.strlen($targetContent)."\0".$targetContent);
-            $requestHash = hash('sha256', "AI6-TICKET-MUTATION-REQUEST-V1\0".$coreHash.$expectedBlob.$targetBlob.$projection->contractHash);
+            $approvalBinding = $statusOperation === TicketStatusOperation::APPROVE
+                ? $approvalSnapshot->aggregateHash
+                : '';
+            $requestHash = hash('sha256', "AI6-TICKET-MUTATION-REQUEST-V1\0".$coreHash.$expectedBlob.$targetBlob.$projection->contractHash.$approvalBinding);
 
             $existing = ControlOperation::query()->find($operationId);
             if ($existing instanceof ControlOperation) {
@@ -321,6 +396,42 @@ final readonly class QueueTicketMutation
                 'external_completion_confirmed' => $externalCompletionConfirmed,
                 'commit_timestamp' => now()->getTimestamp(),
             ]);
+            if ($statusOperation === TicketStatusOperation::APPROVE) {
+                TicketApproval::query()->create([
+                    'id' => $operation->id,
+                    'project_id' => $currentProject->getKey(),
+                    'status_operation_id' => $operation->id,
+                    'ticket_id' => $approvalTicketId,
+                    'relative_path' => $currentReadModel->relative_path,
+                    'reviewed_ticket_blob_sha' => $expectedBlob,
+                    'reviewed_control_sha' => $expectedControlOid,
+                    'ticket_contract_sha256' => $projection->contractHash,
+                    'control_generation' => $currentReadModel->control_generation,
+                    'snapshot_context_id' => $snapshotContextId,
+                    'saga_phase' => 'prepared',
+                    'config_snapshot' => $approvalSnapshot->config,
+                    'config_hash' => $approvalSnapshot->configHash,
+                    'scope_snapshot' => $approvalSnapshot->scope,
+                    'scope_hash' => $approvalSnapshot->scopeHash,
+                    'prompt_snapshot' => $approvalSnapshot->prompt,
+                    'prompt_hash' => $approvalSnapshot->promptHash,
+                    'instruction_snapshot' => $approvalSnapshot->instructions,
+                    'instruction_hash' => $approvalSnapshot->instructionHash,
+                    'runtime_profile_snapshot' => $approvalSnapshot->runtimeProfiles,
+                    'runtime_profile_hash' => $approvalSnapshot->runtimeProfileHash,
+                    'agent_profile_snapshot' => $approvalSnapshot->agentProfiles,
+                    'agent_profile_hash' => $approvalSnapshot->agentProfileHash,
+                    'security_policy_hash' => $approvalSnapshot->securityPolicyHash,
+                    'limits_snapshot' => $approvalSelection->limits->jsonSerialize(),
+                    'approval_snapshot_hash' => $approvalSnapshot->aggregateHash,
+                    'queue_state' => 'pending_approval_effect',
+                    'attention_user_id' => $approvalSelection->attentionUserId,
+                    'push_mode' => $approvalSelection->pushMode,
+                    'version' => 1,
+                    'approved_by' => $actor->getKey(),
+                    'approved_at' => now(),
+                ]);
+            }
             Queue::connection('database')->push(new ExecuteControlOperation($operation->id));
 
             return $operation;

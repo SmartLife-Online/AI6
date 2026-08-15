@@ -39,6 +39,7 @@ final readonly class ControlOperationExecutor
                 if (in_array($operation->operation_type, [
                     ControlOperationType::TICKET_EDIT,
                     ControlOperationType::TICKET_STATUS_CHANGE,
+                    ControlOperationType::TICKET_APPROVAL,
                 ], true)) {
                     $this->ticketMutations->cleanupFailedAttempt(
                         $operation,
@@ -128,7 +129,8 @@ final readonly class ControlOperationExecutor
                     ControlOperationType::TICKET_REFRESH => $this->ticketReadModels->advance($operation, $attemptToken),
                     ControlOperationType::CONFIG_REFRESH => $this->projectConfigs->advance($operation, $attemptToken),
                     ControlOperationType::TICKET_EDIT,
-                    ControlOperationType::TICKET_STATUS_CHANGE => $this->ticketMutations->advance($operation, $attemptToken),
+                    ControlOperationType::TICKET_STATUS_CHANGE,
+                    ControlOperationType::TICKET_APPROVAL => $this->ticketMutations->advance($operation, $attemptToken),
                 };
                 if ($completed) {
                     return;
@@ -175,7 +177,8 @@ final readonly class ControlOperationExecutor
                 ControlOperationType::TICKET_REFRESH => $this->ticketReadModels->recoveryFinding($operation, $attemptToken, $deviation),
                 ControlOperationType::CONFIG_REFRESH => $this->projectConfigs->recoveryFinding($operation, $attemptToken, $deviation),
                 ControlOperationType::TICKET_EDIT,
-                ControlOperationType::TICKET_STATUS_CHANGE => $this->ticketMutations->recoveryFinding($operation, $attemptToken, $deviation),
+                ControlOperationType::TICKET_STATUS_CHANGE,
+                ControlOperationType::TICKET_APPROVAL => $this->ticketMutations->recoveryFinding($operation, $attemptToken, $deviation),
             };
         } catch (Throwable $inspectionFailure) {
             $this->recordRecoveryInspectionFailure($operation, $attemptToken, $inspectionFailure);
@@ -327,6 +330,7 @@ final readonly class ControlOperationExecutor
         } elseif (in_array($operation->operation_type, [
             ControlOperationType::TICKET_EDIT,
             ControlOperationType::TICKET_STATUS_CHANGE,
+            ControlOperationType::TICKET_APPROVAL,
         ], true)) {
             try {
                 $this->ticketMutations->cleanupFailedAttempt($operation, $attemptToken);
@@ -339,6 +343,7 @@ final readonly class ControlOperationExecutor
 
         $safe = $this->safeMessage($operation, $exception);
         DB::transaction(function () use ($operation, $attemptToken, $exception, $safe): void {
+            $this->ticketMutations->cancelApprovalEffect($operation);
             $binding = hash(
                 'sha256',
                 "AI6-CONTROL-RESULT-V1\0".$operation->id.$operation->request_hash.$exception->conflict,
@@ -391,7 +396,8 @@ final readonly class ControlOperationExecutor
                     ControlOperationType::TICKET_REFRESH => $this->ticketReadModels->activeIntentUnderLock($operation, $attemptToken),
                     ControlOperationType::CONFIG_REFRESH => $this->projectConfigs->activeIntentUnderLock($operation, $attemptToken),
                     ControlOperationType::TICKET_EDIT,
-                    ControlOperationType::TICKET_STATUS_CHANGE => $this->ticketMutations->activeIntentUnderLock($operation, $attemptToken),
+                    ControlOperationType::TICKET_STATUS_CHANGE,
+                    ControlOperationType::TICKET_APPROVAL => $this->ticketMutations->activeIntentUnderLock($operation, $attemptToken),
                 };
             } catch (Throwable $inspectionFailure) {
                 $this->requireRecovery($operation, $attemptToken, $inspectionFailure);
@@ -420,6 +426,7 @@ final readonly class ControlOperationExecutor
                 } elseif (in_array($operation->operation_type, [
                     ControlOperationType::TICKET_EDIT,
                     ControlOperationType::TICKET_STATUS_CHANGE,
+                    ControlOperationType::TICKET_APPROVAL,
                 ], true)) {
                     $this->ticketMutations->cleanupFailedAttempt($operation, $attemptToken);
                 } elseif ($operation->operation_type === ControlOperationType::CONFIG_REFRESH) {
@@ -434,6 +441,7 @@ final readonly class ControlOperationExecutor
             }
 
             DB::transaction(function () use ($operation, $attemptToken, $safe): void {
+                $this->ticketMutations->cancelApprovalEffect($operation);
                 if ($operation->operation_type === ControlOperationType::DEPLOY_KEY_PROVISION) {
                     $projectUpdated = Project::query()
                         ->whereKey($operation->project_id)

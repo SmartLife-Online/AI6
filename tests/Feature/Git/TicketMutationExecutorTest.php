@@ -2,6 +2,9 @@
 
 namespace Tests\Feature\Git;
 
+use App\AI6\Agents\AgentInputLimits;
+use App\AI6\Agents\AgentProfileRegistry;
+use App\AI6\Agents\AgentRole;
 use App\AI6\Auth\Models\User;
 use App\AI6\Git\Actions\QueueManagedCloneOperation;
 use App\AI6\Git\Actions\QueueTicketMutation;
@@ -24,10 +27,17 @@ use App\AI6\Git\RecoveryDecisionType;
 use App\AI6\Git\TicketMutationExecutor;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
+use App\AI6\Projects\ProjectRole;
+use App\AI6\Reviews\ReviewerSlotFactory;
+use App\AI6\Runs\ApprovalLimits;
+use App\AI6\Runs\ApprovalSelection;
+use App\AI6\Runs\ApprovalSnapshotFactory;
+use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\RedactionMatchType;
 use App\AI6\Tickets\TicketMutationConflict;
 use App\AI6\Tickets\TicketStatusOperation;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -45,6 +55,11 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
         }
 
         $fixture = $this->managedFixture();
+        $actor = $fixture['administrator'];
+        if ($kind === 'approval') {
+            $actor = $this->createUser();
+            $this->addMembership($actor, $fixture['project'], ProjectRole::APPROVER);
+        }
         $sourceStatus = $kind === 'edit' ? 'ready' : 'todo';
         $sourceContent = $this->validTicketMarkdown('AI6-909', $sourceStatus, '[]', 'Alter Inhalt.');
         self::assertNotFalse(file_put_contents($fixture['source'].'/tickets/AI6-909.md', $sourceContent));
@@ -72,21 +87,34 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
         DB::table('jobs')->delete();
         $this->app->make(ControlOperationExecutor::class)->execute($refresh->id);
         $readModel = TicketReadModel::query()->where('relative_path', 'tickets/AI6-909.md')->firstOrFail();
-        $targetContent = $kind === 'edit'
-            ? str_replace('Alter Inhalt.', 'Neuer Inhalt.', $sourceContent)
-            : str_replace('status: todo', 'status: blocked', $sourceContent);
+        $targetContent = match ($kind) {
+            'edit' => str_replace('Alter Inhalt.', 'Neuer Inhalt.', $sourceContent),
+            'approval' => str_replace('status: todo', 'status: ready', $sourceContent),
+            default => str_replace('status: todo', 'status: blocked', $sourceContent),
+        };
         $queue = $this->app->make(QueueTicketMutation::class);
-        $operation = $kind === 'edit'
-            ? $queue->edit(
-                $fixture['administrator'], $fixture['project']->refresh(), $readModel, (string) Str::uuid(),
+        $operationId = (string) Str::uuid();
+        $approvalSelection = $kind === 'approval' ? $this->approvalSelection() : null;
+        $approvalSnapshot = $approvalSelection === null
+            ? null
+            : $this->app->make(ApprovalSnapshotFactory::class)->create($fixture['project']->refresh(), $readModel, $approvalSelection, $operationId);
+        $operation = match ($kind) {
+            'edit' => $queue->edit(
+                $actor, $fixture['project']->refresh(), $readModel, $operationId,
                 $readModel->control_commit, $readModel->blob_sha, $sourceContent, $targetContent,
                 'Fachliche Korrektur', true,
-            )
-            : $queue->changeStatus(
-                $fixture['administrator'], $fixture['project']->refresh(), $readModel, (string) Str::uuid(),
+            ),
+            'approval' => $queue->approve(
+                $actor, $fixture['project']->refresh(), $readModel, $operationId,
+                $readModel->control_commit, $readModel->blob_sha, $sourceContent,
+                'Menschliche Freigabe', true, $approvalSelection, $approvalSnapshot, $operationId,
+            ),
+            default => $queue->changeStatus(
+                $actor, $fixture['project']->refresh(), $readModel, $operationId,
                 $readModel->control_commit, $readModel->blob_sha, $sourceContent,
                 'Fachliche Blockade', true, TicketStatusOperation::BLOCK, false,
-            );
+            ),
+        };
         DB::table('jobs')->delete();
         $attemptToken = $fixture['lease']->claim($operation, str_repeat('e', 32));
         self::assertIsInt($attemptToken);
@@ -96,8 +124,31 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
         $attemptToken = $fixture['lease']->claim($operation->refresh(), str_repeat('f', 32));
         self::assertIsInt($attemptToken);
 
+        if ($kind === 'approval') {
+            self::assertSame(1, TicketApproval::query()->whereKey($operation->id)->count());
+            self::assertSame('prepared', TicketApproval::query()->findOrFail($operation->id)->saga_phase);
+            $this->installApprovalProgressCrash(
+                $operation->id,
+                ControlOperationPhase::PREPARED,
+                ControlOperationPhase::COMMIT_PREPARED,
+            );
+            try {
+                $executor->advance($operation, $attemptToken);
+                self::fail('The prepared-phase crash injection did not interrupt operation progress.');
+            } catch (QueryException $exception) {
+                self::assertStringContainsString('synthetic ticket mutation progress crash', $exception->getMessage());
+            } finally {
+                $this->removeApprovalProgressCrash();
+            }
+            self::assertSame(ControlOperationPhase::PREPARED, $operation->refresh()->phase);
+            self::assertSame('commit_prepared', TicketApproval::query()->findOrFail($operation->id)->saga_phase);
+        }
         self::assertFalse($executor->advance($operation, $attemptToken));
         self::assertSame(ControlOperationPhase::COMMIT_PREPARED, $operation->refresh()->phase);
+        if ($kind === 'approval') {
+            self::assertSame(1, TicketApproval::query()->whereKey($operation->id)->count());
+            self::assertSame('commit_prepared', TicketApproval::query()->findOrFail($operation->id)->saga_phase);
+        }
 
         $mutation = TicketMutation::query()->findOrFail($operation->id);
         self::assertNotNull($mutation->prepared_commit_oid);
@@ -123,8 +174,29 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
         self::assertTrue($fixture['lease']->expire($operation->id, $operation->project_id, $attemptToken));
         $attemptToken = $fixture['lease']->claim($operation->refresh(), str_repeat('1', 32));
         self::assertIsInt($attemptToken);
+        if ($kind === 'approval') {
+            $this->installApprovalProgressCrash(
+                $operation->id,
+                ControlOperationPhase::COMMIT_PREPARED,
+                ControlOperationPhase::CONTROL_CONFIRMED,
+            );
+            try {
+                $executor->advance($operation, $attemptToken);
+                self::fail('The control-confirmation crash injection did not interrupt operation progress.');
+            } catch (QueryException $exception) {
+                self::assertStringContainsString('synthetic ticket mutation progress crash', $exception->getMessage());
+            } finally {
+                $this->removeApprovalProgressCrash();
+            }
+            self::assertSame(ControlOperationPhase::COMMIT_PREPARED, $operation->refresh()->phase);
+            self::assertSame('control_confirmed', TicketApproval::query()->findOrFail($operation->id)->saga_phase);
+        }
         self::assertFalse($executor->advance($operation, $attemptToken));
         self::assertSame(ControlOperationPhase::CONTROL_CONFIRMED, $operation->refresh()->phase);
+        if ($kind === 'approval') {
+            self::assertSame(1, TicketApproval::query()->whereKey($operation->id)->count());
+            self::assertSame('control_confirmed', TicketApproval::query()->findOrFail($operation->id)->saga_phase);
+        }
 
         self::assertTrue($fixture['lease']->expire($operation->id, $operation->project_id, $attemptToken));
         $attemptToken = $fixture['lease']->claim($operation->refresh(), str_repeat('2', 32));
@@ -133,6 +205,10 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
         self::assertSame(ControlOperationPhase::DB_FINALIZED, $operation->refresh()->phase);
         self::assertSame(ControlOperationState::COMPLETED, $operation->state);
         self::assertTrue($executor->advance($operation, $attemptToken));
+        if ($kind === 'approval') {
+            self::assertSame(1, TicketApproval::query()->whereKey($operation->id)->count());
+            self::assertSame('complete', TicketApproval::query()->findOrFail($operation->id)->saga_phase);
+        }
 
         self::assertSame($commitOid, trim($this->managedFixtureGit([
             '--git-dir='.$fixture['remote'],
@@ -152,8 +228,12 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
             preg_split('/\s+/', trim($this->managedFixtureGit(['rev-list', '--parents', '-n', '1', $commitOid], $repository))),
         );
         $message = $this->managedFixtureGit(['show', '-s', '--format=%B', $commitOid], $repository);
-        self::assertStringContainsString('AI6-Actor-ID: '.$fixture['administrator']->getKey(), $message);
-        self::assertStringContainsString('AI6-Reason: '.($kind === 'edit' ? 'Fachliche Korrektur' : 'Fachliche Blockade'), $message);
+        self::assertStringContainsString('AI6-Actor-ID: '.$actor->getKey(), $message);
+        self::assertStringContainsString('AI6-Reason: '.match ($kind) {
+            'edit' => 'Fachliche Korrektur',
+            'approval' => 'Menschliche Freigabe',
+            default => 'Fachliche Blockade',
+        }, $message);
         self::assertStringContainsString('AI6-Previous-Blob: '.$readModel->blob_sha, $message);
 
         try {
@@ -182,7 +262,19 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
         self::assertSame($commitOid, $fresh->control_commit);
         self::assertSame($mutation->expected_target_blob_sha, $fresh->blob_sha);
         self::assertStringContainsString($kind === 'edit' ? 'Neuer Inhalt.' : 'Alter Inhalt.', $fresh->redacted_content);
-        self::assertStringContainsString('status: '.($kind === 'edit' ? 'todo' : 'blocked'), $fresh->redacted_content);
+        self::assertStringContainsString('status: '.match ($kind) {
+            'approval' => 'ready',
+            'status' => 'blocked',
+            default => 'todo',
+        }, $fresh->redacted_content);
+        if ($kind === 'approval') {
+            $approval = TicketApproval::query()->findOrFail($operation->id);
+            self::assertSame('complete', $approval->saga_phase);
+            self::assertSame('queued', $approval->queue_state);
+            self::assertSame($readModel->blob_sha, $approval->reviewed_ticket_blob_sha);
+            self::assertSame($fresh->blob_sha, $approval->approved_ticket_blob_sha);
+            self::assertSame($commitOid, $approval->approved_control_sha);
+        }
 
         $attemptRef = ManagedProjectPath::attemptRef($operation->id, $attemptToken);
         $context = new RedactionContext((string) $project->getKey(), $operation->id, 'terminal-cleanup-test');
@@ -198,6 +290,45 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
     {
         yield 'ticket edit' => ['edit'];
         yield 'ticket status change' => ['status'];
+        yield 'ticket approval' => ['approval'];
+    }
+
+    private function installApprovalProgressCrash(
+        string $operationId,
+        ControlOperationPhase $from,
+        ControlOperationPhase $to,
+    ): void {
+        self::assertTrue(ManagedProjectPath::validOperationIdentifier($operationId));
+        DB::unprepared(sprintf(
+            "CREATE TEMP TRIGGER ticket_mutation_progress_crash BEFORE UPDATE ON control_operations WHEN OLD.id = '%s' AND OLD.phase = '%s' AND NEW.phase = '%s' BEGIN SELECT RAISE(ABORT, 'synthetic ticket mutation progress crash'); END",
+            $operationId,
+            $from->value,
+            $to->value,
+        ));
+    }
+
+    private function removeApprovalProgressCrash(): void
+    {
+        DB::unprepared('DROP TRIGGER IF EXISTS ticket_mutation_progress_crash');
+    }
+
+    private function approvalSelection(): ApprovalSelection
+    {
+        $profiles = $this->app->make(AgentProfileRegistry::class);
+
+        return new ApprovalSelection(
+            $profiles->resolve('fake', AgentRole::IMPLEMENTATION, 'fake-model', 'medium'),
+            $this->app->make(ReviewerSlotFactory::class)->fromArray([[
+                'id' => (string) Str::uuid(),
+                'profile' => 'fake',
+                'model' => 'fake-model',
+                'effort' => 'high',
+                'prompt_profile' => 'security',
+            ]]),
+            ApprovalLimits::fromConfiguredValues(config('ai6.project_config.server_defaults.limits'), $this->app->make(AgentInputLimits::class)),
+            null,
+            'manual',
+        );
     }
 
     #[DataProvider('foreignControlChanges')]
@@ -208,6 +339,8 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
         }
 
         $fixture = $this->managedFixture();
+        $approver = $this->createUser();
+        $this->addMembership($approver, $fixture['project'], ProjectRole::APPROVER);
         $sourceContent = $this->validTicketMarkdown('AI6-911', 'todo', '[]', 'Unveränderter Inhalt.');
         self::assertNotFalse(file_put_contents($fixture['source'].'/tickets/AI6-911.md', $sourceContent));
         $this->managedFixtureGit(['add', 'tickets/AI6-911.md'], $fixture['source']);
@@ -232,18 +365,27 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
         DB::table('jobs')->delete();
         $this->app->make(ControlOperationExecutor::class)->execute($refresh->id);
         $readModel = TicketReadModel::query()->where('relative_path', 'tickets/AI6-911.md')->firstOrFail();
-        $operation = $this->app->make(QueueTicketMutation::class)->changeStatus(
-            $fixture['administrator'],
+        $operationId = (string) Str::uuid();
+        $selection = $this->approvalSelection();
+        $approvalSnapshot = $this->app->make(ApprovalSnapshotFactory::class)->create(
             $fixture['project']->refresh(),
             $readModel,
-            (string) Str::uuid(),
+            $selection,
+            $operationId,
+        );
+        $operation = $this->app->make(QueueTicketMutation::class)->approve(
+            $approver,
+            $fixture['project']->refresh(),
+            $readModel,
+            $operationId,
             $readModel->control_commit,
             $readModel->blob_sha,
             $sourceContent,
             'Konfliktnachweis',
             true,
-            TicketStatusOperation::BLOCK,
-            false,
+            $selection,
+            $approvalSnapshot,
+            $operationId,
         );
         DB::table('jobs')->delete();
         $attemptToken = $fixture['lease']->claim($operation, str_repeat('4', 32));
@@ -256,7 +398,7 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
         if ($change === 'history_rewrite') {
             $this->managedFixtureGit(['checkout', '--orphan', 'rewritten'], $fixture['source']);
         }
-        $foreignContent = str_replace('status: todo', 'status: blocked', $sourceContent);
+        $foreignContent = str_replace('status: todo', 'status: ready', $sourceContent);
         self::assertNotFalse(file_put_contents($fixture['source'].'/tickets/AI6-911.md', $foreignContent));
         if ($change === 'additional_tree_change') {
             self::assertNotFalse(file_put_contents($fixture['source'].'/foreign.txt', "fremde Treeänderung\n"));
@@ -288,6 +430,10 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
             $fixture['paths']->repositoryDirectory((string) $fixture['project']->project_identifier),
         );
         self::assertSame($parentOid, trim($this->managedFixtureGit(['rev-parse', 'refs/heads/main'], $repository)));
+        $approval = TicketApproval::query()->findOrFail($operation->id);
+        self::assertSame('conflict', $approval->saga_phase);
+        self::assertSame('cancelled', $approval->queue_state);
+        self::assertNull($approval->approved_ticket_blob_sha);
     }
 
     /** @return iterable<string, array{string}> */

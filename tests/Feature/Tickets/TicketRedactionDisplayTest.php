@@ -20,7 +20,7 @@ final class TicketRedactionDisplayTest extends TicketUiTestCase
         $response->assertSee('Unmaskiert');
         $response->assertDontSee('Inhalt maskiert');
         $response->assertSee('data-ai6-entry="edit"', false);
-        $response->assertSee('data-ai6-entry="approval"', false);
+        $response->assertDontSee('data-ai6-entry="approval"', false);
 
         $stored = TicketReadModel::query()->findOrFail($readModel->getKey());
         self::assertSame($content, $stored->redacted_content, 'Presentation must never rewrite the stored contract content.');

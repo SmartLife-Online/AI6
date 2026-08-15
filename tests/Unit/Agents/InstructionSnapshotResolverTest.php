@@ -30,6 +30,8 @@ final class InstructionSnapshotResolverTest extends TestCase
 
         self::assertSame(['AGENTS.md', 'docs/nested.md'], array_column($first->entries, 'repositoryPath'));
         self::assertSame(['repository', 'nested'], array_column($first->entries, 'scope'));
+        self::assertSame(hash('sha256', 'a'), $first->entries[0]->contentSha256);
+        self::assertSame($first->entries[0]->contentSha256, $first->jsonSerialize()['entries'][0]['content_sha256']);
         self::assertSame($first->hash, $second->hash);
         self::assertSame($first->hash, $resolver->resolve('fake', $entries, $this->context())->hash);
 

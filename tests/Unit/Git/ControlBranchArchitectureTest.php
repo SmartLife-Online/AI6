@@ -37,6 +37,7 @@ final class ControlBranchArchitectureTest extends TestCase
 
         $generationMethods = [];
         $generationComparisons = [];
+        $generationQueueReaders = [];
         $staleMarkerWrites = [];
         foreach ($this->sourceFiles($root.'/app/AI6', static fn (SplFileInfo $file): bool => $file->getExtension() === 'php') as $file) {
             $source = file_get_contents($file);
@@ -57,15 +58,20 @@ final class ControlBranchArchitectureTest extends TestCase
                 }
             }
             if (str_contains($source, 'control_generation')) {
-                self::assertStringNotContainsString('implements ShouldQueue', $source, $file);
+                if (str_contains($source, 'implements ShouldQueue')) {
+                    $generationQueueReaders[] = $file;
+                    self::assertStringNotContainsString('control_generation + 1', $source, $file);
+                }
                 self::assertStringNotContainsString('Listener', basename($file), $file);
             }
         }
         $generationFile = str_replace('\\', '/', $root.'/app/AI6/Projects/ControlGeneration.php');
         $configurationApprovalFile = str_replace('\\', '/', $root.'/app/AI6/Projects/Actions/ApproveProjectConfiguration.php');
         $backfillFile = str_replace('\\', '/', $root.'/app/AI6/Tickets/Console/ReprojectUnparsedTicketsCommand.php');
+        $approvalPreviewFile = str_replace('\\', '/', $root.'/app/AI6/Runs/Jobs/BuildTicketApprovalPreview.php');
         self::assertSame([$generationFile], $generationMethods);
-        self::assertSame([$configurationApprovalFile, $generationFile, $backfillFile], $generationComparisons);
+        self::assertSame([$configurationApprovalFile, $generationFile, $approvalPreviewFile, $backfillFile], $generationComparisons);
+        self::assertSame([$approvalPreviewFile], $generationQueueReaders);
         self::assertSame([], $staleMarkerWrites);
 
         $freshness = file_get_contents($root.'/app/AI6/Projects/TicketReadModelFreshness.php');

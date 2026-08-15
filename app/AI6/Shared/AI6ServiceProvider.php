@@ -38,6 +38,13 @@ use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Policies\ProjectPolicy;
 use App\AI6\Prompts\PromptCatalog;
 use App\AI6\Prompts\PromptRenderer;
+use App\AI6\Reviews\ReviewerSlotFactory;
+use App\AI6\Runs\ApprovalSelectionFactory;
+use App\AI6\Runs\ApprovalSnapshotFactory;
+use App\AI6\Runs\ApprovalStatusPage;
+use App\AI6\Runs\InstructionCandidateCollector;
+use App\AI6\Runs\InstructionCandidateSource;
+use App\AI6\Runs\TicketApprovalPage;
 use App\AI6\Shared\Config\ConfigurationException;
 use App\AI6\Shared\Config\StrictEnumParser;
 use App\AI6\Shared\Config\StrictPositiveIntegerParser;
@@ -109,6 +116,11 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(ModelProfileAllowlist::class);
         $this->app->singleton(PromptCatalog::class, static fn (): PromptCatalog => PromptCatalog::defaults());
         $this->app->singleton(PromptRenderer::class);
+        $this->app->singleton(ReviewerSlotFactory::class);
+        $this->app->singleton(ApprovalSelectionFactory::class);
+        $this->app->singleton(ApprovalSnapshotFactory::class);
+        $this->app->singleton(InstructionCandidateCollector::class);
+        $this->app->singleton(InstructionCandidateSource::class, InstructionCandidateCollector::class);
         $this->app->singleton(DependencySatisfiedStatusAllowlist::class, static fn (): DependencySatisfiedStatusAllowlist => DependencySatisfiedStatusAllowlist::fromConfiguredValues());
         $this->app->singleton(EffectiveProjectConfiguration::class);
         $this->app->singleton(
@@ -323,6 +335,8 @@ final class AI6ServiceProvider extends ServiceProvider
 
         Livewire::component('ai6.tickets.ticket-list', TicketList::class);
         Livewire::component('ai6.tickets.ticket-detail', TicketDetail::class);
+        Livewire::component('ai6.runs.ticket-approval', TicketApprovalPage::class);
+        Livewire::component('ai6.runs.approval-status', ApprovalStatusPage::class);
     }
 
     /**

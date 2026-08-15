@@ -89,7 +89,7 @@ final class TicketStatusTransitionPolicyTest extends TestCase
     public function test_reserved_and_free_target_edges_are_not_representable(): void
     {
         self::assertSame(
-            ['block', 'cancel', 'return_to_todo', 'complete_review'],
+            ['approve', 'block', 'cancel', 'return_to_todo', 'complete_review'],
             array_map(static fn (TicketStatusOperation $operation): string => $operation->value, TicketStatusOperation::cases()),
         );
         $this->expectException(TicketMutationConflict::class);
