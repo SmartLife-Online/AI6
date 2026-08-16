@@ -10,9 +10,14 @@ use App\AI6\Shared\Process\ProcessResult;
 use App\AI6\Shared\Redaction\RedactionContext;
 use InvalidArgumentException;
 use RuntimeException;
+use Throwable;
 
 final class HardenedGitRunner
 {
+    private const CHECKPOINT_IDENTITY_NAME = 'AI6';
+
+    private const CHECKPOINT_IDENTITY_EMAIL = 'ai6@localhost.invalid';
+
     public function __construct(
         private readonly ControlProcessRunner $processes,
         private readonly GitRemotePolicy $remotePolicy,
@@ -169,6 +174,263 @@ final class HardenedGitRunner
             $variables,
             $redactionContext,
         ));
+    }
+
+    /**
+     * Create the single run worktree and its run branch on the immutable initial run base.
+     *
+     * Effecting worktree work runs under the project effect lock, exactly like every other
+     * operation that writes refs or objects into the managed clone.
+     */
+    public function createRunWorktree(
+        string $repository,
+        string $worktree,
+        string $branch,
+        string $initialRunBaseSha,
+        string $effectLockName,
+        RedactionContext $redactionContext,
+    ): ProcessResult {
+        $runBranch = new RunBranchName($branch);
+        $this->assertOid($initialRunBaseSha);
+
+        $result = $this->runEffectingRepositoryCommand($repository, [
+            'worktree', 'add', '-b', $runBranch->shortName(), $worktree, $initialRunBaseSha,
+        ], $effectLockName, $redactionContext);
+        if (! $result->succeeded()) {
+            return $result;
+        }
+
+        $resolved = $this->resolveRunBranch($repository, $runBranch, $redactionContext);
+        if ($resolved->succeeded() && hash_equals($initialRunBaseSha, trim($resolved->output))) {
+            return $resolved;
+        }
+
+        $this->discardRunWorkspace($repository, $worktree, $runBranch, $effectLockName, $redactionContext);
+
+        throw new RuntimeException('The run worktree branch does not resolve to its initial base.');
+    }
+
+    /**
+     * Remove the worktree registration, prune stale registrations and delete the run branch.
+     *
+     * Every step tolerates an already absent predecessor so a repeated reconciliation ends in
+     * the same state. The run branch is deleted with its resolved object as expected value, so
+     * a concurrently advanced branch is never dropped silently.
+     */
+    public function discardRunWorkspace(
+        string $repository,
+        string $worktree,
+        RunBranchName $branch,
+        string $effectLockName,
+        RedactionContext $redactionContext,
+    ): void {
+        $this->removeRunWorktree($repository, $worktree, $effectLockName, $redactionContext);
+        $this->pruneWorktrees($repository, $effectLockName, $redactionContext);
+
+        $resolved = $this->resolveRunBranch($repository, $branch, $redactionContext);
+        $oid = trim($resolved->output);
+        if ($resolved->succeeded() && $this->validOid($oid)) {
+            $this->deleteRunBranch($repository, $branch, $oid, $effectLockName, $redactionContext);
+        }
+    }
+
+    public function removeRunWorktree(
+        string $repository,
+        string $worktree,
+        string $effectLockName,
+        RedactionContext $redactionContext,
+    ): ProcessResult {
+        return $this->runEffectingRepositoryCommand($repository, [
+            'worktree', 'remove', $worktree,
+        ], $effectLockName, $redactionContext);
+    }
+
+    public function pruneWorktrees(
+        string $repository,
+        string $effectLockName,
+        RedactionContext $redactionContext,
+    ): ProcessResult {
+        return $this->runEffectingRepositoryCommand(
+            $repository,
+            ['worktree', 'prune', '--expire=now'],
+            $effectLockName,
+            $redactionContext,
+        );
+    }
+
+    public function deleteRunBranch(
+        string $repository,
+        RunBranchName $branch,
+        string $expectedOid,
+        string $effectLockName,
+        RedactionContext $redactionContext,
+    ): ProcessResult {
+        $this->assertOid($expectedOid);
+
+        return $this->runEffectingRepositoryCommand($repository, [
+            '-c', 'core.logAllRefUpdates=false',
+            'update-ref', '--no-deref', '-d', $branch->value, $expectedOid,
+        ], $effectLockName, $redactionContext);
+    }
+
+    public function resolveRunBranch(
+        string $repository,
+        RunBranchName $branch,
+        RedactionContext $redactionContext,
+    ): ProcessResult {
+        return $this->runRepositoryCommand($repository, [
+            'rev-parse', '--quiet', '--verify', $branch->value.'^{commit}',
+        ], $redactionContext);
+    }
+
+    public function createRunCheckpoint(
+        string $worktree,
+        string $branch,
+        string $message,
+        int $timestamp,
+        string $effectLockName,
+        RedactionContext $redactionContext,
+    ): ProcessResult {
+        $runBranch = new RunBranchName($branch);
+        if (preg_match('/\A[\x20-\x7e]{1,200}\z/D', $message) !== 1) {
+            throw new InvalidArgumentException('The checkpoint message must be fixed ASCII text.');
+        }
+
+        $date = '@'.$timestamp.' +0000';
+        $identity = [
+            'GIT_AUTHOR_NAME' => self::CHECKPOINT_IDENTITY_NAME,
+            'GIT_AUTHOR_EMAIL' => self::CHECKPOINT_IDENTITY_EMAIL,
+            'GIT_AUTHOR_DATE' => $date,
+            'GIT_COMMITTER_NAME' => self::CHECKPOINT_IDENTITY_NAME,
+            'GIT_COMMITTER_EMAIL' => self::CHECKPOINT_IDENTITY_EMAIL,
+            'GIT_COMMITTER_DATE' => $date,
+        ];
+
+        foreach ([
+            ['add', '--all', '--no-renormalize'],
+            ['commit', '--allow-empty', '--no-verify', '--no-gpg-sign', '--no-status', '-m', $message],
+        ] as $arguments) {
+            $result = $this->runEffectingRepositoryCommand($worktree, $arguments, $effectLockName, $redactionContext, $identity);
+            if (! $result->succeeded()) {
+                return $result;
+            }
+        }
+
+        return $this->resolveRunBranch($worktree, $runBranch, $redactionContext);
+    }
+
+    public function resolveTree(string $repository, string $commit, RedactionContext $redactionContext): ProcessResult
+    {
+        $this->assertOid($commit);
+
+        return $this->runRepositoryCommand($repository, ['rev-parse', '--quiet', '--verify', $commit.'^{tree}'], $redactionContext);
+    }
+
+    public function canonicalRawDiff(
+        string $repository,
+        string $fromCommit,
+        string $toCommit,
+        RedactionContext $redactionContext,
+    ): ProcessResult {
+        $this->assertOid($fromCommit);
+        $this->assertOid($toCommit);
+
+        return $this->runRepositoryCommand($repository, [
+            'diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--raw', '-z', '--no-abbrev', $fromCommit, $toCommit,
+        ], $redactionContext);
+    }
+
+    /**
+     * Read a bounded, identity-free history projection of a bound commit.
+     *
+     * Author and committer identities are never requested, so the sanitized history context can
+     * never carry them. The remaining subject bytes stay untrusted repository text.
+     */
+    public function readRunHistory(
+        string $repository,
+        string $commit,
+        int $limit,
+        RedactionContext $redactionContext,
+    ): ProcessResult {
+        $this->assertOid($commit);
+        if ($limit < 1 || $limit > 1000) {
+            throw new InvalidArgumentException('The run history limit is invalid.');
+        }
+
+        return $this->runRepositoryCommand($repository, [
+            'log', '--no-decorate', '--no-color', '--no-abbrev',
+            '-n', (string) $limit, '--format=%H%x00%at%x00%s%x00', $commit,
+        ], $redactionContext);
+    }
+
+    /**
+     * Inventory the direct children of a bound tree object of this run.
+     *
+     * @return list<GitTreeEntry>
+     */
+    public function listRunTreeEntries(
+        string $repository,
+        string $treeOid,
+        RedactionContext $redactionContext,
+    ): array {
+        $this->assertOid($treeOid);
+        $result = $this->runRepositoryCommand($repository, [
+            'ls-tree', '-z', '--full-tree', $treeOid,
+        ], $redactionContext);
+        if (! $result->succeeded()) {
+            throw new RuntimeException('The bound run tree could not be inventoried safely.');
+        }
+        if ($result->output === '') {
+            return [];
+        }
+        if (! str_ends_with($result->output, "\0")) {
+            throw new RuntimeException('Git returned a malformed run tree inventory.');
+        }
+
+        $entries = [];
+        foreach (explode("\0", substr($result->output, 0, -1)) as $record) {
+            $tab = strpos($record, "\t");
+            if ($tab === false
+                || preg_match('/\A([0-7]{6}) (blob|tree|commit) ([0-9a-f]{64})\z/D', substr($record, 0, $tab), $matches) !== 1) {
+                throw new RuntimeException('Git returned a malformed run tree entry.');
+            }
+            $name = substr($record, $tab + 1);
+            if ($name === '' || str_contains($name, '/') || str_contains($name, "\0")) {
+                throw new RuntimeException('Git returned an invalid direct run tree child.');
+            }
+            $entries[] = new GitTreeEntry($name, $matches[1], $matches[2], $matches[3]);
+        }
+
+        return $entries;
+    }
+
+    /**
+     * Read a bound regular blob of this run. The bytes stay untrusted and are redacted by the caller.
+     */
+    public function readRunBlob(
+        string $repository,
+        string $blobOid,
+        int $maximumBytes,
+        RedactionContext $redactionContext,
+    ): string {
+        $this->assertOid($blobOid);
+        if ($maximumBytes < 1) {
+            throw new InvalidArgumentException('The run blob size limit is invalid.');
+        }
+        $size = $this->runRepositoryCommand($repository, ['cat-file', '-s', $blobOid], $redactionContext);
+        if (! $size->succeeded() || preg_match('/\A[0-9]{1,19}\z/D', trim($size->output)) !== 1) {
+            throw new RuntimeException('The bound run blob size could not be resolved.');
+        }
+        if ((int) trim($size->output) > $maximumBytes) {
+            throw new RuntimeException('The bound run blob exceeds the configured size limit.');
+        }
+
+        $blob = $this->runRepositoryCommand($repository, ['cat-file', 'blob', $blobOid], $redactionContext);
+        if (! $blob->succeeded()) {
+            throw new RuntimeException('The bound run blob could not be read safely.');
+        }
+
+        return $blob->output;
     }
 
     public function resolveRef(string $repository, string $ref, RedactionContext $redactionContext): ProcessResult
@@ -336,6 +598,92 @@ final class HardenedGitRunner
             ...$this->environment->commandPrefix(), ...$preflight,
             'rev-parse', '--quiet', '--verify', $ref.'^{commit}',
         ], $repository, $variables, $redactionContext));
+    }
+
+    /**
+     * Run a read-only repository command. Read-only work needs no effect lock.
+     *
+     * @param  list<string>  $arguments
+     */
+    private function runRepositoryCommand(string $repository, array $arguments, RedactionContext $redactionContext): ProcessResult
+    {
+        $variables = $this->environment->variables();
+        $prepared = $this->prepareRepositoryCommand($repository, $arguments, $variables, $redactionContext);
+        if ($prepared instanceof ProcessResult) {
+            return $prepared;
+        }
+
+        return $this->processes->run($this->request($prepared, $repository, $variables, $redactionContext));
+    }
+
+    /**
+     * Run a repository command that writes refs, objects or worktree registrations.
+     *
+     * The command is serialized by the project-bound effect lock, so it cannot interleave with a
+     * clone, fetch, push or another run workspace operation of the same project.
+     *
+     * @param  list<string>  $arguments
+     * @param  array<string, string>  $extraVariables
+     */
+    private function runEffectingRepositoryCommand(
+        string $repository,
+        array $arguments,
+        string $effectLockName,
+        RedactionContext $redactionContext,
+        array $extraVariables = [],
+    ): ProcessResult {
+        $variables = [...$this->environment->variables(), ...$extraVariables];
+        $prepared = $this->prepareRepositoryCommand($repository, $arguments, $variables, $redactionContext);
+        if ($prepared instanceof ProcessResult) {
+            return $prepared;
+        }
+
+        $start = $this->processes->startBlocked(
+            $this->request($prepared, $repository, $variables, $redactionContext),
+            $effectLockName,
+        );
+        if (! $start->ready() || $start->process === null) {
+            return new ProcessResult(ProcessOutcome::START_FAILED, null, '', $start->message, 0.0);
+        }
+
+        $blocked = $start->process;
+        try {
+            $blocked->release();
+
+            return $blocked->wait();
+        } catch (Throwable) {
+            $blocked->cancel();
+
+            return new ProcessResult(
+                ProcessOutcome::START_FAILED,
+                null,
+                '',
+                'The effecting repository command could not be completed.',
+                0.0,
+            );
+        }
+    }
+
+    /**
+     * @param  list<string>  $arguments
+     * @param  array<string, string>  $variables
+     * @return non-empty-list<string>|ProcessResult
+     */
+    private function prepareRepositoryCommand(
+        string $repository,
+        array $arguments,
+        array $variables,
+        RedactionContext $redactionContext,
+    ): array|ProcessResult {
+        $preflight = $this->repositoryConfiguration($repository, $variables, $redactionContext);
+        if ($preflight instanceof ProcessResult) {
+            return $preflight;
+        }
+
+        return [
+            ...$this->environment->commandPrefix(), ...$preflight,
+            '-c', 'gc.auto=0', '-c', 'maintenance.auto=false', ...$arguments,
+        ];
     }
 
     public function updateRef(

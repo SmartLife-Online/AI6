@@ -46,6 +46,72 @@ final readonly class ManagedProjectPath
         return $this->repositoryPath($projectIdentifier, create: false);
     }
 
+    public function runWorktreeDirectory(string $projectIdentifier, string $runId): string
+    {
+        if (! self::validRunIdentifier($runId)) {
+            throw new RuntimeException('The run identifier is invalid.');
+        }
+
+        return $this->runWorktreeRoot($projectIdentifier).DIRECTORY_SEPARATOR.$runId;
+    }
+
+    public static function validRunIdentifier(string $runId): bool
+    {
+        return preg_match(
+            '/\A[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/D',
+            $runId,
+        ) === 1;
+    }
+
+    public function runWorktreeRoot(string $projectIdentifier): string
+    {
+        $repository = $this->repositoryPath($projectIdentifier, create: true);
+        $project = dirname($repository);
+        $root = $this->regularDirectory($this->configuration->managedRoot, create: false);
+        $worktrees = $this->regularDirectory($project.'/worktrees', create: true);
+        $this->assertContained($worktrees, $root);
+
+        return $worktrees;
+    }
+
+    /**
+     * Inventory every entry below the project worktree root, including symlinks and foreign names.
+     *
+     * @return list<string> entry names, never resolved through a symbolic link
+     */
+    public function runWorktreeEntries(string $projectIdentifier): array
+    {
+        $names = [];
+        foreach (new FilesystemIterator($this->runWorktreeRoot($projectIdentifier), FilesystemIterator::SKIP_DOTS) as $entry) {
+            $names[] = $entry->getFilename();
+        }
+        sort($names);
+
+        return $names;
+    }
+
+    /**
+     * Remove one entry below the project worktree root without ever following a symbolic link.
+     *
+     * The call is idempotent: an already absent entry is not an error.
+     */
+    public function removeRunWorktreeDirectory(string $projectIdentifier, string $entryName): void
+    {
+        if ($entryName === '' || $entryName === '.' || $entryName === '..'
+            || str_contains($entryName, '/') || str_contains($entryName, '\\') || str_contains($entryName, "\0")) {
+            throw new RuntimeException('The run worktree entry name is invalid.');
+        }
+
+        $worktrees = $this->runWorktreeRoot($projectIdentifier);
+        $target = $worktrees.DIRECTORY_SEPARATOR.$entryName;
+        clearstatcache(true, $target);
+        if (! file_exists($target) && ! is_link($target)) {
+            return;
+        }
+
+        $this->removeTree($target, $worktrees);
+    }
+
     private function repositoryPath(string $projectIdentifier, bool $create): string
     {
         if (preg_match('/\A[0-9a-f]{32}\z/D', $projectIdentifier) !== 1) {

@@ -7,6 +7,7 @@ use App\AI6\Git\ControlOperationState;
 use App\AI6\Git\ControlOperationType;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\TicketMutation;
+use App\AI6\Git\RunBranchName;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunEvent;
@@ -117,6 +118,56 @@ final readonly class RunOrchestrator
 
             return $run;
         });
+    }
+
+    public function bindWorkspace(Run $run, int $expectedVersion, string $branch, string $worktreePath): Run
+    {
+        try {
+            new RunBranchName($branch);
+        } catch (\InvalidArgumentException) {
+            throw new RunTransitionConflict('invalid_workspace_binding', 'The run workspace binding is invalid.');
+        }
+        if ($worktreePath === '' || str_contains($worktreePath, "\0")) {
+            throw new RunTransitionConflict('invalid_workspace_binding', 'The run workspace binding is invalid.');
+        }
+
+        $updated = Run::query()->whereKey($run->getKey())->where('version', $expectedVersion)
+            ->whereNull('run_branch')->whereNull('worktree_path')->update([
+                'run_branch' => $branch,
+                'worktree_path' => $worktreePath,
+                'version' => $expectedVersion + 1,
+            ]);
+        if ($updated !== 1) {
+            throw new RunTransitionConflict('stale_run_version', 'The run changed before its workspace could be bound.');
+        }
+
+        return Run::query()->findOrFail($run->getKey());
+    }
+
+    public function bindCheckpoint(
+        Run $run,
+        int $expectedVersion,
+        string $commitSha,
+        string $treeSha,
+        string $diffHash,
+    ): Run {
+        foreach ([$commitSha, $treeSha, $diffHash] as $value) {
+            if (preg_match('/\A[0-9a-f]{64}\z/D', $value) !== 1) {
+                throw new RunTransitionConflict('invalid_checkpoint_binding', 'The checkpoint binding is invalid.');
+            }
+        }
+        $updated = Run::query()->whereKey($run->getKey())->where('version', $expectedVersion)
+            ->whereNull('checkpoint_commit_sha')->whereNull('checkpoint_tree_sha')->whereNull('checkpoint_diff_hash')->update([
+                'checkpoint_commit_sha' => $commitSha,
+                'checkpoint_tree_sha' => $treeSha,
+                'checkpoint_diff_hash' => $diffHash,
+                'version' => $expectedVersion + 1,
+            ]);
+        if ($updated !== 1) {
+            throw new RunTransitionConflict('stale_run_version', 'The run changed before its checkpoint could be bound.');
+        }
+
+        return Run::query()->findOrFail($run->getKey());
     }
 
     public function transition(

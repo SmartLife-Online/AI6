@@ -22,6 +22,11 @@ use Illuminate\Support\Carbon;
  * @property string $claim_parent_control_sha
  * @property string $initial_run_base_sha
  * @property string $run_base_sha
+ * @property string|null $run_branch
+ * @property string|null $worktree_path
+ * @property string|null $checkpoint_commit_sha
+ * @property string|null $checkpoint_tree_sha
+ * @property string|null $checkpoint_diff_hash
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
