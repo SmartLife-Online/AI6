@@ -129,7 +129,10 @@ final class ControlOperationPersistenceTest extends ControlOperationTestCase
                 $writers[] = str_replace('\\', '/', substr($file->getPathname(), strlen(base_path()) + 1));
             }
         }
-        self::assertSame(['app/AI6/Git/ProjectOperationLease.php'], $writers);
+        self::assertSame([
+            'app/AI6/Git/ProjectOperationLease.php',
+            'app/AI6/Runs/RunOrchestrator.php',
+        ], $writers);
 
         $claim = $this->methodSource(ProjectOperationLease::class, 'claim');
         self::assertSame(

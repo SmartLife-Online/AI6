@@ -44,7 +44,9 @@ use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ApprovalStatusPage;
 use App\AI6\Runs\InstructionCandidateCollector;
 use App\AI6\Runs\InstructionCandidateSource;
+use App\AI6\Runs\RunTransitionMap;
 use App\AI6\Runs\TicketApprovalPage;
+use App\AI6\Runs\WaitReasonRegistry;
 use App\AI6\Shared\Config\ConfigurationException;
 use App\AI6\Shared\Config\StrictEnumParser;
 use App\AI6\Shared\Config\StrictPositiveIntegerParser;
@@ -119,6 +121,8 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(ReviewerSlotFactory::class);
         $this->app->singleton(ApprovalSelectionFactory::class);
         $this->app->singleton(ApprovalSnapshotFactory::class);
+        $this->app->singleton(RunTransitionMap::class);
+        $this->app->singleton(WaitReasonRegistry::class);
         $this->app->singleton(InstructionCandidateCollector::class);
         $this->app->singleton(InstructionCandidateSource::class, InstructionCandidateCollector::class);
         $this->app->singleton(DependencySatisfiedStatusAllowlist::class, static fn (): DependencySatisfiedStatusAllowlist => DependencySatisfiedStatusAllowlist::fromConfiguredValues());

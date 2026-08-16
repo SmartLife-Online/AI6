@@ -555,6 +555,33 @@ final class HardenedGitRunner
         return ['tree_oid' => $treeMatch[1], 'parent_oid' => $parentMatch[1]];
     }
 
+    public function isAncestor(
+        string $repository,
+        string $ancestorOid,
+        string $descendantOid,
+        RedactionContext $redactionContext,
+    ): bool {
+        $this->assertOid($ancestorOid);
+        $this->assertOid($descendantOid);
+        $variables = $this->environment->variables();
+        $preflight = $this->repositoryConfiguration($repository, $variables, $redactionContext);
+        if ($preflight instanceof ProcessResult) {
+            throw new RuntimeException('The managed repository ancestry could not be inspected safely.');
+        }
+        $result = $this->processes->run($this->request([
+            ...$this->environment->commandPrefix(), ...$preflight,
+            'merge-base', '--is-ancestor', $ancestorOid, $descendantOid,
+        ], $repository, $variables, $redactionContext));
+        if ($result->exitCode === 0) {
+            return true;
+        }
+        if ($result->exitCode === 1 && $result->output === '' && $result->errorOutput === '') {
+            return false;
+        }
+
+        throw new RuntimeException('The managed repository ancestry could not be inspected safely.');
+    }
+
     public function pushCommitCas(
         string $repository,
         string $remote,

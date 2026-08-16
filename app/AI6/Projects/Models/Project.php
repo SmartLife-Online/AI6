@@ -4,8 +4,10 @@ namespace App\AI6\Projects\Models;
 
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Projects\ProjectProvisioningStatus;
+use App\AI6\Runs\Models\Run;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
@@ -30,6 +32,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $pending_control_ref
  * @property string|null $pending_control_oid
  * @property string|null $pending_control_operation_id
+ * @property string|null $active_run_id
  * @property-read Collection<int, TicketReadModel> $ticketReadModels
  */
 final class Project extends Model
@@ -75,6 +78,12 @@ final class Project extends Model
     public function ticketReadModels(): HasMany
     {
         return $this->hasMany(TicketReadModel::class);
+    }
+
+    /** @return BelongsTo<Run, $this> */
+    public function activeRun(): BelongsTo
+    {
+        return $this->belongsTo(Run::class, 'active_run_id');
     }
 
     public function publicDeployKeyForDisplay(): ?string

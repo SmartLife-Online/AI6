@@ -19,12 +19,13 @@ final class ControlBranchArchitectureTest extends TestCase
         $claim = $this->methodSource($root.'/app/AI6/Git/ProjectOperationLease.php', 'claimInitialControlOperation');
         self::assertSame(1, substr_count($claim, '->update(['));
         self::assertStringContainsString("->whereNull('operation_lock_operation_id')", $claim);
-        self::assertStringNotContainsString('active_run', $claim);
+        self::assertStringContainsString("->whereNull('active_run_id')", $claim);
 
         $publish = $this->methodSource($root.'/app/AI6/Git/ControlBranchChanger.php', 'publish');
         self::assertSame(1, substr_count($publish, 'DB::transaction('));
         self::assertStringContainsString("->where('operation_lock_operation_id', \$operation->id)", $publish);
         self::assertStringContainsString("->where('operation_lock_attempt_token', \$attemptToken)", $publish);
+        self::assertStringContainsString("->whereNull('active_run_id')", $publish);
         self::assertStringContainsString("'control_generation' => DB::raw('control_generation + 1')", $publish);
         self::assertStringContainsString('ControlBranchAuditEntry::query()->create(', $publish);
 
@@ -69,8 +70,9 @@ final class ControlBranchArchitectureTest extends TestCase
         $configurationApprovalFile = str_replace('\\', '/', $root.'/app/AI6/Projects/Actions/ApproveProjectConfiguration.php');
         $backfillFile = str_replace('\\', '/', $root.'/app/AI6/Tickets/Console/ReprojectUnparsedTicketsCommand.php');
         $approvalPreviewFile = str_replace('\\', '/', $root.'/app/AI6/Runs/Jobs/BuildTicketApprovalPreview.php');
+        $runStartFile = str_replace('\\', '/', $root.'/app/AI6/Git/Actions/QueueRunStart.php');
         self::assertSame([$generationFile], $generationMethods);
-        self::assertSame([$configurationApprovalFile, $generationFile, $approvalPreviewFile, $backfillFile], $generationComparisons);
+        self::assertSame([$runStartFile, $configurationApprovalFile, $generationFile, $approvalPreviewFile, $backfillFile], $generationComparisons);
         self::assertSame([$approvalPreviewFile], $generationQueueReaders);
         self::assertSame([], $staleMarkerWrites);
 

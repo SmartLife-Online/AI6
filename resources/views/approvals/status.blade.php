@@ -9,6 +9,12 @@
         <dt>Aktuelle Startberechtigung</dt><dd>{{ $eligibility['eligible'] ? 'Startbar' : 'Nicht startbar' }}</dd>
     </dl>
     <button type="button" wire:click="requestEvaluation" wire:loading.attr="disabled">Startberechtigung asynchron prüfen</button>
+    @if ($eligibility['eligible'])
+        <form method="POST" action="{{ route('projects.approvals.start', [$project, $approval]) }}">
+            @csrf
+            <button type="submit">Runstart beauftragen</button>
+        </form>
+    @endif
     @if ($evaluationState === 'queued')
         <p wire:poll.2s>Die Prüfung läuft im Worker.</p>
     @elseif ($evaluationState === 'ready')

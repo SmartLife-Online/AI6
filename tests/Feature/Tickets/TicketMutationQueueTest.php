@@ -274,7 +274,7 @@ final class TicketMutationQueueTest extends TicketUiTestCase
         self::assertIsString($queueSource);
         self::assertIsString($leaseSource);
         self::assertSame(1, substr_count($queueSource, 'claimInitialControlOperation('));
-        self::assertStringContainsString('AI6-013 extends this exact compare-and-swap seam with the active-run guard.', $leaseSource);
+        self::assertStringContainsString("->whereNull('active_run_id')", $leaseSource);
     }
 
     public function test_redaction_marker_in_clear_editor_target_is_rejected_before_queueing(): void

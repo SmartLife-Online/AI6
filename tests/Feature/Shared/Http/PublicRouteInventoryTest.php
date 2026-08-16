@@ -83,6 +83,7 @@ final class PublicRouteInventoryTest extends TestCase
             'POST /login [web, guest]',
             'POST /logout [web, auth]',
             'POST /projects [web, auth, can:create,App\AI6\Projects\Models\Project]',
+            'POST /projects/{project}/approvals/{approvalId}/start [web, auth, can:startRun,project]',
             'POST /projects/{project}/configuration/drafts/{draft}/approve [web, auth, can:approveConfiguration,project]',
             'POST /projects/{project}/configuration/refresh [web, auth, can:refreshConfiguration,project]',
             'POST /projects/{project}/control-branch [web, auth, can:changeControlBranch,project]',

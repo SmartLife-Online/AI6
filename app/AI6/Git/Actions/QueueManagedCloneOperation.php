@@ -110,7 +110,11 @@ final readonly class QueueManagedCloneOperation
                 return $existing;
             }
 
-            $attemptToken = $this->lease->claimInitialControlOperation($project, $operationId);
+            $attemptToken = $this->lease->claimInitialControlOperation(
+                $project,
+                $operationId,
+                allowsPendingControlBinding: $type === ControlOperationType::MANAGED_FETCH,
+            );
             if ($attemptToken === null) {
                 throw new ControlOperationConflict('Another mutating project operation is active.');
             }

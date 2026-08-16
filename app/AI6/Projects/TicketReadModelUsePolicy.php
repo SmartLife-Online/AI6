@@ -36,6 +36,20 @@ final readonly class TicketReadModelUsePolicy
             && $readModel->source_blockers === [];
     }
 
+    public function allowsRunStart(
+        TicketReadModel $readModel,
+        bool $isFresh,
+        TicketValidationProfile $requiredProfile,
+    ): bool {
+        return $isFresh
+            && $readModel->document_state === TicketDocumentState::VALID
+            && is_string($readModel->ticket_contract_sha256)
+            && preg_match('/\A[0-9a-f]{64}\z/D', $readModel->ticket_contract_sha256) === 1
+            && $this->hasRequiredProfile($readModel, $requiredProfile)
+            && $readModel->redaction_state === TicketReadModelRedactionState::CLEAR
+            && $readModel->source_blockers === [];
+    }
+
     private function hasRequiredProfile(TicketReadModel $readModel, TicketValidationProfile $requiredProfile): bool
     {
         return is_string($readModel->validation_profile)

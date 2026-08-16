@@ -10,8 +10,10 @@ use App\AI6\Runs\ApprovalFreshness;
 use App\AI6\Runs\ApprovalSelectionFactory;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ApprovalStartEligibility;
+use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\Models\TicketApprovalEvaluation;
+use App\AI6\Runs\RunState;
 use App\AI6\Tickets\TicketParseException;
 use App\AI6\Tickets\TicketV1Parser;
 use Illuminate\Bus\Queueable;
@@ -92,7 +94,10 @@ final class EvaluateTicketApproval implements ShouldQueue
                 $dependencyState['statuses'],
                 $binding->configuration->values['dependency_satisfied_statuses'],
                 $capabilitiesAvailable,
-                false,
+                Run::query()
+                    ->where('project_id', $project->getKey())
+                    ->whereNotIn('state', [RunState::COMPLETED, RunState::CANCELLED])
+                    ->exists(),
                 $approval->queue_state,
             );
             TicketApprovalEvaluation::query()

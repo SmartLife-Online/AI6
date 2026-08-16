@@ -40,6 +40,7 @@ final readonly class ControlOperationExecutor
                     ControlOperationType::TICKET_EDIT,
                     ControlOperationType::TICKET_STATUS_CHANGE,
                     ControlOperationType::TICKET_APPROVAL,
+                    ControlOperationType::RUN_START,
                 ], true)) {
                     $this->ticketMutations->cleanupFailedAttempt(
                         $operation,
@@ -131,6 +132,7 @@ final readonly class ControlOperationExecutor
                     ControlOperationType::TICKET_EDIT,
                     ControlOperationType::TICKET_STATUS_CHANGE,
                     ControlOperationType::TICKET_APPROVAL => $this->ticketMutations->advance($operation, $attemptToken),
+                    ControlOperationType::RUN_START => $this->ticketMutations->advance($operation, $attemptToken),
                 };
                 if ($completed) {
                     return;
@@ -179,6 +181,7 @@ final readonly class ControlOperationExecutor
                 ControlOperationType::TICKET_EDIT,
                 ControlOperationType::TICKET_STATUS_CHANGE,
                 ControlOperationType::TICKET_APPROVAL => $this->ticketMutations->recoveryFinding($operation, $attemptToken, $deviation),
+                ControlOperationType::RUN_START => $this->ticketMutations->recoveryFinding($operation, $attemptToken, $deviation),
             };
         } catch (Throwable $inspectionFailure) {
             $this->recordRecoveryInspectionFailure($operation, $attemptToken, $inspectionFailure);
@@ -331,6 +334,7 @@ final readonly class ControlOperationExecutor
             ControlOperationType::TICKET_EDIT,
             ControlOperationType::TICKET_STATUS_CHANGE,
             ControlOperationType::TICKET_APPROVAL,
+            ControlOperationType::RUN_START,
         ], true)) {
             try {
                 $this->ticketMutations->cleanupFailedAttempt($operation, $attemptToken);
@@ -398,6 +402,7 @@ final readonly class ControlOperationExecutor
                     ControlOperationType::TICKET_EDIT,
                     ControlOperationType::TICKET_STATUS_CHANGE,
                     ControlOperationType::TICKET_APPROVAL => $this->ticketMutations->activeIntentUnderLock($operation, $attemptToken),
+                    ControlOperationType::RUN_START => $this->ticketMutations->activeIntentUnderLock($operation, $attemptToken),
                 };
             } catch (Throwable $inspectionFailure) {
                 $this->requireRecovery($operation, $attemptToken, $inspectionFailure);
@@ -427,6 +432,7 @@ final readonly class ControlOperationExecutor
                     ControlOperationType::TICKET_EDIT,
                     ControlOperationType::TICKET_STATUS_CHANGE,
                     ControlOperationType::TICKET_APPROVAL,
+                    ControlOperationType::RUN_START,
                 ], true)) {
                     $this->ticketMutations->cleanupFailedAttempt($operation, $attemptToken);
                 } elseif ($operation->operation_type === ControlOperationType::CONFIG_REFRESH) {

@@ -13,6 +13,7 @@ use App\AI6\Projects\Http\ProjectConfigurationController;
 use App\AI6\Projects\Http\ProjectController;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Runs\ApprovalStatusPage;
+use App\AI6\Runs\RunStartController;
 use App\AI6\Runs\TicketApprovalController;
 use App\AI6\Runs\TicketApprovalPage;
 use App\AI6\Tickets\Livewire\TicketDetail;
@@ -109,6 +110,9 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/projects/{project}/approvals/{approvalId}', ApprovalStatusPage::class)
         ->middleware('can:view,project')
         ->name('projects.approvals.show');
+    Route::post('/projects/{project}/approvals/{approvalId}/start', [RunStartController::class, 'store'])
+        ->middleware('can:startRun,project')
+        ->name('projects.approvals.start');
     Route::post('/projects/{project}/deploy-key', [ControlOperationController::class, 'provision'])
         ->middleware('can:provisionDeployKey,project')
         ->name('projects.deploy-key.provision');

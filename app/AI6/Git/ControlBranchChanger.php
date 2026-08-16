@@ -150,6 +150,7 @@ final readonly class ControlBranchChanger
                 ->whereKey($operation->project_id)
                 ->where('operation_lock_operation_id', $operation->id)
                 ->where('operation_lock_attempt_token', $attemptToken)
+                ->whereNull('active_run_id')
                 ->where('control_branch', $parameters['old_control_ref'])
                 ->where('control_binding_version', $parameters['expected_binding_version'])
                 ->where(function (Builder $query) use ($parameters): void {

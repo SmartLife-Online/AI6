@@ -24,6 +24,9 @@ final readonly class ProjectOperationLease
             ])
             ->whereNull('provisioning_operation_id')
             ->whereNull('operation_lock_operation_id')
+            ->whereNull('pending_control_ref')
+            ->whereNull('pending_control_oid')
+            ->whereNull('pending_control_operation_id')
             ->update([
                 'provisioning_status' => ProjectProvisioningStatus::PROVISIONING,
                 'provisioning_operation_id' => $operationId,
@@ -41,19 +44,30 @@ final readonly class ProjectOperationLease
             ->value('operation_lock_attempt_token');
     }
 
-    public function claimInitialControlOperation(Project $project, string $operationId): ?int
-    {
-        // AI6-013 extends this exact compare-and-swap seam with the active-run guard.
+    public function claimInitialControlOperation(
+        Project $project,
+        string $operationId,
+        bool $requiresInactiveRun = false,
+        bool $allowsPendingControlBinding = false,
+    ): ?int {
         $now = Date::now();
-        $updated = Project::query()
+        $claim = Project::query()
             ->whereKey($project->getKey())
-            ->whereNull('operation_lock_operation_id')
-            ->update([
-                'operation_lock_operation_id' => $operationId,
-                'operation_lock_lease_expires_at' => $now->copy()->addSeconds($this->configuration->leaseSeconds),
-                'operation_lock_heartbeat_at' => $now,
-                'operation_lock_attempt_token' => DB::raw('operation_lock_attempt_token + 1'),
-            ]);
+            ->whereNull('operation_lock_operation_id');
+        if (! $allowsPendingControlBinding) {
+            $claim->whereNull('pending_control_ref')
+                ->whereNull('pending_control_oid')
+                ->whereNull('pending_control_operation_id');
+        }
+        if ($requiresInactiveRun) {
+            $claim->whereNull('active_run_id');
+        }
+        $updated = $claim->update([
+            'operation_lock_operation_id' => $operationId,
+            'operation_lock_lease_expires_at' => $now->copy()->addSeconds($this->configuration->leaseSeconds),
+            'operation_lock_heartbeat_at' => $now,
+            'operation_lock_attempt_token' => DB::raw('operation_lock_attempt_token + 1'),
+        ]);
         if ($updated !== 1) {
             return null;
         }

@@ -7,9 +7,11 @@ use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentRole;
 use App\AI6\Auth\Models\User;
 use App\AI6\Git\Actions\QueueManagedCloneOperation;
+use App\AI6\Git\Actions\QueueRunStart;
 use App\AI6\Git\Actions\QueueTicketMutation;
 use App\AI6\Git\Actions\QueueTicketReadModelRefresh;
 use App\AI6\Git\ControlOperationConfiguration;
+use App\AI6\Git\ControlOperationConflict;
 use App\AI6\Git\ControlOperationExecutor;
 use App\AI6\Git\ControlOperationOutcome;
 use App\AI6\Git\ControlOperationPhase;
@@ -32,6 +34,7 @@ use App\AI6\Reviews\ReviewerSlotFactory;
 use App\AI6\Runs\ApprovalLimits;
 use App\AI6\Runs\ApprovalSelection;
 use App\AI6\Runs\ApprovalSnapshotFactory;
+use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\RedactionMatchType;
@@ -291,6 +294,221 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
         yield 'ticket edit' => ['edit'];
         yield 'ticket status change' => ['status'];
         yield 'ticket approval' => ['approval'];
+    }
+
+    #[DataProvider('runStartLineageCases')]
+    public function test_run_start_lineage_crash_replay_and_foreign_commit_contract(string $change): void
+    {
+        if (DIRECTORY_SEPARATOR !== '/') {
+            self::markTestSkipped('The real run-start Git and crash proof requires the POSIX process and effect-lock runtime.');
+        }
+
+        $fixture = $this->managedFixture();
+        $relativePath = 'tickets/AI6-RUN-START.md';
+        $todo = $this->validTicketMarkdown('AI6-RUN-START', 'todo', '[]', 'Gebundener Runstart.');
+        self::assertNotFalse(file_put_contents($fixture['source'].'/'.$relativePath, $todo));
+        $this->managedFixtureGit(['add', $relativePath], $fixture['source']);
+        $this->managedFixtureGit(['commit', '-m', 'add run-start fixture'], $fixture['source']);
+        $this->managedFixtureGit(['push', $fixture['remote'], 'refs/heads/main:refs/heads/main'], $fixture['source']);
+
+        $clone = $this->app->make(QueueManagedCloneOperation::class)->handle(
+            $fixture['administrator'],
+            $fixture['project']->refresh(),
+            ControlOperationType::MANAGED_CLONE,
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $this->app->make(ControlOperationExecutor::class)->execute($clone->id);
+        $refresh = $this->app->make(QueueTicketReadModelRefresh::class)->handle(
+            $fixture['administrator'],
+            $fixture['project']->refresh(),
+            $relativePath,
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $this->app->make(ControlOperationExecutor::class)->execute($refresh->id);
+
+        $approver = $this->createUser();
+        $operator = $this->createUser();
+        $this->addMembership($approver, $fixture['project'], ProjectRole::APPROVER);
+        $this->addMembership($operator, $fixture['project'], ProjectRole::OPERATOR);
+        $readModel = TicketReadModel::query()->where('relative_path', $relativePath)->firstOrFail();
+        $selection = $this->approvalSelection();
+        $approvalId = (string) Str::uuid();
+        $snapshot = $this->app->make(ApprovalSnapshotFactory::class)->create(
+            $fixture['project']->refresh(),
+            $readModel,
+            $selection,
+            $approvalId,
+        );
+        $approvalOperation = $this->app->make(QueueTicketMutation::class)->approve(
+            $approver,
+            $fixture['project']->refresh(),
+            $readModel,
+            $approvalId,
+            $readModel->control_commit,
+            $readModel->blob_sha,
+            $todo,
+            'Runstart freigeben',
+            true,
+            $selection,
+            $snapshot,
+            $approvalId,
+        );
+        DB::table('jobs')->delete();
+        $this->app->make(ControlOperationExecutor::class)->execute($approvalOperation->id);
+        $approval = TicketApproval::query()->findOrFail($approvalId);
+        self::assertSame('complete', $approval->saga_phase);
+        self::assertSame('queued', $approval->queue_state);
+        $approvedControl = $approval->approved_control_sha;
+        self::assertIsString($approvedControl);
+
+        $this->managedFixtureGit(['fetch', $fixture['remote'], 'refs/heads/main'], $fixture['source']);
+        $this->managedFixtureGit(['reset', '--hard', 'FETCH_HEAD'], $fixture['source']);
+        if ($change === 'irrelevant') {
+            self::assertNotFalse(file_put_contents($fixture['source'].'/IRRELEVANT.md', "Irrelevanter Fortschritt.\n"));
+            $this->managedFixtureGit(['add', 'IRRELEVANT.md'], $fixture['source']);
+            $this->managedFixtureGit(['commit', '-m', 'add irrelevant control progress'], $fixture['source']);
+            $this->managedFixtureGit(['push', $fixture['remote'], 'refs/heads/main:refs/heads/main'], $fixture['source']);
+        } elseif ($change === 'relevant') {
+            $ready = (string) file_get_contents($fixture['source'].'/'.$relativePath);
+            self::assertNotFalse(file_put_contents(
+                $fixture['source'].'/'.$relativePath,
+                str_replace('Gebundener Runstart.', 'Geänderter Runstart.', $ready),
+            ));
+            $this->managedFixtureGit(['add', $relativePath], $fixture['source']);
+            $this->managedFixtureGit(['commit', '-m', 'change approved ticket'], $fixture['source']);
+            $this->managedFixtureGit(['push', $fixture['remote'], 'refs/heads/main:refs/heads/main'], $fixture['source']);
+        } elseif ($change === 'rewrite') {
+            $tree = trim($this->managedFixtureGit(['rev-parse', 'FETCH_HEAD^{tree}'], $fixture['source']));
+            $unrelated = trim($this->managedFixtureGit(['commit-tree', $tree, '-m', 'unrelated identical tree'], $fixture['source']));
+            $this->managedFixtureGit(['push', '--force', $fixture['remote'], $unrelated.':refs/heads/main'], $fixture['source']);
+        }
+
+        $fetch = $this->app->make(QueueManagedCloneOperation::class)->handle(
+            $fixture['administrator'],
+            $fixture['project']->refresh(),
+            ControlOperationType::MANAGED_FETCH,
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $this->app->make(ControlOperationExecutor::class)->execute($fetch->id);
+        $refresh = $this->app->make(QueueTicketReadModelRefresh::class)->handle(
+            $fixture['administrator'],
+            $fixture['project']->refresh(),
+            $relativePath,
+            (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $this->app->make(ControlOperationExecutor::class)->execute($refresh->id);
+
+        try {
+            $runStart = $this->app->make(QueueRunStart::class)->handle(
+                $operator,
+                $fixture['project']->refresh(),
+                $approvalId,
+                (string) Str::uuid(),
+            );
+        } catch (ControlOperationConflict $conflict) {
+            self::assertSame('relevant', $change);
+            self::assertSame(0, Run::query()->count());
+            self::assertNull($fixture['project']->fresh()->active_run_id);
+
+            return;
+        }
+        DB::table('jobs')->delete();
+        $attemptToken = $fixture['lease']->claim($runStart, str_repeat('9', 32));
+        self::assertIsInt($attemptToken);
+        $executor = $this->app->make(TicketMutationExecutor::class);
+
+        if ($change === 'foreign') {
+            self::assertFalse($executor->advance($runStart, $attemptToken));
+            $runStart->refresh();
+            self::assertSame(ControlOperationPhase::COMMIT_PREPARED, $runStart->phase);
+            $mutation = TicketMutation::query()->findOrFail($runStart->id);
+            self::assertIsString($mutation->prepared_commit_oid);
+            self::assertNotFalse(file_put_contents($fixture['source'].'/'.$relativePath, $mutation->target_content));
+            $this->managedFixtureGit(['add', $relativePath], $fixture['source']);
+            $this->managedFixtureGit(['commit', '-m', 'foreign matching in-progress transition'], $fixture['source']);
+            $foreignCommit = trim($this->managedFixtureGit(['rev-parse', 'HEAD'], $fixture['source']));
+            self::assertNotSame($mutation->prepared_commit_oid, $foreignCommit);
+            self::assertSame(
+                $mutation->expected_target_tree_oid,
+                trim($this->managedFixtureGit(['rev-parse', $foreignCommit.'^{tree}'], $fixture['source'])),
+            );
+            $this->managedFixtureGit(['push', $fixture['remote'], 'refs/heads/main:refs/heads/main'], $fixture['source']);
+            self::assertTrue($fixture['lease']->expire($runStart->id, $runStart->project_id, $attemptToken));
+            $this->app->make(ControlOperationExecutor::class)->execute($runStart->id);
+
+            $runStart->refresh();
+            $result = ControlOperationResult::query()->where('control_operation_id', $runStart->id)->firstOrFail();
+            self::assertSame(ControlOperationState::FAILED, $runStart->state);
+            self::assertSame(ControlOperationOutcome::FAILED, $result->outcome);
+            self::assertSame(
+                hash('sha256', "AI6-CONTROL-RESULT-V1\0".$runStart->id.$runStart->request_hash.'control_head_changed'),
+                $result->result_binding,
+            );
+            self::assertSame(0, Run::query()->count());
+            self::assertNull($fixture['project']->fresh()->active_run_id);
+            self::assertNull($fixture['project']->fresh()->operation_lock_operation_id);
+
+            return;
+        }
+
+        if ($change === 'rewrite') {
+            try {
+                $executor->advance($runStart, $attemptToken);
+                self::fail('An unrelated identical ticket history was adopted.');
+            } catch (ControlOperationTerminalConflict $conflict) {
+                self::assertSame('run_start_lineage_changed', $conflict->conflict);
+            }
+            self::assertSame(0, Run::query()->count());
+            self::assertNull($fixture['project']->fresh()->active_run_id);
+
+            return;
+        }
+
+        foreach ([
+            [ControlOperationPhase::PREPARED, ControlOperationPhase::COMMIT_PREPARED],
+            [ControlOperationPhase::COMMIT_PREPARED, ControlOperationPhase::CONTROL_CONFIRMED],
+            [ControlOperationPhase::CONTROL_CONFIRMED, ControlOperationPhase::DB_FINALIZED],
+        ] as [$from, $to]) {
+            $this->installApprovalProgressCrash($runStart->id, $from, $to);
+            try {
+                $executor->advance($runStart->refresh(), $attemptToken);
+                self::fail('The run-start crash injection did not interrupt '.$from->value.'.');
+            } catch (QueryException $exception) {
+                self::assertStringContainsString('synthetic ticket mutation progress crash', $exception->getMessage());
+            } finally {
+                $this->removeApprovalProgressCrash();
+            }
+            self::assertSame($from, $runStart->refresh()->phase);
+            $completed = $executor->advance($runStart->refresh(), $attemptToken);
+            self::assertSame($to === ControlOperationPhase::DB_FINALIZED, $completed);
+        }
+
+        $run = Run::query()->sole();
+        $mutation = TicketMutation::query()->findOrFail($runStart->id);
+        self::assertSame($mutation->prepared_commit_oid, $run->initial_run_base_sha);
+        self::assertSame($run->initial_run_base_sha, $run->run_base_sha);
+        self::assertSame($run->id, $fixture['project']->fresh()->active_run_id);
+        self::assertNull($fixture['project']->fresh()->operation_lock_operation_id);
+        self::assertTrue($fixture['runner']->isAncestor(
+            $fixture['paths']->assertRepository($fixture['paths']->repositoryDirectory((string) $fixture['project']->project_identifier)),
+            $approvedControl,
+            $run->claim_parent_control_sha,
+            new RedactionContext((string) $fixture['project']->getKey(), $runStart->id, 'run-start-lineage-proof'),
+        ));
+        self::assertSame(1, ControlOperation::query()->where('operation_type', ControlOperationType::RUN_START)->count());
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function runStartLineageCases(): iterable
+    {
+        yield 'irrelevant fast forward and crash replay' => ['irrelevant'];
+        yield 'relevant ticket change' => ['relevant'];
+        yield 'unrelated identical history' => ['rewrite'];
+        yield 'foreign matching in-progress commit' => ['foreign'];
     }
 
     private function installApprovalProgressCrash(

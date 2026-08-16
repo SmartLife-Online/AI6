@@ -39,7 +39,6 @@ use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Tickets\TicketMutationConflict;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Support\ViewErrorBag;
 use Livewire\Livewire;
@@ -114,7 +113,8 @@ final class TicketApprovalQueueTest extends TicketUiTestCase
         self::assertSame('1', $approval->prompt_snapshot['catalog_version']);
         self::assertArrayHasKey('fake-v1', $approval->runtime_profile_snapshot);
         self::assertSame(1, DB::table('jobs')->count());
-        self::assertFalse(Schema::hasTable('runs'));
+        self::assertSame(0, DB::table('runs')->count());
+        self::assertNull($project->fresh()->active_run_id);
         $this->actingAs($approver)
             ->get(route('projects.approvals.show', [$project, $approval]))
             ->assertOk()

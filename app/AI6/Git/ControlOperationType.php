@@ -13,6 +13,7 @@ enum ControlOperationType: string
     case TICKET_STATUS_CHANGE = 'ticket_status_change';
     case CONFIG_REFRESH = 'config_refresh';
     case TICKET_APPROVAL = 'ticket_approval';
+    case RUN_START = 'run_start';
 
     /** @var array<string, list<string>> */
     public const PARAMETER_FIELDS = [
@@ -51,6 +52,11 @@ enum ControlOperationType: string
             'relative_path',
             'expected_binding_version',
             'status_operation',
+        ],
+        'run_start' => [
+            'approval_id',
+            'relative_path',
+            'expected_binding_version',
         ],
     ];
 

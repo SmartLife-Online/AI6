@@ -21,7 +21,9 @@ use App\AI6\Projects\TicketReadModelUsePolicy;
 use App\AI6\Prompts\PromptRenderingException;
 use App\AI6\Runs\ApprovalSelectionFactory;
 use App\AI6\Runs\ApprovalSnapshotFactory;
+use App\AI6\Runs\ApprovalSnapshotVerifier;
 use App\AI6\Runs\Models\TicketApproval;
+use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Shared\Process\EffectLock;
 use App\AI6\Shared\Process\EffectLockHandle;
 use App\AI6\Shared\Process\EffectLockOutcome;
@@ -63,6 +65,8 @@ final readonly class TicketMutationExecutor
         private TicketMutationConfiguration $configuration,
         private ApprovalSelectionFactory $approvalSelections,
         private ApprovalSnapshotFactory $approvalSnapshots,
+        private ApprovalSnapshotVerifier $approvalSnapshotVerifier,
+        private RunOrchestrator $runs,
     ) {}
 
     public function advance(ControlOperation $operation, int $attemptToken): bool
@@ -370,9 +374,11 @@ final readonly class TicketMutationExecutor
             ->firstOrFail();
         $fresh = ! $this->freshness->for($project, $readModel)['stale'];
         $profile = $this->projectConfiguration->for($project)->configuration->ticketValidationProfile();
-        $sourceAllowed = $operation->operation_type === ControlOperationType::TICKET_APPROVAL
-            ? $this->usePolicy->allowsApproval($readModel, $fresh, $profile)
-            : $this->usePolicy->allowsEditor($readModel, $fresh, $profile);
+        $sourceAllowed = match ($operation->operation_type) {
+            ControlOperationType::TICKET_APPROVAL => $this->usePolicy->allowsApproval($readModel, $fresh, $profile),
+            ControlOperationType::RUN_START => $this->usePolicy->allowsRunStart($readModel, $fresh, $profile),
+            default => $this->usePolicy->allowsEditor($readModel, $fresh, $profile),
+        };
         if (! hash_equals($mutation->expected_ticket_blob_sha, $blob->blobSha)
             || ! hash_equals($mutation->base_content_sha256, hash('sha256', $blob->content))
             || ! hash_equals($mutation->base_content, $blob->content)
@@ -402,6 +408,16 @@ final readonly class TicketMutationExecutor
             }
             if (! hash_equals($approval->approval_snapshot_hash, $currentSnapshot->aggregateHash)) {
                 throw new ControlOperationTerminalConflict('approval_snapshot_changed', 'Der bestätigte Approval-Snapshot ist nicht mehr aktuell.');
+            }
+        }
+        if ($operation->operation_type === ControlOperationType::RUN_START) {
+            $approvalId = $this->parameters($operation)['approval_id'] ?? null;
+            $approval = is_string($approvalId) ? TicketApproval::query()->whereKey($approvalId)->first() : null;
+            if (! $approval instanceof TicketApproval
+                || $approval->approved_control_sha === null
+                || ! $this->approvalSnapshotVerifier->matches($approval, $project, $readModel)
+                || ! $this->git->isAncestor($repository, $approval->approved_control_sha, (string) $operation->expected_control_commit, $context)) {
+                throw new ControlOperationTerminalConflict('run_start_lineage_changed', 'Die freigegebene Runstart-Lineage ist nicht mehr gültig.');
             }
         }
         $targetRedaction = $this->redactor->redact($mutation->target_content, $context);
@@ -679,6 +695,28 @@ final readonly class TicketMutationExecutor
             if ($result->outcome !== ControlOperationOutcome::SUCCEEDED || ! hash_equals($result->result_binding, $binding)) {
                 throw new RuntimeException('The existing mutation result has a different provenance binding.');
             }
+            $runStartLeaseReleased = false;
+            if ($operation->operation_type === ControlOperationType::RUN_START) {
+                $approvalId = $this->parameters($operation)['approval_id'] ?? null;
+                if (! is_string($approvalId)) {
+                    throw new ControlOperationRecoveryRequired('The run-start approval binding is missing.');
+                }
+                $approval = TicketApproval::query()->whereKey($approvalId)->firstOrFail();
+                $this->runs->finalizeClaim(
+                    $approval,
+                    $current,
+                    $attemptToken,
+                    (string) $operation->expected_control_commit,
+                    $commitOid,
+                );
+                $runStartLeaseReleased = Project::query()
+                    ->whereKey($operation->project_id)
+                    ->whereNull('operation_lock_operation_id')
+                    ->exists();
+                if (! $runStartLeaseReleased) {
+                    throw new RuntimeException('The run-start claim did not replace its operation lease.');
+                }
+            }
             $operationUpdated = ControlOperation::query()
                 ->whereKey($operation->id)
                 ->where('state', ControlOperationState::RUNNING)
@@ -691,7 +729,10 @@ final readonly class TicketMutationExecutor
                     'version' => DB::raw('version + 1'),
                     'updated_at' => $now,
                 ]);
-            if ($operationUpdated !== 1 || ! $this->lease->release($operation->id, $operation->project_id, $attemptToken)) {
+            $leaseReleased = $operation->operation_type === ControlOperationType::RUN_START
+                ? $runStartLeaseReleased
+                : $this->lease->release($operation->id, $operation->project_id, $attemptToken);
+            if ($operationUpdated !== 1 || ! $leaseReleased) {
                 throw new RuntimeException('The ticket mutation lost its terminal compare-and-swap binding.');
             }
         });
@@ -710,6 +751,7 @@ final readonly class TicketMutationExecutor
         $authorized = match ($operation->operation_type) {
             ControlOperationType::TICKET_EDIT => $this->projectPolicy->editTicket($actor, $project),
             ControlOperationType::TICKET_APPROVAL => $this->projectPolicy->approveTicket($actor, $project),
+            ControlOperationType::RUN_START => $this->projectPolicy->startRun($actor, $project),
             default => $this->projectPolicy->changeTicketStatus($actor, $project),
         };
         if (! $authorized || ! $this->authorizationSnapshots->matchesCurrent($operation, $actor, $project)) {
@@ -740,7 +782,7 @@ final readonly class TicketMutationExecutor
         ];
     }
 
-    /** @return array{relative_path: string, expected_binding_version: int, status_operation?: string} */
+    /** @return array{relative_path: string, expected_binding_version: int, status_operation?: string, approval_id?: string} */
     private function parameters(ControlOperation $operation): array
     {
         try {
@@ -823,6 +865,22 @@ final readonly class TicketMutationExecutor
         }
 
         $parameters = $this->parameters($operation);
+        if ($operation->operation_type === ControlOperationType::RUN_START) {
+            $approvalId = $parameters['approval_id'] ?? null;
+            $approval = is_string($approvalId) ? TicketApproval::query()->whereKey($approvalId)->first() : null;
+            if (! $approval instanceof TicketApproval
+                || $approval->project_id !== $project->getKey()
+                || $approval->queue_state !== 'queued'
+                || $approval->saga_phase !== 'complete'
+                || ! hash_equals((string) $approval->approved_ticket_blob_sha, $actualBlobSha)
+                || ! hash_equals($approval->ticket_contract_sha256, $mutation->target_contract_sha256)
+                || $mutation->source_status !== 'ready'
+                || $mutation->target_status !== 'in_progress') {
+                throw new ControlOperationTerminalConflict('run_start_contract_changed', 'Der gebundene Runstart ist nicht mehr zulässig.');
+            }
+
+            return;
+        }
         if ($operation->operation_type === ControlOperationType::TICKET_EDIT) {
             $expectedTarget = $mutation->source_status === 'ready' ? 'todo' : $mutation->source_status;
             if (! in_array($mutation->source_status, ['todo', 'ready', 'blocked'], true)
@@ -1117,7 +1175,7 @@ final readonly class TicketMutationExecutor
 
     private function assertType(ControlOperation $operation): void
     {
-        if (! in_array($operation->operation_type, [ControlOperationType::TICKET_EDIT, ControlOperationType::TICKET_STATUS_CHANGE, ControlOperationType::TICKET_APPROVAL], true)) {
+        if (! in_array($operation->operation_type, [ControlOperationType::TICKET_EDIT, ControlOperationType::TICKET_STATUS_CHANGE, ControlOperationType::TICKET_APPROVAL, ControlOperationType::RUN_START], true)) {
             throw new RuntimeException('The operation is not a ticket mutation.');
         }
     }

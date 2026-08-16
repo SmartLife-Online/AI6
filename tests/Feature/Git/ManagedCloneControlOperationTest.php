@@ -377,6 +377,7 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
 
     public function test_migration_chain_restores_the_exact_ai6_006c_contract_on_ordered_down(): void
     {
+        $runMigration = require database_path('migrations/2026_08_15_000000_add_run_contract.php');
         $approvalMigration = require database_path('migrations/2026_08_14_000000_add_ticket_approval_contract.php');
         $configMigration = require database_path('migrations/2026_08_13_000000_add_project_configuration_snapshot_contract.php');
         $mutationMigration = require database_path('migrations/2026_08_12_000000_add_ticket_mutation_operation_contract.php');
@@ -386,6 +387,7 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
         $cloneMigration = require database_path('migrations/2026_08_09_000000_add_clone_fetch_control_operation_contract.php');
         self::assertTrue(Schema::hasColumn('control_operations', 'target_control_oid'));
 
+        $runMigration->down();
         $approvalMigration->down();
         $configMigration->down();
         $mutationMigration->down();
@@ -416,6 +418,7 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
         $mutationMigration->up();
         $configMigration->up();
         $approvalMigration->up();
+        $runMigration->up();
         $latestTrigger = (string) DB::table('sqlite_master')
             ->where('type', 'trigger')
             ->where('name', 'control_operations_insert_guard')
@@ -423,6 +426,12 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
         self::assertStringContainsString('control_branch_change', $latestTrigger);
         self::assertStringContainsString('remote_probed', $latestTrigger);
         self::assertStringContainsString('config_refresh', $latestTrigger);
+        self::assertStringContainsString('run_start', $latestTrigger);
+        $latestMutationTrigger = (string) DB::table('sqlite_master')
+            ->where('type', 'trigger')
+            ->where('name', 'ticket_mutations_insert_guard')
+            ->value('sql');
+        self::assertMatchesRegularExpression('/source_status[^;]+in_progress/s', $latestMutationTrigger);
     }
 
     public function test_launch_fetch_publish_and_cleanup_keep_the_single_process_and_effect_lock_boundaries(): void

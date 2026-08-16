@@ -114,7 +114,12 @@ final readonly class QueueControlBranchChange
                 return $existing;
             }
 
-            $attemptToken = $this->lease->claimInitialControlOperation($project, $operationId);
+            $attemptToken = $this->lease->claimInitialControlOperation(
+                $project,
+                $operationId,
+                requiresInactiveRun: true,
+                allowsPendingControlBinding: true,
+            );
             if ($attemptToken === null) {
                 throw new ControlOperationConflict('Another mutating project operation is active.');
             }
