@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_015(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_016(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -58,25 +58,40 @@ final class ScaffoldStructureTest extends TestCase
         sort($files);
         self::assertSame([
             'app/AI6/Agents/.gitkeep',
+            'app/AI6/Agents/AgentAdapter.php',
+            'app/AI6/Agents/AgentFinding.php',
             'app/AI6/Agents/AgentInputLimits.php',
             'app/AI6/Agents/AgentProfile.php',
             'app/AI6/Agents/AgentProfileRegistry.php',
             'app/AI6/Agents/AgentProfileSelectionError.php',
             'app/AI6/Agents/AgentProfileSelectionException.php',
+            'app/AI6/Agents/AgentResult.php',
+            'app/AI6/Agents/AgentResultContext.php',
+            'app/AI6/Agents/AgentResultImporter.php',
+            'app/AI6/Agents/AgentResultStatus.php',
+            'app/AI6/Agents/AgentResultValidationError.php',
+            'app/AI6/Agents/AgentResultValidationException.php',
+            'app/AI6/Agents/AgentResultValidator.php',
             'app/AI6/Agents/AgentRole.php',
+            'app/AI6/Agents/AgentScenario.php',
             'app/AI6/Agents/AgentSelection.php',
             'app/AI6/Agents/CapabilityStatus.php',
             'app/AI6/Agents/CredentialProjection.php',
             'app/AI6/Agents/CredentialProjectionException.php',
             'app/AI6/Agents/CredentialRevisionRegistry.php',
+            'app/AI6/Agents/CriterionCoverageEntry.php',
             'app/AI6/Agents/ExecutionHome.php',
             'app/AI6/Agents/ExecutionHomeException.php',
             'app/AI6/Agents/ExecutionHomeManager.php',
+            'app/AI6/Agents/FakeAgentAdapter.php',
             'app/AI6/Agents/Http/AgentProfileController.php',
+            'app/AI6/Agents/HumanRequestOption.php',
+            'app/AI6/Agents/HumanRequestProposal.php',
             'app/AI6/Agents/InstructionCandidate.php',
             'app/AI6/Agents/InstructionCandidateOrigin.php',
             'app/AI6/Agents/InstructionDiscovery.php',
             'app/AI6/Agents/InstructionFileType.php',
+            'app/AI6/Agents/InstructionPatch.php',
             'app/AI6/Agents/InstructionPatchChannel.php',
             'app/AI6/Agents/InstructionPatchException.php',
             'app/AI6/Agents/InstructionPatchProposal.php',
@@ -336,6 +351,9 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Shared/Http/HttpSecurityConfiguration.php',
             'app/AI6/Shared/Http/HttpSecurityConfigurationFactory.php',
             'app/AI6/Shared/Http/ResolveTrustedProxies.php',
+            'app/AI6/Shared/Json/JsonDecodingError.php',
+            'app/AI6/Shared/Json/JsonDecodingException.php',
+            'app/AI6/Shared/Json/RestrictedJsonDecoder.php',
             'app/AI6/Shared/Markdown/AllowedHtmlPolicy.php',
             'app/AI6/Shared/Markdown/SafeMarkdownRenderer.php',
             'app/AI6/Shared/Process/BlockedControlProcess.php',

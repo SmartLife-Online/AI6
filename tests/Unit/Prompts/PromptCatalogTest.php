@@ -16,13 +16,81 @@ use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
 use Error;
 use InvalidArgumentException;
+use RecursiveDirectoryIterator;
+use RecursiveIteratorIterator;
 use ReflectionClass;
 use ReflectionMethod;
+use ReflectionParameter;
 use ReflectionProperty;
+use SplFileInfo;
 use Tests\TestCase;
 
 final class PromptCatalogTest extends TestCase
 {
+    public function test_role_prompt_snapshot_and_result_schema_are_provider_independent(): void
+    {
+        $renderer = $this->app->make(PromptRenderer::class);
+        $request = new PromptRenderRequest('quality_review', new PromptVariables(['context' => 'gebunden']));
+        $rendererParameters = array_map(static fn (ReflectionParameter $parameter): string => $parameter->getName(), (new ReflectionMethod(PromptRenderer::class, 'snapshot'))->getParameters());
+        $requestParameters = array_map(static fn (ReflectionParameter $parameter): string => $parameter->getName(), (new ReflectionMethod(PromptRenderRequest::class, '__construct'))->getParameters());
+        self::assertSame(['requests', 'context'], $rendererParameters);
+        self::assertSame(['entryId', 'variables', 'reviewProfileId'], $requestParameters);
+        self::assertSame([], array_filter([...$rendererParameters, ...$requestParameters], static fn (string $name): bool => preg_match('/provider|model/i', $name) === 1));
+        $first = $renderer->snapshot([$request], $this->context());
+        $second = $renderer->snapshot([$request], $this->context());
+
+        self::assertSame($first->renderedPrompts, $second->renderedPrompts);
+        self::assertSame($first->hash, $second->hash);
+        self::assertSame('1', $first->catalogVersion);
+    }
+
+    public function test_prompt_source_has_exactly_one_catalog_and_renderer(): void
+    {
+        $catalogs = [];
+        $renderers = [];
+        $templatesOutsidePrompts = [];
+
+        foreach ($this->modulePhpFiles() as $path => $contents) {
+            if (preg_match('/\bclass\s+\w*PromptCatalog\w*\b/', $contents) === 1) {
+                $catalogs[] = $path;
+            }
+            if (preg_match('/\bclass\s+\w*PromptRenderer\w*\b/', $contents) === 1) {
+                $renderers[] = $path;
+            }
+            // Any `{{name}}` placeholder is prompt template text; PromptRenderer builds them as '{{'.$key.'}}'.
+            if (! str_contains($path, '/app/AI6/Prompts/') && preg_match('/\{\{\s*\w+\s*\}\}/', $contents) === 1) {
+                $templatesOutsidePrompts[] = $path;
+            }
+        }
+
+        self::assertCount(1, $catalogs);
+        self::assertCount(1, $renderers);
+        self::assertStringContainsString('/app/AI6/Prompts/PromptCatalog.php', $catalogs[0]);
+        self::assertStringContainsString('/app/AI6/Prompts/PromptRenderer.php', $renderers[0]);
+        self::assertSame([], $templatesOutsidePrompts);
+    }
+
+    /**
+     * Every PHP file of the module tree with forward-slash paths, traversed exactly once.
+     *
+     * @return array<string, string>
+     */
+    private function modulePhpFiles(): array
+    {
+        $files = [];
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(dirname(__DIR__, 3).'/app/AI6'));
+        foreach ($iterator as $file) {
+            if (! $file instanceof SplFileInfo || ! $file->isFile() || $file->getExtension() !== 'php') {
+                continue;
+            }
+            $files[str_replace('\\', '/', $file->getPathname())] = (string) file_get_contents($file->getPathname());
+        }
+
+        self::assertNotSame([], $files);
+
+        return $files;
+    }
+
     public function test_six_purposes_render_byte_identically_against_the_golden_fixture(): void
     {
         $fixture = $this->fixture();
@@ -76,14 +144,14 @@ final class PromptCatalogTest extends TestCase
         self::assertSame(
             ['entryId', 'variables', 'context', 'reviewProfileId'],
             array_map(
-                static fn (\ReflectionParameter $parameter): string => $parameter->getName(),
+                static fn (ReflectionParameter $parameter): string => $parameter->getName(),
                 (new ReflectionMethod(PromptRenderer::class, 'render'))->getParameters(),
             ),
         );
         self::assertSame(
             ['requests', 'context'],
             array_map(
-                static fn (\ReflectionParameter $parameter): string => $parameter->getName(),
+                static fn (ReflectionParameter $parameter): string => $parameter->getName(),
                 (new ReflectionMethod(PromptRenderer::class, 'snapshot'))->getParameters(),
             ),
         );
@@ -105,7 +173,7 @@ final class PromptCatalogTest extends TestCase
                 $dimensionNames = [
                     ...$dimensionNames,
                     ...array_map(
-                        static fn (\ReflectionParameter $parameter): string => $parameter->getName(),
+                        static fn (ReflectionParameter $parameter): string => $parameter->getName(),
                         $constructor->getParameters(),
                     ),
                 ];

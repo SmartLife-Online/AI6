@@ -1,0 +1,51 @@
+[
+    {
+        "scenario": "success",
+        "role": "implementation",
+        "status": "completed",
+        "bytes": "{\"schema_version\":\"ai6.agent.v1\",\"status\":\"completed\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}"
+    },
+    {
+        "scenario": "no_change_required",
+        "role": "implementation",
+        "status": "no_change_required",
+        "bytes": "{\"schema_version\":\"ai6.agent.v1\",\"status\":\"no_change_required\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}"
+    },
+    {
+        "scenario": "no_change_with_diff",
+        "role": "implementation",
+        "error": "no_change_diff",
+        "actual_diff": "real diff",
+        "bytes": "{\"schema_version\":\"ai6.agent.v1\",\"status\":\"no_change_required\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}"
+    },
+    {
+        "scenario": "human_request",
+        "role": "implementation",
+        "status": "needs_human",
+        "bytes": "{\"schema_version\":\"ai6.agent.v1\",\"status\":\"needs_human\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"human_request\":{\"kind\":\"clarification\",\"title\":\"Rückfrage\",\"message\":\"Eine Entscheidung wird benötigt.\",\"why_needed\":\"Die gebundene Umsetzung benötigt eine Auswahl.\",\"response_mode\":\"select\",\"options\":[{\"key\":\"a\",\"label\":\"Option A\"},{\"key\":\"b\",\"label\":\"Option B\"}],\"recommended_option\":\"a\",\"affected_paths\":[\"app/Example.php\"],\"criterion_refs\":[\"AC-01\",\"AC-02\"]}}"
+    },
+    {
+        "scenario": "findings",
+        "role": "quality_review",
+        "status": "findings_to_fix",
+        "bytes": "{\"schema_version\":\"ai6.quality-review.v1\",\"status\":\"findings_to_fix\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"findings\":[{\"local_id\":\"finding-1\",\"severity\":\"must_fix\",\"disposition\":\"open\",\"category\":\"contract\",\"file\":\"app/Example.php\",\"line\":1,\"title\":\"Deterministischer Befund\",\"evidence\":\"Das erwartete Ergebnis fehlt.\",\"expected_result\":\"Der Vertrag ist erfüllt.\",\"criterion_refs\":[\"AC-01\",\"AC-02\"]}],\"criterion_coverage\":[{\"criterion_id\":\"AC-01\",\"status\":\"satisfied\",\"evidence\":\"Deterministischer Nachweis.\"},{\"criterion_id\":\"AC-02\",\"status\":\"satisfied\",\"evidence\":\"Deterministischer Nachweis.\"}]}"
+    },
+    {
+        "scenario": "invalid_json",
+        "role": "implementation",
+        "error": "invalid_json",
+        "bytes": "{\"schema_version\":"
+    },
+    {
+        "scenario": "provider_error",
+        "role": "implementation",
+        "status": "failed",
+        "bytes": "{\"schema_version\":\"ai6.agent.v1\",\"status\":\"failed\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}"
+    },
+    {
+        "scenario": "security_findings",
+        "role": "security_review",
+        "status": "security_findings",
+        "bytes": "{\"schema_version\":\"ai6.quality-review.v1\",\"status\":\"security_findings\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"findings\":[{\"local_id\":\"finding-1\",\"severity\":\"must_fix\",\"disposition\":\"open\",\"category\":\"contract\",\"file\":\"app/Example.php\",\"line\":1,\"title\":\"Deterministischer Befund\",\"evidence\":\"Das erwartete Ergebnis fehlt.\",\"expected_result\":\"Der Vertrag ist erfüllt.\",\"criterion_refs\":[\"AC-01\",\"AC-02\"]}],\"criterion_coverage\":[{\"criterion_id\":\"AC-01\",\"status\":\"satisfied\",\"evidence\":\"Deterministischer Nachweis.\"},{\"criterion_id\":\"AC-02\",\"status\":\"satisfied\",\"evidence\":\"Deterministischer Nachweis.\"}]}"
+    }
+]

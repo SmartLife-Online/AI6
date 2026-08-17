@@ -4,8 +4,12 @@ namespace App\AI6\Shared;
 
 use App\AI6\Agents\AgentInputLimits;
 use App\AI6\Agents\AgentProfileRegistry;
+use App\AI6\Agents\AgentResultImporter;
+use App\AI6\Agents\AgentResultValidator;
 use App\AI6\Agents\CredentialRevisionRegistry;
 use App\AI6\Agents\ExecutionHomeManager;
+use App\AI6\Agents\FakeAgentAdapter;
+use App\AI6\Agents\InstructionPatchChannel;
 use App\AI6\Agents\InstructionProfileRegistry;
 use App\AI6\Agents\InstructionSnapshotResolver;
 use App\AI6\Agents\ModelProfileAllowlist;
@@ -64,6 +68,7 @@ use App\AI6\Shared\Doctor\RedactionKeyringDoctorCheck;
 use App\AI6\Shared\Doctor\SecurityPolicyDoctorCheck;
 use App\AI6\Shared\Http\HttpSecurityConfiguration;
 use App\AI6\Shared\Http\HttpSecurityConfigurationFactory;
+use App\AI6\Shared\Json\RestrictedJsonDecoder;
 use App\AI6\Shared\Markdown\AllowedHtmlPolicy;
 use App\AI6\Shared\Markdown\SafeMarkdownRenderer;
 use App\AI6\Shared\Process\ControlProcessRunner;
@@ -107,6 +112,7 @@ final class AI6ServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(RestrictedYaml::class);
+        $this->app->singleton(RestrictedJsonDecoder::class);
         $this->app->singleton(CheckProfileAllowlist::class, static fn (): CheckProfileAllowlist => CheckProfileAllowlist::fromConfiguredValues());
         $this->app->singleton(
             AgentInputLimits::class,
@@ -129,6 +135,10 @@ final class AI6ServiceProvider extends ServiceProvider
         );
         $this->app->singleton(InstructionProfileRegistry::class);
         $this->app->singleton(InstructionSnapshotResolver::class);
+        $this->app->singleton(InstructionPatchChannel::class);
+        $this->app->singleton(AgentResultValidator::class);
+        $this->app->singleton(AgentResultImporter::class);
+        $this->app->singleton(FakeAgentAdapter::class);
         $this->app->singleton(CredentialRevisionRegistry::class, static fn (): CredentialRevisionRegistry => CredentialRevisionRegistry::fromConfiguredValues());
         $this->app->singleton(
             ExecutionHomeManager::class,

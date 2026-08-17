@@ -44,9 +44,14 @@ final class CreateAdministratorCommandTest extends AuthFeatureTestCase
             self::assertStringNotContainsString($password, $secondOutput);
 
             foreach (glob(storage_path('logs/*')) ?: [] as $logFile) {
-                $contents = file_get_contents($logFile);
-                self::assertIsString($contents);
-                self::assertStringNotContainsString($password, $contents);
+                if (! is_file($logFile)) {
+                    continue;
+                }
+
+                self::assertFalse(
+                    $this->fileContains($logFile, $password),
+                    sprintf('The log file %s contains the password.', basename($logFile)),
+                );
             }
         } finally {
             if (is_string($previous)) {
@@ -55,5 +60,35 @@ final class CreateAdministratorCommandTest extends AuthFeatureTestCase
                 putenv($environmentKey);
             }
         }
+    }
+
+    /**
+     * Scans the complete file in bounded chunks so a grown local log cannot exhaust the memory
+     * limit, while an overlap of one byte less than the needle keeps chunk boundaries covered.
+     */
+    private function fileContains(string $path, string $needle): bool
+    {
+        $handle = fopen($path, 'rb');
+        self::assertIsResource($handle);
+        $overlap = max(0, strlen($needle) - 1);
+        $carry = '';
+
+        try {
+            while (! feof($handle)) {
+                $chunk = fread($handle, 1024 * 1024);
+                if (! is_string($chunk) || $chunk === '') {
+                    break;
+                }
+                $window = $carry.$chunk;
+                if (str_contains($window, $needle)) {
+                    return true;
+                }
+                $carry = $overlap === 0 ? '' : substr($window, -$overlap);
+            }
+        } finally {
+            fclose($handle);
+        }
+
+        return false;
     }
 }

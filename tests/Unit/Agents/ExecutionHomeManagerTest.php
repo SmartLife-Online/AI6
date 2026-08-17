@@ -179,6 +179,38 @@ final class ExecutionHomeManagerTest extends TestCase
         $manager->destroy($home);
     }
 
+    public function test_patch_target_must_be_a_snapshot_path_or_explicitly_approved_new_path(): void
+    {
+        $patchDirectory = $this->root.'/unbound-patch';
+        mkdir($patchDirectory, 0700, true);
+        $home = new ExecutionHome('', '', '', '', '', '', '', '', '', $patchDirectory);
+        $snapshot = new InstructionSnapshot('codex_cli', [new InstructionSnapshotEntry('agent', 'repository', 1, 'AGENTS.md', str_repeat('a', 40), 'bound', [])], str_repeat('b', 64));
+        $channel = new InstructionPatchChannel($this->redactor());
+        $context = new RedactionContext('project-1', 'run-1', 'unbound-patch');
+
+        try {
+            $channel->propose($home, $snapshot, ['README.md'], 'README.md', 'unsafe', $context);
+            self::fail('An unbound scope path was accepted.');
+        } catch (InstructionPatchException $exception) {
+            self::assertSame('The instruction patch target is not a bound discovery path.', $exception->getMessage());
+        }
+        self::assertSame([], array_values(array_diff(scandir($patchDirectory) ?: [], ['.', '..'])));
+
+        file_put_contents($patchDirectory.'/proposal.json', json_encode([
+            'version' => 1,
+            'target_path' => 'README.md',
+            'content_sha256' => hash('sha256', 'unsafe'),
+            'content_base64' => base64_encode('unsafe'),
+        ], JSON_THROW_ON_ERROR)."\n");
+        config(['ai6.runtime_role' => 'worker']);
+        try {
+            $channel->readForWorker($home, $snapshot, ['README.md'], $context);
+            self::fail('The worker accepted an unbound scope path.');
+        } catch (InstructionPatchException $exception) {
+            self::assertSame('The instruction patch target is not a bound discovery path.', $exception->getMessage());
+        }
+    }
+
     public function test_isolation_negative_matrix_exposes_only_the_bound_snapshot_and_exported_source(): void
     {
         foreach (['.git/hooks', '.codex/plugins', '.codex/skills', '.codex/commands', '.claude', 'nested'] as $directory) {

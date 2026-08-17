@@ -11,10 +11,20 @@ final readonly class InstructionPatchChannel
 {
     public function __construct(private Redactor $redactor) {}
 
-    /** @param list<string> $initialScope */
-    public function propose(ExecutionHome $home, InstructionSnapshot $snapshot, array $initialScope, string $targetPath, string $content, RedactionContext $context): InstructionPatchProposal
-    {
-        $this->assertTarget($snapshot, $initialScope, $targetPath);
+    /**
+     * @param  list<string>  $initialScope
+     * @param  list<string>  $approvedNewInstructionPaths
+     */
+    public function propose(
+        ExecutionHome $home,
+        InstructionSnapshot $snapshot,
+        array $initialScope,
+        string $targetPath,
+        string $content,
+        RedactionContext $context,
+        array $approvedNewInstructionPaths = [],
+    ): InstructionPatchProposal {
+        $this->assertTarget($snapshot, $initialScope, $targetPath, $approvedNewInstructionPaths);
         try {
             $content = $this->redactor->redact($content, $context)->text;
         } catch (InvalidRedactionInputException) {
@@ -34,9 +44,17 @@ final readonly class InstructionPatchChannel
         return new InstructionPatchProposal($targetPath, $content, $hash);
     }
 
-    /** @param list<string> $initialScope */
-    public function readForWorker(ExecutionHome $home, InstructionSnapshot $snapshot, array $initialScope, RedactionContext $context): InstructionPatchProposal
-    {
+    /**
+     * @param  list<string>  $initialScope
+     * @param  list<string>  $approvedNewInstructionPaths
+     */
+    public function readForWorker(
+        ExecutionHome $home,
+        InstructionSnapshot $snapshot,
+        array $initialScope,
+        RedactionContext $context,
+        array $approvedNewInstructionPaths = [],
+    ): InstructionPatchProposal {
         if (config('ai6.runtime_role') !== 'worker') {
             throw new InstructionPatchException('Only the worker may consume an instruction patch proposal.');
         }
@@ -72,7 +90,7 @@ final readonly class InstructionPatchChannel
         if (strlen($content) > $this->maximumBytes()) {
             throw new InstructionPatchException('The instruction patch exceeds its server limit.');
         }
-        $this->assertTarget($snapshot, $initialScope, $targetPath);
+        $this->assertTarget($snapshot, $initialScope, $targetPath, $approvedNewInstructionPaths);
 
         return new InstructionPatchProposal($targetPath, $content, $document['content_sha256']);
     }
@@ -87,14 +105,18 @@ final readonly class InstructionPatchChannel
         return (int) $maximum;
     }
 
-    /** @param list<string> $initialScope */
-    private function assertTarget(InstructionSnapshot $snapshot, array $initialScope, string $targetPath): void
+    /**
+     * @param  list<string>  $initialScope
+     * @param  list<string>  $approvedNewInstructionPaths
+     */
+    private function assertTarget(InstructionSnapshot $snapshot, array $initialScope, string $targetPath, array $approvedNewInstructionPaths): void
     {
         if (count(array_filter($initialScope, static fn (string $path): bool => $path === $targetPath)) !== 1) {
             throw new InstructionPatchException('The instruction patch target was not approved in the initial scope.');
         }
         $snapshotPaths = array_map(static fn (InstructionSnapshotEntry $entry): string => $entry->repositoryPath, $snapshot->entries);
-        if (! in_array($targetPath, $snapshotPaths, true) || str_contains('/'.str_replace('\\', '/', $targetPath).'/', '/../')) {
+        if ((! in_array($targetPath, $snapshotPaths, true) && ! in_array($targetPath, $approvedNewInstructionPaths, true))
+            || str_contains('/'.str_replace('\\', '/', $targetPath).'/', '/../')) {
             throw new InstructionPatchException('The instruction patch target is not a bound discovery path.');
         }
     }
