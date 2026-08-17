@@ -145,6 +145,10 @@ return [
         'stale_seconds' => env('AI6_CONTROL_OPERATION_STALE_SECONDS', '300'),
         'reconciliation_budget' => env('AI6_CONTROL_OPERATION_RECONCILIATION_BUDGET', '8'),
     ],
+    'run_steps' => [
+        'lease_seconds' => env('AI6_RUN_STEP_LEASE_SECONDS', '120'),
+        'max_attempts' => env('AI6_RUN_STEP_MAX_ATTEMPTS', '3'),
+    ],
     'tickets' => [
         'max_candidates' => env('AI6_TICKET_MAX_CANDIDATES', '100'),
     ],

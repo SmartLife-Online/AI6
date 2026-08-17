@@ -24,6 +24,7 @@ final class CsrfAndArchitectureTest extends AuthFeatureTestCase
         $livewire = array_map(static fn (string $path): string => str_replace('\\', '/', app_path($path)), [
             'AI6/Runs/TicketApprovalPage.php',
             'AI6/Runs/ApprovalStatusPage.php',
+            'AI6/Runs/RunTimelinePage.php',
             'AI6/Tickets/Livewire/TicketDetail.php',
             'AI6/Tickets/Livewire/TicketList.php',
         ]);

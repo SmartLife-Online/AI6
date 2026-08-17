@@ -35,6 +35,59 @@ final class RunArchitectureTest extends TestCase
         self::assertStringContainsString('QueueRunStart', $controller);
     }
 
+    /** TC-11: step state is written by the orchestrator only, never from a browser entry point. */
+    public function test_execution_step_state_is_written_only_by_the_orchestrator(): void
+    {
+        $root = dirname(__DIR__, 3);
+        $pattern = '/ExecutionJob::query\(\)[\s\S]{0,250}->(?:create|update|delete|firstOrCreate)\(/';
+        self::assertSame(1, preg_match(
+            $pattern,
+            '<?php ExecutionJob::query()->whereKey(1)->update(["state" => "succeeded"]);',
+        ), 'The detection itself must be able to fail.');
+
+        $writers = [];
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root.'/app'));
+        foreach ($iterator as $file) {
+            if (! $file->isFile() || $file->getExtension() !== 'php') {
+                continue;
+            }
+            $path = str_replace('\\', '/', $file->getPathname());
+            $source = file_get_contents($path);
+            self::assertIsString($source);
+            if (preg_match($pattern, $source) === 1) {
+                $writers[] = $path;
+            }
+        }
+
+        self::assertSame([
+            str_replace('\\', '/', $root.'/app/AI6/Runs/RunOrchestrator.php'),
+        ], $writers);
+    }
+
+    /** TC-11: the read-only run page holds no orchestration and no mutation. */
+    public function test_the_run_timeline_page_stays_a_read_surface(): void
+    {
+        $page = file_get_contents(dirname(__DIR__, 3).'/app/AI6/Runs/RunTimelinePage.php');
+        self::assertIsString($page);
+
+        foreach ([
+            'RunOrchestrator',
+            'ExecuteRunStep',
+            'RunStepReconciler',
+            'ExecutionStepDispatcher',
+            'HardenedGitRunner',
+            'ControlProcessRunner',
+            '->update(',
+            '->create(',
+            '->delete(',
+            'Queue::',
+            'dispatch(',
+        ] as $forbidden) {
+            self::assertStringNotContainsString($forbidden, $page, $forbidden);
+        }
+        self::assertStringContainsString("Gate::authorize('viewRun'", $page);
+    }
+
     public function test_run_start_is_routed_through_the_recoverable_ticket_status_saga(): void
     {
         $root = dirname(__DIR__, 3);

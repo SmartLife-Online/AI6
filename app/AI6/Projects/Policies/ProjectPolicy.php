@@ -67,6 +67,12 @@ final class ProjectPolicy
             'operator' => true,
             'approver' => false,
         ],
+        'view_run' => [
+            'admin' => true,
+            'viewer' => true,
+            'operator' => true,
+            'approver' => true,
+        ],
     ];
 
     public function create(User $user): bool
@@ -137,6 +143,11 @@ final class ProjectPolicy
     public function startRun(User $user, Project $project): bool
     {
         return $this->decide(ProjectAction::START_RUN, $user, $project);
+    }
+
+    public function viewRun(User $user, Project $project): bool
+    {
+        return $this->decide(ProjectAction::VIEW_RUN, $user, $project);
     }
 
     public function decide(ProjectAction $action, User $user, Project $project): bool

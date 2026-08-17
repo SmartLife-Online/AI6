@@ -64,17 +64,21 @@ final class ProcessPolicyAndLimitTest extends TestCase
 
     public function test_runtime_and_output_limits_accept_the_maximum_and_clamp_one_over_approvals(): void
     {
-        $limits = new ProcessLimits(1, 64, 4, 10, 1024, 10);
-        $runner = $this->runner($limits, true);
-        $approval = new ProcessLimits(10, 128, 8, 20, 2048, 20);
+        $approval = new ProcessLimits(30, 128, 8, 20, 2048, 20);
 
-        self::assertSame(ProcessOutcome::SUCCEEDED, $runner->run($this->request('usleep(100000);', approvedLimits: $approval))->outcome);
-        $timeout = $runner->run($this->request('usleep(1500000);', approvedLimits: $approval));
+        // The runtime ceiling gets its own runner: the interpreter start of the
+        // accepted run must stay far below the server limit even under full suite
+        // load, while the rejected run overshoots it by a wide margin. A limit close
+        // to the process start overhead would make this proof depend on wall clock.
+        $runtime = $this->runner(new ProcessLimits(5, 1024, 4, 10, 1024, 10), true);
+        self::assertSame(ProcessOutcome::SUCCEEDED, $runtime->run($this->request('usleep(100000);', approvedLimits: $approval))->outcome);
+        $timeout = $runtime->run($this->request('usleep(15000000);', approvedLimits: $approval));
         self::assertSame(ProcessLimit::RUNTIME_SECONDS, $timeout->limitResult->limit);
-        self::assertSame(1, $timeout->limitResult->maximum);
+        self::assertSame(5, $timeout->limitResult->maximum);
 
-        self::assertSame(ProcessOutcome::SUCCEEDED, $runner->run($this->request('echo str_repeat("x", 64);', approvedLimits: $approval))->outcome);
-        $output = $runner->run($this->request('echo str_repeat("x", 65);', approvedLimits: $approval));
+        $bytes = $this->runner(new ProcessLimits(30, 64, 4, 10, 1024, 10), true);
+        self::assertSame(ProcessOutcome::SUCCEEDED, $bytes->run($this->request('echo str_repeat("x", 64);', approvedLimits: $approval))->outcome);
+        $output = $bytes->run($this->request('echo str_repeat("x", 65);', approvedLimits: $approval));
         self::assertSame(ProcessLimit::OUTPUT_BYTES, $output->limitResult->limit);
         self::assertSame(64, $output->limitResult->maximum);
     }

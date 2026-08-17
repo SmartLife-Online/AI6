@@ -55,8 +55,13 @@ use App\AI6\Reviews\ReviewerSlotFactory;
 use App\AI6\Runs\ApprovalSelectionFactory;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ApprovalStatusPage;
+use App\AI6\Runs\ExecutionStepDispatcher;
 use App\AI6\Runs\InstructionCandidateCollector;
 use App\AI6\Runs\InstructionCandidateSource;
+use App\AI6\Runs\RunPreflight;
+use App\AI6\Runs\RunStepConfiguration;
+use App\AI6\Runs\RunStepReconciler;
+use App\AI6\Runs\RunTimelinePage;
 use App\AI6\Runs\RunTransitionMap;
 use App\AI6\Runs\TicketApprovalPage;
 use App\AI6\Runs\WaitReasonRegistry;
@@ -164,6 +169,15 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(ApprovalSelectionFactory::class);
         $this->app->singleton(ApprovalSnapshotFactory::class);
         $this->app->singleton(RunTransitionMap::class);
+        $this->app->singleton(
+            RunStepConfiguration::class,
+            static fn (Application $app): RunStepConfiguration => RunStepConfiguration::fromConfiguredValues(
+                $app->make(StrictPositiveIntegerParser::class),
+            ),
+        );
+        $this->app->singleton(ExecutionStepDispatcher::class);
+        $this->app->singleton(RunPreflight::class);
+        $this->app->singleton(RunStepReconciler::class);
         $this->app->singleton(WaitReasonRegistry::class);
         $this->app->singleton(InstructionCandidateCollector::class);
         $this->app->singleton(InstructionCandidateSource::class, InstructionCandidateCollector::class);
@@ -394,6 +408,7 @@ final class AI6ServiceProvider extends ServiceProvider
         Livewire::component('ai6.tickets.ticket-detail', TicketDetail::class);
         Livewire::component('ai6.runs.ticket-approval', TicketApprovalPage::class);
         Livewire::component('ai6.runs.approval-status', ApprovalStatusPage::class);
+        Livewire::component('ai6.runs.timeline', RunTimelinePage::class);
     }
 
     /**

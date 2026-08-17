@@ -1,6 +1,7 @@
 <?php
 
 use App\AI6\Git\ControlOperationReconciler;
+use App\AI6\Runs\RunStepReconciler;
 use App\AI6\Shared\Runtime\RuntimeHeartbeat;
 use App\AI6\Shared\Runtime\RuntimeSelfTestJob;
 use Illuminate\Support\Facades\Queue;
@@ -24,4 +25,10 @@ Schedule::call(static function (): void {
     app(ControlOperationReconciler::class)->reconcile();
 })
     ->name('ai6-control-operation-reconciler')
+    ->everyTenSeconds();
+
+Schedule::call(static function (): void {
+    app(RunStepReconciler::class)->reconcile();
+})
+    ->name('ai6-run-step-reconciler')
     ->everyTenSeconds();

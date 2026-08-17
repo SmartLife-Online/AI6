@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_016(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_017(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -313,10 +313,15 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Runs/ApprovalSnapshotVerifier.php',
             'app/AI6/Runs/ApprovalStartEligibility.php',
             'app/AI6/Runs/ApprovalStatusPage.php',
+            'app/AI6/Runs/ExecutionJobState.php',
+            'app/AI6/Runs/ExecutionStepDispatcher.php',
+            'app/AI6/Runs/ExecutionStepType.php',
             'app/AI6/Runs/InstructionCandidateCollector.php',
             'app/AI6/Runs/InstructionCandidateSource.php',
             'app/AI6/Runs/Jobs/BuildTicketApprovalPreview.php',
             'app/AI6/Runs/Jobs/EvaluateTicketApproval.php',
+            'app/AI6/Runs/Jobs/ExecuteRunStep.php',
+            'app/AI6/Runs/Models/ExecutionJob.php',
             'app/AI6/Runs/Models/Run.php',
             'app/AI6/Runs/Models/RunAgent.php',
             'app/AI6/Runs/Models/RunEvent.php',
@@ -325,8 +330,12 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Runs/Models/TicketApprovalPreview.php',
             'app/AI6/Runs/RunOrchestrator.php',
             'app/AI6/Runs/RunPhase.php',
+            'app/AI6/Runs/RunPreflight.php',
             'app/AI6/Runs/RunStartController.php',
             'app/AI6/Runs/RunState.php',
+            'app/AI6/Runs/RunStepConfiguration.php',
+            'app/AI6/Runs/RunStepReconciler.php',
+            'app/AI6/Runs/RunTimelinePage.php',
             'app/AI6/Runs/RunTransitionConflict.php',
             'app/AI6/Runs/RunTransitionMap.php',
             'app/AI6/Runs/TicketApprovalController.php',
@@ -698,7 +707,7 @@ final class ScaffoldStructureTest extends TestCase
         }
     }
 
-    public function test_migrations_match_the_approved_state_through_ai6_014(): void
+    public function test_migrations_match_the_approved_state_through_ai6_017(): void
     {
         $migrations = glob($this->path('database/migrations/*.php'));
         self::assertIsArray($migrations);
@@ -730,6 +739,8 @@ final class ScaffoldStructureTest extends TestCase
             '2026_08_14_000000_add_ticket_approval_contract.php',
             '2026_08_15_000000_add_run_contract.php',
             '2026_08_16_000000_add_run_workspace_checkpoint_contract.php',
+            '2026_08_17_000000_add_execution_jobs_contract.php',
+            '2026_08_17_000001_add_execution_job_event_idempotency.php',
         ], $migrations);
     }
 

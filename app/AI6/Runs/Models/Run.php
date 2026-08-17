@@ -27,6 +27,20 @@ use Illuminate\Support\Carbon;
  * @property string|null $checkpoint_commit_sha
  * @property string|null $checkpoint_tree_sha
  * @property string|null $checkpoint_diff_hash
+ * @property string $run_type
+ * @property array<string, mixed>|null $config_snapshot
+ * @property string $config_hash
+ * @property array<string, mixed>|null $scope_snapshot
+ * @property string $scope_hash
+ * @property array<string, mixed>|null $prompt_snapshot
+ * @property string $prompt_hash
+ * @property array<string, mixed>|null $instruction_snapshot
+ * @property string $instruction_hash
+ * @property array<string, mixed>|null $runtime_profile_snapshot
+ * @property string $runtime_profile_hash
+ * @property array<string, mixed>|null $agent_profile_snapshot
+ * @property string $agent_profile_hash
+ * @property string $security_policy_hash
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */

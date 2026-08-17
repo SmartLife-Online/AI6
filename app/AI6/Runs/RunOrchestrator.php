@@ -9,16 +9,347 @@ use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\TicketMutation;
 use App\AI6\Git\RunBranchName;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunEvent;
 use App\AI6\Runs\Models\TicketApproval;
+use App\AI6\Shared\Redaction\RedactionContext;
+use App\AI6\Shared\Redaction\Redactor;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /** The exclusive mutation boundary for persisted run state. */
 final readonly class RunOrchestrator
 {
-    public function __construct(private RunTransitionMap $transitions) {}
+    public function __construct(
+        private RunTransitionMap $transitions,
+        private Redactor $redactor,
+        private RunStepConfiguration $stepConfiguration,
+        private RunPreflight $preflight,
+        private ExecutionStepDispatcher $dispatcher,
+    ) {}
+
+    /**
+     * Derive the stable idempotency key of a step.
+     *
+     * The key is a pure function of run, step type and step number, so the same
+     * step can never be planned twice behind the unique index on the column.
+     */
+    public static function stepKey(string $runId, ExecutionStepType $type, int $number): string
+    {
+        return hash('sha256', implode(':', [$runId, $type->value, $number]));
+    }
+
+    /**
+     * The single next-step decision of this application.
+     *
+     * @param  list<string>  $completedStepTypes
+     */
+    public static function decideNextStep(RunState $state, ?WaitReason $waitReason, array $completedStepTypes): ?ExecutionStepType
+    {
+        if (in_array($state, [RunState::FAILED, RunState::COMPLETED, RunState::CANCELLED], true)) {
+            return null;
+        }
+        if ($state === RunState::WAITING || $waitReason instanceof WaitReason) {
+            return null;
+        }
+
+        foreach (ExecutionStepType::cases() as $type) {
+            if (! in_array($type->value, $completedStepTypes, true)) {
+                return $type;
+            }
+        }
+
+        return null;
+    }
+
+    public function nextStep(Run $run, ?ExecutionStepType $completing = null): ?ExecutionStepType
+    {
+        $completed = ExecutionJob::query()->where('run_id', $run->getKey())
+            ->where('state', ExecutionJobState::SUCCEEDED->value)->pluck('step_type')->all();
+        if ($completing instanceof ExecutionStepType) {
+            $completed[] = $completing->value;
+        }
+
+        /** @var list<string> $completed */
+        $completed = array_values(array_map(strval(...), $completed));
+
+        return self::decideNextStep($run->state, $run->wait_reason, $completed);
+    }
+
+    /**
+     * Plan the step the next-step decision names and hand it to the queue.
+     *
+     * This is the only way an execution job is created; the decision itself never
+     * happens outside this class.
+     */
+    public function planNextStep(Run $run, ?ExecutionStepType $completing = null): ?ExecutionJob
+    {
+        $type = $this->nextStep($run, $completing);
+        if (! $type instanceof ExecutionStepType) {
+            return null;
+        }
+
+        return $this->ensureStep($run, $type);
+    }
+
+    public function preflightFailureCode(Run $run): ?string
+    {
+        return $this->preflight->failureCode($run);
+    }
+
+    private function ensureStep(Run $run, ExecutionStepType $type, int $number = 1): ExecutionJob
+    {
+        $key = self::stepKey($run->getKey(), $type, $number);
+
+        $job = ExecutionJob::query()->firstOrCreate(
+            ['idempotency_key' => $key],
+            ['run_id' => $run->getKey(), 'step_type' => $type->value, 'step_number' => $number, 'state' => ExecutionJobState::PLANNED],
+        );
+        if ($job->wasRecentlyCreated) {
+            $this->recordStepEvent($run->id, $type->value, ExecutionJobState::PLANNED, 'Schritt geplant.', 'planned:'.$key);
+            if ($type->hasRegisteredHandler()) {
+                $dispatcher = $this->dispatcher;
+                DB::afterCommit(static function () use ($dispatcher, $job): void {
+                    $dispatcher->dispatch($job);
+                });
+            }
+        }
+
+        return $job;
+    }
+
+    /**
+     * Apply the bound side effect of a prepared step before its result is published.
+     *
+     * Every part of it is idempotent, so a crash between effect and publication is
+     * completed from the persisted intent without repeating the effect. Returns
+     * false when the run left the executable range while the step was claimed; the
+     * effect is then not applied, and the caller must not publish a success for it.
+     */
+    public function applyPreparedStepEffect(Run $run, ExecutionStepType $completed): bool
+    {
+        $fresh = Run::query()->findOrFail($run->getKey());
+        if (! in_array($fresh->state, [RunState::QUEUED, RunState::RUNNING], true)) {
+            return false;
+        }
+        if ($completed === ExecutionStepType::PREFLIGHT && $fresh->state === RunState::QUEUED) {
+            $fresh = $this->transition($fresh, $fresh->version, RunState::RUNNING, RunPhase::IMPLEMENT);
+        }
+
+        $this->planNextStep($fresh, $completed);
+
+        return true;
+    }
+
+    public function claimStep(ExecutionJob $job, string $owner): ?ExecutionJob
+    {
+        $now = now();
+        $updated = ExecutionJob::query()->whereKey($job->getKey())
+            ->where('attempts', '<', $this->stepConfiguration->maxAttempts)
+            ->where(function ($query) use ($now): void {
+                $query->where('state', ExecutionJobState::PLANNED->value)
+                    ->orWhere(function ($expired) use ($now): void {
+                        $expired->where('state', ExecutionJobState::RUNNING->value)->where('lease_expires_at', '<=', $now);
+                    });
+            })->update([
+                'state' => ExecutionJobState::RUNNING,
+                'lease_owner' => $owner,
+                'lease_expires_at' => $now->copy()->addSeconds($this->stepConfiguration->leaseSeconds),
+                'attempts' => DB::raw('attempts + 1'),
+                'updated_at' => $now,
+            ]);
+
+        if ($updated !== 1) {
+            return null;
+        }
+
+        $claimed = ExecutionJob::query()->find($job->getKey());
+        if (! $claimed instanceof ExecutionJob) {
+            return null;
+        }
+        $this->recordStepEvent($claimed->run_id, $claimed->step_type, ExecutionJobState::RUNNING, 'Schritt beansprucht.', 'running:'.$claimed->id.':'.$claimed->attempts);
+
+        return $claimed;
+    }
+
+    /**
+     * End a step that has no attempt left as visibly failed.
+     *
+     * A step is exhausted once it holds the configured attempt maximum and is not
+     * owned by a live lease any more; the run follows it into a named failure.
+     */
+    public function failExhaustedStep(ExecutionJob $job): bool
+    {
+        $now = now();
+        $updated = ExecutionJob::query()->whereKey($job->getKey())
+            ->where('attempts', '>=', $this->stepConfiguration->maxAttempts)
+            ->where(function ($query) use ($now): void {
+                $query->where('state', ExecutionJobState::PLANNED->value)
+                    ->orWhere(function ($expired) use ($now): void {
+                        $expired->where('state', ExecutionJobState::RUNNING->value)->where('lease_expires_at', '<=', $now);
+                    });
+            })->update([
+                'state' => ExecutionJobState::FAILED,
+                'failure_code' => 'step_retry_exhausted',
+                'lease_owner' => null,
+                'lease_expires_at' => null,
+                'updated_at' => $now,
+            ]);
+        if ($updated !== 1) {
+            return false;
+        }
+
+        $this->recordStepEvent($job->run_id, $job->step_type, ExecutionJobState::FAILED, 'Schrittversuche ausgeschöpft: step_retry_exhausted.', 'failed:'.$job->id.':'.$job->attempts);
+        $this->failRun($job->run_id);
+
+        return true;
+    }
+
+    /** Park a claimed step while its run waits for a decision. */
+    public function parkStep(ExecutionJob $job, string $owner): bool
+    {
+        return $this->finishStep($job, $owner, ExecutionJobState::WAITING, 'Schritt wartet auf eine Entscheidung.');
+    }
+
+    /** Return a parked step to the planned state once its run no longer waits. */
+    public function resumeStep(ExecutionJob $job): bool
+    {
+        $updated = ExecutionJob::query()->whereKey($job->getKey())
+            ->where('state', ExecutionJobState::WAITING->value)->update([
+                'state' => ExecutionJobState::PLANNED,
+                'lease_owner' => null,
+                'lease_expires_at' => null,
+                'updated_at' => now(),
+            ]);
+        if ($updated !== 1) {
+            return false;
+        }
+
+        $this->recordStepEvent($job->run_id, $job->step_type, ExecutionJobState::PLANNED, 'Schritt erneut geplant.', 'planned:'.$job->id.':'.$job->attempts);
+
+        return true;
+    }
+
+    /** Return a step whose lease died to the planned state, owner-independently. */
+    public function reclaimExpiredStep(ExecutionJob $job): bool
+    {
+        $updated = ExecutionJob::query()->whereKey($job->getKey())
+            ->where('state', ExecutionJobState::RUNNING->value)
+            ->where('lease_expires_at', '<=', now())->update([
+                'state' => ExecutionJobState::PLANNED,
+                'lease_owner' => null,
+                'lease_expires_at' => null,
+                'updated_at' => now(),
+            ]);
+        if ($updated !== 1) {
+            return false;
+        }
+
+        $this->recordStepEvent($job->run_id, $job->step_type, ExecutionJobState::PLANNED, 'Abgelaufenes Lease zurückgegeben.', 'planned:'.$job->id.':'.$job->attempts);
+
+        return true;
+    }
+
+    /**
+     * Hand a planned step back to the queue.
+     *
+     * The delivery stamp moves forward so the reconciler waits a full lease period
+     * before it delivers the same step again; a worker that stays down therefore
+     * cannot be answered with an unbounded pile of duplicate messages.
+     */
+    public function redeliverStep(ExecutionJob $job): void
+    {
+        ExecutionJob::query()->whereKey($job->getKey())
+            ->where('state', ExecutionJobState::PLANNED->value)
+            ->update(['updated_at' => now()]);
+
+        $this->dispatcher->dispatch($job);
+    }
+
+    /**
+     * Move a non-terminal run into the failed state without releasing the project lock.
+     *
+     * A concurrent writer can invalidate the read version between load and update; the
+     * second attempt works against the state that writer left behind. A conflict that
+     * survives both attempts stays a real conflict and is not swallowed.
+     */
+    public function failRun(string $runId): bool
+    {
+        foreach ([1, 2] as $attempt) {
+            $run = Run::query()->find($runId);
+            if (! $run instanceof Run
+                || in_array($run->state, [RunState::FAILED, RunState::COMPLETED, RunState::CANCELLED], true)) {
+                return false;
+            }
+
+            try {
+                $this->transition($run, $run->version, RunState::FAILED, $run->phase);
+
+                return true;
+            } catch (RunTransitionConflict $conflict) {
+                if ($attempt === 2) {
+                    throw $conflict;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    public function finishStep(ExecutionJob $job, string $owner, ExecutionJobState $state, string $message, ?string $failureCode = null): bool
+    {
+        $updated = ExecutionJob::query()->whereKey($job->getKey())->where('state', ExecutionJobState::RUNNING->value)
+            ->where('lease_owner', $owner)->update([
+                'state' => $state,
+                'failure_code' => $failureCode,
+                'lease_owner' => null,
+                'lease_expires_at' => null,
+                'updated_at' => now(),
+            ]);
+        if ($updated !== 1) {
+            return false;
+        }
+
+        $this->recordStepEvent($job->run_id, $job->step_type, $state, $message, $state->value.':'.$job->id.':'.$job->attempts);
+
+        return true;
+    }
+
+    public function releaseStep(ExecutionJob $job, string $owner): bool
+    {
+        return ExecutionJob::query()->whereKey($job->getKey())->where('state', ExecutionJobState::RUNNING->value)
+            ->where('lease_owner', $owner)->update([
+                'state' => ExecutionJobState::PLANNED,
+                'lease_owner' => null,
+                'lease_expires_at' => null,
+                'updated_at' => now(),
+            ]) === 1;
+    }
+
+    /** @param  array<string, scalar>  $intent */
+    public function persistIntent(ExecutionJob $job, string $owner, array $intent): bool
+    {
+        return ExecutionJob::query()->whereKey($job->getKey())->where('state', ExecutionJobState::RUNNING->value)
+            ->where('lease_owner', $owner)->update([
+                'intent' => json_encode($intent, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+                'updated_at' => now(),
+            ]) === 1;
+    }
+
+    public function recordStepEvent(string $runId, string $stepType, ExecutionJobState $state, string $message, ?string $eventKey = null): RunEvent
+    {
+        $run = Run::query()->findOrFail($runId);
+        $redacted = $this->redactor->redact($message, new RedactionContext((string) $run->project_id, $runId, 'run-timeline'));
+
+        return RunEvent::query()->firstOrCreate([
+            'event_key' => $eventKey ?? hash('sha256', implode(':', [$runId, $stepType, $state->value, $message])),
+        ], [
+            'run_id' => $runId,
+            'event_type' => 'step.'.$stepType.'.'.$state->value,
+            'redacted_payload' => $redacted->text,
+        ]);
+    }
 
     public function finalizeClaim(
         TicketApproval $approval,
@@ -115,6 +446,7 @@ final readonly class RunOrchestrator
                 'queue_state' => 'consumed', 'version' => DB::raw('version + 1'), 'updated_at' => now(),
             ]);
             RunEvent::query()->create(['run_id' => $run->id, 'event_type' => 'claim_finalized', 'redacted_payload' => 'Der Run-Claim wurde bestätigt.']);
+            $this->planNextStep($run);
 
             return $run;
         });
