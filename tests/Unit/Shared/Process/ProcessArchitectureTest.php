@@ -18,7 +18,7 @@ final class ProcessArchitectureTest extends TestCase
             }
 
             $contents = file_get_contents($file->getPathname());
-            if (is_string($contents) && preg_match('/(?:new\s+Process\s*\(|proc_open\s*\(|fromShellCommandline\s*\()/i', $contents) === 1) {
+            if (is_string($contents) && preg_match('/(?:new\s+Process\s*\(|proc_open\s*\(|fromShellCommandline\s*\(|shell_exec\s*\(|(?<!->|::)exec\s*\(|system\s*\(|passthru\s*\(|popen\s*\(|``)/i', $this->withoutLiteralText($contents)) === 1) {
                 $matches[] = str_replace('\\', '/', $file->getPathname());
             }
         }
@@ -26,6 +26,20 @@ final class ProcessArchitectureTest extends TestCase
         self::assertSame([
             str_replace('\\', '/', dirname(__DIR__, 4).'/app/AI6/Shared/Process/ControlProcessRunner.php'),
         ], $matches);
+    }
+
+    private function withoutLiteralText(string $source): string
+    {
+        $result = '';
+        foreach (token_get_all($source) as $token) {
+            if (is_array($token) && in_array($token[0], [T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                $result .= str_repeat(' ', strlen($token[1]));
+            } else {
+                $result .= is_array($token) ? $token[1] : $token;
+            }
+        }
+
+        return $result;
     }
 
     public function test_effect_lock_has_only_the_two_approved_acquisition_call_sites(): void

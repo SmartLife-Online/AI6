@@ -111,8 +111,8 @@ final class RuntimeScriptsTest extends TestCase
         $commands = [
             'worker' => 'exec php /opt/ai6/artisan queue:work database --queue=default --sleep=2 "--timeout=$worker_timeout" --tries=3 --no-interaction',
             'scheduler' => 'exec php /opt/ai6/artisan schedule:work --no-interaction',
-            'agent' => 'exec /opt/ai6/docker/idle-heartbeat.sh agent',
-            'checker' => 'exec /opt/ai6/docker/idle-heartbeat.sh checker',
+            'agent' => 'exec php /opt/ai6/artisan ai6:execution-mailbox agent --no-interaction',
+            'checker' => 'exec php /opt/ai6/artisan ai6:execution-mailbox checker --no-interaction',
         ];
 
         self::assertStringNotContainsString('eval ', $script);
@@ -153,22 +153,6 @@ final class RuntimeScriptsTest extends TestCase
         self::assertStringContainsString('exec sleep infinity', $agent['entrypoint'][2]);
         self::assertStringNotContainsString('AI6_TEST_DISABLE_HEARTBEAT_PRODUCER', $agent['entrypoint'][2]);
         self::assertArrayNotHasKey('environment', $agent);
-    }
-
-    public function test_idle_heartbeat_producer_writes_role_boot_id_and_timestamp_atomically(): void
-    {
-        $script = $this->read('docker/idle-heartbeat.sh');
-
-        self::assertMatchesRegularExpression('/^    agent\|checker\)$/m', $script);
-        self::assertStringContainsString('if [ "$directory" != "/run/ai6/heartbeat/$role" ]', $script);
-        self::assertStringContainsString("''|*[!0-9]*|0*)", $script);
-        self::assertStringContainsString('boot_id="$(sed ', $script);
-        self::assertStringContainsString('"role":"%s","boot_id":"%s","recorded_at":%s', $script);
-        self::assertStringContainsString('> "$directory/heartbeat.json.tmp"', $script);
-        self::assertStringContainsString('mv "$directory/heartbeat.json.tmp" "$directory/heartbeat.json"', $script);
-        self::assertStringContainsString('sleep "$interval"', $script);
-        self::assertStringNotContainsString('eval ', $script);
-        self::assertStringNotContainsString('sh -c', $script);
     }
 
     public function test_image_and_sqlite_sources_are_pinned_and_code_runs_unprivileged(): void

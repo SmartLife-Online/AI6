@@ -1,0 +1,7 @@
+<?php
+
+namespace App\AI6\Agents;
+
+use RuntimeException;
+
+final class InstructionPatchException extends RuntimeException {}

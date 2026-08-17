@@ -28,6 +28,9 @@ final class RunningControlProcess
         private readonly int $discardOutputPrefixBytes = 0,
         /** @var null|Closure(int, int): bool */
         private readonly ?Closure $terminateProcessGroup = null,
+        private readonly ?ProcessLimits $limits = null,
+        private readonly ?string $resultDirectory = null,
+        private readonly ?string $artifactDirectory = null,
     ) {}
 
     public function running(): bool
@@ -72,16 +75,30 @@ final class RunningControlProcess
 
         $observedBytes = 0;
         $outcome = null;
+        $limitResult = null;
         $nextHeartbeat = microtime(true) + $heartbeatSeconds;
+        $nextResourceCheck = microtime(true);
 
         while ($this->process->isRunning()) {
             $observedBytes += strlen($this->process->getIncrementalOutput());
             $observedBytes += strlen($this->process->getIncrementalErrorOutput());
 
-            if ($observedBytes > $this->outputLimitBytes + $this->discardOutputPrefixBytes) {
+            $visibleObservedBytes = max(0, $observedBytes - $this->discardOutputPrefixBytes);
+            if ($visibleObservedBytes > $this->outputLimitBytes) {
                 $outcome = ProcessOutcome::OUTPUT_LIMIT_EXCEEDED;
                 $this->terminate();
                 break;
+            }
+
+            if ($this->limits !== null && microtime(true) >= $nextResourceCheck) {
+                $resourceLimit = $this->resourceLimitResult();
+                if ($resourceLimit !== null) {
+                    $outcome = ProcessOutcome::RESOURCE_LIMIT_EXCEEDED;
+                    $limitResult = $resourceLimit;
+                    $this->terminate();
+                    break;
+                }
+                $nextResourceCheck = microtime(true) + 0.1;
             }
 
             if ((microtime(true) - $this->startedAt) >= $this->timeoutSeconds) {
@@ -106,13 +123,20 @@ final class RunningControlProcess
             }
         }
         $duration = max(0.0, microtime(true) - $this->startedAt);
+        $limitResult ??= $this->resourceLimitResult();
+        if ($limitResult !== null) {
+            $outcome = ProcessOutcome::RESOURCE_LIMIT_EXCEEDED;
+        }
 
         if ($this->terminationFailed) {
             return $this->limitedResult(ProcessOutcome::TERMINATION_FAILED, $duration, 'The control process group could not be terminated safely.');
         }
 
-        if ($outcome === null
-            && (strlen($this->process->getOutput()) + strlen($this->process->getErrorOutput())) > $this->outputLimitBytes + $this->discardOutputPrefixBytes) {
+        $finalVisibleBytes = max(
+            0,
+            strlen($this->process->getOutput()) + strlen($this->process->getErrorOutput()) - $this->discardOutputPrefixBytes,
+        );
+        if ($outcome === null && $finalVisibleBytes > $this->outputLimitBytes) {
             $outcome = ProcessOutcome::OUTPUT_LIMIT_EXCEEDED;
         }
 
@@ -120,12 +144,21 @@ final class RunningControlProcess
             return $this->limitedResult(ProcessOutcome::CANCELLED, $duration, 'The control process was cancelled.');
         }
 
+        if ($outcome === ProcessOutcome::RESOURCE_LIMIT_EXCEEDED && $limitResult !== null) {
+            return $this->limitedResult($outcome, $duration, 'The control process exceeded a resource limit.', $limitResult);
+        }
+
         if ($outcome === ProcessOutcome::OUTPUT_LIMIT_EXCEEDED) {
-            return $this->limitedResult($outcome, $duration, 'The control process exceeded its output limit.');
+            return $this->limitedResult(
+                $outcome,
+                $duration,
+                'The control process exceeded a resource limit.',
+                $limitResult ?? new ProcessLimitResult(ProcessLimit::OUTPUT_BYTES, max($finalVisibleBytes, max(0, $observedBytes - $this->discardOutputPrefixBytes)), $this->outputLimitBytes),
+            );
         }
 
         if ($outcome === ProcessOutcome::TIMED_OUT) {
-            return $this->limitedResult($outcome, $duration, 'The control process exceeded its runtime limit.');
+            return $this->limitedResult($outcome, $duration, 'The control process exceeded its runtime limit.', new ProcessLimitResult(ProcessLimit::RUNTIME_SECONDS, (int) floor($duration) + 1, $this->timeoutSeconds));
         }
 
         $output = $this->process->getOutput();
@@ -145,9 +178,76 @@ final class RunningControlProcess
         );
     }
 
-    private function limitedResult(ProcessOutcome $outcome, float $duration, string $message): ProcessResult
+    private function limitedResult(ProcessOutcome $outcome, float $duration, string $message, ?ProcessLimitResult $limitResult = null): ProcessResult
     {
-        return new ProcessResult($outcome, $this->process->getExitCode(), '', $this->redact($message), $duration);
+        return new ProcessResult($outcome, $this->process->getExitCode(), '', $this->redact($message), $duration, $limitResult);
+    }
+
+    private function resourceLimitResult(): ?ProcessLimitResult
+    {
+        if ($this->limits === null) {
+            return null;
+        }
+
+        [$files, $bytes] = $this->directoryInventory($this->resultDirectory);
+        $artifacts = $this->directoryInventory($this->artifactDirectory)[0];
+        foreach ([
+            [ProcessLimit::PROCESS_COUNT, $this->processCount(), $this->limits->processCount],
+            [ProcessLimit::FILE_COUNT, $files, $this->limits->fileCount],
+            [ProcessLimit::TOTAL_BYTES, $bytes, $this->limits->totalBytes],
+            [ProcessLimit::ARTIFACT_COUNT, $artifacts, $this->limits->artifactCount],
+        ] as [$limit, $observed, $maximum]) {
+            if ($observed > $maximum) {
+                return new ProcessLimitResult($limit, $observed, $maximum);
+            }
+        }
+
+        return null;
+    }
+
+    private function processCount(): int
+    {
+        if (DIRECTORY_SEPARATOR !== '/' || ! is_dir('/proc')) {
+            return 1;
+        }
+
+        $count = 0;
+        foreach (scandir('/proc') ?: [] as $entry) {
+            if (preg_match('/\A[1-9][0-9]*\z/D', $entry) !== 1) {
+                continue;
+            }
+            $stat = @file_get_contents('/proc/'.$entry.'/stat');
+            $end = is_string($stat) ? strrpos($stat, ')') : false;
+            if ($end !== false && preg_match('/\A[A-Z] [0-9]+ ([0-9]+) /', substr($stat, $end + 2), $match) === 1
+                && (int) $match[1] === $this->processId) {
+                $count++;
+            }
+        }
+
+        return max(1, $count);
+    }
+
+    /** @return array{int, int} */
+    private function directoryInventory(?string $directory): array
+    {
+        if ($directory === null) {
+            return [0, 0];
+        }
+
+        $files = 0;
+        $bytes = 0;
+        $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS));
+        foreach ($iterator as $entry) {
+            if ($entry->isLink()) {
+                return [PHP_INT_MAX, PHP_INT_MAX];
+            }
+            if ($entry->isFile()) {
+                $files++;
+                $bytes += $entry->getSize();
+            }
+        }
+
+        return [$files, $bytes];
     }
 
     private function terminate(): void

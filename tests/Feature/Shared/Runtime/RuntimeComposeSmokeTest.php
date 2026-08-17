@@ -75,6 +75,8 @@ final class RuntimeComposeSmokeTest extends TestCase
             $this->waitForServiceState($service, static fn (string $state): bool => str_ends_with($state, '|healthy'), 180);
         }
 
+        $this->assertMailboxAndIsolationBoundaries();
+
         $this->assertManagedEffectLocksAreImmutableAcrossInit();
         $this->assertEffectLockSerializesAcrossWorkerInstances();
 
@@ -160,6 +162,105 @@ final class RuntimeComposeSmokeTest extends TestCase
 
             return in_array($manualDigest, $files, true) && count($files) === 2;
         }, 60, 'Genau ein Worker-Nachweis und ein bootgebundener Scheduler-Nachweis wurden nicht innerhalb der Frist sichtbar.');
+    }
+
+    private function assertMailboxAndIsolationBoundaries(): void
+    {
+        foreach (['agent' => '10002', 'checker' => '10003'] as $role => $uid) {
+            $identity = $this->compose(['exec', '-T', $role, 'sh', '-c', 'printf "%s|%s" "$(id -u)" "$(id -g)"'], 30);
+            $identity->mustRun();
+            self::assertSame($uid.'|10001', trim($identity->getOutput()));
+
+            $heartbeat = $this->compose(['exec', '-T', $role, 'cat', '/run/ai6/heartbeat/'.$role.'/heartbeat.json'], 30);
+            $heartbeat->mustRun();
+            $document = json_decode($heartbeat->getOutput(), true, 8, JSON_THROW_ON_ERROR);
+            self::assertSame($role, $document['role'] ?? null);
+            self::assertMatchesRegularExpression('/\A[0-9a-f]{32}\z/D', $document['boot_id'] ?? '');
+            self::assertIsInt($document['mailbox_pending'] ?? null);
+
+            $input = '/var/lib/ai6/'.$role.'-executions';
+            $output = '/var/lib/ai6/'.$role.'-outputs';
+            $readOnly = $this->compose(['exec', '-T', $role, 'php', '-r', '@file_put_contents($argv[1]."/forbidden","x"); exit(file_exists($argv[1]."/forbidden") ? 1 : 0);', $input], 30);
+            $readOnly->mustRun();
+            $writable = $this->compose(['exec', '-T', $role, 'php', '-r', 'exit(file_put_contents($argv[1]."/allowed","x") === 1 ? 0 : 1);', $output], 30);
+            $writable->mustRun();
+        }
+
+        $network = $this->compose(['exec', '-T', 'checker', 'sh', '-c', 'find /sys/class/net -mindepth 1 -maxdepth 1 -printf "%f\n" | sort'], 30);
+        $network->mustRun();
+        self::assertSame('lo', trim($network->getOutput()));
+
+        $prepareCode = <<<'PHP'
+require '/opt/ai6/vendor/autoload.php';
+$app = require '/opt/ai6/bootstrap/app.php';
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+$export = '/tmp/ai6-execution-home-smoke';
+if (!is_dir($export) && !mkdir($export, 0700, true)) { throw new RuntimeException('export'); }
+file_put_contents($export.'/source.php', '<?php');
+$instructions = $app->make(App\AI6\Agents\InstructionProfileRegistry::class)->get('fake');
+$runtime = $app->make(App\AI6\Agents\ProviderRuntimeProfileRegistry::class)->get('fake-v1');
+$entry = new App\AI6\Agents\InstructionSnapshotEntry('agents_md', 'repository', 10, 'AGENTS.md', str_repeat('a', 40), "bound\n", []);
+$snapshot = new App\AI6\Agents\InstructionSnapshot('fake', [$entry], str_repeat('b', 64));
+$home = $app->make(App\AI6\Agents\ExecutionHomeManager::class)->create(
+    '/var/lib/ai6/agent-executions',
+    '/var/lib/ai6/agent-outputs',
+    'smoke-slot',
+    null,
+    $export,
+    $instructions,
+    $snapshot,
+    $runtime,
+    new App\AI6\Agents\CredentialProjection('fake', 'test-v1', []),
+);
+$app->make(App\AI6\Shared\Process\ExecutionMailboxFactory::class)
+    ->forRole(App\AI6\Shared\Process\ExecutionRole::AGENT)
+    ->write(App\AI6\Shared\Process\MailboxMessageType::REQUEST, 'smoke-slot', 'smoke-request', 'request');
+echo json_encode(get_object_vars($home), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+PHP;
+        $prepare = $this->compose(['exec', '-T', 'worker', 'php', '-r', $prepareCode], 30);
+        $prepare->mustRun();
+        $home = json_decode($prepare->getOutput(), true, 16, JSON_THROW_ON_ERROR);
+        self::assertIsArray($home);
+        foreach (['root', 'outputRoot', 'workspace', 'instructionOverlay', 'resultDirectory', 'artifactDirectory'] as $key) {
+            self::assertIsString($home[$key] ?? null);
+        }
+
+        $this->waitUntil(function (): bool {
+            $heartbeat = $this->compose(['exec', '-T', 'agent', 'cat', '/run/ai6/heartbeat/agent/heartbeat.json'], 30);
+            if ($heartbeat->run() !== 0) {
+                return false;
+            }
+            $document = json_decode($heartbeat->getOutput(), true);
+
+            return is_array($document) && ($document['mailbox_pending'] ?? null) === 1;
+        }, 20, 'Die Ausführungsrolle konnte das Worker-Envelope im 0750-Requestverzeichnis nicht sehen.');
+
+        $verify = $this->compose([
+            'exec', '-T', 'agent', 'php', '-r',
+            'require "/opt/ai6/vendor/autoload.php"; $app=require "/opt/ai6/bootstrap/app.php"; $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap(); $request=new App\AI6\Shared\Process\ProcessRequest(["/bin/true"],$argv[1],[],[],new App\AI6\Shared\Redaction\RedactionContext("project","run","smoke"),policy:App\AI6\Shared\Process\ProcessPolicyName::AGENT,resultDirectory:$argv[2],artifactDirectory:$argv[3]); (new App\AI6\Shared\Process\ProcessIsolationVerifier)->assertIsolated($request,App\AI6\Shared\Process\ProcessPolicyRegistry::fromConfiguredValues()->get(App\AI6\Shared\Process\ProcessPolicyName::AGENT)); $mailbox=$app->make(App\AI6\Shared\Process\ExecutionMailboxFactory::class)->forRole(App\AI6\Shared\Process\ExecutionRole::AGENT); $mailbox->write(App\AI6\Shared\Process\MailboxMessageType::RESULT,"smoke-slot","smoke-result","executor-result"); echo "verified";',
+            $home['workspace'], $home['resultDirectory'], $home['artifactDirectory'],
+        ], 30);
+        $verify->mustRun();
+        self::assertSame('verified', trim($verify->getOutput()));
+
+        $consumeCode = <<<'PHP'
+require '/opt/ai6/vendor/autoload.php';
+$app = require '/opt/ai6/bootstrap/app.php';
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+$mailbox = $app->make(App\AI6\Shared\Process\ExecutionMailboxFactory::class)->forRole(App\AI6\Shared\Process\ExecutionRole::AGENT);
+$message = $mailbox->read(App\AI6\Shared\Process\MailboxMessageType::RESULT, 'smoke-slot', 'smoke-result', new App\AI6\Shared\Redaction\RedactionContext('project', 'run', 'smoke-result'));
+$home = new App\AI6\Agents\ExecutionHome(...json_decode($argv[1], true, 16, JSON_THROW_ON_ERROR));
+$app->make(App\AI6\Agents\ExecutionHomeManager::class)->destroy($home);
+echo $message->content;
+PHP;
+        $consume = $this->compose(['exec', '-T', 'worker', 'php', '-r', $consumeCode, json_encode($home, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)], 30);
+        $consume->mustRun();
+        self::assertSame('executor-result', trim($consume->getOutput()));
+
+        foreach ([$home['root'], $home['outputRoot']] as $removedRoot) {
+            $removed = $this->compose(['exec', '-T', 'worker', 'test', '!', '-e', $removedRoot], 30);
+            $removed->mustRun();
+        }
     }
 
     private function assertManagedEffectLocksAreImmutableAcrossInit(): void

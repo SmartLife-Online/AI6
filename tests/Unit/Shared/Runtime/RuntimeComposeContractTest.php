@@ -97,6 +97,8 @@ final class RuntimeComposeContractTest extends TestCase
             'AI6_CONTROL_OPERATION_RECONCILER_SECONDS', 'AI6_CONTROL_OPERATION_STALE_SECONDS',
             'AI6_DEPLOY_KEY_ROOT', 'AI6_EFFECT_LOCK_DIRECTORY', 'AI6_EFFECT_LOCK_OBJECT_COUNT',
             'AI6_EFFECT_LOCK_OWNER_UID', 'AI6_MANAGED_PROJECT_ROOT', 'AI6_SSH_KEYGEN_BINARY',
+            'AI6_AGENT_EXECUTION_ROOT', 'AI6_AGENT_OUTPUT_ROOT', 'AI6_CHECKER_EXECUTION_ROOT', 'AI6_CHECKER_OUTPUT_ROOT',
+            'AI6_CODEX_CREDENTIAL_REVISION', 'AI6_GROK_CREDENTIAL_REVISION', 'AI6_COPILOT_CREDENTIAL_REVISION',
             'AI6_EXECUTION_DIRECTORY', 'AI6_GIT_ALLOWED_HOSTS', 'AI6_GIT_ALLOWED_REMOTE_PATHS', 'AI6_GIT_ALLOWED_REF_PATTERNS',
             'AI6_GIT_PINNED_HOST_KEYS', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE',
             'AI6_WORKER_TIMEOUT', 'APP_DEBUG', 'APP_ENV', 'APP_KEY', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',
@@ -112,8 +114,8 @@ final class RuntimeComposeContractTest extends TestCase
             'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE', 'DB_QUEUE_RETRY_AFTER',
             'DB_SYNCHRONOUS', 'LOG_CHANNEL', 'QUEUE_CONNECTION',
         ],
-        'agent' => ['AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE'],
-        'checker' => ['AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE'],
+        'agent' => [...self::REDACTION_ENVIRONMENT, 'AI6_AGENT_EXECUTION_ROOT', 'AI6_AGENT_OUTPUT_ROOT', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'LOG_CHANNEL'],
+        'checker' => [...self::REDACTION_ENVIRONMENT, 'AI6_CHECKER_EXECUTION_ROOT', 'AI6_CHECKER_OUTPUT_ROOT', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'LOG_CHANNEL'],
     ];
 
     /** @var array<string, list<string>> */
@@ -135,6 +137,10 @@ final class RuntimeComposeContractTest extends TestCase
             'tmpfs::/run/ai6/heartbeat/worker:rw',
             'tmpfs::/tmp:rw',
             'volume:ai6_database:/var/lib/ai6/database:rw',
+            'volume:ai6_agent_executions:/var/lib/ai6/agent-executions:rw',
+            'volume:ai6_agent_outputs:/var/lib/ai6/agent-outputs:rw',
+            'volume:ai6_checker_executions:/var/lib/ai6/checker-executions:rw',
+            'volume:ai6_checker_outputs:/var/lib/ai6/checker-outputs:rw',
             'volume:ai6_executions:/var/lib/ai6/executions:rw',
             'volume:ai6_managed:/var/lib/ai6/managed:rw',
             'volume:ai6_storage:/opt/ai6/storage:rw',
@@ -148,10 +154,14 @@ final class RuntimeComposeContractTest extends TestCase
         'agent' => [
             'tmpfs::/run/ai6/heartbeat/agent:rw',
             'tmpfs::/tmp:rw',
+            'volume:ai6_agent_executions:/var/lib/ai6/agent-executions:ro',
+            'volume:ai6_agent_outputs:/var/lib/ai6/agent-outputs:rw',
         ],
         'checker' => [
             'tmpfs::/run/ai6/heartbeat/checker:rw',
             'tmpfs::/tmp:rw',
+            'volume:ai6_checker_executions:/var/lib/ai6/checker-executions:ro',
+            'volume:ai6_checker_outputs:/var/lib/ai6/checker-outputs:rw',
         ],
     ];
 
@@ -264,13 +274,13 @@ final class RuntimeComposeContractTest extends TestCase
             }
         }
 
-        foreach (['app', 'worker', 'scheduler'] as $role) {
+        foreach (['app', 'worker', 'scheduler', 'agent', 'checker'] as $role) {
             $environment = $services[$role]['environment'] ?? [];
             self::assertSame('${AI6_REDACTION_ACTIVE_KEY_ID:-app-key-v1}', $environment['AI6_REDACTION_ACTIVE_KEY_ID'] ?? null);
             self::assertSame('${AI6_REDACTION_KEYS:-}', $environment['AI6_REDACTION_KEYS'] ?? null);
         }
 
-        foreach (['init', 'agent', 'checker'] as $role) {
+        foreach (['init'] as $role) {
             $environment = $services[$role]['environment'] ?? [];
             self::assertArrayNotHasKey('AI6_REDACTION_ACTIVE_KEY_ID', $environment);
             self::assertArrayNotHasKey('AI6_REDACTION_KEYS', $environment);
@@ -327,6 +337,7 @@ final class RuntimeComposeContractTest extends TestCase
         foreach (['init', 'worker', 'scheduler', 'agent', 'checker'] as $role) {
             self::assertArrayNotHasKey('networks', $services[$role]);
         }
+        self::assertSame('none', $services['checker']['network_mode'] ?? null);
         self::assertArrayNotHasKey('internal', $compose['networks']['proxy'] ?? []);
         self::assertSame('${AI6_PROXY_ADDRESS:-172.30.61.2}', $caddyAddress);
         self::assertSame('${AI6_PROXY_SUBNET:-172.30.61.0/29}', $subnet);
@@ -346,7 +357,7 @@ final class RuntimeComposeContractTest extends TestCase
     public function test_heartbeat_mounts_are_private_tmpfs_and_persistent_targets_are_named_volumes(): void
     {
         $compose = $this->compose();
-        self::assertSame(['ai6_database', 'ai6_executions', 'ai6_managed', 'ai6_storage'], $this->sortedKeys($compose['volumes'] ?? []));
+        self::assertSame(['ai6_agent_executions', 'ai6_agent_outputs', 'ai6_checker_executions', 'ai6_checker_outputs', 'ai6_database', 'ai6_executions', 'ai6_managed', 'ai6_storage'], $this->sortedKeys($compose['volumes'] ?? []));
 
         foreach (['worker', 'scheduler', 'agent', 'checker'] as $role) {
             $heartbeatMounts = array_values(array_filter(

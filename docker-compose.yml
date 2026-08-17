@@ -145,6 +145,13 @@
       "read_only": true,
       "environment": {
         "AI6_EXECUTION_DIRECTORY": "/var/lib/ai6/executions",
+        "AI6_AGENT_EXECUTION_ROOT": "/var/lib/ai6/agent-executions",
+        "AI6_AGENT_OUTPUT_ROOT": "/var/lib/ai6/agent-outputs",
+        "AI6_CHECKER_EXECUTION_ROOT": "/var/lib/ai6/checker-executions",
+        "AI6_CHECKER_OUTPUT_ROOT": "/var/lib/ai6/checker-outputs",
+        "AI6_CODEX_CREDENTIAL_REVISION": "${AI6_CODEX_CREDENTIAL_REVISION:-}",
+        "AI6_GROK_CREDENTIAL_REVISION": "${AI6_GROK_CREDENTIAL_REVISION:-}",
+        "AI6_COPILOT_CREDENTIAL_REVISION": "${AI6_COPILOT_CREDENTIAL_REVISION:-}",
         "AI6_MANAGED_PROJECT_ROOT": "/var/lib/ai6/managed",
         "AI6_DEPLOY_KEY_ROOT": "/var/lib/ai6/managed/deploy-keys",
         "AI6_EFFECT_LOCK_DIRECTORY": "/var/lib/ai6/managed/effect-locks",
@@ -206,6 +213,10 @@
         { "type": "volume", "source": "ai6_database", "target": "/var/lib/ai6/database" },
         { "type": "volume", "source": "ai6_storage", "target": "/opt/ai6/storage" },
         { "type": "volume", "source": "ai6_executions", "target": "/var/lib/ai6/executions" },
+        { "type": "volume", "source": "ai6_agent_executions", "target": "/var/lib/ai6/agent-executions" },
+        { "type": "volume", "source": "ai6_agent_outputs", "target": "/var/lib/ai6/agent-outputs" },
+        { "type": "volume", "source": "ai6_checker_executions", "target": "/var/lib/ai6/checker-executions" },
+        { "type": "volume", "source": "ai6_checker_outputs", "target": "/var/lib/ai6/checker-outputs" },
         { "type": "volume", "source": "ai6_managed", "target": "/var/lib/ai6/managed" },
         { "type": "tmpfs", "target": "/run/ai6/heartbeat/worker", "tmpfs": { "mode": 511, "size": 1048576 } },
         { "type": "tmpfs", "target": "/tmp", "tmpfs": { "mode": 1023, "size": 67108864 } }
@@ -275,12 +286,21 @@
       "command": ["agent"],
       "depends_on": { "init": { "condition": "service_completed_successfully" } },
       "read_only": true,
+      "user": "10002:10001",
       "environment": {
+        "AI6_AGENT_EXECUTION_ROOT": "/var/lib/ai6/agent-executions",
+        "AI6_AGENT_OUTPUT_ROOT": "/var/lib/ai6/agent-outputs",
         "AI6_HEARTBEAT_DIRECTORY": "/run/ai6/heartbeat/agent",
         "AI6_HEARTBEAT_INTERVAL": "${AI6_IDLE_HEARTBEAT_INTERVAL:-5}",
-        "AI6_HEARTBEAT_MAX_AGE": "${AI6_AGENT_HEARTBEAT_MAX_AGE:-15}"
+        "AI6_HEARTBEAT_MAX_AGE": "${AI6_AGENT_HEARTBEAT_MAX_AGE:-15}",
+        "AI6_REDACTION_ACTIVE_KEY_ID": "${AI6_REDACTION_ACTIVE_KEY_ID:-app-key-v1}",
+        "AI6_REDACTION_KEYS": "${AI6_REDACTION_KEYS:-}",
+        "AI6_RUNTIME_ROLE": "agent",
+        "LOG_CHANNEL": "stderr"
       },
       "volumes": [
+        { "type": "volume", "source": "ai6_agent_executions", "target": "/var/lib/ai6/agent-executions", "read_only": true },
+        { "type": "volume", "source": "ai6_agent_outputs", "target": "/var/lib/ai6/agent-outputs" },
         { "type": "tmpfs", "target": "/run/ai6/heartbeat/agent", "tmpfs": { "mode": 511, "size": 1048576 } },
         { "type": "tmpfs", "target": "/tmp", "tmpfs": { "mode": 1023, "size": 67108864 } }
       ],
@@ -299,12 +319,22 @@
       "command": ["checker"],
       "depends_on": { "init": { "condition": "service_completed_successfully" } },
       "read_only": true,
+      "user": "10003:10001",
+      "network_mode": "none",
       "environment": {
+        "AI6_CHECKER_EXECUTION_ROOT": "/var/lib/ai6/checker-executions",
+        "AI6_CHECKER_OUTPUT_ROOT": "/var/lib/ai6/checker-outputs",
         "AI6_HEARTBEAT_DIRECTORY": "/run/ai6/heartbeat/checker",
         "AI6_HEARTBEAT_INTERVAL": "${AI6_IDLE_HEARTBEAT_INTERVAL:-5}",
-        "AI6_HEARTBEAT_MAX_AGE": "${AI6_CHECKER_HEARTBEAT_MAX_AGE:-15}"
+        "AI6_HEARTBEAT_MAX_AGE": "${AI6_CHECKER_HEARTBEAT_MAX_AGE:-15}",
+        "AI6_REDACTION_ACTIVE_KEY_ID": "${AI6_REDACTION_ACTIVE_KEY_ID:-app-key-v1}",
+        "AI6_REDACTION_KEYS": "${AI6_REDACTION_KEYS:-}",
+        "AI6_RUNTIME_ROLE": "checker",
+        "LOG_CHANNEL": "stderr"
       },
       "volumes": [
+        { "type": "volume", "source": "ai6_checker_executions", "target": "/var/lib/ai6/checker-executions", "read_only": true },
+        { "type": "volume", "source": "ai6_checker_outputs", "target": "/var/lib/ai6/checker-outputs" },
         { "type": "tmpfs", "target": "/run/ai6/heartbeat/checker", "tmpfs": { "mode": 511, "size": 1048576 } },
         { "type": "tmpfs", "target": "/tmp", "tmpfs": { "mode": 1023, "size": 67108864 } }
       ],
@@ -330,6 +360,18 @@
     "ai6_database": {},
     "ai6_storage": {},
     "ai6_executions": {},
+    "ai6_agent_executions": {
+      "driver_opts": { "type": "tmpfs", "device": "tmpfs", "o": "uid=10001,gid=10001,mode=0750,nosuid,nodev,noexec" }
+    },
+    "ai6_agent_outputs": {
+      "driver_opts": { "type": "tmpfs", "device": "tmpfs", "o": "uid=10001,gid=10001,mode=1730,nosuid,nodev,noexec" }
+    },
+    "ai6_checker_executions": {
+      "driver_opts": { "type": "tmpfs", "device": "tmpfs", "o": "uid=10001,gid=10001,mode=0750,nosuid,nodev,noexec" }
+    },
+    "ai6_checker_outputs": {
+      "driver_opts": { "type": "tmpfs", "device": "tmpfs", "o": "uid=10001,gid=10001,mode=1730,nosuid,nodev,noexec" }
+    },
     "ai6_managed": {}
   }
 }

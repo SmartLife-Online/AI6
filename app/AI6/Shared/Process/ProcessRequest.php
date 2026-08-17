@@ -20,6 +20,10 @@ final readonly class ProcessRequest
         public RedactionContext $redactionContext,
         public ?int $timeoutSeconds = null,
         public ?int $outputLimitBytes = null,
+        public ProcessPolicyName $policy = ProcessPolicyName::CONTROL,
+        public ?ProcessLimits $approvedLimits = null,
+        public ?string $resultDirectory = null,
+        public ?string $artifactDirectory = null,
     ) {
         if ($this->command === []) {
             throw new InvalidArgumentException('A control process requires a non-empty argument list.');
@@ -60,6 +64,13 @@ final readonly class ProcessRequest
 
         if ($this->outputLimitBytes !== null && $this->outputLimitBytes < 1) {
             throw new InvalidArgumentException('A requested process output limit must be positive.');
+        }
+
+        if ($this->resultDirectory !== null && ! is_dir($this->resultDirectory)) {
+            throw new InvalidArgumentException('A process result directory must already exist.');
+        }
+        if ($this->artifactDirectory !== null && ! is_dir($this->artifactDirectory)) {
+            throw new InvalidArgumentException('A process artifact directory must already exist.');
         }
     }
 }

@@ -5,6 +5,7 @@ namespace Tests\Unit\Shared\Process;
 use App\AI6\Shared\Process\ControlProcessRunner;
 use App\AI6\Shared\Process\EffectLock;
 use App\AI6\Shared\Process\ProcessConfiguration;
+use App\AI6\Shared\Process\ProcessLimit;
 use App\AI6\Shared\Process\ProcessOutcome;
 use App\AI6\Shared\Process\ProcessRequest;
 use App\AI6\Shared\Redaction\RedactionContext;
@@ -52,6 +53,9 @@ PHP;
         ]));
         self::assertSame(ProcessOutcome::TIMED_OUT, $timeout->outcome);
         self::assertSame('', $timeout->output);
+        self::assertSame(ProcessLimit::RUNTIME_SECONDS, $timeout->limitResult->limit);
+        self::assertSame(1, $timeout->limitResult->maximum);
+        self::assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/D', $timeout->limitResult->hash);
 
         $output = $this->runner(timeout: 5, outputLimit: 64)->run($this->request([
             PHP_BINARY,
@@ -60,6 +64,10 @@ PHP;
         ]));
         self::assertSame(ProcessOutcome::OUTPUT_LIMIT_EXCEEDED, $output->outcome);
         self::assertSame('', $output->output);
+        self::assertSame(ProcessLimit::OUTPUT_BYTES, $output->limitResult->limit);
+        self::assertSame(64, $output->limitResult->maximum);
+        self::assertGreaterThan(64, $output->limitResult->observed);
+        self::assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/D', $output->limitResult->hash);
     }
 
     public function test_a_running_process_can_be_cancelled_and_errors_are_centrally_redacted(): void

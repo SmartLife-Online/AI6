@@ -4,6 +4,8 @@ namespace App\AI6\Shared;
 
 use App\AI6\Agents\AgentInputLimits;
 use App\AI6\Agents\AgentProfileRegistry;
+use App\AI6\Agents\CredentialRevisionRegistry;
+use App\AI6\Agents\ExecutionHomeManager;
 use App\AI6\Agents\InstructionProfileRegistry;
 use App\AI6\Agents\InstructionSnapshotResolver;
 use App\AI6\Agents\ModelProfileAllowlist;
@@ -66,8 +68,13 @@ use App\AI6\Shared\Markdown\AllowedHtmlPolicy;
 use App\AI6\Shared\Markdown\SafeMarkdownRenderer;
 use App\AI6\Shared\Process\ControlProcessRunner;
 use App\AI6\Shared\Process\EffectLock;
+use App\AI6\Shared\Process\ExecutionMailboxCommand;
+use App\AI6\Shared\Process\ExecutionMailboxFactory;
 use App\AI6\Shared\Process\ProcessConfiguration;
 use App\AI6\Shared\Process\ProcessConfigurationFactory;
+use App\AI6\Shared\Process\ProcessIsolationBoundary;
+use App\AI6\Shared\Process\ProcessIsolationVerifier;
+use App\AI6\Shared\Process\ProcessPolicyRegistry;
 use App\AI6\Shared\Redaction\RedactionFingerprintGenerator;
 use App\AI6\Shared\Redaction\RedactionKeyring;
 use App\AI6\Shared\Redaction\RedactionKeyringFactory;
@@ -122,6 +129,17 @@ final class AI6ServiceProvider extends ServiceProvider
         );
         $this->app->singleton(InstructionProfileRegistry::class);
         $this->app->singleton(InstructionSnapshotResolver::class);
+        $this->app->singleton(CredentialRevisionRegistry::class, static fn (): CredentialRevisionRegistry => CredentialRevisionRegistry::fromConfiguredValues());
+        $this->app->singleton(
+            ExecutionHomeManager::class,
+            static fn (Application $app): ExecutionHomeManager => new ExecutionHomeManager(
+                $app->make(CanonicalJson::class),
+                $app->make(CredentialRevisionRegistry::class),
+                $app->make(ProviderRuntimeProfileRegistry::class),
+                $app->make(InstructionProfileRegistry::class),
+                $app->make(AgentInputLimits::class),
+            ),
+        );
         $this->app->singleton(ModelProfileAllowlist::class);
         $this->app->singleton(PromptCatalog::class, static fn (): PromptCatalog => PromptCatalog::defaults());
         $this->app->singleton(PromptRenderer::class);
@@ -206,6 +224,15 @@ final class AI6ServiceProvider extends ServiceProvider
             ),
         );
         $this->app->singleton(ProcessConfigurationFactory::class);
+        $this->app->singleton(ProcessIsolationBoundary::class, ProcessIsolationVerifier::class);
+        $this->app->singleton(ExecutionMailboxFactory::class);
+        $this->commands([ExecutionMailboxCommand::class]);
+        $this->app->singleton(
+            ProcessPolicyRegistry::class,
+            static fn (Application $app): ProcessPolicyRegistry => ProcessPolicyRegistry::fromConfiguredValues(
+                static fn (): string => $app->make(ControlOperationConfiguration::class)->managedRoot,
+            ),
+        );
         $this->app->singleton(
             ProcessConfiguration::class,
             static fn (Application $app): ProcessConfiguration => $app->make(ProcessConfigurationFactory::class)->fromConfiguredValues(),
@@ -220,6 +247,8 @@ final class AI6ServiceProvider extends ServiceProvider
                 $app->make(ProcessConfiguration::class),
                 $app->make(Redactor::class),
                 $app->make(EffectLock::class),
+                $app->make(ProcessPolicyRegistry::class),
+                $app->make(ProcessIsolationBoundary::class),
             ),
         );
         $this->app->singleton(GitConfigurationFactory::class);

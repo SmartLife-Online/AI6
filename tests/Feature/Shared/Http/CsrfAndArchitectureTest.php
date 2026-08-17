@@ -16,6 +16,36 @@ use Tests\Feature\Auth\AuthFeatureTestCase;
 
 final class CsrfAndArchitectureTest extends AuthFeatureTestCase
 {
+    public function test_http_and_livewire_entry_points_cannot_start_a_process_synchronously(): void
+    {
+        $pattern = '/(?:ControlProcessRunner|ProcessRunner|new\s+Process\s*\(|proc_open\s*\(|shell_exec\s*\(|(?<!->|::)exec\s*\(|system\s*\(|passthru\s*\(|popen\s*\(|`[^`]+`)/i';
+        self::assertSame(1, preg_match($pattern, '<?php final class Counterexample { public function __invoke(): void { system("forbidden"); } }'));
+
+        $livewire = array_map(static fn (string $path): string => str_replace('\\', '/', app_path($path)), [
+            'AI6/Runs/TicketApprovalPage.php',
+            'AI6/Runs/ApprovalStatusPage.php',
+            'AI6/Tickets/Livewire/TicketDetail.php',
+            'AI6/Tickets/Livewire/TicketList.php',
+        ]);
+        $checked = [];
+        $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator(app_path('AI6')));
+        foreach ($iterator as $file) {
+            $path = str_replace('\\', '/', $file->getPathname());
+            if (! $file->isFile() || $file->getExtension() !== 'php'
+                || (! str_contains($path, '/Http/') && ! in_array($path, $livewire, true))) {
+                continue;
+            }
+            $source = file_get_contents($file->getPathname());
+            self::assertIsString($source);
+            self::assertSame(0, preg_match($pattern, $source), $file->getPathname());
+            $checked[] = $path;
+        }
+        foreach ($livewire as $path) {
+            self::assertContains($path, $checked);
+        }
+        self::assertGreaterThan(count($livewire), count($checked), 'No modular HTTP entry point was checked.');
+    }
+
     public function test_login_logout_and_administrative_mutation_reject_missing_and_foreign_csrf_tokens(): void
     {
         $this->app->instance('env', 'production');

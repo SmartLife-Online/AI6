@@ -70,9 +70,9 @@ case "$role" in
         exec php /opt/ai6/artisan schedule:work --no-interaction
         ;;
     agent)
-        exec /opt/ai6/docker/idle-heartbeat.sh agent
+        exec php /opt/ai6/artisan ai6:execution-mailbox agent --no-interaction
         ;;
     checker)
-        exec /opt/ai6/docker/idle-heartbeat.sh checker
+        exec php /opt/ai6/artisan ai6:execution-mailbox checker --no-interaction
         ;;
 esac

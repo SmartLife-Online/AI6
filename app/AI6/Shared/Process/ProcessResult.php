@@ -10,6 +10,7 @@ final readonly class ProcessResult
         public string $output,
         public string $errorOutput,
         public float $durationSeconds,
+        public ?ProcessLimitResult $limitResult = null,
     ) {}
 
     public function succeeded(): bool

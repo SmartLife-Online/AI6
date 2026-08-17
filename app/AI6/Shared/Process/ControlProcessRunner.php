@@ -20,6 +20,8 @@ final class ControlProcessRunner
         private readonly ProcessConfiguration $configuration,
         private readonly Redactor $redactor,
         private readonly EffectLock $effectLock,
+        private readonly ?ProcessPolicyRegistry $policies = null,
+        private readonly ?ProcessIsolationBoundary $isolationBoundary = null,
     ) {}
 
     public function run(ProcessRequest $request): ProcessResult
@@ -28,6 +30,14 @@ final class ControlProcessRunner
 
         try {
             return $this->start($request)->wait();
+        } catch (ProcessStartRejectedException $exception) {
+            return new ProcessResult(
+                ProcessOutcome::START_REJECTED,
+                null,
+                '',
+                $this->safeError($exception->getMessage(), $request),
+                max(0.0, microtime(true) - $startedAt),
+            );
         } catch (Throwable) {
             return new ProcessResult(
                 ProcessOutcome::START_FAILED,
@@ -42,6 +52,7 @@ final class ControlProcessRunner
     /** @throws RuntimeException */
     public function start(ProcessRequest $request): RunningControlProcess
     {
+        [$timeout, $outputLimit, $cancelGrace, $limits] = $this->resolvePolicy($request);
         $command = DIRECTORY_SEPARATOR === '/'
             ? $this->wrapperCommand(['direct', '--', ...$request->command])
             : $request->command;
@@ -59,17 +70,30 @@ final class ControlProcessRunner
             $process,
             $this->redactor,
             $request->redactionContext,
-            min($request->timeoutSeconds ?? $this->configuration->timeoutSeconds, $this->configuration->timeoutSeconds),
-            min($request->outputLimitBytes ?? $this->configuration->outputLimitBytes, $this->configuration->outputLimitBytes),
-            $this->configuration->cancelGraceMilliseconds,
+            $timeout,
+            $outputLimit,
+            $cancelGrace,
             $processId,
             $startedAt,
             terminateProcessGroup: $this->processGroupTerminator($process),
+            limits: $limits,
+            resultDirectory: $request->resultDirectory,
+            artifactDirectory: $request->artifactDirectory,
         );
     }
 
     public function startBlocked(ProcessRequest $request, string $lockName): BlockedProcessStartResult
     {
+        try {
+            [$timeout, $outputLimit, $cancelGrace, $limits] = $this->resolvePolicy($request);
+        } catch (ProcessStartRejectedException $exception) {
+            return new BlockedProcessStartResult(
+                BlockedStartOutcome::CONFIGURATION_ERROR,
+                null,
+                $exception->getMessage(),
+            );
+        }
+
         if (DIRECTORY_SEPARATOR !== '/') {
             return new BlockedProcessStartResult(
                 BlockedStartOutcome::CONFIGURATION_ERROR,
@@ -113,7 +137,7 @@ final class ControlProcessRunner
             return new BlockedProcessStartResult(BlockedStartOutcome::START_FAILED, null, 'The blocked control process has no process identifier.');
         }
 
-        $deadline = microtime(true) + min($this->configuration->wrapperReadyTimeoutSeconds, $request->timeoutSeconds ?? $this->configuration->timeoutSeconds);
+        $deadline = microtime(true) + min($this->configuration->wrapperReadyTimeoutSeconds, $timeout);
         $protocol = '';
         do {
             $protocol .= $process->getIncrementalOutput();
@@ -130,13 +154,16 @@ final class ControlProcessRunner
                     $process,
                     $this->redactor,
                     $request->redactionContext,
-                    min($request->timeoutSeconds ?? $this->configuration->timeoutSeconds, $this->configuration->timeoutSeconds),
-                    min($request->outputLimitBytes ?? $this->configuration->outputLimitBytes, $this->configuration->outputLimitBytes),
-                    $this->configuration->cancelGraceMilliseconds,
+                    $timeout,
+                    $outputLimit,
+                    $cancelGrace,
                     $processId,
                     $startedAt,
                     strlen($line.self::RELEASED_PREFIX.$processId."\n"),
                     $this->processGroupTerminator($process),
+                    $limits,
+                    $request->resultDirectory,
+                    $request->artifactDirectory,
                 );
 
                 return new BlockedProcessStartResult(
@@ -204,6 +231,82 @@ final class ControlProcessRunner
         }
 
         return $environment;
+    }
+
+    /** @return array{int, int, int, ?ProcessLimits} */
+    private function resolvePolicy(ProcessRequest $request): array
+    {
+        if ($this->policies === null) {
+            return [
+                min($request->timeoutSeconds ?? $this->configuration->timeoutSeconds, $this->configuration->timeoutSeconds),
+                min($request->outputLimitBytes ?? $this->configuration->outputLimitBytes, $this->configuration->outputLimitBytes),
+                $this->configuration->cancelGraceMilliseconds,
+                null,
+            ];
+        }
+
+        $policy = $this->policies->get($request->policy);
+        if (! $this->pathWithinAny($request->workingDirectory, $policy->workingRoots)) {
+            throw new ProcessStartRejectedException('The process working directory is outside its configured policy root.');
+        }
+
+        if ($request->policy !== ProcessPolicyName::CONTROL) {
+            if ($this->isolationBoundary === null) {
+                throw new ProcessStartRejectedException('The required process isolation boundary is not available.');
+            }
+            $this->isolationBoundary->assertIsolated($request, $policy);
+            if ($policy->requiresProcessGroup && (DIRECTORY_SEPARATOR !== '/' || $this->configuration->setsidBinary === null)) {
+                throw new ProcessStartRejectedException('The required process-group boundary is not available.');
+            }
+        }
+
+        if (! in_array('*', $policy->allowedExecutables, true) && ! in_array($request->command[0], $policy->allowedExecutables, true)) {
+            throw new ProcessStartRejectedException('The process executable is not allowed by its configured policy.');
+        }
+
+        foreach ($request->environmentAllowlist as $name) {
+            if (! in_array($name, $policy->environmentAllowlist, true)) {
+                throw new ProcessStartRejectedException('The process environment exceeds its configured policy.');
+            }
+        }
+
+        $server = $this->policies->serverLimits;
+        $effective = (new ProcessLimits(
+            min($policy->timeoutSeconds, $server->runtimeSeconds),
+            min($policy->outputLimitBytes, $server->outputBytes),
+            $server->processCount,
+            $server->fileCount,
+            $server->totalBytes,
+            $server->artifactCount,
+        ))->restrict($request->approvedLimits);
+
+        return [
+            min($request->timeoutSeconds ?? $effective->runtimeSeconds, $effective->runtimeSeconds),
+            min($request->outputLimitBytes ?? $effective->outputBytes, $effective->outputBytes),
+            $policy->cancelGraceMilliseconds,
+            $request->policy === ProcessPolicyName::CONTROL ? null : $effective,
+        ];
+    }
+
+    private function pathWithin(string $path, string $root): bool
+    {
+        $resolvedPath = realpath($path);
+        $resolvedRoot = realpath($root);
+
+        return $resolvedPath !== false && $resolvedRoot !== false
+            && ($resolvedPath === $resolvedRoot || str_starts_with($resolvedPath, rtrim($resolvedRoot, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR));
+    }
+
+    /** @param list<string> $roots */
+    private function pathWithinAny(string $path, array $roots): bool
+    {
+        foreach ($roots as $root) {
+            if ($this->pathWithin($path, $root)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** @return null|Closure(int, int): bool */
