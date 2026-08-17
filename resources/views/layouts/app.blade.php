@@ -13,6 +13,7 @@
             <nav aria-label="Hauptnavigation">
                 <a href="{{ route('projects.index') }}">Projekte</a>
                 <a href="{{ route('agents.profiles') }}">Agentenprofile</a>
+                <a href="{{ route('prompts.help') }}">Prompt-Hilfe</a>
                 @php($navProject = request()->route('project'))
                 @if ($navProject instanceof \App\AI6\Projects\Models\Project && $navProject->active_run_id !== null)
                     <a href="{{ route('projects.runs.show', [$navProject, $navProject->active_run_id]) }}">Run-Timeline</a>

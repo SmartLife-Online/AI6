@@ -160,6 +160,9 @@ return [
         'max_instruction_import_depth' => 8,
         'max_prompt_input_bytes' => 2097152,
     ],
+    'manual_prompt_help' => [
+        'max_review_answer_bytes' => 262144,
+    ],
     'agent_profiles' => [
         'codex-gpt-5.6-terra' => [
             'provider_profile' => 'codex_cli',

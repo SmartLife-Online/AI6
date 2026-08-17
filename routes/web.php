@@ -12,6 +12,7 @@ use App\AI6\Git\Http\ControlOperationController;
 use App\AI6\Projects\Http\ProjectConfigurationController;
 use App\AI6\Projects\Http\ProjectController;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Prompts\Livewire\PromptHelp;
 use App\AI6\Runs\ApprovalStatusPage;
 use App\AI6\Runs\RunStartController;
 use App\AI6\Runs\RunTimelinePage;
@@ -35,6 +36,7 @@ Route::middleware('guest')->group(function (): void {
 Route::middleware('auth')->group(function (): void {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
     Route::get('/agents/profiles', AgentProfileController::class)->name('agents.profiles');
+    Route::get('/prompts/help', PromptHelp::class)->name('prompts.help');
 
     Route::prefix('auth')->name('auth.')->group(function (): void {
         Route::get('/factor', [PrimaryAuthenticationController::class, 'factor'])

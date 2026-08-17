@@ -41,7 +41,7 @@ final class PromptCatalogTest extends TestCase
 
         self::assertSame($first->renderedPrompts, $second->renderedPrompts);
         self::assertSame($first->hash, $second->hash);
-        self::assertSame('1', $first->catalogVersion);
+        self::assertSame(PromptCatalog::VERSION, $first->catalogVersion);
     }
 
     public function test_prompt_source_has_exactly_one_catalog_and_renderer(): void
@@ -91,7 +91,7 @@ final class PromptCatalogTest extends TestCase
         return $files;
     }
 
-    public function test_six_purposes_render_byte_identically_against_the_golden_fixture(): void
+    public function test_nine_catalog_entries_render_byte_identically_against_the_golden_fixture(): void
     {
         $fixture = $this->fixture();
         $catalog = $this->app->make(PromptCatalog::class);
@@ -99,18 +99,22 @@ final class PromptCatalogTest extends TestCase
 
         self::assertSame($fixture['catalog_version'], $catalog->version);
         self::assertSame(
-            ['finding_verification', 'fix', 'human_response', 'implementation', 'quality_review', 'security_review'],
+            ['finding_verification', 'fix', 'human_response', 'implementation', 'manual_finding_list_fix', 'manual_foreign_fix_review', 'manual_own_review_fix', 'quality_review', 'security_review'],
             array_column($catalog->entries(), 'id'),
         );
+        self::assertSame(array_keys($fixture['entries']), array_column($catalog->entries(), 'id'));
         foreach ($fixture['entries'] as $id => $expected) {
-            $request = new PromptRenderRequest($id, new PromptVariables(['context' => $fixture['context']]));
+            $variables = is_array($expected['variables'] ?? null)
+                ? $expected['variables']
+                : ['context' => $fixture['context']];
+            $request = new PromptRenderRequest($id, new PromptVariables($variables));
             $first = $renderer->snapshot([$request], $this->context());
             $second = $renderer->snapshot([$request], $this->context());
             self::assertSame($expected['prompt'], $first->renderedPrompts[$id]);
             self::assertSame($expected['hash'], $first->hash);
             self::assertSame($first->renderedPrompts, $second->renderedPrompts);
             self::assertSame($first->hash, $second->hash);
-            self::assertSame('1', $first->catalogVersion);
+            self::assertSame($fixture['catalog_version'], $first->catalogVersion);
         }
     }
 
@@ -125,11 +129,11 @@ final class PromptCatalogTest extends TestCase
         $first = $this->renderer($base)->snapshot([$request], $this->context());
         $entryChanged = $base->withEntry(
             new PromptEntry('quality_review', '2', $base->entry('quality_review')->template."\nVersionierter Zusatz.", ['context']),
-            '2',
+            '3',
         );
         $profileChanged = $base->withReviewProfile(
             new ReviewPromptProfile('architecture', '2', 'Architektur', 'Geänderter autorisierter Fokus.'),
-            '2',
+            '3',
         );
 
         self::assertNotSame($first->hash, $this->renderer($entryChanged)->snapshot([$request], $this->context())->hash);
@@ -183,7 +187,7 @@ final class PromptCatalogTest extends TestCase
             }
         }
 
-        $extended = $catalog->withEntry(new PromptEntry('test_extension', '1', 'Test: {{context}}', ['context']), '2');
+        $extended = $catalog->withEntry(new PromptEntry('test_extension', '1', 'Test: {{context}}', ['context']), '3');
         self::assertSame(
             'Test: erweitert',
             $this->renderer($extended)->render(
@@ -274,6 +278,16 @@ final class PromptCatalogTest extends TestCase
         } catch (PromptRenderingException $exception) {
             self::assertSame(PromptRenderingError::VARIABLES_INVALID, $exception->reason);
         }
+
+        $empty = new PromptVariables([]);
+        self::assertSame([], $empty->values);
+
+        try {
+            new PromptVariables(['a', 'b']);
+            self::fail('A positional prompt-variable list was accepted.');
+        } catch (InvalidArgumentException $exception) {
+            self::assertSame('Prompt variables must be a typed mapping.', $exception->getMessage());
+        }
     }
 
     public function test_catalog_changes_require_a_strictly_increased_catalog_version(): void
@@ -310,7 +324,7 @@ final class PromptCatalogTest extends TestCase
     /** @return array<string, mixed> */
     private function fixture(): array
     {
-        $content = file_get_contents(dirname(__DIR__, 2).'/Fixtures/Prompts/catalog-v1.json');
+        $content = file_get_contents(dirname(__DIR__, 2).'/Fixtures/Prompts/catalog-v2.json');
         self::assertNotFalse($content);
 
         return json_decode($content, true, 512, JSON_THROW_ON_ERROR);

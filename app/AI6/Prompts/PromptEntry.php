@@ -10,5 +10,6 @@ final readonly class PromptEntry
         public string $version,
         public string $template,
         public array $requiredVariables,
+        public string $displayName = '',
     ) {}
 }

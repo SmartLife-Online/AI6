@@ -469,6 +469,74 @@ pre {
     background: var(--ai6-neutral-surface);
 }
 
+.ai6-prompt-help {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    min-width: 0;
+}
+
+.ai6-prompt-panel,
+.ai6-prompt-card {
+    min-width: 0;
+    padding: 1rem;
+    background: var(--ai6-surface);
+    border: 1px solid var(--ai6-border);
+    border-radius: 0.5rem;
+}
+
+.ai6-prompt-panel h2,
+.ai6-prompt-card h3 {
+    margin: 0 0 0.5rem;
+    overflow-wrap: anywhere;
+}
+
+.ai6-prompt-card {
+    margin-top: 1rem;
+}
+
+.ai6-prompt-form {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+    min-width: 0;
+}
+
+.ai6-prompt-label {
+    display: block;
+    margin: 0.75rem 0 0.25rem;
+    font-weight: 600;
+}
+
+.ai6-prompt-preview,
+.ai6-prompt-input {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    min-height: 10rem;
+    resize: vertical;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: 0.9rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ai6-prompt-status,
+.ai6-prompt-complete,
+.ai6-prompt-redaction {
+    min-height: 1.5rem;
+    margin: 0.5rem 0 0;
+}
+
+.ai6-prompt-complete {
+    color: var(--ai6-ok);
+}
+
+.ai6-prompt-redaction {
+    color: var(--ai6-warn);
+}
+
 @media (max-width: 480px) {
     body {
         padding: 0 0.6rem 2rem;

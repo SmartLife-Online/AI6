@@ -12,7 +12,7 @@ final readonly class PromptVariables
     /** @param array<array-key, mixed> $values */
     public function __construct(array $values)
     {
-        if (array_is_list($values)) {
+        if ($values !== [] && array_is_list($values)) {
             throw new InvalidArgumentException('Prompt variables must be a typed mapping.');
         }
         $validated = [];

@@ -110,7 +110,7 @@ final class TicketApprovalQueueTest extends TicketUiTestCase
         self::assertSame('prepared', $approval->saga_phase);
         self::assertSame('pending_approval_effect', $approval->queue_state);
         self::assertCount(17, $approval->limits_snapshot);
-        self::assertSame('1', $approval->prompt_snapshot['catalog_version']);
+        self::assertSame('2', $approval->prompt_snapshot['catalog_version']);
         self::assertArrayHasKey('fake-v1', $approval->runtime_profile_snapshot);
         self::assertSame(1, DB::table('jobs')->count());
         self::assertSame(0, DB::table('runs')->count());

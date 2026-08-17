@@ -58,6 +58,7 @@ final class PublicRouteInventoryTest extends TestCase
             'GET /projects/{project}/tickets/{readModel} [web, auth, can:view,project]',
             'GET /projects/{project}/tickets/{readModel}/approval [web, auth, can:approveTicket,project]',
             'GET /projects/{project}/tickets/{readModel}/edit [web, auth, can:editTicket,project]',
+            'GET /prompts/help [web, auth]',
             'GET /storage/{path} []',
             'GET /{livewire}/css/{component}.css []',
             'GET /{livewire}/css/{component}.global.css []',
