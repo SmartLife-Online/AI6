@@ -25,4 +25,16 @@ final class WaitReasonRegistry
     {
         return isset($this->registrations[$reason->value]);
     }
+
+    /** @return array{producer: string, resolvers: list<string>, cancellable: bool}|null */
+    public function registration(WaitReason $reason): ?array
+    {
+        return $this->registrations[$reason->value] ?? null;
+    }
+
+    /** @return list<string> */
+    public function registeredReasons(): array
+    {
+        return array_keys($this->registrations);
+    }
 }

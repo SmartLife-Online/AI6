@@ -26,7 +26,7 @@ final class AgentProcessBoundaryTest extends TestCase
         $root = dirname(__DIR__, 3);
         $forbidden = ['APP_KEY', 'DB_DATABASE', 'MAIL_PASSWORD', 'AI6_GIT_SSH_KEY', 'AI6_GIT_KNOWN_HOSTS', 'SESSION_DRIVER'];
         $configured = ProcessPolicyRegistry::fromConfiguredValues()->get(ProcessPolicyName::AGENT);
-        self::assertSame([], $configured->allowedExecutables, 'The shipped agent policy must fail closed until a provider adapter defines its executable.');
+        self::assertSame([PHP_BINARY], $configured->allowedExecutables, 'The shipped agent policy names the FakeAgent executable.');
         foreach ($forbidden as $name) {
             self::assertNotContains($name, $configured->environmentAllowlist);
             putenv($name.'=must-not-pass');

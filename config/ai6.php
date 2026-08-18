@@ -86,7 +86,7 @@ return [
             'agent' => [
                 'timeout_seconds' => env('AI6_AGENT_PROCESS_TIMEOUT_SECONDS', '1800'),
                 'output_limit_bytes' => env('AI6_AGENT_PROCESS_OUTPUT_LIMIT_BYTES', '10000000'),
-                'allowed_executables' => [],
+                'allowed_executables' => [PHP_BINARY],
                 'environment_allowlist' => ['PATH', 'HOME', 'XDG_CONFIG_HOME', 'TMPDIR', 'AI6_RUNTIME_PROFILE', 'AI6_AUTH_FILE', 'LC_ALL', 'LANG'],
                 'working_roots' => [env('AI6_AGENT_EXECUTION_ROOT', '/var/lib/ai6/agent-executions')],
                 'requires_process_group' => true,
@@ -102,6 +102,9 @@ return [
                 'cancel_grace_milliseconds' => env('AI6_CHECKER_CANCEL_GRACE_MILLISECONDS', '2000'),
             ],
         ],
+    ],
+    'run_artifacts' => [
+        'root' => env('AI6_RUN_ARTIFACT_ROOT', storage_path('app/ai6/run-artifacts')),
     ],
     'execution_mailboxes' => [
         'version' => 1,
@@ -148,6 +151,10 @@ return [
     'run_steps' => [
         'lease_seconds' => env('AI6_RUN_STEP_LEASE_SECONDS', '120'),
         'max_attempts' => env('AI6_RUN_STEP_MAX_ATTEMPTS', '3'),
+    ],
+    'human_requests' => [
+        'notification_max_attempts' => env('AI6_HUMAN_REQUEST_NOTIFICATION_MAX_ATTEMPTS', '5'),
+        'notification_retry_seconds' => env('AI6_HUMAN_REQUEST_NOTIFICATION_RETRY_SECONDS', '60'),
     ],
     'tickets' => [
         'max_candidates' => env('AI6_TICKET_MAX_CANDIDATES', '100'),

@@ -11,6 +11,7 @@ use App\AI6\Git\RunBranchName;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Runs\Models\RunEvent;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Shared\Redaction\RedactionContext;
@@ -574,5 +575,133 @@ final readonly class RunOrchestrator
         }
 
         return Run::query()->findOrFail($run->getKey());
+    }
+
+    /** Park a planned bound step while its run waits for a human decision. */
+    public function parkBoundStep(ExecutionJob $job): bool
+    {
+        $updated = ExecutionJob::query()->whereKey($job->getKey())
+            ->where('state', ExecutionJobState::PLANNED->value)->update([
+                'state' => ExecutionJobState::WAITING,
+                'lease_owner' => null,
+                'lease_expires_at' => null,
+                'updated_at' => now(),
+            ]);
+        if ($updated !== 1) {
+            return is_string($job->lease_owner) && $job->lease_owner !== ''
+                ? $this->parkStep($job, $job->lease_owner)
+                : false;
+        }
+
+        $this->recordStepEvent($job->run_id, $job->step_type, ExecutionJobState::WAITING, 'Schritt wartet auf eine Entscheidung.', 'waiting:'.$job->id.':'.$job->attempts);
+
+        return true;
+    }
+
+    /**
+     * Resolve a human-question wait and resume exactly the bound step once.
+     *
+     * A second call after the wait has already been cleared does not plan the
+     * step again and does not emit a second resume event.
+     */
+    public function resumeHumanQuestion(Run $run, int $expectedVersion, string $boundStepKey): Run
+    {
+        return $this->resumeWait($run, $expectedVersion, $boundStepKey, WaitReason::HUMAN_QUESTION);
+    }
+
+    /** Cancel a human-question wait through the existing non-terminal abort path. */
+    public function cancelHumanQuestion(Run $run, int $expectedVersion): Run
+    {
+        return $this->cancelWait($run, $expectedVersion, WaitReason::HUMAN_QUESTION);
+    }
+
+    public function resumeWait(Run $run, int $expectedVersion, string $boundStepKey, WaitReason $reason): Run
+    {
+        if ($run->state === RunState::RUNNING && $run->wait_reason === null) {
+            return $run;
+        }
+        if ($run->state !== RunState::WAITING || $run->wait_reason !== $reason) {
+            throw new RunTransitionConflict($reason->value.'_not_waiting', 'The run is not waiting for the bound '.$reason->value.' resolver.');
+        }
+
+        $resumed = $this->transition($run, $expectedVersion, RunState::RUNNING, $run->phase);
+        $job = ExecutionJob::query()
+            ->where('run_id', $run->getKey())
+            ->where('idempotency_key', $boundStepKey)
+            ->first();
+        if ($job instanceof ExecutionJob && $this->resumeStep($job)) {
+            $this->redeliverStep($job);
+        }
+
+        return $resumed;
+    }
+
+    public function cancelWait(Run $run, int $expectedVersion, WaitReason $reason): Run
+    {
+        if ($run->version !== $expectedVersion) {
+            throw new RunTransitionConflict('stale_run_version', 'The run changed before the requested transition could be applied.');
+        }
+        if ($run->state !== RunState::WAITING || $run->wait_reason !== $reason) {
+            throw new RunTransitionConflict($reason->value.'_not_waiting', 'The run is not waiting for the bound '.$reason->value.' resolver.');
+        }
+        $this->failRun($run->getKey());
+
+        return Run::query()->findOrFail($run->getKey());
+    }
+
+    public function resumeResourceLimit(Run $run, int $expectedVersion, string $boundStepKey): Run
+    {
+        return $this->resumeWait($run, $expectedVersion, $boundStepKey, WaitReason::RESOURCE_LIMIT);
+    }
+
+    public function cancelResourceLimit(Run $run, int $expectedVersion): Run
+    {
+        return $this->cancelWait($run, $expectedVersion, WaitReason::RESOURCE_LIMIT);
+    }
+
+    public function ensureImplementationSlot(Run $run): RunAgent
+    {
+        $implementation = ($run->agent_profile_snapshot ?? [])['implementation'] ?? [];
+        $slot = RunAgent::query()->where('run_id', $run->getKey())->where('role', 'implementation')->first();
+        if ($slot instanceof RunAgent) {
+            return $slot;
+        }
+
+        $provider = $implementation['provider_profile'] ?? null;
+        $model = $implementation['model'] ?? null;
+        $effort = $implementation['effort'] ?? null;
+        if (! is_string($provider) || $provider === '' || ! is_string($model) || $model === '' || ! is_string($effort) || $effort === '') {
+            throw new ImplementationImportException(
+                'approval_slot_incomplete',
+                'The implementation slot requires provider profile, model and effort from the approval snapshot.',
+            );
+        }
+
+        return RunAgent::query()->create([
+            'run_id' => $run->id,
+            'slot_id' => (string) Str::uuid(),
+            'role' => 'implementation',
+            'provider_profile' => $provider,
+            'model' => $model,
+            'effort' => $effort,
+            'prompt_profile' => 'implementation',
+            'session_id' => null,
+        ]);
+    }
+
+    public function bindImplementationSession(Run $run, string $slotId, string $sessionId): RunAgent
+    {
+        $slot = RunAgent::query()->where('run_id', $run->getKey())->where('slot_id', $slotId)->firstOrFail();
+        if (is_string($slot->session_id) && $slot->session_id !== '') {
+            return $slot;
+        }
+        $slot->forceFill(['session_id' => $sessionId])->save();
+
+        return $slot->fresh() ?? $slot;
+    }
+
+    public function discardImplementationSessions(Run $run): void
+    {
+        RunAgent::query()->where('run_id', $run->getKey())->where('role', 'implementation')->update(['session_id' => null]);
     }
 }

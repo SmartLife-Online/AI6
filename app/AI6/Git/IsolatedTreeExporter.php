@@ -9,7 +9,7 @@ use RuntimeException;
 
 final class IsolatedTreeExporter
 {
-    public function export(string $source, string $destination): void
+    public function export(string $source, string $destination, bool $writable = false): void
     {
         $source = $this->regularDirectory($source);
         if (file_exists($destination) || is_link($destination)) {
@@ -27,7 +27,11 @@ final class IsolatedTreeExporter
             if (! rename($staging, $destination)) {
                 throw new RuntimeException('The isolated export could not be published.');
             }
-            $this->makeReadOnly($destination);
+            if ($writable) {
+                $this->makeWritable($destination);
+            } else {
+                $this->makeReadOnly($destination);
+            }
         } catch (\Throwable $exception) {
             if (is_dir($staging) && ! is_link($staging)) {
                 $this->remove($staging);
@@ -79,6 +83,15 @@ final class IsolatedTreeExporter
             @chmod($entry->getPathname(), $entry->isDir() ? 0555 : 0444);
         }
         @chmod($path, 0555);
+    }
+
+    private function makeWritable(string $path): void
+    {
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+        foreach ($iterator as $entry) {
+            @chmod($entry->getPathname(), $entry->isDir() ? 0700 : 0600);
+        }
+        @chmod($path, 0700);
     }
 
     private function remove(string $path): void

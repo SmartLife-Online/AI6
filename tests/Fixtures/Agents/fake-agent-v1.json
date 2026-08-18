@@ -3,26 +3,26 @@
         "scenario": "success",
         "role": "implementation",
         "status": "completed",
-        "bytes": "{\"schema_version\":\"ai6.agent.v1\",\"status\":\"completed\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}"
+        "bytes": "{\"schema_version\":\"ai6.agent.v1\",\"status\":\"completed\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"decisions\":[{\"key\":\"d1\",\"title\":\"Umsetzung\",\"rationale\":\"Deterministische Entscheidung.\"}],\"changed_paths\":[\"app/Example.php\"],\"open_manual_gates\":[],\"implementation_summary\":{\"changed_components\":[\"Example\"],\"decisions\":[\"Deterministische Entscheidung.\"],\"assumptions\":[],\"deviations\":[],\"known_limits\":[],\"tests\":[],\"review_focus\":[\"app/Example.php\"]}}"
     },
     {
         "scenario": "no_change_required",
         "role": "implementation",
         "status": "no_change_required",
-        "bytes": "{\"schema_version\":\"ai6.agent.v1\",\"status\":\"no_change_required\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}"
+        "bytes": "{\"schema_version\":\"ai6.agent.v1\",\"status\":\"no_change_required\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"decisions\":[{\"key\":\"d1\",\"title\":\"Umsetzung\",\"rationale\":\"Deterministische Entscheidung.\"}],\"changed_paths\":[],\"open_manual_gates\":[],\"implementation_summary\":{\"changed_components\":[],\"decisions\":[\"Deterministische Entscheidung.\"],\"assumptions\":[],\"deviations\":[],\"known_limits\":[],\"tests\":[],\"review_focus\":[]}}"
     },
     {
         "scenario": "no_change_with_diff",
         "role": "implementation",
         "error": "no_change_diff",
         "actual_diff": "real diff",
-        "bytes": "{\"schema_version\":\"ai6.agent.v1\",\"status\":\"no_change_required\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}"
+        "bytes": "{\"schema_version\":\"ai6.agent.v1\",\"status\":\"no_change_required\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"decisions\":[{\"key\":\"d1\",\"title\":\"Umsetzung\",\"rationale\":\"Deterministische Entscheidung.\"}],\"changed_paths\":[\"app/Example.php\"],\"open_manual_gates\":[],\"implementation_summary\":{\"changed_components\":[\"Example\"],\"decisions\":[\"Deterministische Entscheidung.\"],\"assumptions\":[],\"deviations\":[],\"known_limits\":[],\"tests\":[],\"review_focus\":[\"app/Example.php\"]}}"
     },
     {
         "scenario": "human_request",
         "role": "implementation",
         "status": "needs_human",
-        "bytes": "{\"schema_version\":\"ai6.agent.v1\",\"status\":\"needs_human\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"human_request\":{\"kind\":\"clarification\",\"title\":\"Rückfrage\",\"message\":\"Eine Entscheidung wird benötigt.\",\"why_needed\":\"Die gebundene Umsetzung benötigt eine Auswahl.\",\"response_mode\":\"select\",\"options\":[{\"key\":\"a\",\"label\":\"Option A\"},{\"key\":\"b\",\"label\":\"Option B\"}],\"recommended_option\":\"a\",\"affected_paths\":[\"app/Example.php\"],\"criterion_refs\":[\"AC-01\",\"AC-02\"]}}"
+        "bytes": "{\"schema_version\":\"ai6.agent.v1\",\"status\":\"needs_human\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"decisions\":[{\"key\":\"d1\",\"title\":\"Umsetzung\",\"rationale\":\"Deterministische Entscheidung.\"}],\"changed_paths\":[],\"open_manual_gates\":[],\"implementation_summary\":{\"changed_components\":[],\"decisions\":[\"Deterministische Entscheidung.\"],\"assumptions\":[],\"deviations\":[],\"known_limits\":[],\"tests\":[],\"review_focus\":[]},\"human_request\":{\"kind\":\"clarification\",\"title\":\"Rückfrage\",\"message\":\"Eine Entscheidung wird benötigt.\",\"why_needed\":\"Die gebundene Umsetzung benötigt eine Auswahl.\",\"response_mode\":\"select\",\"options\":[{\"key\":\"a\",\"label\":\"Option A\"},{\"key\":\"b\",\"label\":\"Option B\"}],\"recommended_option\":\"a\",\"affected_paths\":[\"app/Example.php\"],\"criterion_refs\":[\"AC-01\",\"AC-02\"]}}"
     },
     {
         "scenario": "findings",
@@ -40,7 +40,7 @@
         "scenario": "provider_error",
         "role": "implementation",
         "status": "failed",
-        "bytes": "{\"schema_version\":\"ai6.agent.v1\",\"status\":\"failed\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}"
+        "bytes": "{\"schema_version\":\"ai6.agent.v1\",\"status\":\"failed\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"decisions\":[{\"key\":\"d1\",\"title\":\"Umsetzung\",\"rationale\":\"Deterministische Entscheidung.\"}],\"changed_paths\":[],\"open_manual_gates\":[],\"implementation_summary\":{\"changed_components\":[],\"decisions\":[\"Deterministische Entscheidung.\"],\"assumptions\":[],\"deviations\":[],\"known_limits\":[],\"tests\":[],\"review_focus\":[]}}"
     },
     {
         "scenario": "security_findings",

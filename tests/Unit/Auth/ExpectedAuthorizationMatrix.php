@@ -68,6 +68,12 @@ final class ExpectedAuthorizationMatrix
                 'operator' => true,
                 'approver' => true,
             ],
+            'answer_human_request' => [
+                'admin' => true,
+                'viewer' => false,
+                'operator' => true,
+                'approver' => true,
+            ],
         ];
     }
 

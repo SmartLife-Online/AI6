@@ -7,6 +7,9 @@ final readonly class AgentResult
     /**
      * @param  list<AgentFinding>  $findings
      * @param  list<CriterionCoverageEntry>  $criterionCoverage
+     * @param  list<ImplementationDecision>  $decisions
+     * @param  list<string>  $changedPaths
+     * @param  list<string>  $openManualGates
      */
     public function __construct(
         public string $schemaVersion,
@@ -16,5 +19,9 @@ final readonly class AgentResult
         public array $findings,
         public array $criterionCoverage,
         public ?InstructionPatch $instructionPatch,
+        public array $decisions = [],
+        public array $changedPaths = [],
+        public array $openManualGates = [],
+        public ?ImplementationSummary $implementationSummary = null,
     ) {}
 }

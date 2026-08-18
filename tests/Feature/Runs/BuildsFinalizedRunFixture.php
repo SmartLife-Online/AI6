@@ -73,8 +73,8 @@ trait BuildsFinalizedRunFixture
         );
     }
 
-    /** @return array{operator: User, project: Project, approval: TicketApproval} */
-    protected function completedApproval(string $ticketId, ?Project $project = null, ?User $operator = null): array
+    /** @return array{operator: User, project: Project, approval: TicketApproval, attention: ?User} */
+    protected function completedApproval(string $ticketId, ?Project $project = null, ?User $operator = null, ?User $attentionUser = null): array
     {
         $administrator = $this->createUser(['is_global_admin' => true]);
         $approver = $this->createUser();
@@ -88,10 +88,13 @@ trait BuildsFinalizedRunFixture
         if ($newProject) {
             $this->addMembership($operator, $project, ProjectRole::OPERATOR);
         }
+        if ($attentionUser instanceof User) {
+            $this->addMembership($attentionUser, $project, ProjectRole::APPROVER);
+        }
         $todo = $this->validTicketMarkdown($ticketId, 'todo');
         $todoBlob = hash('sha256', 'blob '.strlen($todo)."\0".$todo);
         $readModel = $this->publishReadModel($administrator, $project, 'tickets/'.$ticketId.'.md', $todo, ['blob_sha' => $todoBlob]);
-        $selection = $this->approvalSelection();
+        $selection = $this->approvalSelection($attentionUser);
         $operationId = (string) Str::uuid();
         $snapshot = $this->app->make(ApprovalSnapshotFactory::class)->create($project, $readModel, $selection, $operationId);
         $operation = $this->app->make(QueueTicketMutation::class)->approve(
@@ -157,10 +160,11 @@ trait BuildsFinalizedRunFixture
             'operator' => $operator,
             'project' => $project->refresh(),
             'approval' => TicketApproval::query()->findOrFail($operationId),
+            'attention' => $attentionUser,
         ];
     }
 
-    protected function approvalSelection(): ApprovalSelection
+    protected function approvalSelection(?User $attentionUser = null): ApprovalSelection
     {
         $profiles = $this->app->make(AgentProfileRegistry::class);
 
@@ -174,7 +178,7 @@ trait BuildsFinalizedRunFixture
                 'prompt_profile' => 'security',
             ]]),
             ApprovalLimits::fromConfiguredValues(config('ai6.project_config.server_defaults.limits'), $this->app->make(AgentInputLimits::class)),
-            null,
+            $attentionUser?->getKey(),
             'manual',
         );
     }

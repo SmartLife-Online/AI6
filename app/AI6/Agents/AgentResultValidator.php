@@ -27,17 +27,19 @@ final readonly class AgentResultValidator
             'provider_runtime_profile_hash',
             'human_request',
         ];
+        $requiredKeys = [
+            'schema_version',
+            'status',
+            'summary',
+        ];
         if ($context->role === AgentRole::IMPLEMENTATION) {
-            $allowedKeys[] = 'instruction_patch';
+            $allowedKeys = [...$allowedKeys, 'instruction_patch', 'decisions', 'changed_paths', 'open_manual_gates', 'implementation_summary'];
+            $requiredKeys = [...$requiredKeys, 'decisions', 'changed_paths', 'open_manual_gates', 'implementation_summary'];
         } else {
             $allowedKeys[] = 'findings';
             $allowedKeys[] = 'criterion_coverage';
         }
-        $this->assertKeys($document, $allowedKeys, [
-            'schema_version',
-            'status',
-            'summary',
-        ]);
+        $this->assertKeys($document, $allowedKeys, $requiredKeys);
 
         $schemaVersion = $this->string($document, 'schema_version');
         $expectedSchema = $context->role === AgentRole::IMPLEMENTATION ? 'ai6.agent.v1' : 'ai6.quality-review.v1';
@@ -58,6 +60,12 @@ final readonly class AgentResultValidator
         $findings = array_key_exists('findings', $document) ? $this->findings($document['findings'], $context) : [];
         $coverage = array_key_exists('criterion_coverage', $document) ? $this->coverage($document['criterion_coverage'], $context) : [];
         $patch = array_key_exists('instruction_patch', $document) ? $this->instructionPatch($document['instruction_patch'], $context, $redactionContext) : null;
+        $decisions = $context->role === AgentRole::IMPLEMENTATION ? $this->decisions($document['decisions'] ?? null) : [];
+        $changedPaths = $context->role === AgentRole::IMPLEMENTATION ? $this->paths($document['changed_paths'] ?? null) : [];
+        $openManualGates = $context->role === AgentRole::IMPLEMENTATION ? $this->manualGates($document['open_manual_gates'] ?? null) : [];
+        $summaryDocument = $context->role === AgentRole::IMPLEMENTATION
+            ? $this->implementationSummary($document['implementation_summary'] ?? null)
+            : null;
 
         if ($status === AgentResultStatus::NO_CHANGE_REQUIRED && $context->actualDiff !== '') {
             throw new AgentResultValidationException(AgentResultValidationError::NO_CHANGE_DIFF);
@@ -76,7 +84,84 @@ final readonly class AgentResultValidator
             throw new AgentResultValidationException(AgentResultValidationError::INSTRUCTION_PATCH);
         }
 
-        return new AgentResult($schemaVersion, $status, $summary, $humanRequest, $findings, $coverage, $patch);
+        return new AgentResult(
+            $schemaVersion,
+            $status,
+            $summary,
+            $humanRequest,
+            $findings,
+            $coverage,
+            $patch,
+            $decisions,
+            $changedPaths,
+            $openManualGates,
+            $summaryDocument,
+        );
+    }
+
+    /** @return list<ImplementationDecision> */
+    private function decisions(mixed $value): array
+    {
+        if (! is_array($value) || ! array_is_list($value)) {
+            throw new AgentResultValidationException(AgentResultValidationError::SCHEMA);
+        }
+        $decisions = [];
+        $keys = [];
+        foreach ($value as $decision) {
+            if (! is_array($decision) || array_is_list($decision)) {
+                throw new AgentResultValidationException(AgentResultValidationError::SCHEMA);
+            }
+            $this->assertKeys($decision, ['key', 'title', 'rationale']);
+            $key = $this->nonEmpty($decision, 'key');
+            if (isset($keys[$key]) || preg_match('/\A[a-z0-9][a-z0-9_-]{0,31}\z/D', $key) !== 1) {
+                throw new AgentResultValidationException(AgentResultValidationError::SCHEMA);
+            }
+            $keys[$key] = true;
+            $decisions[] = new ImplementationDecision($key, $this->nonEmpty($decision, 'title'), $this->nonEmpty($decision, 'rationale'));
+        }
+
+        return $decisions;
+    }
+
+    /** @return list<string> */
+    private function manualGates(mixed $value): array
+    {
+        $gates = $this->strings($value);
+        $seen = [];
+        foreach ($gates as $gate) {
+            if (preg_match('/\A(?:MG|EXT)-\d{2}\z/D', $gate) !== 1 || isset($seen[$gate])) {
+                throw new AgentResultValidationException(AgentResultValidationError::SCHEMA);
+            }
+            $seen[$gate] = true;
+        }
+
+        return $gates;
+    }
+
+    private function implementationSummary(mixed $value): ImplementationSummary
+    {
+        if (! is_array($value) || array_is_list($value)) {
+            throw new AgentResultValidationException(AgentResultValidationError::SCHEMA);
+        }
+        $this->assertKeys($value, [
+            'changed_components',
+            'decisions',
+            'assumptions',
+            'deviations',
+            'known_limits',
+            'tests',
+            'review_focus',
+        ]);
+
+        return new ImplementationSummary(
+            $this->strings($value['changed_components'] ?? null),
+            $this->strings($value['decisions'] ?? null),
+            $this->strings($value['assumptions'] ?? null),
+            $this->strings($value['deviations'] ?? null),
+            $this->strings($value['known_limits'] ?? null),
+            $this->strings($value['tests'] ?? null),
+            $this->strings($value['review_focus'] ?? null),
+        );
     }
 
     /** @param array<string, mixed> $document */

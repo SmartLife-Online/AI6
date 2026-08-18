@@ -12,6 +12,7 @@
         @auth
             <nav aria-label="Hauptnavigation">
                 <a href="{{ route('projects.index') }}">Projekte</a>
+                <a href="{{ route('human-requests.index') }}">Attention-Inbox</a>
                 <a href="{{ route('agents.profiles') }}">Agentenprofile</a>
                 <a href="{{ route('prompts.help') }}">Prompt-Hilfe</a>
                 @php($navProject = request()->route('project'))

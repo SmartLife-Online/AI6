@@ -15,6 +15,8 @@ enum ExecutionStepType: string
      */
     public function hasRegisteredHandler(): bool
     {
-        return $this === self::PREFLIGHT;
+        return match ($this) {
+            self::PREFLIGHT, self::IMPLEMENT => true,
+        };
     }
 }

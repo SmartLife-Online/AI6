@@ -72,6 +72,6 @@ final class RunStepDecisionTest extends TestCase
     public function test_only_a_step_type_with_a_registered_handler_may_be_delivered(): void
     {
         self::assertTrue(ExecutionStepType::PREFLIGHT->hasRegisteredHandler());
-        self::assertFalse(ExecutionStepType::IMPLEMENT->hasRegisteredHandler());
+        self::assertTrue(ExecutionStepType::IMPLEMENT->hasRegisteredHandler());
     }
 }

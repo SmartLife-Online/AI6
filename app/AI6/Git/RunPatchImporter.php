@@ -3,6 +3,8 @@
 namespace App\AI6\Git;
 
 use App\AI6\Runs\Models\Run;
+use App\AI6\Shared\Redaction\InvalidRedactionInputException;
+use App\AI6\Shared\Redaction\Redactor;
 use FilesystemIterator;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
@@ -23,6 +25,8 @@ final readonly class RunPatchImporter
     private const MAXIMUM_TOTAL_BYTES = 16777216;
 
     private const MAXIMUM_CHANGES = 500;
+
+    public function __construct(private ?Redactor $redactor = null) {}
 
     /**
      * Compute the validated change set without touching the run worktree.
@@ -54,12 +58,14 @@ final readonly class RunPatchImporter
                 throw new RuntimeException('An imported file exceeds the configured size limit.');
             }
             if (! array_key_exists($path, $present)) {
+                $this->assertImportableFile($sourceRoot.'/'.$path, allowedBinaryOrigin: false);
                 $changes[] = new RunPatchChange($path, RunPatchStatus::ADDED, $size);
                 $total += $size;
 
                 continue;
             }
             if (! $this->identical($sourceRoot.'/'.$path, $worktree.'/'.$path)) {
+                $this->assertImportableFile($sourceRoot.'/'.$path, allowedBinaryOrigin: $this->isBinaryFile($worktree.'/'.$path));
                 $changes[] = new RunPatchChange($path, RunPatchStatus::MODIFIED, $size);
                 $total += $size;
             }
@@ -95,7 +101,47 @@ final readonly class RunPatchImporter
         $changes = $this->plan($run, $source, $approvedScope);
         $worktree = $this->boundWorktree($run);
         $sourceRoot = $this->regularDirectory($source);
+        $backup = $this->backup($worktree, $changes);
 
+        try {
+            $this->apply($worktree, $sourceRoot, $changes);
+        } catch (\Throwable $exception) {
+            $this->restore($worktree, $backup);
+            throw $exception;
+        }
+
+        return $changes;
+    }
+
+    /**
+     * @param  list<RunPatchChange>  $changes
+     * @return array<string, string|null>
+     */
+    private function backup(string $worktree, array $changes): array
+    {
+        $backup = [];
+        foreach ($changes as $change) {
+            $target = $worktree.'/'.$change->path;
+            if (! file_exists($target) || is_link($target)) {
+                $backup[$change->path] = null;
+
+                continue;
+            }
+            $bytes = file_get_contents($target);
+            if (! is_string($bytes)) {
+                throw new RuntimeException('An import backup could not be read.');
+            }
+            $backup[$change->path] = $bytes;
+        }
+
+        return $backup;
+    }
+
+    /**
+     * @param  list<RunPatchChange>  $changes
+     */
+    private function apply(string $worktree, string $sourceRoot, array $changes): void
+    {
         foreach ($changes as $change) {
             $target = $worktree.'/'.$change->path;
             if ($change->status === RunPatchStatus::DELETED) {
@@ -117,8 +163,66 @@ final readonly class RunPatchImporter
                 throw new RuntimeException('An imported file could not be sealed.');
             }
         }
+    }
 
-        return $changes;
+    /** @param array<string, string|null> $backup */
+    private function restore(string $worktree, array $backup): void
+    {
+        foreach ($backup as $path => $bytes) {
+            $target = $worktree.'/'.$path;
+            if ($bytes === null) {
+                if (is_file($target) && ! is_link($target)) {
+                    @unlink($target);
+                }
+
+                continue;
+            }
+            $this->prepareParent($worktree, $path);
+            if (file_put_contents($target, $bytes, LOCK_EX) !== strlen($bytes)) {
+                throw new RuntimeException('The import rollback could not restore the previous worktree state.');
+            }
+            @chmod($target, 0600);
+        }
+    }
+
+    private function assertImportableFile(string $path, bool $allowedBinaryOrigin): void
+    {
+        $bytes = file_get_contents($path);
+        if (! is_string($bytes)) {
+            throw new RuntimeException('The import rejects an unreadable file.');
+        }
+        $validUtf8 = true;
+        if ($this->redactor instanceof Redactor) {
+            try {
+                $this->redactor->assertValidInput($bytes);
+            } catch (InvalidRedactionInputException) {
+                $validUtf8 = false;
+            }
+        } else {
+            $validUtf8 = preg_match('//u', $bytes) === 1;
+        }
+        if (! $validUtf8 && ! $allowedBinaryOrigin) {
+            throw new RuntimeException('The import rejects an unknown binary without an allowed origin.');
+        }
+    }
+
+    private function isBinaryFile(string $path): bool
+    {
+        $bytes = file_get_contents($path);
+        if (! is_string($bytes)) {
+            return false;
+        }
+        if ($this->redactor instanceof Redactor) {
+            try {
+                $this->redactor->assertValidInput($bytes);
+            } catch (InvalidRedactionInputException) {
+                return true;
+            }
+
+            return false;
+        }
+
+        return preg_match('//u', $bytes) !== 1;
     }
 
     /**

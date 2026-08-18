@@ -9,6 +9,9 @@ use App\AI6\Auth\Http\PrimaryAuthenticationController;
 use App\AI6\Auth\Http\StepUpController;
 use App\AI6\Auth\Models\User;
 use App\AI6\Git\Http\ControlOperationController;
+use App\AI6\HumanLoop\AttentionInboxPage;
+use App\AI6\HumanLoop\Http\HumanRequestAnswerController;
+use App\AI6\HumanLoop\HumanRequestDetailPage;
 use App\AI6\Projects\Http\ProjectConfigurationController;
 use App\AI6\Projects\Http\ProjectController;
 use App\AI6\Projects\Models\Project;
@@ -79,6 +82,7 @@ Route::middleware('auth')->group(function (): void {
             ->name('step-up.passkey.verify');
     });
 
+    Route::get('/human-requests', AttentionInboxPage::class)->name('human-requests.index');
     Route::get('/projects', [ProjectController::class, 'index'])->name('projects.index');
     Route::get('/projects/create', [ProjectController::class, 'create'])
         ->middleware('can:create,'.Project::class)
@@ -119,6 +123,12 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/projects/{project}/runs/{runId}', RunTimelinePage::class)
         ->middleware('can:viewRun,project')
         ->name('projects.runs.show');
+    Route::get('/projects/{project}/human-requests/{requestId}', HumanRequestDetailPage::class)
+        ->middleware('can:answerHumanRequest,project')
+        ->name('projects.human-requests.show');
+    Route::post('/projects/{project}/human-requests/{requestId}', [HumanRequestAnswerController::class, 'store'])
+        ->middleware('can:answerHumanRequest,project')
+        ->name('projects.human-requests.answer');
     Route::post('/projects/{project}/deploy-key', [ControlOperationController::class, 'provision'])
         ->middleware('can:provisionDeployKey,project')
         ->name('projects.deploy-key.provision');

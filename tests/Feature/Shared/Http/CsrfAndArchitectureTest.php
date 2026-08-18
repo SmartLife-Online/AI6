@@ -25,6 +25,8 @@ final class CsrfAndArchitectureTest extends AuthFeatureTestCase
             'AI6/Runs/TicketApprovalPage.php',
             'AI6/Runs/ApprovalStatusPage.php',
             'AI6/Runs/RunTimelinePage.php',
+            'AI6/HumanLoop/AttentionInboxPage.php',
+            'AI6/HumanLoop/HumanRequestDetailPage.php',
             'AI6/Tickets/Livewire/TicketDetail.php',
             'AI6/Tickets/Livewire/TicketList.php',
         ]);
@@ -60,6 +62,7 @@ final class CsrfAndArchitectureTest extends AuthFeatureTestCase
             ['POST', '/projects/1/managed-fetch'],
             ['POST', '/projects/1/control-branch'],
             ['POST', '/projects/1/ticket-read-model'],
+            ['POST', '/projects/1/human-requests/00000000-0000-0000-0000-000000000000'],
             ['POST', '/projects/1/operations/00000000-0000-0000-0000-000000000000/recovery'],
             ['POST', EndpointResolver::updatePath()],
         ] as [$method, $path]) {

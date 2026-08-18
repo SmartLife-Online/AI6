@@ -86,6 +86,30 @@ final class RunArchitectureTest extends TestCase
             self::assertStringNotContainsString($forbidden, $page, $forbidden);
         }
         self::assertStringContainsString("Gate::authorize('viewRun'", $page);
+        self::assertStringContainsString('changedFiles', $page);
+        self::assertStringContainsString('decisions', $page);
+    }
+
+    public function test_there_is_exactly_one_prompt_catalog_and_renderer(): void
+    {
+        $root = dirname(__DIR__, 3).'/app/AI6';
+        $catalogs = [];
+        $renderers = [];
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root));
+        foreach ($iterator as $file) {
+            if (! $file->isFile() || $file->getExtension() !== 'php') {
+                continue;
+            }
+            $source = (string) file_get_contents($file->getPathname());
+            if (preg_match('/^final (?:readonly )?class PromptCatalog/m', $source) === 1) {
+                $catalogs[] = $file->getPathname();
+            }
+            if (preg_match('/^final (?:readonly )?class PromptRenderer/m', $source) === 1) {
+                $renderers[] = $file->getPathname();
+            }
+        }
+        self::assertCount(1, $catalogs);
+        self::assertCount(1, $renderers);
     }
 
     public function test_run_start_is_routed_through_the_recoverable_ticket_status_saga(): void

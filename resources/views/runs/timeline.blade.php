@@ -28,13 +28,37 @@
     <h2>Sessions</h2>
     <ul>
         @forelse ($sessions as $session)
-            <li data-session-role="{{ $session->role }}">
+            <li data-session-role="{{ $session->role }}" data-session-state="{{ $session->session_id === null ? 'unbound' : 'bound' }}">
                 <strong>{{ $session->role }}</strong>:
                 {{ $session->provider_profile }} · {{ $session->model }} · {{ $session->effort }}
                 ({{ $session->session_id === null ? 'noch keine Sitzung' : 'Sitzung gebunden' }})
             </li>
         @empty
             <li>Noch keine Session.</li>
+        @endforelse
+    </ul>
+
+    <h2>Geänderte Dateien</h2>
+    <ul>
+        @forelse ($changedFiles as $change)
+            <li data-changed-path="{{ $change['path'] ?? '' }}" data-change-type="{{ $change['change'] ?? '' }}">
+                <code>{{ $change['path'] ?? '' }}</code>
+                ({{ $change['change'] ?? '' }})
+            </li>
+        @empty
+            <li>Noch keine geänderten Dateien.</li>
+        @endforelse
+    </ul>
+
+    <h2>Entscheidungen</h2>
+    <ul>
+        @forelse ($decisions as $decision)
+            <li data-decision-key="{{ $decision['key'] ?? '' }}">
+                <strong>{{ $decision['title'] ?? '' }}</strong>
+                — {{ $decision['rationale'] ?? '' }}
+            </li>
+        @empty
+            <li>Noch keine Entscheidungen.</li>
         @endforelse
     </ul>
 

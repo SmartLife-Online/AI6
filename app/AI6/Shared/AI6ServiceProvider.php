@@ -2,11 +2,13 @@
 
 namespace App\AI6\Shared;
 
+use App\AI6\Agents\AgentAdapter;
 use App\AI6\Agents\AgentInputLimits;
 use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentResultImporter;
 use App\AI6\Agents\AgentResultValidator;
 use App\AI6\Agents\CredentialRevisionRegistry;
+use App\AI6\Agents\DelegatingProcessIsolationBoundary;
 use App\AI6\Agents\ExecutionHomeManager;
 use App\AI6\Agents\FakeAgentAdapter;
 use App\AI6\Agents\InstructionPatchChannel;
@@ -46,6 +48,12 @@ use App\AI6\Git\RunTreeService;
 use App\AI6\Git\RunWorkspaceLifecycle;
 use App\AI6\Git\TicketMutationConfiguration;
 use App\AI6\Git\TicketMutationConfigurationFactory;
+use App\AI6\HumanLoop\AttentionInboxPage;
+use App\AI6\HumanLoop\HumanRequestClassifier;
+use App\AI6\HumanLoop\HumanRequestDetailPage;
+use App\AI6\HumanLoop\HumanRequestNotificationConfiguration;
+use App\AI6\HumanLoop\HumanRequestRecipient;
+use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Policies\ProjectPolicy;
@@ -56,14 +64,20 @@ use App\AI6\Runs\ApprovalSelectionFactory;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ApprovalStatusPage;
 use App\AI6\Runs\ExecutionStepDispatcher;
+use App\AI6\Runs\InstructionBindingVerifier;
 use App\AI6\Runs\InstructionCandidateCollector;
 use App\AI6\Runs\InstructionCandidateSource;
+use App\AI6\Runs\RunArtifactRoot;
+use App\AI6\Runs\RunArtifactStore;
+use App\AI6\Runs\RunImplementation;
+use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunPreflight;
 use App\AI6\Runs\RunStepConfiguration;
 use App\AI6\Runs\RunStepReconciler;
 use App\AI6\Runs\RunTimelinePage;
 use App\AI6\Runs\RunTransitionMap;
 use App\AI6\Runs\TicketApprovalPage;
+use App\AI6\Runs\WaitReason;
 use App\AI6\Runs\WaitReasonRegistry;
 use App\AI6\Shared\Config\ConfigurationException;
 use App\AI6\Shared\Config\StrictEnumParser;
@@ -83,7 +97,6 @@ use App\AI6\Shared\Process\ExecutionMailboxFactory;
 use App\AI6\Shared\Process\ProcessConfiguration;
 use App\AI6\Shared\Process\ProcessConfigurationFactory;
 use App\AI6\Shared\Process\ProcessIsolationBoundary;
-use App\AI6\Shared\Process\ProcessIsolationVerifier;
 use App\AI6\Shared\Process\ProcessPolicyRegistry;
 use App\AI6\Shared\Redaction\RedactionFingerprintGenerator;
 use App\AI6\Shared\Redaction\RedactionKeyring;
@@ -144,6 +157,12 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(AgentResultValidator::class);
         $this->app->singleton(AgentResultImporter::class);
         $this->app->singleton(FakeAgentAdapter::class);
+        $this->app->bind(AgentAdapter::class, FakeAgentAdapter::class);
+        $this->app->singleton(RunArtifactRoot::class, static fn (): RunArtifactRoot => RunArtifactRoot::fromConfiguredValues());
+        $this->app->singleton(RunArtifactStore::class);
+        $this->app->singleton(RunLimitPolicy::class);
+        $this->app->singleton(InstructionBindingVerifier::class);
+        $this->app->singleton(RunImplementation::class);
         $this->app->singleton(CredentialRevisionRegistry::class, static fn (): CredentialRevisionRegistry => CredentialRevisionRegistry::fromConfiguredValues());
         $this->app->singleton(
             ExecutionHomeManager::class,
@@ -179,6 +198,15 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(RunPreflight::class);
         $this->app->singleton(RunStepReconciler::class);
         $this->app->singleton(WaitReasonRegistry::class);
+        $this->app->singleton(HumanRequestClassifier::class);
+        $this->app->singleton(
+            HumanRequestNotificationConfiguration::class,
+            static fn (Application $app): HumanRequestNotificationConfiguration => HumanRequestNotificationConfiguration::fromConfiguredValues(
+                $app->make(StrictPositiveIntegerParser::class),
+            ),
+        );
+        $this->app->singleton(HumanRequestRecipient::class);
+        $this->app->singleton(HumanRequestService::class);
         $this->app->singleton(InstructionCandidateCollector::class);
         $this->app->singleton(InstructionCandidateSource::class, InstructionCandidateCollector::class);
         $this->app->singleton(DependencySatisfiedStatusAllowlist::class, static fn (): DependencySatisfiedStatusAllowlist => DependencySatisfiedStatusAllowlist::fromConfiguredValues());
@@ -248,7 +276,7 @@ final class AI6ServiceProvider extends ServiceProvider
             ),
         );
         $this->app->singleton(ProcessConfigurationFactory::class);
-        $this->app->singleton(ProcessIsolationBoundary::class, ProcessIsolationVerifier::class);
+        $this->app->singleton(ProcessIsolationBoundary::class, DelegatingProcessIsolationBoundary::class);
         $this->app->singleton(ExecutionMailboxFactory::class);
         $this->commands([ExecutionMailboxCommand::class]);
         $this->app->singleton(
@@ -373,6 +401,20 @@ final class AI6ServiceProvider extends ServiceProvider
             $runtimeProfiles->get($agentProfile->runtimeProfileId);
             $instructionProfiles->get($agentProfile->providerProfileAlias);
         }
+        $this->app->make(HumanRequestNotificationConfiguration::class);
+        $this->app->make(WaitReasonRegistry::class)->register(
+            WaitReason::HUMAN_QUESTION,
+            'needs_human',
+            ['bound_answer'],
+            true,
+        );
+        $this->app->make(WaitReasonRegistry::class)->register(
+            WaitReason::RESOURCE_LIMIT,
+            'RunLimitPolicy',
+            ['reduce', 'increase'],
+            true,
+        );
+        $this->app->make(RunArtifactRoot::class);
         $authConfiguration = $this->app->make(AuthConfiguration::class);
         $httpConfiguration = $this->app->make(HttpSecurityConfiguration::class);
         config([
@@ -409,6 +451,8 @@ final class AI6ServiceProvider extends ServiceProvider
         Livewire::component('ai6.runs.ticket-approval', TicketApprovalPage::class);
         Livewire::component('ai6.runs.approval-status', ApprovalStatusPage::class);
         Livewire::component('ai6.runs.timeline', RunTimelinePage::class);
+        Livewire::component('ai6.human-loop.inbox', AttentionInboxPage::class);
+        Livewire::component('ai6.human-loop.detail', HumanRequestDetailPage::class);
     }
 
     /**

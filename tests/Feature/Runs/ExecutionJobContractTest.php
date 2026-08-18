@@ -79,7 +79,8 @@ final class ExecutionJobContractTest extends TicketUiTestCase
         }
         self::assertSame(RunState::RUNNING, $run->refresh()->state);
         self::assertSame(RunPhase::IMPLEMENT, $run->phase);
-        self::assertSame(0, DB::table('jobs')->count(), 'No handler exists for the prepared implement step yet.');
+        self::assertTrue(ExecutionStepType::IMPLEMENT->hasRegisteredHandler());
+        self::assertSame(1, DB::table('jobs')->count(), 'The registered implement handler is handed to the existing job path.');
     }
 
     /** TC-04: an expired lease is reclaimed, the overtaken owner publishes nothing. */
@@ -140,7 +141,7 @@ final class ExecutionJobContractTest extends TicketUiTestCase
         self::assertNull($crashed->fresh()?->intent, 'The crash happened before any intent was bound.');
 
         $this->app->make(RunStepReconciler::class)->reconcile();
-        $this->workQueue();
+        $this->workQueue(1);
 
         $job->refresh();
         self::assertSame(ExecutionJobState::SUCCEEDED, $job->state);
@@ -171,8 +172,9 @@ final class ExecutionJobContractTest extends TicketUiTestCase
         self::assertSame(1, ExecutionJob::query()->where('run_id', $run->id)
             ->where('step_type', ExecutionStepType::IMPLEMENT->value)->count());
 
+        DB::table('jobs')->delete();
         $this->app->make(RunStepReconciler::class)->reconcile();
-        $this->workQueue();
+        $this->workQueue(1);
 
         $job->refresh();
         self::assertSame(ExecutionJobState::SUCCEEDED, $job->state);
@@ -203,7 +205,7 @@ final class ExecutionJobContractTest extends TicketUiTestCase
         $this->expireLease($claimed->fresh() ?? $claimed);
 
         $this->app->make(RunStepReconciler::class)->reconcile();
-        $this->workQueue();
+        $this->workQueue(1);
 
         $job->refresh();
         self::assertSame(ExecutionJobState::FAILED, $job->state);
@@ -315,7 +317,8 @@ final class ExecutionJobContractTest extends TicketUiTestCase
 
         $this->app->make(RunStepReconciler::class)->reconcile();
 
-        self::assertSame(0, DB::table('jobs')->count(), 'AI6-019 registers this handler, not this ticket.');
+        self::assertTrue(ExecutionStepType::IMPLEMENT->hasRegisteredHandler());
+        self::assertSame(1, DB::table('jobs')->count(), 'The registered implement handler is redelivered on the existing job path.');
         self::assertSame(ExecutionJobState::PLANNED, $implement->fresh()->state);
         self::assertSame(0, $implement->fresh()->attempts);
     }
@@ -464,16 +467,21 @@ final class ExecutionJobContractTest extends TicketUiTestCase
     }
 
     /** Drain the database queue exactly the way the worker role does. */
-    private function workQueue(): void
+    private function workQueue(int $maxJobs = 0): void
     {
-        $exitCode = Artisan::call('queue:work', [
+        $parameters = [
             'connection' => 'database',
             '--queue' => 'default',
             '--sleep' => 0,
             '--timeout' => 0,
             '--tries' => 3,
-            '--stop-when-empty' => true,
-        ]);
+        ];
+        if ($maxJobs > 0) {
+            $parameters['--max-jobs'] = $maxJobs;
+        } else {
+            $parameters['--stop-when-empty'] = true;
+        }
+        $exitCode = Artisan::call('queue:work', $parameters);
         self::assertSame(0, $exitCode, Artisan::output());
     }
 }

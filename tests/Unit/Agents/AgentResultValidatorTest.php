@@ -254,7 +254,7 @@ final class AgentResultValidatorTest extends TestCase
     /** @return array<string, mixed> */
     private function document(AgentResultContext $context, AgentResultStatus $status): array
     {
-        return [
+        $document = [
             'schema_version' => $context->role === AgentRole::IMPLEMENTATION ? 'ai6.agent.v1' : 'ai6.quality-review.v1',
             'status' => $status->value,
             'summary' => 'Prüfbares Ergebnis.',
@@ -262,6 +262,22 @@ final class AgentResultValidatorTest extends TestCase
             'instruction_snapshot_hash' => $context->instructionSnapshot->hash,
             'provider_runtime_profile_hash' => $context->runtimeProfile->hash,
         ];
+        if ($context->role === AgentRole::IMPLEMENTATION) {
+            $document['decisions'] = [['key' => 'd1', 'title' => 'Umsetzung', 'rationale' => 'Begründung.']];
+            $document['changed_paths'] = [];
+            $document['open_manual_gates'] = [];
+            $document['implementation_summary'] = [
+                'changed_components' => [],
+                'decisions' => [],
+                'assumptions' => [],
+                'deviations' => [],
+                'known_limits' => [],
+                'tests' => [],
+                'review_focus' => [],
+            ];
+        }
+
+        return $document;
     }
 
     private function context(
