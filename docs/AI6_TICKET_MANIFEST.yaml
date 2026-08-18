@@ -1,6 +1,6 @@
 schema: ai6.ticket-manifest.v1
 source: docs/AI6_IMPLEMENTATION_PLAN.md
-plan_revision: "V1.7.2"
+plan_revision: "V1.7.3"
 blueprint_count: 50
 blueprints:
   - id: "AI6-001"
@@ -218,7 +218,7 @@ blueprints:
     risk: "high"
     kind: "feature"
     depends_on: ["AI6-009", "AI6-018", "AI6-019"]
-    requirement_refs: ["TKT-007", "CFG-002", "AGT-009", "HUM-004", "HUM-005", "REV-005", "RUN-006", "RUN-007"]
+    requirement_refs: ["TKT-007", "TKT-012", "CFG-002", "AGT-009", "HUM-004", "HUM-005", "REV-005", "RUN-006", "RUN-007"]
   - id: "AI6-021"
     title: "Checkprofile und credentialfreier Checker"
     milestone: "M3"
@@ -314,7 +314,7 @@ blueprints:
     risk: "high"
     kind: "feature"
     depends_on: ["AI6-009", "AI6-014", "AI6-027", "AI6-028"]
-    requirement_refs: ["GIT-005", "GIT-006", "GIT-007", "GIT-008", "TKT-005", "RUN-005", "RUN-009"]
+    requirement_refs: ["GIT-005", "GIT-006", "GIT-007", "GIT-008", "TKT-005", "TKT-012", "RUN-005", "RUN-009"]
   - id: "AI6-030"
     title: "Projektqueue und abhängigkeitssicherer Auto-Start"
     milestone: "M5"

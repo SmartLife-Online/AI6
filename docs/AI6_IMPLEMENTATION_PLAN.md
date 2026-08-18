@@ -1,6 +1,8 @@
-# AI6 – Implementierungsplan V1.7.2 – Ticket-Ready, Lean & Secure
+# AI6 – Implementierungsplan V1.7.3 – Ticket-Ready, Lean & Secure
 
-**Stand:** 14. August 2026
+**Stand:** 18. August 2026
+
+**Revision V1.7.3:** Auf ausdrückliche menschliche Entscheidung wird der Umgang mit dem Files-Scope eines Tickets neu gefasst: `files` ist die zum Freigabezeitpunkt beste Vermutung über den Ausgangsscope, keine abschließende Liste, und eine notwendige Erweiterung ist der Regelfall statt eines Fehlers. Erstens kehrt §8.2 die Vorgabe für nicht gelistete Pfade um — ein Pfad, der weder unter `scope.auto_allow` noch in einer sensiblen Kategorie liegt, wird unter dem unveränderten `max_added_scope_paths` automatisch in den `effective_scope` aufgenommen und dokumentiert, statt den Run zu blockieren; die neue vertrauenswürdige Projektvorgabe `scope.unlisted_paths` mit den Werten `auto_allow` und `require_approval` hält die strenge Variante verfügbar. Zweitens bleiben die sensiblen Kategorien — Instruktionsdateien, Ticketdateien, Migrationen, Abhängigkeitsdateien, CI-, Deploy- und Authpfade sowie jede Löschung — unverändert serverseitig entschieden und immer menschlich zu entscheiden; Ticketinhalt, Projektinhalt, Dateiname und Providertext ändern daran nichts. Drittens entsteht mit `TKT-012` die Rückschreibung des tatsächlich wirksamen Scopes in die Ticketdatei: AI6 schreibt sie ausschließlich im bereits vorhandenen Post-Push-Status-CAS aus `AI6-029` als AI6-eigenen Abschnitt `## Recorded Scope`, niemals ein Agent und niemals als Contract Amendment. Viertens nimmt der kanonische `ticket_contract_sha256` aus §5.2 diesen Abschnitt wie den Status aus, damit die Dokumentation keine Vertragsänderung vortäuscht und keine Reviewevidenz invalidiert. `TKT-007` wird entsprechend präzisiert; betroffen sind zusätzlich §6.2, §12.2, §12.4, §13.4, die Blueprints `AI6-010`, `AI6-020` und `AI6-029` sowie die Traceability aus §16. Requirement-Texte im Übrigen, AC-/TC-/MG-/EXT-IDs, Ziele, Abhängigkeiten, Meilensteine und die Blueprintanzahl bleiben unverändert. Das bereits erzeugte Detailticket `AI6-020` ist auf diese Revision zu rebasen.
 
 **Revision V1.7.2:** Ein terminologischer Widerspruch zwischen dem normativen Plan und dem integrierten Read-Model-Vertrag wird auf ausdrückliche menschliche Entscheidung geschlossen: `redaction_state=clear` ist der kanonische Zustand einer unredigierten Ticketprojektion; `content_redacted` bleibt der Zustand einer inhaltlich redigierten Projektion. Die betroffenen Verträge in §4.1 sowie die Blueprints `AI6-008`, `AI6-009` und `AI6-012` werden vom bisherigen `redaction_state`-Wert `none` auf `clear` nachgezogen. Andere fachlich unabhängige `none`-Werte, insbesondere CSP-Direktiven, bleiben unverändert. Das ahead-derived Rebase-Gate von `AI6-012` wird damit gegen die bereits real verifizierten Nähte aus `AI6-011` und den nun konsistenten normativen Redaction-Vertrag bestätigt. Requirement- und Evidenz-IDs, Ziele, Abhängigkeiten, Meilensteine, Blueprintanzahl und Traceability bleiben unverändert; die fachliche Fail-closed-Semantik wird nur auf den bereits integrierten Enumwert vereinheitlicht.
 
@@ -204,11 +206,12 @@ Die IDs sind stabil. Detaillierte Tickets referenzieren diese IDs unter `spec_re
 - **TKT-004** – Ticket-IDs, Statuswerte, Abhängigkeiten, Pfade sowie AC-/TC-IDs werden deterministisch validiert.
 - **TKT-005** – Nur die Ticketdatei ist autoritativ für den Status; zentrale Markdown-Indizes sind reine Ansichten.
 - **TKT-006** – Ticketänderungen aus dem Panel verwenden Git-Blob-Konfliktschutz und erzeugen nachvollziehbare Git-Commits. Eine inhaltlich redigierte Projektion ist niemals Editorquelle; bei Redaction eines vertragsrelevanten Bytes fallen Bearbeitung und Approval geschlossen aus, bis ein neuer unredigierter Blob sicher gelesen und an seine exakte Basis gebunden wurde. Ein unredigiertes schemaungültiges Dokument darf der Editor reparieren, aber niemals approved werden; der neue Schreibstand muss vor Commit vollständig gültig sein.
-- **TKT-007** – files beschreibt den geplanten Ausgangsscope; Erweiterungen erfolgen ausschließlich über die adaptive Scope-Policy.
+- **TKT-007** – `files` ist die zum Freigabezeitpunkt beste Vermutung über den Ausgangsscope und keine abschließende Liste. Erweiterungen erfolgen ausschließlich über die adaptive Scope-Policy; eine policygebunden aufgenommene Erweiterung wird dokumentiert und blockiert weder Umsetzung noch Review.
 - **TKT-008** – Abhängigkeiten werden als gerichteter azyklischer Graph geprüft und im Panel verständlich dargestellt.
 - **TKT-009** – Approval bewahrt die vor dem Status-CAS menschlich geprüfte Ticket-/Control-Bindung und die daraus ausschließlich durch `todo → ready` erzeugte freigegebene Ticket-/Control-Bindung getrennt. Der kanonische Anforderungs-Hash nimmt ausschließlich den Status aus.
 - **TKT-010** – Als Ticketkandidat gilt ausschließlich ein regulärer, nicht symbolischer Git-Blob als direkter Kindpfad `<TICKET-ID>.md` im normalisierten `tickets_path`; `.md`, Pfad und ID werden ASCII-/case-sensitiv geprüft. Andere Endungen, Mehrfachendungen, Unterverzeichnisse, Symlinks und ungültige Namen werden ignoriert. Case-Fold-Kollisionen, mehrere Kandidaten mit derselben deklarierten ID sowie Abweichungen zwischen Dateiname und Frontmatter-ID sind deterministische Projektvalidierungsfehler.
 - **TKT-011** – `ai6.ticket.v1` ist das generische Ticketformat mit den Mindestfeldern aus `TKT-002`. Das serverseitig bekannte Validierungsprofil `ai6_detail_v1` verschärft es für aus diesem Plan erzeugte AI6-Detailtickets um die Felder und Abschnitte aus §13.4; das Profil wird durch freigegebene Projektpolicy gewählt, niemals durch Ticketinhalt.
+- **TKT-012** – Der tatsächlich wirksame Scope eines abgeschlossenen Runs wird in die Ticketdatei zurückgeschrieben: initialer Scope, je aufgenommenem Pfad der benannte Entscheidungsgrund, quarantänierte Pfade und der verbrauchte Anteil des Pfadlimits erscheinen im AI6-eigenen Abschnitt `## Recorded Scope`. Ihn schreibt ausschließlich AI6 im gebundenen Post-Push-Status-CAS, niemals ein Agent. Er ist Dokumentation und kein Vertrag: Er geht nicht in `ticket_contract_sha256` ein, ist kein Contract Amendment und invalidiert keine Reviewevidenz.
 
 ### 3.3 Git
 - **GIT-001** – Jedes Projekt besitzt einen verwalteten Clone mit explizitem Control-Branch und gehärtetem SSH-/Remote-Vertrag. Control-Branch, Remote und Managed-Path stammen nur aus vertrauenswürdigen Projektmetadaten; eine autorisierte Änderung erfordert Step-up, Ref-/OID-Prüfung, keinen aktiven Run und invalidiert abhängige Read Models, Snapshots, Approvals und Queue-Freigaben.
@@ -468,10 +471,10 @@ Der Git-Blob-SHA bleibt die Bindung an die exakten Originalbytes. Der zusätzlic
 1. Frontmatter wird als YAML 1.2 ohne Tags, Anchors, Aliases, Merge-Keys, unbekannte oder doppelte Keys geparst. Alle Strings werden nach Unicode NFC normalisiert; Listenreihenfolgen bleiben erhalten.
 2. Aus den vorhandenen bekannten Keys `schema`, `id`, `title`, `depends_on`, `kind`, `milestone`, `risk`, `files`, `spec_refs` wird ein JSON-Objekt erzeugt. `status` wird samt Key als einziges Feld ausgeschlossen; optionale fehlende Keys bleiben abwesend und sind von leeren Listen verschieden.
 3. Das Frontmatter-Objekt wird exakt nach RFC 8785 JSON Canonicalization Scheme (JCS) als UTF-8 ohne BOM serialisiert. Damit sind Property-Sortierung, String-Escaping, Unicodeausgabe und sonstige JSON-Bytes festgelegt; Arrays behalten ihre Reihenfolge. Zahlen, Booleans, `null` und frei ergänzte Objekte sind in diesen Feldern unzulässig.
-4. Der Markdownkörper ist alles nach dem schließenden Frontmatter-Delimiter. Seine Zeilenenden werden zu LF und sein Unicode zu NFC normalisiert. Anschließend werden ausschließlich alle LF-Zeichen am Dateiende entfernt und genau ein LF angefügt; anderer führender, nachlaufender oder innerer Whitespace wird weder getrimmt noch umgebrochen. Die Frontmatter-Delimiter selbst gehören nicht zum Körper.
+4. Der Markdownkörper ist alles nach dem schließenden Frontmatter-Delimiter. Ein vorhandener AI6-eigener Abschnitt `## Recorded Scope` nach `TKT-012` wird vorher samt Überschrift und Inhalt bis zur nächsten `##`-Überschrift beziehungsweise bis zum Dateiende entfernt; er ist wie der Status Dokumentation und kein Vertragsbestandteil. Seine Zeilenenden werden zu LF und sein Unicode zu NFC normalisiert. Anschließend werden ausschließlich alle LF-Zeichen am Dateiende entfernt und genau ein LF angefügt; anderer führender, nachlaufender oder innerer Whitespace wird weder getrimmt noch umgebrochen. Die Frontmatter-Delimiter selbst gehören nicht zum Körper.
 5. Der Hashinput ist die ASCII-Domäne `AI6-TICKET-CONTRACT-V1` plus NUL, danach die Länge der JSON-Bytes als unsigned 64-bit big-endian, die JSON-Bytes, die Länge der Markdownbytes im selben Format und die Markdownbytes. `ticket_contract_sha256` ist der kleingeschriebene hexadezimale SHA-256 dieses Inputs.
 
-Damit behalten ausschließlich Statusänderungen sowie die ausdrücklich kanonisierten Darstellungsunterschiede denselben Contract-Hash. Geänderte Listenreihenfolge, Prosa, innerer Markdown-Whitespace oder ein optionales Feld verändern ihn; reine YAML-Quoting-/Einrückungs-, CRLF/LF- und Null-/Ein-/Mehrfach-Final-LF-Unterschiede können denselben semantischen Hash besitzen, bleiben aber über den Git-Blob-SHA konfliktwirksam. Plan und Ticketparser pflegen gemeinsame Golden-Vektoren für generisches und `ai6_detail_v1`-Format.
+Damit behalten ausschließlich Statusänderungen, das Schreiben oder Fortschreiben des Abschnitts `## Recorded Scope` sowie die ausdrücklich kanonisierten Darstellungsunterschiede denselben Contract-Hash. Geänderte Listenreihenfolge, Prosa, innerer Markdown-Whitespace oder ein optionales Feld verändern ihn; reine YAML-Quoting-/Einrückungs-, CRLF/LF- und Null-/Ein-/Mehrfach-Final-LF-Unterschiede können denselben semantischen Hash besitzen, bleiben aber über den Git-Blob-SHA konfliktwirksam. Plan und Ticketparser pflegen gemeinsame Golden-Vektoren für generisches und `ai6_detail_v1`-Format.
 
 ### 5.3 Autorität
 
@@ -549,6 +552,7 @@ limits:
   max_run_minutes: 180
 
 scope:
+  unlisted_paths: auto_allow
   auto_allow:
     - app/**
     - resources/**
@@ -775,12 +779,23 @@ Originale Reviewergebnisse bleiben unverändert. Für das Candidate-Gate zählt 
 ### 8.2 Adaptive Scope-Regel
 
 ```text
-initial_scope       Ticket.files bei Freigabe
-effective_scope     initial_scope + genehmigte Erweiterungen
+initial_scope       Ticket.files bei Freigabe — erste Vermutung nach TKT-007
+effective_scope     initial_scope + policygebunden und menschlich aufgenommene Erweiterungen
 actual_changed      tatsächlicher Git-Diff
+recorded_scope      nach Runabschluss in die Ticketdatei zurückgeschriebene Dokumentation (TKT-012)
 ```
 
-Vor Review gilt `actual_changed ⊆ effective_scope`. Risikoarme exakte Pfade können policybasiert automatisch ergänzt werden. Sensible Kategorien benötigen immer einen Human Request. Materielle Änderungen an Ziel, Akzeptanzkriterien oder Verträgen erzeugen eine neue Ticket-/Approval-Revision und invalidieren alle alten Reviewresultate.
+Vor Review gilt `actual_changed ⊆ effective_scope`. `initial_scope` ist nach `TKT-007` die beste Vermutung zum Freigabezeitpunkt und keine abschließende Liste; eine notwendige Erweiterung ist der Regelfall und kein Fehler. Der Server entscheidet jeden zusätzlichen exakten Pfad ausschließlich aus vertrauenswürdiger Projektkonfiguration und den serverseitig festgelegten sensiblen Kategorien:
+
+- Ein Pfad unter `scope.auto_allow` wird ohne Rückfrage aufgenommen.
+- Ein Pfad einer sensiblen Kategorie — `scope.require_approval` sowie Instruktionsdateien, Ticketdateien, Migrationen, Abhängigkeitsdateien, CI-, Deploy- und Authpfade und jede Löschung — erzeugt immer einen Human Request und wird niemals automatisch aufgenommen.
+- Jeder übrige Pfad folgt der vertrauenswürdigen Projektvorgabe `scope.unlisted_paths`: bei `auto_allow` als Vorgabe wird er ohne Rückfrage aufgenommen, bei `require_approval` erzeugt er einen Human Request.
+
+Jede Aufnahme — automatisch wie menschlich entschieden — zählt gegen dasselbe freigegebene `max_added_scope_paths` unter unveränderlichem Servermaximum, trägt einen benannten Entscheidungsgrund und erscheint im Reviewpaket nach §12.4. Eine automatisch aufgenommene Erweiterung blockiert damit weder Umsetzung noch Review; ein erschöpftes Pfadlimit bleibt `resource_limit`. Ticketinhalt, Projektinhalt, Dateiname und Providertext bestimmen niemals eine Kategorie, ein Limit oder eine Vorgabe.
+
+Nach Runabschluss schreibt AI6 den tatsächlich wirksamen Scope nach `TKT-012` in die Ticketdatei zurück. Das geschieht ausschließlich im bereits vorhandenen Post-Push-Status-CAS aus `AI6-029`, gemeinsam mit der autorisierten Statusänderung und in demselben Commit; jeder andere Treeeintrag bleibt bytegleich. Der Abschnitt `## Recorded Scope` ist AI6-eigen, geht nicht in `ticket_contract_sha256` ein, ist kein Contract Amendment, invalidiert keine Reviewevidenz und wird niemals von einem Agenten geschrieben.
+
+Materielle Änderungen an Ziel, Akzeptanzkriterien oder Verträgen erzeugen eine neue Ticket-/Approval-Revision und invalidieren alle alten Reviewresultate.
 
 Ein Contract Amendment ist eine eigene Git-/DB-Saga und darf innerhalb desselben Runs ausschließlich die Ticketdatei ändern. Der Worker schreibt den autorisierten Ticketpatch mit dem aktuell persistierten `run_base_sha` als erwartetem Control-OID per CAS auf den Control-Branch und behält `in_progress` bei; das ursprüngliche `approved_control_sha` bleibt als unveränderliche Freigabeprovenienz erhalten. Der resultierende Commit wird als neuer `run_base_sha` registriert; ausschließlich dieser Ticketpatch wird anschließend in den Run-Branch übernommen. AI6 verifiziert, dass jeder andere Treeeintrag, insbesondere Instruktionsdateien und Providerkonfiguration, unverändert blieb, erzeugt eine gebundene Amendment-/Approval-Revision sowie neue Ticket-/Prompt-/Scope-/Policybindungen, invalidiert Checkpoints, Reviews, Gate-Evidenz und Finding-Dispositionen und setzt den Run vor Scope/Checks fort. Die bestehende Run-Branch-Historie wird dabei nicht still rebased; AI6-027 rekonstruiert den späteren Candidate deterministisch aus dem erneut geprüften effektiven Code-Diff auf dem neuesten `run_base_sha`, und AI6-029 verwendet genau diesen SHA als einzigen Commit-Parent. Jeder unerwartete zusätzliche Control- oder Run-Branch-Diff ist `git_base_changed`; automatisches Rebase fremder Änderungen ist verboten.
 
@@ -1040,7 +1055,7 @@ Ein Ticket ist nur reviewbereit, wenn:
 - gezielte und bestehende relevante Tests grün sind;
 - neue Fachlogik eigene Tests besitzt;
 - Formatierung, Syntax, die konfigurierte statische Analyse und `git diff --check` grün sind;
-- keine unfreigegebene Scope-/Vertragsänderung offen ist;
+- keine unfreigegebene Scope-/Vertragsänderung offen ist; eine policygebunden aufgenommene und dokumentierte Scope-Erweiterung nach §8.2 gilt als freigegeben und blockiert nicht;
 - keine Secrets oder Rohcredentials in Diff/Logs/Fixtures liegen;
 - Dokumentation nur dort aktualisiert wurde, wo der Ticketvertrag dies verlangt;
 - manuelle/externe Gates ehrlich als offen oder mit Evidenz dokumentiert sind;
@@ -1065,7 +1080,7 @@ Ein einzelner Review muss ohne Implementierungs-Chat möglich sein. AI6 stellt d
 
 - freigegebene Ticketrevision und referenzierte Requirements/Specs;
 - Base- und Checkpoint-SHA sowie den vollständigen Diff;
-- effektiven Scope einschließlich genehmigter Erweiterungen;
+- effektiven Scope einschließlich aller aufgenommenen Erweiterungen mit ihrem benannten Entscheidungsgrund;
 - strukturierte Implementierungsentscheidungen und Human-Responses;
 - Ergebnisse aller ticketbezogenen Checks;
 - AC-/TC-Evidenz sowie Status und gebundene Evidenz jeder MG-/EXT-ID;
@@ -1120,7 +1135,8 @@ Der letzte Punkt greift nicht, wenn die fehlende Voraussetzung ausschließlich a
 - manuelle/externe Gates unter `## Manual and External Gates`;
 - `## Review Focus`;
 - Abhängigkeiten nur auf bereits definierte IDs;
-- Hinweis unter `## Notes`, dass AI6 Ticketstatus/Runmetadaten verwaltet.
+- Hinweis unter `## Notes`, dass AI6 Ticketstatus/Runmetadaten verwaltet;
+- kein `## Recorded Scope`: Dieser AI6-eigene Abschnitt entsteht erst nach Runabschluss nach `TKT-012` und wird vom Generator nie erzeugt.
 
 ### 13.5 Reviewbarkeit
 
@@ -2033,7 +2049,7 @@ Versionierte Projektdefaults nutzen, ohne dass Repositoryinhalt die Control-Plan
 
 **Deliverables**
 
-- Strenges Schema für .ai6/config.yaml.
+- Strenges Schema für .ai6/config.yaml einschließlich `scope.unlisted_paths` mit ausschließlich `auto_allow` oder `require_approval` und der Vorgabe `auto_allow`.
 - Semantische Diffansicht und Approver-Freigabe.
 - Effektiver Config-Snapshot mit Blob-SHA und Hash.
 - Referenzen auf serverseitige Check-/Modellprofile.
@@ -2049,6 +2065,7 @@ Versionierte Projektdefaults nutzen, ohne dass Repositoryinhalt die Control-Plan
 - Fehlende Datei verwendet Serverdefaults.
 - Unsichere Checkdefinitionen werden abgelehnt.
 - Repositoryinhalt kann weder die Definition des Validierungsprofils noch Control-Branch, Remote oder Managed-Path bestimmen.
+- `scope.unlisted_paths` stammt ausschließlich aus der freigegebenen Projektkonfiguration; ein unbekannter Wert wird abgelehnt, und Ticket- oder Providerinhalt setzt ihn nicht.
 - Ein Read Model, das unter einem anderen Validierungsprofil oder Config-Snapshot erzeugt wurde, ist stale und weder approvable noch startbar, bis es neu projiziert wurde.
 - Nach einem Control-Branch-Wechsel ist der bisherige Config-Snapshot stale und kein Run verwendet ihn weiter; die Entwertung ergibt sich ausschließlich aus der abweichenden `control_generation`.
 
@@ -2568,7 +2585,7 @@ Den ersten Implementierungsturn mit FakeAgent ausführen, Ergebnisse importieren
 - **Risiko:** `high`
 - **Kind:** `feature`
 - **Depends on:** `AI6-009`, `AI6-018`, `AI6-019`
-- **Requirement-Refs:** `TKT-007`, `CFG-002`, `AGT-009`, `HUM-004`, `HUM-005`, `REV-005`, `RUN-006`, `RUN-007`
+- **Requirement-Refs:** `TKT-007`, `TKT-012`, `CFG-002`, `AGT-009`, `HUM-004`, `HUM-005`, `REV-005`, `RUN-006`, `RUN-007`
 - **Erwartete Module:** `Tickets`, `Runs`, `HumanLoop`, `Git`
 
 **Ziel**
@@ -2578,7 +2595,8 @@ Notwendige Abweichungen vom geplanten File-Scope kontrolliert zulassen, ohne Zie
 **Deliverables**
 
 - initial_scope, effective_scope und actual_changed_paths.
-- Deterministische Auto-Allow-Policy für risikoarme exakte Pfade.
+- Deterministische Scope-Policy mit den drei Spuren aus §8.2: `scope.auto_allow` ohne Rückfrage, sensible Kategorien immer per Human Request, jeder übrige Pfad nach der vertrauenswürdigen Projektvorgabe `scope.unlisted_paths` mit der Vorgabe `auto_allow`.
+- `recorded_scope` als dokumentierender Runzustand nach `TKT-012`: initialer Scope, je aufgenommenem Pfad der benannte Entscheidungsgrund, quarantänierte Pfade und Verbrauch des Pfadlimits, dazu der Ausschluss des AI6-eigenen Abschnitts `## Recorded Scope` aus der einen vorhandenen kanonischen Contract-Hash-Naht ohne zweite Parser- oder Hashnaht.
 - Zähler für neu in `effective_scope` aufgenommene exakte Pfade gegen das freigegebene `max_added_scope_paths`; Retry, Teilgenehmigung und Contract Amendment verbrauchen denselben idempotenten Zähler.
 - Human Requests für sensible Pfade.
 - Contract-Amendment-Saga: Ticketänderung mit unverändertem Status `in_progress` per Control-Branch-CAS committen, neuen Control-Commit ausschließlich als aktuelles `run_base_sha` speichern, `initial_run_base_sha` unverändert lassen und nur den gebundenen Ticketpatch in den bestehenden Run-Branch übernehmen.
@@ -2593,6 +2611,8 @@ Notwendige Abweichungen vom geplanten File-Scope kontrolliert zulassen, ohne Zie
 - actual_changed_paths ist vor Review Teil von effective_scope.
 - Eine Überschreitung von `max_added_scope_paths` übernimmt keinen zusätzlichen Pfad, setzt `wait_reason=resource_limit` und bleibt durch Projektinhalt oder Intervention nicht über das Servermaximum hinaus erhöhbar.
 - AGENTS.md, Tickets, Migrationen, Dependencies, CI/Deploy/Auth und Löschungen benötigen menschliche Entscheidung.
+- Ein Pfad außerhalb von `scope.auto_allow` und außerhalb jeder sensiblen Kategorie wird bei `scope.unlisted_paths: auto_allow` ohne Rückfrage aufgenommen, mit benanntem Entscheidungsgrund dokumentiert und blockiert weder Umsetzung noch Review; bei `require_approval` erzeugt derselbe Pfad einen Human Request.
+- Ein vorhandener Abschnitt `## Recorded Scope` verändert `ticket_contract_sha256` nicht; der Contract-Hash bleibt vor und nach seinem Schreiben identisch.
 - Ablehnung entfernt nur AI6-eigene Änderungen und bewahrt Audit.
 - Freigegebene Vertragsänderung ist über Human Request, Autorisierung, alten/neuen Ticketblob, alten/neuen Control-Commit, Patchhash und aktualisierte Runbindung vollständig nachvollziehbar.
 - Contract Amendment verändert niemals `initial_run_base_sha`; das neue `run_base_sha` wird als spätere Candidate-Basis verwendet, nicht als nachträglich erfundener Worktree-Ahn.
@@ -2602,7 +2622,8 @@ Notwendige Abweichungen vom geplanten File-Scope kontrolliert zulassen, ohne Zie
 
 **Mindestens zu erzeugende Testfälle**
 
-- Auto-Allow-/Sensitive-Kategorien.
+- Auto-Allow-, Sensitive- und Unlisted-Kategorien einschließlich beider Werte von `scope.unlisted_paths` an demselben Pfad.
+- Contract-Hash-Invarianz über einem geschriebenen und einem fortgeschriebenen `## Recorded Scope` sowie Golden-Vektor mit und ohne diesen Abschnitt.
 - Grenz-, Überschreitungs-, Retry- und Teilgenehmigungstest für `max_added_scope_paths`.
 - Teilgenehmigung.
 - Ablehnung und Patch-Erhalt.
@@ -2616,6 +2637,7 @@ Notwendige Abweichungen vom geplanten File-Scope kontrolliert zulassen, ohne Zie
 
 - Repositoryweite automatische Freigabe.
 - Stille Änderung von Akzeptanzkriterien.
+- Das Zurückschreiben des `## Recorded Scope` in die Ticketdatei selbst (`AI6-029`).
 
 ### AI6-021 — Checkprofile und credentialfreier Checker
 
@@ -3123,7 +3145,7 @@ Den exakten Publish-Kandidaten optional mit einer frischen read-only LLM-Sitzung
 - **Risiko:** `high`
 - **Kind:** `feature`
 - **Depends on:** `AI6-009`, `AI6-014`, `AI6-027`, `AI6-028`
-- **Requirement-Refs:** `GIT-005`, `GIT-006`, `GIT-007`, `GIT-008`, `TKT-005`, `RUN-005`, `RUN-009`
+- **Requirement-Refs:** `GIT-005`, `GIT-006`, `GIT-007`, `GIT-008`, `TKT-005`, `TKT-012`, `RUN-005`, `RUN-009`
 - **Erwartete Module:** `Git`, `Runs`, `Tickets`
 
 **Ziel**
@@ -3138,13 +3160,14 @@ Den akzeptierten Candidate unverändert committen, gemäß Pushpolicy veröffent
 - Manueller Pushbutton und optional automatic_after_gates.
 - Expected-remote-OID und Branch-Allowlist.
 - Nach bestätigtem Arbeits- oder No-change-Branchref separater, `status_operation_id`-gebundener Control-Branch-CAS `in_progress → review` mit vorab persistiertem Parent, Zielblob/-tree und beabsichtigtem Commit.
+- Rückschreibung des `recorded_scope` aus `AI6-020` als AI6-eigener Abschnitt `## Recorded Scope` nach `TKT-012` in derselben Ticketdatei und in genau diesem einen Status-CAS, redigiert und ohne Contract Amendment.
 - `manual_push`- und `status_sync`-Producer samt Erweiterung des zentralen Resolverregisters, Status-Saga-Reconciler, idempotentem Retry, Runabschluss, Lockfreigabe und Cleanup.
 
 **Akzeptanzvertrag**
 
 - Kein Commit/Push bei ungültigem oder veraltetem Security-/Reviewresultat.
 - Kein finaler Commit und kein Push bei offenem beziehungsweise stale gewordenem `MG-`-/`EXT-`-Gate.
-- Der Arbeitsbranch-Push verändert nur den Run-Branch; der spätere Status-CAS enthält ausschließlich die autorisierte Ticketstatusänderung.
+- Der Arbeitsbranch-Push verändert nur den Run-Branch; der spätere Status-CAS enthält ausschließlich die autorisierte Ticketstatusänderung und den gebundenen `## Recorded Scope`-Block derselben Ticketdatei. Jeder andere Treeeintrag bleibt bytegleich, und `ticket_contract_sha256` ist vor und nach dem CAS identisch.
 - Jeder geänderte finale Commit besitzt genau das aktuelle `run_base_sha` als einzigen Parent. Der No-change-Zweig veröffentlicht stattdessen einen Run-Branchref, der exakt auf `run_base_sha` zeigt.
 - Basisdrift blockiert verständlich.
 - Retry nach unklarem Push prüft Remote statt doppelt zu pushen.
@@ -3160,6 +3183,7 @@ Den akzeptierten Candidate unverändert committen, gemäß Pushpolicy veröffent
 - Remote drift/non-fast-forward/unknown result.
 - Post-Push-Status-Saga-Crashmatrix an jeder gemeinsamen Phase, Erfolg, Konflikt, Retry, fremder ähnlich aussehender `review`-Commit und genau einmaliger Runabschluss/Lockfreigabe.
 - Producer-/Resolver-/Cancel-Tests für `manual_push` und `status_sync`.
+- Recorded-Scope-Rückschreibung: derselbe Status-CAS schreibt Status und Scope-Dokumentation in genau einem Commit, lässt jeden anderen Treeeintrag bytegleich, hält `ticket_contract_sha256` unverändert, ist bei Wiederholung idempotent und fällt bei CAS-Konflikt ohne Teilwirkung aus.
 - Cleanup nach Erfolg/Fehler.
 - No-change-run ohne leeren Code-Commit, mit lokalem/remote Run-Branchref exakt auf `run_base_sha`, Driftprüfung, Status-CAS und Lockfreigabe.
 
@@ -3730,11 +3754,12 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `TKT-004` | `AI6-007` |
 | `TKT-005` | `AI6-009`, `AI6-029`, `AI6-037`, `AI6-039` |
 | `TKT-006` | `AI6-009` |
-| `TKT-007` | `AI6-010`, `AI6-020`, `AI6-022` |
+| `TKT-007` | `AI6-010`, `AI6-020`, `AI6-022`, `AI6-029` |
 | `TKT-008` | `AI6-007`, `AI6-008`, `AI6-030` |
 | `TKT-009` | `AI6-007`, `AI6-009`, `AI6-012`, `AI6-013` |
 | `TKT-010` | `AI6-007` |
 | `TKT-011` | `AI6-007`, `AI6-010`, `AI6-037` |
+| `TKT-012` | `AI6-020`, `AI6-029` |
 | `GIT-001` | `AI6-006A`, `AI6-006B`, `AI6-006D`, `AI6-006E`, `AI6-006F`, `AI6-009`, `AI6-010`, `AI6-012`, `AI6-013`, `AI6-030` |
 | `GIT-002` | `AI6-013`, `AI6-014` |
 | `GIT-003` | `AI6-014`, `AI6-019`, `AI6-022` |

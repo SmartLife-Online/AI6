@@ -1,8 +1,8 @@
 # AI6 – Ticket-Template V1 (`ai6.ticket.v1`)
 
-**Stand:** 29. Juli 2026
+**Stand:** 18. August 2026
 **Zweck:** Maschinenlesbarer Erzeugungs- und Umsetzungsvertrag für einzelne Detailtickets
-**Normative Quelle:** `docs/AI6_IMPLEMENTATION_PLAN.md` ab Revision V1.6.20 – dieses Dokument konkretisiert die Erzeugung, der aktuelle Plan gewinnt jeden Widerspruch
+**Normative Quelle:** `docs/AI6_IMPLEMENTATION_PLAN.md` ab Revision V1.7.3 – dieses Dokument konkretisiert die Erzeugung, der aktuelle Plan gewinnt jeden Widerspruch
 **Adressaten:** ein **Erzeuger-LLM**, das Tickets schreibt, und ein **Umsetzer-LLM**, das sie implementiert
 **Verweiskonvention:** `Plan §X` verweist auf `docs/AI6_IMPLEMENTATION_PLAN.md`, `§X` ohne Präfix auf dieses Dokument. In den eigenständig kopierbaren Blöcken — Antragsformat §10 und Generatorprompt §12 — ist jeder Verweis mit `Plan` oder `Template` ausgeschrieben, weil sie ohne dieses Dokument gelesen werden.
 
@@ -46,9 +46,9 @@ Solange AI6 nicht lauffähig ist, wird das Erzeuger-LLM manuell aufgerufen. Der 
 
 ### 2.2 Umsetzer-LLM
 
-**Darf:** Dateien im effektiven Scope ändern und Tests ergänzen.
+**Darf:** Dateien im effektiven Scope ändern und Tests ergänzen. Der `files`-Scope des Tickets ist nach `TKT-007` die erste Vermutung zum Erzeugungszeitpunkt und keine abschließende Liste; eine notwendige Erweiterung ist der Regelfall und wird nach Plan §8.2 policygebunden aufgenommen und dokumentiert.
 
-**Darf nicht:** `status` oder andere Ticketfelder ändern, Approval- oder Run-Metadaten anfassen oder den Scope still erweitern. Reviewer ändern `AGENTS.md` oder vergleichbare Instruktionsdateien niemals (`REV-009`). Ein Implementierungsagent darf eine prospektive Instruktionsänderung nur in einem ausdrücklich vor Runstart freigegebenen Instruction-Update-Ticket mit dem Pfad im `initial_scope` über den strukturierten Patchkanal aus Plan §8.2 vorschlagen; gewöhnlicher Dateischreibzugriff am nativen Discoverypfad, Same-run-Scopeerweiterung und Contract Amendment sind verboten.
+**Darf nicht:** `status` oder andere Ticketfelder ändern, Approval- oder Run-Metadaten anfassen, den Abschnitt `## Recorded Scope` selbst schreiben oder den Scope still erweitern — eine Erweiterung ist zulässig, das unbemerkte Erweitern nicht, und ein Pfad einer sensiblen Kategorie nach Plan §8.2 bleibt immer eine menschliche Entscheidung. Reviewer ändern `AGENTS.md` oder vergleichbare Instruktionsdateien niemals (`REV-009`). Ein Implementierungsagent darf eine prospektive Instruktionsänderung nur in einem ausdrücklich vor Runstart freigegebenen Instruction-Update-Ticket mit dem Pfad im `initial_scope` über den strukturierten Patchkanal aus Plan §8.2 vorschlagen; gewöhnlicher Dateischreibzugriff am nativen Discoverypfad, Same-run-Scopeerweiterung und Contract Amendment sind verboten.
 
 **Muss:** jede notwendige Abweichung als `needs_human` beziehungsweise Scope-/Contract-Request melden (Plan §9.2, Plan §17.2), und ausschließlich schema-validiertes JSON zurückgeben (`AGT-004`).
 
@@ -222,7 +222,7 @@ Prosa-Slots sind **deutsch**, sofern nicht anders vermerkt. Struktur-, Enum- und
 | `kind` | bekannt | Pflicht | `feature`, `chore`, `fix` oder `spike`; für Plan-Blueprints unverändert. | Plan §5.1, §17.1 |
 | `milestone` | bekannt | Pflicht | `M0` bis `M7`, unverändert aus dem Blueprint. | Plan §14, §17.1 |
 | `risk` | bekannt | Pflicht | `low`, `medium` oder `high`, unverändert aus dem Blueprint. | Plan §15, §17.1 |
-| `files` | bekannt | Pflicht | Geplanter Ausgangsscope; leer exakt `[]`; nach Dekodierung identisch zum Scope-Unterabschnitt. | `TKT-007`, Plan §8.2 |
+| `files` | bekannt | Pflicht | Erste Vermutung über den Ausgangsscope, keine abschließende Liste; leer exakt `[]`; nach Dekodierung identisch zum Scope-Unterabschnitt. | `TKT-007`, Plan §8.2 |
 | `spec_refs` | bekannt | Pflicht | Je Requirement-ID des aktuellen Blueprints genau ein kanonischer Eintrag, in Blueprint-Reihenfolge. | Plan §13.4, §13.5, §17.1 |
 
 Die Key-Reihenfolge des Generatorprofils ist `schema`, `id`, `title`, `status`, `depends_on`, `kind`, `milestone`, `risk`, `files`, `spec_refs`. Das Basisschema definiert keine abweichende Bedeutung durch eine andere YAML-Key-Reihenfolge.
@@ -303,6 +303,8 @@ Manual and External Gates · Review Focus · Notes
 | `Notes` | exakt drei fixe Zeilen plus null oder mehrere deutsche Hinweise | nein |
 
 `None.` steht allein in einer Zeile und ausschließlich in den vier als zulässig markierten Fällen. Es ist keine globale Ersatzregel für fehlenden Pflichtinhalt.
+
+Genau ein weiterer Abschnitt darf nach `Notes` auftreten und gehört ausschließlich AI6: `## Recorded Scope` nach `TKT-012`. AI6 schreibt ihn erst nach Runabschluss im gebundenen Post-Push-Status-CAS mit dem tatsächlich wirksamen Scope. Das Erzeuger-LLM gibt ihn nie aus, das Umsetzer-LLM schreibt ihn nie, und er geht nach Plan §5.2 nicht in `ticket_contract_sha256` ein. Ein Validierungsprofil, das ihn vorfindet, akzeptiert ihn; ein Ticket ohne ihn bleibt vollständig gültig.
 
 ### 7.4 Statuswerte und Übergänge
 
@@ -585,6 +587,13 @@ sections:
       if_empty: {exact_content: "None."}
     "Review Focus": {min_items: 1}
     Notes: {required_boilerplate_lines: 3, optional_additional_items: true}
+  ai6_owned_sections:
+    - name: "Recorded Scope"
+      emitted_by_generator: false
+      written_by: ai6_post_push_status_cas
+      position: after_notes
+      optional: true
+      excluded_from_contract_hash: true
 
 fixed_literals:
   coverage_table_header: "| AC | Evidence |"
@@ -744,6 +753,10 @@ Vorgehen:
 - Leite Kontext, Aufgaben, Scope und Tests aus Blueprint, Requirements,
   Abhängigkeitsverträgen und realem Repositorystand ab. Prüfe jeden als
   vorhanden beschriebenen Pfad und jede vorhandene Naht.
+- files ist die beste Vermutung über den Ausgangsscope und keine
+  abschließende Liste (TKT-007). Nenne die Pfade, die du heute begründen
+  kannst; eine spätere Erweiterung ist der Regelfall und blockiert die
+  Umsetzung nicht. Blähe den Scope deshalb nicht vorsorglich auf.
 - Klassen, Commands und andere Artefakte, deren Neuanlage der Blueprint
   verlangt, darfst und musst du konkret benennen. Führe sie im Scope als
   "new". Behaupte niemals, eine Naht oder API existiere bereits, wenn du sie
@@ -785,7 +798,7 @@ Aus dem Ticket selbst zieht das Umsetzer-LLM: das Outcome (`## Goal`), die Näht
 
 - Alle AC- und TC-IDs nachweisbar bearbeitet; Nachweis über die IDs, nicht über Prosa.
 - Neue Fachlogik besitzt eigene Tests; bestehende relevante Tests bleiben grün (Plan §12.2).
-- Keine Änderung außerhalb des effektiven Scope. Jede benötigte Erweiterung läuft über einen Scope-Request (Plan §8.2).
+- Keine Änderung außerhalb des effektiven Scope. Eine benötigte Erweiterung wird gemeldet und nach Plan §8.2 policygebunden aufgenommen; sie blockiert weder Umsetzung noch Review. Ein Pfad einer sensiblen Kategorie läuft weiterhin über einen Scope-Request und wird vor der Entscheidung nicht geändert.
 - Keine Änderung an `status`, Approval- oder Run-Metadaten.
 - Offene manuelle/externe Gates bleiben ehrlich offen und werden nie als bestanden gemeldet.
 - Ausgabe ist schema-validiertes JSON nach Plan §9, kein Freitext.
