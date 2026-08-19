@@ -80,7 +80,50 @@ final class DelegatingProcessIsolationBoundaryTest extends TestCase
         }
     }
 
-    public function test_a_checker_policy_outside_its_role_is_refused_without_agent_containment(): void
+    /**
+     * AI6-021, human-released scope decision: outside its own role a checker
+     * request reaches the check containment boundary, exactly as an agent
+     * request reaches the turn containment boundary. Containment is not a
+     * waiver — result and artifact directories inside the checked tree are
+     * still refused, and by the check boundary rather than by the delegator.
+     */
+    public function test_a_checker_policy_outside_its_role_uses_check_containment(): void
+    {
+        config(['ai6.runtime_role' => 'worker']);
+        $root = sys_get_temp_dir().DIRECTORY_SEPARATOR.'ai6-iso-'.bin2hex(random_bytes(4));
+        $tree = $root.DIRECTORY_SEPARATOR.'tree';
+        $io = $root.DIRECTORY_SEPARATOR.'io';
+        self::assertTrue(mkdir($tree, 0700, true));
+        self::assertTrue(mkdir($io, 0700, true));
+
+        try {
+            // An isolated checker request passes; otherwise the refusal below
+            // would prove nothing.
+            (new DelegatingProcessIsolationBoundary)->assertIsolated(
+                $this->request($tree, $io, ProcessPolicyName::CHECKER),
+                $this->policy(ProcessPolicyName::CHECKER, $tree),
+            );
+
+            try {
+                (new DelegatingProcessIsolationBoundary)->assertIsolated(
+                    $this->request($tree, $tree, ProcessPolicyName::CHECKER),
+                    $this->policy(ProcessPolicyName::CHECKER, $tree),
+                );
+                self::fail('A checker result directory inside the checked tree must be refused.');
+            } catch (ProcessStartRejectedException $exception) {
+                self::assertNotSame(self::OWN_REFUSAL, $exception->getMessage());
+                self::assertNotSame(self::CONTAINMENT_REFUSAL, $exception->getMessage());
+                self::assertStringContainsString('must not lie inside the checked tree', $exception->getMessage());
+            }
+        } finally {
+            @rmdir($io);
+            @rmdir($tree);
+            @rmdir($root);
+        }
+    }
+
+    /** A policy without any containment boundary outside its role stays refused. */
+    public function test_a_control_policy_outside_its_role_is_still_refused_by_the_delegator(): void
     {
         config(['ai6.runtime_role' => 'worker']);
         $root = sys_get_temp_dir().DIRECTORY_SEPARATOR.'ai6-iso-'.bin2hex(random_bytes(4));
@@ -88,10 +131,10 @@ final class DelegatingProcessIsolationBoundaryTest extends TestCase
 
         try {
             (new DelegatingProcessIsolationBoundary)->assertIsolated(
-                $this->request($root, $root, ProcessPolicyName::CHECKER),
-                $this->policy(ProcessPolicyName::CHECKER, $root),
+                $this->request($root, $root, ProcessPolicyName::CONTROL),
+                $this->policy(ProcessPolicyName::CONTROL, $root),
             );
-            self::fail('A checker policy outside its role must be refused.');
+            self::fail('A policy without a containment boundary must be refused.');
         } catch (ProcessStartRejectedException $exception) {
             self::assertSame(self::OWN_REFUSAL, $exception->getMessage());
         } finally {

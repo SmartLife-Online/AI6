@@ -139,10 +139,34 @@ final readonly class RunOrchestrator
         if ($completed === ExecutionStepType::PREFLIGHT && $fresh->state === RunState::QUEUED) {
             $fresh = $this->transition($fresh, $fresh->version, RunState::RUNNING, RunPhase::IMPLEMENT);
         }
+        if ($completed === ExecutionStepType::IMPLEMENT && $fresh->phase === RunPhase::IMPLEMENT) {
+            $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::CHECK);
+        }
 
         $this->planNextStep($fresh, $completed);
 
         return true;
+    }
+
+    /**
+     * Move an executable run into its next phase without changing its state.
+     *
+     * The generic state map deliberately has no running → running edge, so a
+     * phase-only advance cannot go through `transition()`. It stays a
+     * compare-and-swap on the run version and applies only while the run is
+     * still executable and not waiting.
+     */
+    public function advancePhase(Run $run, int $expectedVersion, RunPhase $phase): Run
+    {
+        $updated = Run::query()->whereKey($run->getKey())->where('version', $expectedVersion)
+            ->whereIn('state', [RunState::QUEUED->value, RunState::RUNNING->value])
+            ->whereNull('wait_reason')
+            ->update(['phase' => $phase, 'version' => $expectedVersion + 1]);
+        if ($updated !== 1) {
+            throw new RunTransitionConflict('stale_run_version', 'The run changed before its phase could be advanced.');
+        }
+
+        return Run::query()->findOrFail($run->getKey());
     }
 
     public function claimStep(ExecutionJob $job, string $owner): ?ExecutionJob
@@ -693,6 +717,23 @@ final readonly class RunOrchestrator
     public function cancelResourceLimit(Run $run, int $expectedVersion): Run
     {
         return $this->cancelWait($run, $expectedVersion, WaitReason::RESOURCE_LIMIT);
+    }
+
+    /**
+     * Resolve a failed check by retrying its parked step (plan §7.2).
+     *
+     * The step key binds the retry to exactly the step that failed, so a resume
+     * cannot restart a different one; the check itself stays bound to the tree
+     * it ran against through its own deterministic result key.
+     */
+    public function resumeCheckFailure(Run $run, int $expectedVersion, string $boundStepKey): Run
+    {
+        return $this->resumeWait($run, $expectedVersion, $boundStepKey, WaitReason::CHECK_FAILURE);
+    }
+
+    public function cancelCheckFailure(Run $run, int $expectedVersion): Run
+    {
+        return $this->cancelWait($run, $expectedVersion, WaitReason::CHECK_FAILURE);
     }
 
     public function ensureImplementationSlot(Run $run): RunAgent

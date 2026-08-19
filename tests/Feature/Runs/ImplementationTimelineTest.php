@@ -45,6 +45,9 @@ final class ImplementationTimelineTest extends TicketUiTestCase
         $this->app->instance(AgentAdapter::class, $adapter);
         $this->app->forgetInstance(RunImplementation::class);
         $this->executeImplement($prepared['run']);
+        // The finished implement step plans the follow-up check step, so the
+        // control here is that the browser request itself queues nothing.
+        $queuedBeforeRequest = DB::table('jobs')->count();
 
         $response = $this->actingAs($prepared['operator'])
             ->get(route('projects.runs.show', [$prepared['project'], $prepared['run']->id]));
@@ -57,7 +60,7 @@ final class ImplementationTimelineTest extends TicketUiTestCase
         $response->assertDontSee('sk-live-testsecret');
         $response->assertSee('[REDACTED:TOKEN]');
         $response->assertHeader('Content-Security-Policy', self::STRICT_POLICY);
-        self::assertSame(0, DB::table('jobs')->count());
+        self::assertSame($queuedBeforeRequest, DB::table('jobs')->count());
 
         $body = (string) $response->getContent();
         self::assertStringContainsString('<meta name="viewport" content="width=device-width, initial-scale=1">', $body);

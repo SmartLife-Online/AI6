@@ -22,7 +22,8 @@ final class RunStepDecisionTest extends TestCase
             [RunState::QUEUED, null, [], ExecutionStepType::PREFLIGHT],
             [RunState::RUNNING, null, [], ExecutionStepType::PREFLIGHT],
             [RunState::RUNNING, null, ['preflight'], ExecutionStepType::IMPLEMENT],
-            [RunState::RUNNING, null, ['preflight', 'implement'], null],
+            [RunState::RUNNING, null, ['preflight', 'implement'], ExecutionStepType::CHECK],
+            [RunState::RUNNING, null, ['preflight', 'implement', 'check'], null],
             [RunState::WAITING, WaitReason::HUMAN_QUESTION, ['preflight'], null],
             [RunState::FAILED, null, [], null],
             [RunState::COMPLETED, null, ['preflight'], null],
@@ -73,5 +74,6 @@ final class RunStepDecisionTest extends TestCase
     {
         self::assertTrue(ExecutionStepType::PREFLIGHT->hasRegisteredHandler());
         self::assertTrue(ExecutionStepType::IMPLEMENT->hasRegisteredHandler());
+        self::assertTrue(ExecutionStepType::CHECK->hasRegisteredHandler());
     }
 }

@@ -2,6 +2,13 @@
 
 namespace App\AI6\Checks;
 
+/**
+ * The allowed check profile names of an untrusted project configuration.
+ *
+ * The names are never a list of their own: they are derived from the one
+ * CheckProfileRegistry that also defines what each profile executes, so
+ * validation and execution can never disagree about which names exist.
+ */
 final readonly class CheckProfileAllowlist
 {
     /** @var list<string> */
@@ -13,15 +20,24 @@ final readonly class CheckProfileAllowlist
         $this->profiles = array_values(array_unique($profiles));
     }
 
+    public static function fromRegistry(CheckProfileRegistry $registry): self
+    {
+        return new self($registry->names());
+    }
+
     public static function fromConfiguredValues(): self
     {
-        $profiles = config('ai6.project_config.check_profiles');
-
-        return new self(is_array($profiles) ? array_values(array_filter($profiles, 'is_string')) : []);
+        return self::fromRegistry(CheckProfileRegistry::fromConfiguredValues());
     }
 
     public function allows(string $profile): bool
     {
         return in_array($profile, $this->profiles, true);
+    }
+
+    /** @return list<string> */
+    public function profiles(): array
+    {
+        return $this->profiles;
     }
 }

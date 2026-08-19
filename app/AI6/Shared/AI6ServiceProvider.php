@@ -25,7 +25,11 @@ use App\AI6\Auth\PasskeyCeremony;
 use App\AI6\Auth\PasskeyRelyingParty;
 use App\AI6\Auth\PasskeyRelyingPartyFactory;
 use App\AI6\Auth\Policies\UserPolicy;
+use App\AI6\Checks\CheckFailureResolver;
 use App\AI6\Checks\CheckProfileAllowlist;
+use App\AI6\Checks\CheckProfileRegistry;
+use App\AI6\Checks\CheckRunner;
+use App\AI6\Checks\CheckTreeBinding;
 use App\AI6\Git\CanonicalDiffHasher;
 use App\AI6\Git\CanonicalJson;
 use App\AI6\Git\ControlOperationConfiguration;
@@ -74,6 +78,7 @@ use App\AI6\Runs\RunArtifactRoot;
 use App\AI6\Runs\RunArtifactStore;
 use App\AI6\Runs\RunImplementation;
 use App\AI6\Runs\RunLimitPolicy;
+use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunPreflight;
 use App\AI6\Runs\RunStepConfiguration;
 use App\AI6\Runs\RunStepReconciler;
@@ -134,7 +139,40 @@ final class AI6ServiceProvider extends ServiceProvider
     {
         $this->app->singleton(RestrictedYaml::class);
         $this->app->singleton(RestrictedJsonDecoder::class);
-        $this->app->singleton(CheckProfileAllowlist::class, static fn (): CheckProfileAllowlist => CheckProfileAllowlist::fromConfiguredValues());
+        $this->app->singleton(
+            CheckProfileRegistry::class,
+            static fn (Application $app): CheckProfileRegistry => CheckProfileRegistry::fromConfiguredValues(
+                $app->make(ProcessPolicyRegistry::class),
+            ),
+        );
+        // One source of allowed profile names: the project validation derives
+        // them from the same registry the execution resolves against.
+        $this->app->singleton(
+            CheckProfileAllowlist::class,
+            static fn (Application $app): CheckProfileAllowlist => CheckProfileAllowlist::fromRegistry(
+                $app->make(CheckProfileRegistry::class),
+            ),
+        );
+        $this->app->singleton(CheckTreeBinding::class);
+        $this->app->singleton(
+            CheckRunner::class,
+            static fn (Application $app): CheckRunner => new CheckRunner(
+                $app->make(CheckProfileRegistry::class),
+                $app->make(ControlProcessRunner::class),
+                $app->make(ExecutionMailboxFactory::class),
+                $app->make(IsolatedTreeExporter::class),
+                $app->make(CheckTreeBinding::class),
+                $app->make(Redactor::class),
+                $app->make(ProcessPolicyRegistry::class),
+                $app->make(SecurityPolicy::class),
+            ),
+        );
+        $this->app->singleton(
+            CheckFailureResolver::class,
+            static fn (Application $app): CheckFailureResolver => new CheckFailureResolver(
+                $app->make(RunOrchestrator::class),
+            ),
+        );
         $this->app->singleton(
             AgentInputLimits::class,
             static fn (Application $app): AgentInputLimits => AgentInputLimits::fromConfiguredValues(
@@ -434,6 +472,17 @@ final class AI6ServiceProvider extends ServiceProvider
             // the controlled in_progress → todo reset for an instruction or
             // runtime profile change. Cancel stays the third, explicit path.
             ['amendment_cas', 'return_to_todo'],
+            true,
+        );
+        $this->app->make(WaitReasonRegistry::class)->register(
+            WaitReason::CHECK_FAILURE,
+            // The step handler is the producer: CheckRunner executes one
+            // profile, RunCheckStep is what parks the run behind this wait.
+            'RunCheckStep',
+            // Plan §7.2 allowlists a retry on the unchanged tree and a code fix
+            // through the orchestrator for this one producer; cancel stays the
+            // third, explicit path.
+            ['retry_unchanged_tree', 'orchestrator_code_fix'],
             true,
         );
         $this->app->make(RunArtifactRoot::class);

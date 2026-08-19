@@ -240,7 +240,6 @@ final class ProjectConfigurationSnapshotTest extends AuthFeatureTestCase
             - php-targeted
           final:
             - php-all
-            - git-diff-check
         YAML;
     }
 

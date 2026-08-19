@@ -95,7 +95,7 @@ return [
             'checker' => [
                 'timeout_seconds' => env('AI6_CHECKER_PROCESS_TIMEOUT_SECONDS', '900'),
                 'output_limit_bytes' => env('AI6_CHECKER_PROCESS_OUTPUT_LIMIT_BYTES', '5000000'),
-                'allowed_executables' => [],
+                'allowed_executables' => [PHP_BINARY, env('AI6_GIT_BINARY', '/usr/bin/git')],
                 'environment_allowlist' => ['PATH', 'HOME', 'XDG_CONFIG_HOME', 'TMPDIR', 'AI6_CHECK_PROFILE', 'LC_ALL', 'LANG'],
                 'working_roots' => [env('AI6_CHECKER_EXECUTION_ROOT', '/var/lib/ai6/checker-executions')],
                 'requires_process_group' => true,
@@ -284,8 +284,74 @@ return [
             ],
         ],
     ],
+    /*
+     * The trusted definition of every check profile (CFG-003).
+     *
+     * A managed project selects a name from here and can define neither the
+     * program nor an argument. Each profile names an executable that must also
+     * be allowed by the checker process policy, a plain argument list, the
+     * phases it may run in, its working directory, the exit codes that count as
+     * success, and its declared side effect, network and mutation behaviour.
+     *
+     * `working_directory` is `tree` for the exported project tree and `batch`
+     * for its parent, which additionally holds the always empty `baseline`
+     * directory. The exported tree carries no Git metadata (GIT-010), so
+     * `git diff --check` cannot run inside it; the repo-less `--no-index` form
+     * against that empty baseline is the working variant, and its clean exit
+     * code is 1, not 0.
+     */
+    'checks' => [
+        'profiles' => [
+            'php-targeted' => [
+                'program' => PHP_BINARY,
+                'arguments' => ['artisan', 'test', '--compact'],
+                'phases' => ['before_review'],
+                'working_directory' => 'tree',
+                'success_exit_codes' => [0],
+                'side_effects' => false,
+                'network' => false,
+                'mutates' => false,
+            ],
+            'php-all' => [
+                'program' => PHP_BINARY,
+                'arguments' => ['artisan', 'test'],
+                'phases' => ['final'],
+                'working_directory' => 'tree',
+                'success_exit_codes' => [0],
+                'side_effects' => false,
+                'network' => false,
+                'mutates' => false,
+            ],
+            /*
+             * Whole-tree hygiene, deliberately not a shipped default.
+             *
+             * The repo-less `--no-index` form compares the exported tree
+             * against an always empty baseline, so every file counts as newly
+             * added and every pre-existing whitespace error in the repository
+             * fails the check — not only the change of this run. That is usable
+             * as an explicitly selected hygiene profile, but it would make a
+             * default `final` gate unpassable for any project with legacy
+             * whitespace, so `server_defaults.checks.final` does not name it.
+             *
+             * Binding the check to the change difference instead needs the run
+             * base tree next to the current one; materialising it belongs to
+             * the ticket that owns the checkpoint diff, not here.
+             */
+            'git-diff-check' => [
+                'program' => env('AI6_GIT_BINARY', '/usr/bin/git'),
+                'arguments' => ['--no-pager', 'diff', '--check', '--no-index', '--', 'baseline', 'tree'],
+                'phases' => ['before_review', 'final'],
+                'working_directory' => 'batch',
+                // 1 means "differences, no whitespace errors" and is the clean
+                // case here; 3 means whitespace errors or conflict markers.
+                'success_exit_codes' => [0, 1],
+                'side_effects' => false,
+                'network' => false,
+                'mutates' => false,
+            ],
+        ],
+    ],
     'project_config' => [
-        'check_profiles' => ['php-targeted', 'php-all', 'git-diff-check'],
         'dependency_satisfied_status_allowlist' => ['review', 'done'],
         'server_maxima' => [
             'max_fix_rounds' => 10,
@@ -336,7 +402,11 @@ return [
             ],
             'checks' => [
                 'before_review' => ['php-targeted'],
-                'final' => ['php-all', 'git-diff-check'],
+                // `git-diff-check` stays available but unselected: against the
+                // empty baseline it reports every pre-existing whitespace error
+                // in the repository, which no project with legacy code could
+                // pass as a mandatory final gate. See the profile comment.
+                'final' => ['php-all'],
             ],
         ],
     ],

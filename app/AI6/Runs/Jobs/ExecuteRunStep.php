@@ -6,6 +6,7 @@ use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\ExecutionStepType;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\RunCheckStep;
 use App\AI6\Runs\RunImplementation;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
@@ -28,7 +29,7 @@ final class ExecuteRunStep implements ShouldQueue
 
     public function __construct(public readonly int $executionJobId) {}
 
-    public function handle(RunOrchestrator $orchestrator, ?RunImplementation $implementation = null): void
+    public function handle(RunOrchestrator $orchestrator, ?RunImplementation $implementation = null, ?RunCheckStep $checks = null): void
     {
         $job = ExecutionJob::query()->find($this->executionJobId);
         if (! $job instanceof ExecutionJob
@@ -63,6 +64,12 @@ final class ExecuteRunStep implements ShouldQueue
 
         if ($type === ExecutionStepType::IMPLEMENT) {
             ($implementation ?? app(RunImplementation::class))->execute($claimed, $run, $owner);
+
+            return;
+        }
+
+        if ($type === ExecutionStepType::CHECK) {
+            ($checks ?? app(RunCheckStep::class))->execute($claimed, $run, $owner);
 
             return;
         }

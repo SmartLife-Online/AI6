@@ -1,7 +1,7 @@
 schema: ai6.ticket-manifest.v1
 source: docs/AI6_IMPLEMENTATION_PLAN.md
-plan_revision: "V1.7.3"
-blueprint_count: 50
+plan_revision: "V1.7.4"
+blueprint_count: 51
 blueprints:
   - id: "AI6-001"
     title: "Laravel-Grundgerüst und Qualitätsbaseline"
@@ -227,13 +227,21 @@ blueprints:
     kind: "feature"
     depends_on: ["AI6-010", "AI6-015", "AI6-017"]
     requirement_refs: ["CFG-003", "AGT-007", "GIT-010", "SEC-005", "SEC-007", "RUN-003"]
+  - id: "AI6-045"
+    title: "Checkausführung in der Checkerrolle"
+    milestone: "M3"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-015", "AI6-017", "AI6-021"]
+    requirement_refs: ["AGT-006", "AGT-007", "GIT-010", "RUN-003", "RUN-004", "SEC-005", "SEC-007", "OPS-003"]
   - id: "AI6-022"
     title: "Pre-Review-Verifikation und Checkpoint-Bereitschaft"
     milestone: "M3"
     initial_status: "todo"
     risk: "medium"
     kind: "feature"
-    depends_on: ["AI6-019", "AI6-020", "AI6-021"]
+    depends_on: ["AI6-019", "AI6-020", "AI6-021", "AI6-045"]
     requirement_refs: ["RUN-003", "RUN-007", "RUN-009", "GIT-003", "GIT-004", "TKT-007"]
   - id: "AI6-023"
     title: "Read-only Review-Workspaces und Multi-Reviewer-Ausführung"
