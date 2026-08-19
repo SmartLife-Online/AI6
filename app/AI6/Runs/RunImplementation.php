@@ -290,6 +290,18 @@ final readonly class RunImplementation
 
                 return;
             }
+            // The freigegebene change limits are evaluated over the set that is
+            // actually imported. Approved or auto-allowed paths only join that
+            // set here, so the limits run once more over the re-partitioned
+            // change set before any write; otherwise a path taken up in this
+            // very turn would never count against max_changed_files or
+            // max_changed_bytes (RUN-006).
+            $limit = $this->limits->evaluate($run, $partition['in'], $artifactCandidates, strlen($bytes));
+            if ($limit instanceof ImportLimitResult) {
+                $this->openResourceLimit($job, $run, $slot, $limit);
+
+                return;
+            }
         }
 
         $imported = $partition['in'];

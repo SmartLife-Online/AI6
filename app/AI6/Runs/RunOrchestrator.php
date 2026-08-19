@@ -580,6 +580,39 @@ final readonly class RunOrchestrator
         return Run::query()->findOrFail($run->getKey());
     }
 
+    /**
+     * Park a run behind git_base_changed after unexpected base drift.
+     *
+     * Drift is answered from every non-terminal state, not only from a running
+     * run: a run that already waits behind contract_change while its amendment
+     * compare-and-swap fails would otherwise keep advertising a resolver that
+     * can no longer succeed, and a queued run would keep no record at all.
+     * The call is idempotent — a run already parked behind git_base_changed is
+     * returned unchanged — and it never releases the project lock (AC-13).
+     */
+    public function parkOnBaseDrift(Run $run, int $expectedVersion): Run
+    {
+        if ($run->version !== $expectedVersion) {
+            throw new RunTransitionConflict('stale_run_version', 'The run changed before the base drift could be recorded.');
+        }
+        if ($run->state === RunState::WAITING && $run->wait_reason === WaitReason::GIT_BASE_CHANGED) {
+            return $run;
+        }
+        $this->transitions->assertBaseDriftPark($run->state);
+
+        $updated = Run::query()->whereKey($run->getKey())->where('version', $expectedVersion)->update([
+            'state' => RunState::WAITING,
+            'wait_reason' => WaitReason::GIT_BASE_CHANGED,
+            'version' => DB::raw('version + 1'),
+            'updated_at' => now(),
+        ]);
+        if ($updated !== 1) {
+            throw new RunTransitionConflict('stale_run_version', 'The run changed before the base drift could be recorded.');
+        }
+
+        return Run::query()->findOrFail($run->getKey());
+    }
+
     /** Park a planned bound step while its run waits for a human decision. */
     public function parkBoundStep(ExecutionJob $job): bool
     {
@@ -736,10 +769,23 @@ final readonly class RunOrchestrator
         ?string $humanRequestId,
         int $maxAddedScopePaths,
         CanonicalJson $canonicalJson,
+        string $reason,
+        ?int $expectedVersion = null,
     ): Run {
-        return DB::transaction(function () use ($run, $path, $approved, $humanRequestId, $maxAddedScopePaths, $canonicalJson): Run {
+        return DB::transaction(function () use ($run, $path, $approved, $humanRequestId, $maxAddedScopePaths, $canonicalJson, $reason, $expectedVersion): Run {
             DB::table('runs')->where('id', $run->getKey())->lockForUpdate()->first();
             $fresh = Run::query()->findOrFail($run->getKey());
+
+            // A human scope decision carries the run version its request was
+            // bound to. Comparing the caller's value against the stored binding
+            // alone cannot falsify drift — both are the same stale number — so
+            // the decision itself runs compare-and-swap against the run: if the
+            // run moved after the request was opened (for example through a
+            // contract amendment), the decision is refused and stays without
+            // effect (AC-14, HUM-004).
+            if ($expectedVersion !== null && $fresh->version !== $expectedVersion) {
+                throw new RunTransitionConflict('stale_run_version', 'The run moved after the scope request was opened.');
+            }
 
             $existing = ScopeDecision::query()->where('run_id', $fresh->getKey())->where('path', $path)->first();
             if ($existing instanceof ScopeDecision) {
@@ -755,6 +801,7 @@ final readonly class RunOrchestrator
                 'run_id' => $fresh->getKey(),
                 'path' => $path,
                 'outcome' => $approved ? 'approved' : 'rejected',
+                'reason' => $reason,
                 'human_request_id' => $humanRequestId,
             ]);
 
@@ -854,6 +901,8 @@ final readonly class RunOrchestrator
         array $promptSnapshot,
         string $promptHash,
         CanonicalJson $canonicalJson,
+        int $maxAddedScopePaths,
+        ?string $humanRequestId = null,
     ): Run {
         foreach ([$newRunBaseSha, $ticketBlobSha, $ticketContractSha256, $scopeHash, $configHash, $promptHash] as $value) {
             if (preg_match('/\A[0-9a-f]{64}\z/D', $value) !== 1) {
@@ -861,7 +910,7 @@ final readonly class RunOrchestrator
             }
         }
 
-        return DB::transaction(function () use ($run, $newRunBaseSha, $ticketBlobSha, $ticketContractSha256, $scopeSnapshot, $scopeHash, $configSnapshot, $configHash, $promptSnapshot, $promptHash, $canonicalJson): Run {
+        return DB::transaction(function () use ($run, $newRunBaseSha, $ticketBlobSha, $ticketContractSha256, $scopeSnapshot, $scopeHash, $configSnapshot, $configHash, $promptSnapshot, $promptHash, $canonicalJson, $maxAddedScopePaths, $humanRequestId): Run {
             DB::table('runs')->where('id', $run->getKey())->lockForUpdate()->first();
             $fresh = Run::query()->findOrFail($run->getKey());
             if (in_array($fresh->state, [RunState::COMPLETED, RunState::CANCELLED], true)) {
@@ -870,6 +919,47 @@ final readonly class RunOrchestrator
 
             /** @var list<string> $initialScope */
             $initialScope = array_values(array_filter($scopeSnapshot['ticket_files'] ?? [], 'is_string'));
+            /** @var list<string> $previousInitialScope */
+            $previousInitialScope = array_values(array_filter(($fresh->scope_snapshot ?? [])['ticket_files'] ?? [], 'is_string'));
+
+            // A path the amendment adds to the ticket's files list joins the
+            // effective scope exactly like an approved addition and therefore
+            // consumes the same idempotent counter against the freigegebene
+            // max_added_scope_paths (AC-05, plan §8.2). Recording it as a
+            // ScopeDecision is what makes the consumption idempotent: a replay
+            // of the same amendment finds the row and does not count again.
+            $consumed = 0;
+            foreach (array_values(array_diff($initialScope, $previousInitialScope)) as $addedPath) {
+                $existing = ScopeDecision::query()->where('run_id', $fresh->getKey())->where('path', $addedPath)->first();
+                if ($existing instanceof ScopeDecision) {
+                    // An already approved path consumed the counter once and
+                    // never again. A rejected one must never reappear here:
+                    // both amendment guards refuse that re-add before any
+                    // commit exists, so reaching this point means the state
+                    // moved underneath the saga.
+                    if ($existing->outcome === 'rejected') {
+                        throw new RunTransitionConflict(
+                            'amendment_readds_rejected_path',
+                            'A rejected additional path cannot re-enter the effective scope through an amendment.',
+                        );
+                    }
+
+                    continue;
+                }
+                if ($fresh->added_scope_paths_count + $consumed + 1 > $maxAddedScopePaths) {
+                    throw new ScopePathLimitExceeded($fresh->added_scope_paths_count + $consumed + 1, $maxAddedScopePaths);
+                }
+                ScopeDecision::query()->create([
+                    'id' => (string) Str::uuid(),
+                    'run_id' => $fresh->getKey(),
+                    'path' => $addedPath,
+                    'outcome' => 'approved',
+                    'reason' => 'amendment',
+                    'human_request_id' => $humanRequestId,
+                ]);
+                $consumed++;
+            }
+
             /** @var list<string> $approvedAdditions */
             $approvedAdditions = ScopeDecision::query()
                 ->where('run_id', $fresh->getKey())
@@ -880,6 +970,7 @@ final readonly class RunOrchestrator
             $hasEffectiveState = $approvedAdditions !== [] || $fresh->effective_scope_snapshot !== null;
 
             $updated = Run::query()->whereKey($fresh->getKey())->where('version', $fresh->version)->update([
+                'added_scope_paths_count' => $fresh->added_scope_paths_count + $consumed,
                 'run_base_sha' => $newRunBaseSha,
                 'ticket_blob_sha' => $ticketBlobSha,
                 'ticket_contract_sha256' => $ticketContractSha256,

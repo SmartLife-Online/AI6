@@ -45,7 +45,7 @@ final class EvidenceInvalidationTest extends TicketUiTestCase
         self::assertTrue($orchestrator->hasEffectiveCheckpoint($run));
         $checkpoint = [$run->checkpoint_commit_sha, $run->checkpoint_tree_sha, $run->checkpoint_diff_hash];
 
-        $updated = $orchestrator->applyScopeDecision($run, 'docs/added.md', true, null, 12, $this->app->make(CanonicalJson::class));
+        $updated = $orchestrator->applyScopeDecision($run, 'docs/added.md', true, null, 12, $this->app->make(CanonicalJson::class), 'human_approved');
 
         self::assertSame(1, $updated->evidence_epoch);
         self::assertFalse($orchestrator->hasEffectiveCheckpoint($updated));
@@ -61,7 +61,7 @@ final class EvidenceInvalidationTest extends TicketUiTestCase
         $run = $this->checkpointedRun('AI6-020-INV-REJ');
         $orchestrator = $this->app->make(RunOrchestrator::class);
 
-        $updated = $orchestrator->applyScopeDecision($run, 'docs/rejected.md', false, null, 12, $this->app->make(CanonicalJson::class));
+        $updated = $orchestrator->applyScopeDecision($run, 'docs/rejected.md', false, null, 12, $this->app->make(CanonicalJson::class), 'human_approved');
 
         self::assertSame(0, $updated->evidence_epoch);
         self::assertTrue($orchestrator->hasEffectiveCheckpoint($updated));
@@ -84,6 +84,7 @@ final class EvidenceInvalidationTest extends TicketUiTestCase
             (array) $run->prompt_snapshot,
             (string) $run->prompt_hash,
             $this->app->make(CanonicalJson::class),
+            12,
         );
 
         self::assertSame(1, $amended->evidence_epoch);

@@ -167,17 +167,28 @@ final readonly class ProjectConfigurationParser
     }
 
     /** @param list<ProjectConfigurationError> $errors
-     * @return array{auto_allow: list<string>, require_approval: list<string>}
+     * @return array{unlisted_paths: string, auto_allow: list<string>, require_approval: list<string>}
      */
     private function scope(mixed $value, array &$errors): array
     {
-        if (! $this->mappingHasExactKeys($value, ['auto_allow', 'require_approval'])) {
+        // `unlisted_paths` is the trusted project default for every path that is
+        // neither auto-allowed nor sensible (plan §8.2, revision V1.7.3). It is
+        // optional and defaults to `auto_allow`; an unknown value is rejected
+        // rather than silently normalized, and ticket or provider content never
+        // sets it.
+        if (! is_array($value) || array_is_list($value)
+            || array_diff(array_keys($value), ['unlisted_paths', 'auto_allow', 'require_approval']) !== []
+            || array_diff(['auto_allow', 'require_approval'], array_keys($value)) !== []) {
             $errors[] = $this->error('scope_invalid', 'scope', 'Der Scope-Block ist unvollständig oder enthält unbekannte Schlüssel.');
 
-            return ['auto_allow' => [], 'require_approval' => []];
+            return ['unlisted_paths' => 'auto_allow', 'auto_allow' => [], 'require_approval' => []];
         }
+        $unlisted = array_key_exists('unlisted_paths', $value)
+            ? $this->enum($value['unlisted_paths'], 'scope.unlisted_paths', ['auto_allow', 'require_approval'], $errors)
+            : 'auto_allow';
 
         return [
+            'unlisted_paths' => $unlisted ?? 'auto_allow',
             'auto_allow' => $this->pathList($value['auto_allow'], 'scope.auto_allow', $errors),
             'require_approval' => $this->pathList($value['require_approval'], 'scope.require_approval', $errors),
         ];

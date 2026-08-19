@@ -113,7 +113,7 @@ final class HumanRequestResumeTest extends TicketUiTestCase
         ], $registry->registration(WaitReason::SCOPE_APPROVAL));
         self::assertSame([
             'producer' => 'ContractChangeService',
-            'resolvers' => ['return_to_todo'],
+            'resolvers' => ['amendment_cas', 'return_to_todo'],
             'cancellable' => true,
         ], $registry->registration(WaitReason::CONTRACT_CHANGE));
 

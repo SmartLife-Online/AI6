@@ -6,5 +6,9 @@
     "ai6_detail_v1": {
         "fixture": "ai6-detail-v1.md",
         "sha256": "56990880aa201d5112130d5c7d773069b9ee2b79b5a61851eb5435a9e5a60bd1"
+    },
+    "generic_v1_recorded_scope": {
+        "fixture": "generic-v1-recorded-scope.md",
+        "sha256": "52484e9d0b6f74c2204c7d88eb6d16153b3edcfe7330483df1d4a39f42285f3d"
     }
 }

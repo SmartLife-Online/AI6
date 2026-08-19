@@ -38,7 +38,7 @@ final class ScopeDecisionTest extends TicketUiTestCase
         $orchestrator = $this->app->make(RunOrchestrator::class);
         $canonicalJson = $this->app->make(CanonicalJson::class);
 
-        $updated = $orchestrator->applyScopeDecision($run, 'app/AI6/Runs/Extra.php', true, null, 12, $canonicalJson);
+        $updated = $orchestrator->applyScopeDecision($run, 'app/AI6/Runs/Extra.php', true, null, 12, $canonicalJson, 'auto_allow');
 
         self::assertSame(1, $updated->added_scope_paths_count);
         self::assertContains('app/AI6/Runs/Extra.php', $updated->effective_scope_snapshot);
@@ -53,7 +53,7 @@ final class ScopeDecisionTest extends TicketUiTestCase
         $orchestrator = $this->app->make(RunOrchestrator::class);
         $canonicalJson = $this->app->make(CanonicalJson::class);
 
-        $updated = $orchestrator->applyScopeDecision($run, 'app/AI6/Runs/Rejected.php', false, null, 12, $canonicalJson);
+        $updated = $orchestrator->applyScopeDecision($run, 'app/AI6/Runs/Rejected.php', false, null, 12, $canonicalJson, 'auto_allow');
 
         self::assertSame(0, $updated->added_scope_paths_count);
         self::assertNull($updated->effective_scope_snapshot);
@@ -68,8 +68,8 @@ final class ScopeDecisionTest extends TicketUiTestCase
         $orchestrator = $this->app->make(RunOrchestrator::class);
         $canonicalJson = $this->app->make(CanonicalJson::class);
 
-        $first = $orchestrator->applyScopeDecision($run, 'app/AI6/Runs/Retry.php', true, null, 12, $canonicalJson);
-        $second = $orchestrator->applyScopeDecision($run->fresh(), 'app/AI6/Runs/Retry.php', true, null, 12, $canonicalJson);
+        $first = $orchestrator->applyScopeDecision($run, 'app/AI6/Runs/Retry.php', true, null, 12, $canonicalJson, 'auto_allow');
+        $second = $orchestrator->applyScopeDecision($run->fresh(), 'app/AI6/Runs/Retry.php', true, null, 12, $canonicalJson, 'auto_allow');
 
         self::assertSame(1, $first->added_scope_paths_count);
         self::assertSame(1, $second->added_scope_paths_count);
@@ -84,11 +84,11 @@ final class ScopeDecisionTest extends TicketUiTestCase
         $orchestrator = $this->app->make(RunOrchestrator::class);
         $canonicalJson = $this->app->make(CanonicalJson::class);
 
-        $run = $orchestrator->applyScopeDecision($run, 'app/AI6/Runs/One.php', true, null, 1, $canonicalJson);
+        $run = $orchestrator->applyScopeDecision($run, 'app/AI6/Runs/One.php', true, null, 1, $canonicalJson, 'auto_allow');
         self::assertSame(1, $run->added_scope_paths_count);
 
         try {
-            $orchestrator->applyScopeDecision($run, 'app/AI6/Runs/Two.php', true, null, 1, $canonicalJson);
+            $orchestrator->applyScopeDecision($run, 'app/AI6/Runs/Two.php', true, null, 1, $canonicalJson, 'auto_allow');
             self::fail('Exceeding max_added_scope_paths must throw.');
         } catch (ScopePathLimitExceeded $exceeded) {
             self::assertSame(2, $exceeded->observed);
@@ -106,7 +106,7 @@ final class ScopeDecisionTest extends TicketUiTestCase
         $run = $this->finalizedRun($fixture);
         $orchestrator = $this->app->make(RunOrchestrator::class);
         $canonicalJson = $this->app->make(CanonicalJson::class);
-        $orchestrator->applyScopeDecision($run, 'app/AI6/Runs/Immutable.php', true, null, 12, $canonicalJson);
+        $orchestrator->applyScopeDecision($run, 'app/AI6/Runs/Immutable.php', true, null, 12, $canonicalJson, 'auto_allow');
         $decision = ScopeDecision::query()->where('run_id', $run->id)->firstOrFail();
 
         $this->expectException(QueryException::class);

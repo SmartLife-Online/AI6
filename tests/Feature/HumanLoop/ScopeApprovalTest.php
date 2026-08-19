@@ -16,6 +16,7 @@ use App\AI6\Runs\ExecutionStepType;
 use App\AI6\Runs\InstructionCandidateSource;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\Models\ScopeDecision;
 use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
@@ -99,6 +100,58 @@ final class ScopeApprovalTest extends TicketUiTestCase
         self::assertNull($run->fresh()->effective_scope_snapshot);
     }
 
+    /**
+     * AC-02/AC-03, TC-01: the third track of plan §8.2 at one and the same
+     * path — the trusted project default decides, nothing else.
+     */
+    public function test_an_unlisted_path_follows_the_trusted_project_default(): void
+    {
+        Mail::fake();
+        $run = $this->startedRun('AI6-020-SCOPE-UNLISTED');
+        $step = $this->implementStep($run);
+
+        // `scope.unlisted_paths: auto_allow` (the server default) takes the
+        // path up without a question and does not block the run.
+        $opened = $this->app->make(ScopeApprovalService::class)->requestOrAutoAllow(
+            $run,
+            $this->configuration($run),
+            'docs/unlisted.md',
+            false,
+            (string) $step->id,
+            $step->idempotency_key,
+        );
+        self::assertNull($opened);
+        self::assertSame(RunState::RUNNING, $run->fresh()->state);
+        self::assertContains('docs/unlisted.md', $run->fresh()->effective_scope_snapshot);
+        $decision = ScopeDecision::query()->where('run_id', $run->id)->where('path', 'docs/unlisted.md')->firstOrFail();
+        self::assertSame('unlisted_auto_allow', $decision->reason);
+        self::assertSame(0, HumanRequest::query()->where('run_id', $run->id)->count());
+
+    }
+
+    /** The strict value of the same trusted setting at the very same path. */
+    public function test_the_strict_unlisted_paths_default_turns_the_same_path_into_a_decision(): void
+    {
+        Mail::fake();
+        $run = $this->startedRun('AI6-020-SCOPE-UNLISTED-STRICT');
+        $step = $this->implementStep($run);
+
+        $request = $this->app->make(ScopeApprovalService::class)->requestOrAutoAllow(
+            $run,
+            $this->strictConfiguration($run),
+            'docs/unlisted.md',
+            false,
+            (string) $step->id,
+            $step->idempotency_key,
+        );
+
+        self::assertNotNull($request);
+        self::assertSame('scope_approval', $request->kind);
+        self::assertSame(['docs/unlisted.md'], $request->affected_paths);
+        self::assertSame(WaitReason::SCOPE_APPROVAL, $run->fresh()->wait_reason);
+        self::assertNull($run->fresh()->effective_scope_snapshot);
+    }
+
     public function test_approving_the_request_extends_the_effective_scope_and_resumes_the_run(): void
     {
         Mail::fake();
@@ -106,7 +159,7 @@ final class ScopeApprovalTest extends TicketUiTestCase
         $step = $this->implementStep($run);
         $request = $this->app->make(ScopeApprovalService::class)->requestOrAutoAllow(
             $run,
-            $this->configuration($run),
+            $this->strictConfiguration($run),
             'docs/notes.md',
             false,
             (string) $step->id,
@@ -142,7 +195,7 @@ final class ScopeApprovalTest extends TicketUiTestCase
         $step = $this->implementStep($run);
         $request = $this->app->make(ScopeApprovalService::class)->requestOrAutoAllow(
             $run,
-            $this->configuration($run),
+            $this->strictConfiguration($run),
             'docs/rejected.md',
             false,
             (string) $step->id,
@@ -182,13 +235,13 @@ final class ScopeApprovalTest extends TicketUiTestCase
         $orchestrator = $this->app->make(RunOrchestrator::class);
         $canonicalJson = $this->app->make(CanonicalJson::class);
         for ($i = 0; $i < $maxAddedScopePaths; $i++) {
-            $orchestrator->applyScopeDecision($run->fresh(), 'app/AI6/Runs/Filler'.$i.'.php', true, null, $maxAddedScopePaths, $canonicalJson);
+            $orchestrator->applyScopeDecision($run->fresh(), 'app/AI6/Runs/Filler'.$i.'.php', true, null, $maxAddedScopePaths, $canonicalJson, 'auto_allow');
         }
 
         $step = $this->implementStep($run);
         $request = $this->app->make(ScopeApprovalService::class)->requestOrAutoAllow(
             $run->fresh(),
-            $this->configuration($run),
+            $this->strictConfiguration($run),
             'docs/one-too-many.md',
             false,
             (string) $step->id,
@@ -210,13 +263,13 @@ final class ScopeApprovalTest extends TicketUiTestCase
         $limits = $this->app->make(RunLimitPolicy::class);
         $maxAddedScopePaths = $limits->effective($run)['max_added_scope_paths'];
         for ($i = 0; $i < $maxAddedScopePaths; $i++) {
-            $orchestrator->applyScopeDecision($run->fresh(), 'app/AI6/Runs/Filler'.$i.'.php', true, null, $maxAddedScopePaths, $canonicalJson);
+            $orchestrator->applyScopeDecision($run->fresh(), 'app/AI6/Runs/Filler'.$i.'.php', true, null, $maxAddedScopePaths, $canonicalJson, 'auto_allow');
         }
 
         $step = $this->implementStep($run);
         $request = $this->app->make(ScopeApprovalService::class)->requestOrAutoAllow(
             $run->fresh(),
-            $this->configuration($run),
+            $this->strictConfiguration($run),
             'docs/one-more.md',
             false,
             (string) $step->id,
@@ -234,7 +287,7 @@ final class ScopeApprovalTest extends TicketUiTestCase
 
         $scopeRequest = $this->app->make(ScopeApprovalService::class)->requestOrAutoAllow(
             $run->fresh(),
-            $this->configuration($run),
+            $this->strictConfiguration($run),
             'docs/one-more.md',
             false,
             (string) $step->id,
@@ -261,13 +314,13 @@ final class ScopeApprovalTest extends TicketUiTestCase
         $limits = $this->app->make(RunLimitPolicy::class);
         self::assertSame(2, $limits->effective($run)['max_added_scope_paths']);
         foreach (['app/AI6/Runs/One.php', 'app/AI6/Runs/Two.php'] as $path) {
-            $orchestrator->applyScopeDecision($run->fresh(), $path, true, null, 2, $canonicalJson);
+            $orchestrator->applyScopeDecision($run->fresh(), $path, true, null, 2, $canonicalJson, 'auto_allow');
         }
 
         $step = $this->implementStep($run);
         $request = $this->app->make(ScopeApprovalService::class)->requestOrAutoAllow(
             $run->fresh(),
-            $this->configuration($run),
+            $this->strictConfiguration($run),
             'docs/beyond-maximum.md',
             false,
             (string) $step->id,
@@ -333,5 +386,17 @@ final class ScopeApprovalTest extends TicketUiTestCase
     private function configuration(Run $run): ProjectConfiguration
     {
         return $this->app->make(EffectiveProjectConfiguration::class)->for($run->fresh()->project()->firstOrFail())->configuration;
+    }
+
+    /**
+     * The same freigegebene configuration with the strict variant of the third
+     * track: `scope.unlisted_paths: require_approval` (plan §8.2).
+     */
+    private function strictConfiguration(Run $run): ProjectConfiguration
+    {
+        $values = $this->configuration($run)->values;
+        $values['scope']['unlisted_paths'] = 'require_approval';
+
+        return new ProjectConfiguration($values);
     }
 }

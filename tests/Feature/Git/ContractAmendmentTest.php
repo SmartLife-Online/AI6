@@ -15,9 +15,14 @@ use App\AI6\Git\ProjectOperationLease;
 use App\AI6\Git\TicketMutationExecutor;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
+use App\AI6\Runs\ExecutionJobState;
+use App\AI6\Runs\ExecutionStepType;
 use App\AI6\Runs\InstructionCandidateSource;
+use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\Models\ScopeDecision;
 use App\AI6\Runs\Models\TicketApproval;
+use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunPreflight;
 use App\AI6\Runs\RunState;
@@ -34,11 +39,11 @@ use Tests\Feature\Tickets\TicketUiTestCase;
 /**
  * TC-08, TC-09, TC-11: the contract-amendment saga around the active run.
  *
- * The Git-side worker phases (prepare, CAS publish, finalize) additionally
- * carry the POSIX-gated executor proof in TicketMutationExecutorTest-style
- * runtime tests; the contracts below are the platform-independent half: queue
- * validation, the published SQLite guards, the exclusive run_base_sha
- * progression and the drift behaviour.
+ * The contracts below are the platform-independent half: queue validation, the
+ * published SQLite guards, the exclusive run_base_sha progression and the drift
+ * behaviour. The Git-side worker phases (prepare, CAS publish, finalize) carry
+ * their own POSIX-gated proof in ContractAmendmentExecutorTest, and the tree
+ * proof over real Git objects lives in TicketFileDeltaProofTest.
  */
 final class ContractAmendmentTest extends TicketUiTestCase
 {
@@ -177,6 +182,124 @@ final class ContractAmendmentTest extends TicketUiTestCase
         self::assertSame(0, ControlOperation::query()->where('operation_type', 'contract_amendment')->count());
     }
 
+    /**
+     * AC-12, TC-11: the nested discovery form is an instruction path too, so a
+     * nested AGENTS.md cannot ride into the files scope either.
+     */
+    public function test_amendment_rejects_a_nested_instruction_path(): void
+    {
+        $fixture = $this->amendableRun('AI6-020-AMEND-NESTED');
+        $target = $this->amendmentTicketMarkdown($fixture['ticketId'], 'in_progress', ['app/Example.php', 'app/sub/AGENTS.md']);
+
+        try {
+            $this->queueAmendment($fixture, $target);
+            self::fail('A nested instruction path must never join the ticket files through an amendment.');
+        } catch (TicketMutationConflict $conflict) {
+            self::assertSame('instruction_scope_extension_forbidden', $conflict->conflict);
+        }
+        self::assertSame(0, ControlOperation::query()->where('operation_type', 'contract_amendment')->count());
+    }
+
+    /**
+     * AC-05, TC-03: paths the amendment adds to the files list consume the same
+     * freigegebene max_added_scope_paths; beyond it nothing is taken up at all.
+     */
+    public function test_amendment_beyond_the_added_scope_path_limit_takes_up_nothing(): void
+    {
+        $fixture = $this->amendableRun('AI6-020-AMEND-LIMIT');
+        $run = $fixture['run'];
+        $canonicalJson = $this->app->make(CanonicalJson::class);
+        $orchestrator = $this->app->make(RunOrchestrator::class);
+        $maxAddedScopePaths = $this->app->make(RunLimitPolicy::class)->effective($run)['max_added_scope_paths'];
+        for ($i = 0; $i < $maxAddedScopePaths; $i++) {
+            $run = $orchestrator->applyScopeDecision(
+                $run->fresh(),
+                'app/AI6/Runs/Filler'.$i.'.php',
+                true,
+                null,
+                $maxAddedScopePaths,
+                $canonicalJson,
+                'auto_allow',
+            );
+        }
+        $fixture['run'] = $run->fresh();
+
+        $target = $this->amendmentTicketMarkdown($fixture['ticketId'], 'in_progress', ['app/Example.php', 'app/Another.php']);
+        try {
+            $this->queueAmendment($fixture, $target);
+            self::fail('An amendment beyond the approved path limit must be refused.');
+        } catch (TicketMutationConflict $conflict) {
+            self::assertSame('scope_path_limit_exceeded', $conflict->conflict);
+        }
+
+        // Nothing was taken up and no operation exists.
+        self::assertSame(0, ControlOperation::query()->where('operation_type', 'contract_amendment')->count());
+        self::assertSame($maxAddedScopePaths, $run->fresh()->added_scope_paths_count);
+        self::assertSame(0, ScopeDecision::query()
+            ->where('run_id', $run->id)->where('path', 'app/Another.php')->count());
+    }
+
+    /**
+     * A confirmed amendment moves version, scope and prompt binding; it is
+     * therefore refused while an implement step is actually executing.
+     */
+    public function test_amendment_is_refused_while_an_implement_step_runs(): void
+    {
+        $fixture = $this->amendableRun('AI6-020-AMEND-RUNNING');
+        $job = ExecutionJob::query()->where('run_id', $fixture['run']->id)
+            ->where('step_type', ExecutionStepType::IMPLEMENT->value)->firstOrFail();
+        self::assertSame(1, ExecutionJob::query()->whereKey($job->getKey())
+            ->update(['state' => ExecutionJobState::RUNNING]));
+
+        $target = $this->amendmentTicketMarkdown($fixture['ticketId'], 'in_progress', ['app/Example.php'], 'Konkurrierendes Ziel.');
+        try {
+            $this->queueAmendment($fixture, $target);
+            self::fail('An amendment must not move the contract underneath a running implement step.');
+        } catch (TicketMutationConflict $conflict) {
+            self::assertSame('amendment_step_running', $conflict->conflict);
+        }
+        self::assertSame(0, ControlOperation::query()->where('operation_type', 'contract_amendment')->count());
+    }
+
+    /**
+     * N2: a path this run already rejected must not re-enter the effective
+     * scope through the ticket files list.
+     */
+    public function test_an_amendment_readding_a_rejected_path_is_refused(): void
+    {
+        $fixture = $this->amendableRun('AI6-020-AMEND-READD');
+        $orchestrator = $this->app->make(RunOrchestrator::class);
+        $canonicalJson = $this->app->make(CanonicalJson::class);
+        $run = $orchestrator->applyScopeDecision(
+            $fixture['run'],
+            'docs/rejected.md',
+            false,
+            null,
+            12,
+            $canonicalJson,
+            'human_rejected',
+        );
+        $fixture['run'] = $run->fresh();
+
+        $target = $this->amendmentTicketMarkdown(
+            $fixture['ticketId'],
+            'in_progress',
+            ['app/Example.php', 'docs/rejected.md'],
+        );
+        try {
+            $this->queueAmendment($fixture, $target);
+            self::fail('A rejected path must not return through an amendment.');
+        } catch (TicketMutationConflict $conflict) {
+            self::assertSame('amendment_readds_rejected_path', $conflict->conflict);
+        }
+
+        // Nothing was queued and the immutable decision still stands.
+        self::assertSame(0, ControlOperation::query()->where('operation_type', 'contract_amendment')->count());
+        self::assertSame('rejected', ScopeDecision::query()
+            ->where('run_id', $run->id)->where('path', 'docs/rejected.md')->firstOrFail()->outcome);
+        self::assertSame(0, $run->fresh()->added_scope_paths_count);
+    }
+
     /** The amendment never moves the ticket status. */
     public function test_amendment_requires_the_unchanged_in_progress_status(): void
     {
@@ -202,7 +325,7 @@ final class ContractAmendmentTest extends TicketUiTestCase
         // An earlier approved addition survives the amendment inside the
         // recomputed effective scope and keeps its counter (AC-05); it already
         // invalidates the checkpoint evidence of the pre-extension state.
-        $run = $orchestrator->applyScopeDecision($run, 'docs/extra.md', true, null, 12, $canonicalJson);
+        $run = $orchestrator->applyScopeDecision($run, 'docs/extra.md', true, null, 12, $canonicalJson, 'human_approved');
         self::assertFalse($orchestrator->hasEffectiveCheckpoint($run));
         $approvalBefore = TicketApproval::query()->findOrFail($run->ticket_approval_id);
         $initialBase = $run->initial_run_base_sha;
@@ -221,6 +344,7 @@ final class ContractAmendmentTest extends TicketUiTestCase
             ['rendered_prompts' => ['implementation' => 'Neuer Prompt.']],
             str_repeat('4', 64),
             $canonicalJson,
+            12,
         );
 
         self::assertSame($newBase, $amended->run_base_sha);
@@ -229,10 +353,36 @@ final class ContractAmendmentTest extends TicketUiTestCase
         self::assertSame(str_repeat('2', 64), $amended->ticket_contract_sha256);
         self::assertSame(['app/Example.php', 'app/New.php'], $amended->scope_snapshot['ticket_files']);
         // The recomputed effective scope carries the amended initial scope plus
-        // the previously approved addition; the counter does not move again.
+        // the previously approved addition.
         self::assertContains('app/New.php', $amended->effective_scope_snapshot);
         self::assertContains('docs/extra.md', $amended->effective_scope_snapshot);
-        self::assertSame(1, $amended->added_scope_paths_count);
+        // AC-05: the two paths the amendment adds to the ticket files consume
+        // the same counter as an approved addition — the earlier docs/extra.md
+        // decision is not counted a second time.
+        self::assertSame(3, $amended->added_scope_paths_count);
+        $reasons = ScopeDecision::query()->where('run_id', $run->id)->orderBy('path')->pluck('reason', 'path')->all();
+        self::assertSame([
+            'app/Example.php' => 'amendment',
+            'app/New.php' => 'amendment',
+            'docs/extra.md' => 'human_approved',
+        ], $reasons);
+
+        // A replayed amendment with the same files list consumes nothing more.
+        $replayed = $orchestrator->applyContractAmendment(
+            $amended,
+            $newBase,
+            str_repeat('1', 64),
+            str_repeat('2', 64),
+            ['ticket_files' => ['app/Example.php', 'app/New.php'], 'project_scope' => []],
+            str_repeat('3', 64),
+            ['values' => []],
+            (string) $run->config_hash,
+            ['rendered_prompts' => ['implementation' => 'Neuer Prompt.']],
+            str_repeat('4', 64),
+            $canonicalJson,
+            12,
+        );
+        self::assertSame(3, $replayed->added_scope_paths_count);
 
         // Evidence of the old state is ineffective but stays readable (AC-10).
         self::assertSame(2, $amended->evidence_epoch);
@@ -260,6 +410,64 @@ final class ContractAmendmentTest extends TicketUiTestCase
         self::assertSame(WaitReason::GIT_BASE_CHANGED, $run->wait_reason);
         // No silent rebase: the run base and the project lock survive (AC-13).
         self::assertSame($fixture['run']->run_base_sha, $run->run_base_sha);
+        self::assertSame($run->id, $fixture['project']->fresh()->active_run_id);
+    }
+
+    /**
+     * AC-13: drift is answered from every non-terminal state.
+     *
+     * An amendment is normally queued for a run that already waits behind
+     * contract_change — its compare-and-swap is that wait's allowlisted
+     * resolver. When the resolver fails, the run must not keep advertising it.
+     */
+    public function test_a_terminal_amendment_conflict_reparks_a_waiting_run(): void
+    {
+        $fixture = $this->amendableRun('AI6-020-AMEND-REPARK');
+        $target = $this->amendmentTicketMarkdown($fixture['ticketId'], 'in_progress', ['app/Example.php'], 'Wartezustandsziel.');
+        $operation = $this->queueAmendment($fixture, $target);
+
+        // The run waits behind contract_change while the amendment runs.
+        $orchestrator = $this->app->make(RunOrchestrator::class);
+        $waiting = $orchestrator->transition(
+            $fixture['run']->fresh(),
+            $fixture['run']->fresh()->version,
+            RunState::WAITING,
+            $fixture['run']->phase,
+            WaitReason::CONTRACT_CHANGE,
+        );
+        self::assertSame(WaitReason::CONTRACT_CHANGE, $waiting->wait_reason);
+
+        $this->app->make(TicketMutationExecutor::class)->parkAmendedRunOnConflict($operation);
+
+        $run = $fixture['run']->fresh();
+        self::assertSame(RunState::WAITING, $run->state);
+        self::assertSame(WaitReason::GIT_BASE_CHANGED, $run->wait_reason);
+        self::assertSame($fixture['run']->run_base_sha, $run->run_base_sha);
+        self::assertSame($run->id, $fixture['project']->fresh()->active_run_id);
+
+        // Idempotent: a replayed conflict neither moves the run nor its version.
+        $version = $run->version;
+        $this->app->make(TicketMutationExecutor::class)->parkAmendedRunOnConflict($operation);
+        self::assertSame($version, $fixture['run']->fresh()->version);
+    }
+
+    /** A queued run — claimed, first worker job not started — is parked too. */
+    public function test_a_terminal_amendment_conflict_parks_a_queued_run(): void
+    {
+        $fixture = $this->amendableRun('AI6-020-AMEND-QUEUED');
+        $target = $this->amendmentTicketMarkdown($fixture['ticketId'], 'in_progress', ['app/Example.php'], 'Queuezustandsziel.');
+        $operation = $this->queueAmendment($fixture, $target);
+        self::assertSame(1, Run::query()->whereKey($fixture['run']->id)->update([
+            'state' => RunState::QUEUED,
+            'wait_reason' => null,
+            'version' => DB::raw('version + 1'),
+        ]));
+
+        $this->app->make(TicketMutationExecutor::class)->parkAmendedRunOnConflict($operation);
+
+        $run = $fixture['run']->fresh();
+        self::assertSame(RunState::WAITING, $run->state);
+        self::assertSame(WaitReason::GIT_BASE_CHANGED, $run->wait_reason);
         self::assertSame($run->id, $fixture['project']->fresh()->active_run_id);
     }
 
@@ -320,8 +528,19 @@ final class ContractAmendmentTest extends TicketUiTestCase
             (array) $run->prompt_snapshot,
             (string) $run->prompt_hash,
             $this->app->make(CanonicalJson::class),
+            12,
         );
 
         self::assertNull($preflight->failureCode($amended));
+
+        // A config divergence is never amendment-tolerated: the amendment
+        // changes exactly the ticket file and finalizeAmendedRun proves the
+        // effective configuration stayed byte-stable, so a moved config_hash
+        // is foreign drift even behind this confirmed amendment.
+        self::assertSame(1, Run::query()->whereKey($amended->id)->update([
+            'config_hash' => str_repeat('c', 64),
+            'version' => DB::raw('version + 1'),
+        ]));
+        self::assertSame('snapshot_binding_changed', $preflight->failureCode($amended->fresh()));
     }
 }

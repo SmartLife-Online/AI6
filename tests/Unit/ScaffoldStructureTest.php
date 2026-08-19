@@ -793,6 +793,7 @@ final class ScaffoldStructureTest extends TestCase
             '2026_08_18_010000_add_run_artifacts_contract.php',
             '2026_08_18_020000_add_scope_decision_contract.php',
             '2026_08_19_000000_add_contract_amendment_contract.php',
+            '2026_08_19_010000_add_scope_decision_reason.php',
         ], $migrations);
     }
 

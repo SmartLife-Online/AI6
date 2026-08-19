@@ -13,12 +13,10 @@ use App\AI6\Projects\ProjectConfiguration;
  * always yields the same decision (AC-02) and a manipulated ticket or
  * provider text cannot move a path into another category.
  */
-final class ScopeCategorizer
+final readonly class ScopeCategorizer
 {
     /** Never auto-allowed, regardless of project configuration (AC-03). */
     private const SENSITIVE_EXACT = [
-        'AGENTS.md',
-        'CLAUDE.md',
         'composer.json',
         'composer.lock',
         'Dockerfile',
@@ -27,13 +25,15 @@ final class ScopeCategorizer
 
     /** @var list<string> */
     private const SENSITIVE_GLOBS = [
-        '.ai6/**',
         'database/migrations/**',
         '.github/**',
         'deploy/**',
         'docker/**',
         'app/AI6/Auth/**',
     ];
+
+    /** Instruction paths are decided by the one instruction-path policy, never a second list. */
+    public function __construct(private InstructionPathPolicy $instructionPaths) {}
 
     public function categorize(
         string $path,
@@ -45,7 +45,8 @@ final class ScopeCategorizer
         }
 
         $ticketsPath = $configuration->ticketsPath();
-        if (in_array($path, self::SENSITIVE_EXACT, true)
+        if ($this->instructionPaths->isInstructionPath($path)
+            || in_array($path, self::SENSITIVE_EXACT, true)
             || ScopePathMatcher::matchesAny($path, self::SENSITIVE_GLOBS)
             || $path === $ticketsPath
             || str_starts_with($path, $ticketsPath.'/')) {

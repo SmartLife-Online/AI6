@@ -50,9 +50,4 @@ final readonly class EffectiveScope
 
         return new self($initial, $additions, $effective, $hash);
     }
-
-    public function contains(string $path): bool
-    {
-        return in_array($path, $this->effectiveScope, true);
-    }
 }

@@ -13,6 +13,7 @@ use Illuminate\Support\Carbon;
  * @property string $run_id
  * @property string $path
  * @property string $outcome
+ * @property string $reason
  * @property string|null $human_request_id
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at

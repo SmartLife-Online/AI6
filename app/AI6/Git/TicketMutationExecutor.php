@@ -22,13 +22,17 @@ use App\AI6\Prompts\PromptRenderingException;
 use App\AI6\Runs\ApprovalSelectionFactory;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ApprovalSnapshotVerifier;
+use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\InstructionPathPolicy;
+use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\Models\ScopeDecision;
 use App\AI6\Runs\Models\TicketApproval;
+use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
 use App\AI6\Runs\RunTransitionConflict;
-use App\AI6\Runs\WaitReason;
+use App\AI6\Runs\ScopePathLimitExceeded;
 use App\AI6\Shared\Process\EffectLock;
 use App\AI6\Shared\Process\EffectLockHandle;
 use App\AI6\Shared\Process\EffectLockOutcome;
@@ -74,6 +78,7 @@ final readonly class TicketMutationExecutor
         private ApprovalSnapshotFactory $approvalSnapshots,
         private ApprovalSnapshotVerifier $approvalSnapshotVerifier,
         private RunOrchestrator $runs,
+        private RunLimitPolicy $runLimits,
     ) {}
 
     public function advance(ControlOperation $operation, int $attemptToken): bool
@@ -976,6 +981,22 @@ final readonly class TicketMutationExecutor
             );
         }
 
+        // The queue action already refused an amendment for a run with a
+        // running implement step, but a planned step can be claimed between
+        // that check and this one. This recheck runs under the operation lock
+        // and before any external effect, so the race ends as a named terminal
+        // conflict instead of moving version, scope and prompt underneath a
+        // live turn.
+        if (ExecutionJob::query()
+            ->where('run_id', $run->getKey())
+            ->where('state', ExecutionJobState::RUNNING)
+            ->exists()) {
+            throw new ControlOperationTerminalConflict(
+                'amendment_step_running',
+                'Eine Vertragsänderung ist während eines laufenden Implementierungsschritts nicht zulässig.',
+            );
+        }
+
         // The same-run amendment must not adopt an instruction path into the
         // ticket scope (AC-12); the separate contract_change path is the only
         // way an instruction or runtime profile change becomes effective.
@@ -985,13 +1006,31 @@ final readonly class TicketMutationExecutor
         } catch (TicketParseException) {
             throw new ControlOperationTerminalConflict('target_validation_changed', 'Der vorbereitete Ticketstand ist nicht mehr gültig gebunden.');
         }
-        foreach (array_diff($targetFiles, $baseFiles) as $added) {
+        $addedPaths = array_values(array_diff($targetFiles, $baseFiles));
+        foreach ($addedPaths as $added) {
             if ($this->instructionPaths->isInstructionPath($added)) {
                 throw new ControlOperationTerminalConflict(
                     'instruction_scope_extension_forbidden',
                     'Ein Instruktionspfad darf nicht per Same-run-Amendment in den Scope gelangen.',
                 );
             }
+        }
+
+        // A path this run already rejected must not re-enter the effective
+        // scope through the ticket's files list: the decision row is
+        // immutable, so the amendment would leave the run in a state where the
+        // recorded decision contradicts the effective scope, and the path
+        // would bypass the counter entirely. Reworking such a path needs a new
+        // approval and a new run.
+        if (ScopeDecision::query()
+            ->where('run_id', $run->getKey())
+            ->where('outcome', 'rejected')
+            ->whereIn('path', $addedPaths)
+            ->exists()) {
+            throw new ControlOperationTerminalConflict(
+                'amendment_readds_rejected_path',
+                'Ein bereits abgelehnter Zusatzpfad darf nicht per Vertragsänderung in den Scope zurückkehren.',
+            );
         }
     }
 
@@ -1025,6 +1064,7 @@ final readonly class TicketMutationExecutor
             throw new ControlOperationRecoveryRequired('The project configuration drifted during the contract amendment.');
         }
 
+        $humanRequestId = $this->parameters($operation)['human_request_id'] ?? null;
         try {
             $this->runs->applyContractAmendment(
                 $run,
@@ -1038,9 +1078,17 @@ final readonly class TicketMutationExecutor
                 $snapshot->prompt,
                 $snapshot->promptHash,
                 $this->canonicalJson,
+                // Paths the amendment adds to the ticket files consume the same
+                // idempotent counter as an approved addition (AC-05). The queue
+                // action already refuses an amendment that would exceed the
+                // limit; reaching it here means the run moved in between.
+                $this->runLimits->effective($run)['max_added_scope_paths'],
+                is_string($humanRequestId) ? $humanRequestId : null,
             );
         } catch (RunTransitionConflict $conflict) {
             throw new ControlOperationRecoveryRequired('The amended run binding lost its compare-and-swap: '.$conflict->reason, previous: $conflict);
+        } catch (ScopePathLimitExceeded $exceeded) {
+            throw new ControlOperationRecoveryRequired('The confirmed amendment would exceed the approved max_added_scope_paths limit.', previous: $exceeded);
         }
     }
 
@@ -1048,6 +1096,12 @@ final readonly class TicketMutationExecutor
      * Park the amended run behind git_base_changed after a terminal amendment
      * conflict (AC-13). The project lock and the run survive; only the wait
      * state records that the base drifted instead of silently rebasing.
+     *
+     * Every non-terminal state is parked, not only a running run. An amendment
+     * is typically queued for a run that already waits behind contract_change,
+     * and its compare-and-swap is that wait's allowlisted resolver; leaving
+     * such a run on contract_change after the resolver failed would advertise
+     * a resolution that can no longer succeed.
      */
     public function parkAmendedRunOnConflict(ControlOperation $operation): void
     {
@@ -1060,11 +1114,11 @@ final readonly class TicketMutationExecutor
         }
         foreach ([1, 2] as $attempt) {
             $run = Run::query()->whereKey($runId)->first();
-            if (! $run instanceof Run || $run->state !== RunState::RUNNING) {
+            if (! $run instanceof Run || in_array($run->state, [RunState::COMPLETED, RunState::CANCELLED], true)) {
                 return;
             }
             try {
-                $this->runs->transition($run, $run->version, RunState::WAITING, $run->phase, WaitReason::GIT_BASE_CHANGED);
+                $this->runs->parkOnBaseDrift($run, $run->version);
 
                 return;
             } catch (RunTransitionConflict $conflict) {

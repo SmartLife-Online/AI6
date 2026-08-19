@@ -429,7 +429,11 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->make(WaitReasonRegistry::class)->register(
             WaitReason::CONTRACT_CHANGE,
             'ContractChangeService',
-            ['return_to_todo'],
+            // Plan §7.2 allowlists two resolvers for this one producer: the run
+            // bound amendment compare-and-swap for a ticket-text change, and
+            // the controlled in_progress → todo reset for an instruction or
+            // runtime profile change. Cancel stays the third, explicit path.
+            ['amendment_cas', 'return_to_todo'],
             true,
         );
         $this->app->make(RunArtifactRoot::class);

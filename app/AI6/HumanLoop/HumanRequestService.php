@@ -348,6 +348,12 @@ final readonly class HumanRequestService
                 $request->id,
                 $maxAddedScopePaths,
                 $this->canonicalJson,
+                $chosenEffect === 'approve' ? 'human_approved' : 'human_rejected',
+                // The decision runs compare-and-swap against the run version the
+                // request was opened under; a run that moved in between (for
+                // example through a contract amendment) refuses the answer as
+                // stale_run_version instead of applying it (AC-14, HUM-004).
+                (int) $request->bound_run_version,
             );
         } catch (ScopePathLimitExceeded) {
             throw new HumanRequestRejected(

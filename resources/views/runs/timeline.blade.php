@@ -56,7 +56,7 @@
             <li data-scope-decision-path="{{ $decision['path'] }}" data-scope-decision-outcome="{{ $decision['outcome'] }}" data-scope-decision-reason="{{ $decision['reason'] }}">
                 <code>{{ $decision['path'] }}</code>
                 ({{ $decision['outcome'] === 'approved' ? 'genehmigt' : 'abgelehnt' }},
-                {{ $decision['reason'] === 'auto_allow' ? 'automatisch risikoarm' : 'menschliche Entscheidung' }})
+                {{ $scopeDecisionReasons[$decision['reason']] ?? 'unbekannter Grund' }})
             </li>
         @empty
             <li>Noch keine Scope-Erweiterung.</li>

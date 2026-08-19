@@ -53,12 +53,16 @@ final readonly class RunPreflight
                 $diverged[] = $field;
             }
         }
-        // Config, scope and prompt may legitimately diverge from the approval
-        // once a confirmed contract amendment binds the current run base; the
-        // instruction, runtime, agent and security bindings never move without
-        // a new approval (AC-11, AC-12).
+        // Scope and prompt may legitimately diverge from the approval once a
+        // confirmed contract amendment binds the current run base. The config
+        // binding is not in that set: an amendment changes exactly the ticket
+        // file, and finalizeAmendedRun proves the effective project
+        // configuration stayed byte-stable, so a config divergence is foreign
+        // drift even behind a confirmed amendment. The instruction, runtime,
+        // agent and security bindings never move without a new approval
+        // (AC-11, AC-12).
         if ($diverged !== []
-            && (array_diff($diverged, ['config_hash', 'scope_hash', 'prompt_hash']) !== []
+            && (array_diff($diverged, ['scope_hash', 'prompt_hash']) !== []
                 || ! $this->confirmedAmendmentBindsRunBase($run))) {
             return 'snapshot_binding_changed';
         }

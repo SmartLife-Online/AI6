@@ -64,9 +64,26 @@ final readonly class ScopeApprovalService
         $maxAddedScopePaths = $this->limits->effective($run)['max_added_scope_paths'];
         $category = $this->categorizer->categorize($path, $isDeletion, $configuration);
 
-        if ($category === ScopeCategory::AUTO_ALLOW) {
+        // The third track of plan §8.2: a path that is neither auto-allowed nor
+        // sensible follows the trusted project default `scope.unlisted_paths`.
+        // With its default `auto_allow` the necessary extension is the normal
+        // case and does not block the run; `require_approval` keeps the strict
+        // variant available. Both values come from the freigegebene project
+        // configuration only (TKT-007).
+        $autoAllow = $category === ScopeCategory::AUTO_ALLOW
+            || ($category === ScopeCategory::UNDETERMINED && $configuration->unlistedPaths() === 'auto_allow');
+
+        if ($autoAllow) {
             try {
-                $this->orchestrator->applyScopeDecision($run, $path, true, null, $maxAddedScopePaths, $this->canonicalJson);
+                $this->orchestrator->applyScopeDecision(
+                    $run,
+                    $path,
+                    true,
+                    null,
+                    $maxAddedScopePaths,
+                    $this->canonicalJson,
+                    reason: $category === ScopeCategory::AUTO_ALLOW ? 'auto_allow' : 'unlisted_auto_allow',
+                );
 
                 return null;
             } catch (ScopePathLimitExceeded $exceeded) {

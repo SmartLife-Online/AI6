@@ -30,6 +30,14 @@ final readonly class TicketContractHasher
         if (! is_string($body)) {
             throw new RuntimeException('Ticket body line endings could not be normalized.');
         }
+        // The AI6-owned `## Recorded Scope` section is documentation, not
+        // contract (plan §5.2 step 4, TKT-012): it is removed with its heading
+        // and its content up to the next `##` heading before the body is
+        // hashed, so writing or updating it never looks like a contract change
+        // and never invalidates review evidence. Line-ending normalization can
+        // neither create nor destroy that heading, so doing it first yields the
+        // same bytes as the plan's order.
+        $body = self::stripRecordedScope($body);
         $body = Normalizer::normalize($body, Normalizer::FORM_C);
         if (! is_string($body)) {
             throw new RuntimeException('Ticket body Unicode could not be normalized.');
@@ -38,5 +46,37 @@ final readonly class TicketContractHasher
         $input = self::DOMAIN."\0".pack('J', strlen($json)).$json.pack('J', strlen($body)).$body;
 
         return hash('sha256', $input);
+    }
+
+    /** Remove the AI6-owned `## Recorded Scope` section from an LF-normalized body. */
+    private static function stripRecordedScope(string $body): string
+    {
+        if (! str_contains($body, '## Recorded Scope')) {
+            return $body;
+        }
+        $kept = [];
+        $inRecordedScope = false;
+        foreach (explode("\n", $body) as $line) {
+            if ($inRecordedScope) {
+                if (! self::isSectionHeading($line)) {
+                    continue;
+                }
+                $inRecordedScope = false;
+            }
+            if (rtrim($line, " \t") === '## Recorded Scope') {
+                $inRecordedScope = true;
+
+                continue;
+            }
+            $kept[] = $line;
+        }
+
+        return implode("\n", $kept);
+    }
+
+    /** A `##` heading ends the AI6-owned section; a deeper `###` heading belongs to it. */
+    private static function isSectionHeading(string $line): bool
+    {
+        return str_starts_with($line, '## ') || rtrim($line, " \t") === '##';
     }
 }

@@ -41,6 +41,20 @@ final class RunTimelinePage extends Component
         $this->runId = $this->run($project, $runId)->id;
     }
 
+    /**
+     * The five server-owned decision reasons of a scope decision, as persisted
+     * under the closed guard of the scope_decisions table.
+     *
+     * @var array<string, string>
+     */
+    private const DECISION_REASONS = [
+        'auto_allow' => 'automatisch risikoarm nach scope.auto_allow',
+        'unlisted_auto_allow' => 'nicht gelisteter Pfad nach scope.unlisted_paths',
+        'human_approved' => 'menschlich genehmigt',
+        'human_rejected' => 'menschlich abgelehnt',
+        'amendment' => 'per Vertragsänderung aufgenommen',
+    ];
+
     public function render(Redactor $redactor, RunLimitPolicy $limits): View
     {
         Gate::authorize('viewRun', $this->project);
@@ -57,7 +71,12 @@ final class RunTimelinePage extends Component
             $scopeDecisions[] = [
                 'path' => $redact($decision->path),
                 'outcome' => $decision->outcome,
-                'reason' => $decision->human_request_id === null ? 'auto_allow' : 'human_decision',
+                // The named decision reason is persisted server-side under a
+                // closed value set; deriving it from the presence of a bound
+                // request would collapse auto_allow with unlisted_auto_allow
+                // and show an amendment adoption as risk-free automation
+                // (TKT-007, plan §8.2).
+                'reason' => $decision->reason,
             ];
         }
         $quarantined = [];
@@ -80,6 +99,7 @@ final class RunTimelinePage extends Component
             'decisions' => is_array($payload['decisions'] ?? null) ? $payload['decisions'] : [],
             'initialScope' => array_map($redact, array_values(array_filter(is_array($initialScope) ? $initialScope : [], 'is_string'))),
             'scopeDecisions' => $scopeDecisions,
+            'scopeDecisionReasons' => self::DECISION_REASONS,
             'quarantinedPaths' => $quarantined,
             'addedScopePathsUsed' => $run->added_scope_paths_count,
             'addedScopePathsLimit' => $limits->effective($run)['max_added_scope_paths'] ?? null,

@@ -24,9 +24,13 @@ use App\AI6\Projects\TicketDocumentState;
 use App\AI6\Projects\TicketReadModelFreshness;
 use App\AI6\Projects\TicketReadModelRedactionState;
 use App\AI6\Projects\TicketReadModelUsePolicy;
+use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\InstructionPathPolicy;
+use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\Models\ScopeDecision;
 use App\AI6\Runs\Models\TicketApproval;
+use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunState;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\RedactionMatchType;
@@ -62,6 +66,7 @@ final readonly class QueueContractAmendment
         private EffectiveProjectConfiguration $projectConfiguration,
         private TicketV1Parser $parser,
         private InstructionPathPolicy $instructionPaths,
+        private RunLimitPolicy $runLimits,
         private Redactor $redactor,
     ) {}
 
@@ -128,10 +133,57 @@ final readonly class QueueContractAmendment
                 || ($targetDocument->frontmatter['status'] ?? null) !== 'in_progress') {
                 throw new TicketMutationConflict('amendment_status_not_in_progress', 'Eine Vertragsänderung behält den Ticketstatus in_progress bei.');
             }
-            foreach (array_diff($targetDocument->files, $baseDocument->files) as $added) {
+            // A confirmed amendment moves the run's version, scope and prompt
+            // binding. Doing that while an implement step is actually executing
+            // would shift the contract underneath the running turn, so the
+            // amendment is only queued for a run whose steps are parked —
+            // through the contract_change wait or any other bound wait — and is
+            // resolved by the amendment compare-and-swap itself.
+            if (ExecutionJob::query()
+                ->where('run_id', $currentRun->getKey())
+                ->where('state', ExecutionJobState::RUNNING)
+                ->exists()) {
+                throw new TicketMutationConflict('amendment_step_running', 'Eine Vertragsänderung ist während eines laufenden Implementierungsschritts nicht zulässig.');
+            }
+
+            $addedPaths = array_values(array_diff($targetDocument->files, $baseDocument->files));
+            foreach ($addedPaths as $added) {
                 if ($this->instructionPaths->isInstructionPath($added)) {
                     throw new TicketMutationConflict('instruction_scope_extension_forbidden', 'Ein Instruktionspfad darf nicht per Same-run-Amendment in den Scope gelangen.');
                 }
+            }
+
+            // A path this run already rejected must not re-enter the effective
+            // scope through the ticket's files list. The decision row is
+            // immutable, so the amendment would leave the recorded decision
+            // contradicting the effective scope while bypassing the counter.
+            $rejected = ScopeDecision::query()
+                ->where('run_id', $currentRun->getKey())
+                ->where('outcome', 'rejected')
+                ->whereIn('path', $addedPaths)
+                ->exists();
+            if ($rejected) {
+                throw new TicketMutationConflict('amendment_readds_rejected_path', 'Ein bereits abgelehnter Zusatzpfad darf nicht per Vertragsänderung in den Scope zurückkehren.');
+            }
+
+            // Every path the amendment adds to the files list joins the
+            // effective scope and consumes the same freigegebene
+            // max_added_scope_paths as an approved addition (AC-05, plan §8.2).
+            // Only an already approved path is free: it consumed the counter
+            // once and must not consume it a second time.
+            // An amendment beyond that limit takes up nothing at all: it is
+            // refused here, before any commit exists, and the exhausted limit
+            // stays the run's resource_limit decision.
+            $alreadyApproved = ScopeDecision::query()
+                ->where('run_id', $currentRun->getKey())
+                ->where('outcome', 'approved')
+                ->whereIn('path', $addedPaths)
+                ->pluck('path')
+                ->all();
+            $consuming = count(array_diff($addedPaths, $alreadyApproved));
+            $maxAddedScopePaths = $this->runLimits->effective($currentRun)['max_added_scope_paths'];
+            if ($currentRun->added_scope_paths_count + $consuming > $maxAddedScopePaths) {
+                throw new TicketMutationConflict('scope_path_limit_exceeded', 'Die Vertragsänderung würde das freigegebene Limit zusätzlicher Scope-Pfade überschreiten.');
             }
 
             $projection = $this->projector->project(

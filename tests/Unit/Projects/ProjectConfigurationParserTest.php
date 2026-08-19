@@ -61,6 +61,55 @@ final class ProjectConfigurationParserTest extends TestCase
         }
     }
 
+    /**
+     * Plan §8.2 revision V1.7.3: `scope.unlisted_paths` is the trusted project
+     * default for a path outside `auto_allow` and outside every sensible
+     * category. It is optional with the server default `auto_allow`, accepts
+     * exactly two values, and rejects anything else.
+     */
+    public function test_unlisted_paths_accepts_both_trusted_values_and_defaults_to_auto_allow(): void
+    {
+        $parser = $this->app->make(ProjectConfigurationParser::class);
+
+        $absent = $parser->parse($this->validYaml());
+        self::assertTrue($absent->valid());
+        self::assertSame('auto_allow', $absent->configuration?->unlistedPaths());
+
+        $strict = $parser->parse($this->replace(
+            $this->validYaml(),
+            'scope:
+  auto_allow:',
+            'scope:
+  unlisted_paths: require_approval
+  auto_allow:',
+        ));
+        self::assertTrue($strict->valid());
+        self::assertSame('require_approval', $strict->configuration?->unlistedPaths());
+
+        $explicitDefault = $parser->parse($this->replace(
+            $this->validYaml(),
+            'scope:
+  auto_allow:',
+            'scope:
+  unlisted_paths: auto_allow
+  auto_allow:',
+        ));
+        self::assertTrue($explicitDefault->valid());
+        self::assertSame('auto_allow', $explicitDefault->configuration?->unlistedPaths());
+
+        // An unknown value is refused; project content never invents a track.
+        $unknown = $parser->parse($this->replace(
+            $this->validYaml(),
+            'scope:
+  auto_allow:',
+            'scope:
+  unlisted_paths: always_allow
+  auto_allow:',
+        ));
+        self::assertFalse($unknown->valid());
+        self::assertContains('enum_value_unknown', array_map(static fn ($error): string => $error->code, $unknown->errors));
+    }
+
     public function test_ticket_paths_and_scope_globs_follow_the_closed_repository_relative_grammar(): void
     {
         $parser = $this->app->make(ProjectConfigurationParser::class);

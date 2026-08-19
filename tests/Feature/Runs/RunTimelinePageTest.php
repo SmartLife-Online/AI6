@@ -199,8 +199,10 @@ final class RunTimelinePageTest extends TicketUiTestCase
         [$run, $project, $operator] = $this->preparedRun('AI6-020-UI-1');
         $orchestrator = $this->app->make(RunOrchestrator::class);
         $canonicalJson = $this->app->make(CanonicalJson::class);
-        $run = $orchestrator->applyScopeDecision($run, 'docs/allowed.md', true, null, 12, $canonicalJson);
-        $orchestrator->applyScopeDecision($run, 'docs/api_key=supersecret1234.md', false, null, 12, $canonicalJson);
+        $run = $orchestrator->applyScopeDecision($run, 'docs/allowed.md', true, null, 12, $canonicalJson, 'auto_allow');
+        $run = $orchestrator->applyScopeDecision($run, 'docs/unlisted.md', true, null, 12, $canonicalJson, 'unlisted_auto_allow');
+        $run = $orchestrator->applyScopeDecision($run, 'app/Amended.php', true, null, 12, $canonicalJson, 'amendment');
+        $orchestrator->applyScopeDecision($run, 'docs/api_key=supersecret1234.md', false, null, 12, $canonicalJson, 'human_rejected');
 
         config(['ai6.run_artifacts.root' => sys_get_temp_dir().'/ai6-020-timeline-artifacts']);
         $this->app->forgetInstance(RunArtifactRoot::class);
@@ -218,9 +220,20 @@ final class RunTimelinePageTest extends TicketUiTestCase
         $response->assertOk();
         $response->assertSee('data-scope-decision-path="docs/allowed.md"', false);
         $response->assertSee('data-scope-decision-outcome="approved"', false);
+        // The persisted reason is shown as such: an amendment adoption never
+        // reads as risk-free automation, and unlisted_auto_allow stays
+        // distinguishable from auto_allow.
         $response->assertSee('data-scope-decision-reason="auto_allow"', false);
-        $response->assertSee('data-scope-limit-used="1"', false);
-        $response->assertSee('Verbrauchte Zusatzpfade: 1 von 12');
+        $response->assertSee('data-scope-decision-reason="unlisted_auto_allow"', false);
+        $response->assertSee('data-scope-decision-reason="amendment"', false);
+        $response->assertSee('data-scope-decision-reason="human_rejected"', false);
+        $response->assertSee('automatisch risikoarm nach scope.auto_allow');
+        $response->assertSee('nicht gelisteter Pfad nach scope.unlisted_paths');
+        $response->assertSee('per Vertragsänderung aufgenommen');
+        $response->assertSee('menschlich abgelehnt');
+        $response->assertDontSee('unbekannter Grund');
+        $response->assertSee('data-scope-limit-used="3"', false);
+        $response->assertSee('Verbrauchte Zusatzpfade: 3 von 12');
         $response->assertSee('data-quarantined-change="added"', false);
         // The untrusted path is shown redacted only; the secret never renders.
         $response->assertDontSee('supersecret1234');

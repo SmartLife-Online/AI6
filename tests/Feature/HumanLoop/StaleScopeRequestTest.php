@@ -10,6 +10,7 @@ use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\HumanLoop\ScopeApprovalService;
 use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Projects\ProjectConfiguration;
 use App\AI6\Projects\ProjectRole;
 use App\AI6\Runs\ExecutionStepType;
 use App\AI6\Runs\InstructionCandidateSource;
@@ -47,9 +48,15 @@ final class StaleScopeRequestTest extends TicketUiTestCase
         $run = $this->finishPreflight($this->bindRunWorkspace($fixture, $this->finalizedRun($fixture)));
         $step = ExecutionJob::query()->where('run_id', $run->id)
             ->where('step_type', ExecutionStepType::IMPLEMENT->value)->firstOrFail();
+        $configuration = $this->app->make(EffectiveProjectConfiguration::class)
+            ->for($run->fresh()->project()->firstOrFail())->configuration;
+        // The strict variant of the third track (plan §8.2): an unlisted path
+        // needs a human decision, which is what this stale-answer proof needs.
+        $values = $configuration->values;
+        $values['scope']['unlisted_paths'] = 'require_approval';
         $request = $this->app->make(ScopeApprovalService::class)->requestOrAutoAllow(
             $run,
-            $this->app->make(EffectiveProjectConfiguration::class)->for($run->fresh()->project()->firstOrFail())->configuration,
+            new ProjectConfiguration($values),
             'docs/stale.md',
             false,
             (string) $step->id,
@@ -78,12 +85,18 @@ final class StaleScopeRequestTest extends TicketUiTestCase
         );
     }
 
-    private function assertNoEffect(Run $run): void
+    /**
+     * The rejected answer left nothing behind: the run still waits and neither
+     * the counter nor the decision table moved past the state that existed
+     * before the answer (a confirmed amendment may legitimately have taken up
+     * ticket-file paths beforehand).
+     */
+    private function assertNoEffect(Run $run, int $expectedCount = 0, int $expectedDecisions = 0): void
     {
         $fresh = $run->fresh();
         self::assertSame(RunState::WAITING, $fresh->state);
-        self::assertSame(0, $fresh->added_scope_paths_count);
-        self::assertSame(0, ScopeDecision::query()->where('run_id', $run->id)->count());
+        self::assertSame($expectedCount, $fresh->added_scope_paths_count);
+        self::assertSame($expectedDecisions, ScopeDecision::query()->where('run_id', $run->id)->count());
     }
 
     public function test_a_stale_run_version_is_rejected_without_effect(): void
@@ -114,6 +127,55 @@ final class StaleScopeRequestTest extends TicketUiTestCase
         $this->assertNoEffect($opened['run']);
     }
 
+    /**
+     * TC-07, HUM-004: the real drift case — the run version moves after the
+     * request was opened, and the answer arrives with exactly the bindings the
+     * request stored.
+     *
+     * Comparing the caller's values against the stored binding alone cannot
+     * catch this: both are the same stale numbers. Only the compare-and-swap
+     * of the scope decision against the run refuses it.
+     */
+    public function test_a_run_that_moved_after_the_request_refuses_the_stored_binding(): void
+    {
+        Mail::fake();
+        $opened = $this->openScopeRequest('AI6-020-STALE-DRIFT');
+        $before = $opened['run']->fresh();
+
+        // A confirmed amendment moves the run version while the request is open.
+        $amended = $this->app->make(RunOrchestrator::class)->applyContractAmendment(
+            $before,
+            str_repeat('d', 64),
+            str_repeat('1', 64),
+            str_repeat('2', 64),
+            (array) $before->scope_snapshot,
+            str_repeat('3', 64),
+            (array) $before->config_snapshot,
+            (string) $before->config_hash,
+            (array) $before->prompt_snapshot,
+            (string) $before->prompt_hash,
+            $this->app->make(CanonicalJson::class),
+            12,
+        );
+        self::assertGreaterThan($opened['request']->bound_run_version, $amended->version);
+        $countAfterAmendment = $amended->added_scope_paths_count;
+        $decisionsAfterAmendment = ScopeDecision::query()->where('run_id', $opened['run']->id)->count();
+
+        // The answer carries exactly the stored bindings — nothing the caller
+        // could have noticed — and is still refused.
+        try {
+            $this->answer($opened['request'], $opened['run'], []);
+            self::fail('An answer bound to a run version that moved must be rejected.');
+        } catch (HumanRequestRejected $rejected) {
+            self::assertSame('stale_run_version', $rejected->reason);
+        }
+
+        $this->assertNoEffect($opened['run'], $countAfterAmendment, $decisionsAfterAmendment);
+        self::assertSame(0, ScopeDecision::query()
+            ->where('run_id', $opened['run']->id)->where('path', 'docs/stale.md')->count());
+        self::assertSame('open', $opened['request']->fresh()->resolution_state->value);
+    }
+
     public function test_a_meanwhile_amended_ticket_contract_is_rejected_without_effect(): void
     {
         Mail::fake();
@@ -134,6 +196,7 @@ final class StaleScopeRequestTest extends TicketUiTestCase
             (array) $opened['run']->prompt_snapshot,
             (string) $opened['run']->prompt_hash,
             $this->app->make(CanonicalJson::class),
+            12,
         );
         self::assertSame(str_repeat('2', 64), $amended->ticket_contract_sha256);
 
@@ -143,6 +206,8 @@ final class StaleScopeRequestTest extends TicketUiTestCase
         } catch (HumanRequestRejected $rejected) {
             self::assertSame('stale_ticket_contract', $rejected->reason);
         }
-        $this->assertNoEffect($opened['run']);
+        // The amendment itself took up its one ticket-file path; the rejected
+        // answer added nothing on top of that.
+        $this->assertNoEffect($opened['run'], expectedCount: 1, expectedDecisions: 1);
     }
 }

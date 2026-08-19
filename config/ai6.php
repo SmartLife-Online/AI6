@@ -330,6 +330,7 @@ return [
                 'max_run_minutes' => 180,
             ],
             'scope' => [
+                'unlisted_paths' => 'auto_allow',
                 'auto_allow' => ['app/**', 'resources/**', 'tests/**'],
                 'require_approval' => ['AGENTS.md', 'CLAUDE.md', '.ai6/**', 'tickets/**'],
             ],
