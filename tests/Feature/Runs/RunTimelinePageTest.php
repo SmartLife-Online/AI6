@@ -3,6 +3,7 @@
 namespace Tests\Feature\Runs;
 
 use App\AI6\Auth\Models\User;
+use App\AI6\Git\CanonicalJson;
 use App\AI6\Git\ControlOperationRuntimeIdentity;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\ProjectRole;
@@ -11,6 +12,9 @@ use App\AI6\Runs\InstructionCandidateSource;
 use App\AI6\Runs\Jobs\ExecuteRunStep;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\RunArtifactKind;
+use App\AI6\Runs\RunArtifactRoot;
+use App\AI6\Runs\RunArtifactStore;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunTimelinePage;
 use App\AI6\Shared\Redaction\RedactionContext;
@@ -187,6 +191,42 @@ final class RunTimelinePageTest extends TicketUiTestCase
         foreach (['Diff', 'Checks', 'Findings', 'Security-Gate', 'Pushstatus', 'Interventionen'] as $later) {
             $response->assertDontSee($later);
         }
+    }
+
+    /** AI6-020 TC-12: scope, extensions, quarantine and limit usage appear redacted and read-only. */
+    public function test_the_timeline_shows_scope_extensions_quarantine_and_limit_usage_redacted(): void
+    {
+        [$run, $project, $operator] = $this->preparedRun('AI6-020-UI-1');
+        $orchestrator = $this->app->make(RunOrchestrator::class);
+        $canonicalJson = $this->app->make(CanonicalJson::class);
+        $run = $orchestrator->applyScopeDecision($run, 'docs/allowed.md', true, null, 12, $canonicalJson);
+        $orchestrator->applyScopeDecision($run, 'docs/api_key=supersecret1234.md', false, null, 12, $canonicalJson);
+
+        config(['ai6.run_artifacts.root' => sys_get_temp_dir().'/ai6-020-timeline-artifacts']);
+        $this->app->forgetInstance(RunArtifactRoot::class);
+        $this->app->forgetInstance(RunArtifactStore::class);
+        $this->app->make(RunArtifactStore::class)->store(
+            $run->fresh(),
+            RunArtifactKind::QUARANTINED_PATH,
+            json_encode(['path' => 'docs/api_key=supersecret1234.md', 'change' => 'added'], JSON_THROW_ON_ERROR),
+            ['kind' => RunArtifactKind::QUARANTINED_PATH->value, 'path' => 'docs/api_key=supersecret1234.md', 'change' => 'added'],
+            new RedactionContext((string) $run->project_id, $run->id, 'run-timeline-test'),
+        );
+
+        $response = $this->actingAs($operator)->get(route('projects.runs.show', [$project, $run->id]));
+
+        $response->assertOk();
+        $response->assertSee('data-scope-decision-path="docs/allowed.md"', false);
+        $response->assertSee('data-scope-decision-outcome="approved"', false);
+        $response->assertSee('data-scope-decision-reason="auto_allow"', false);
+        $response->assertSee('data-scope-limit-used="1"', false);
+        $response->assertSee('Verbrauchte Zusatzpfade: 1 von 12');
+        $response->assertSee('data-quarantined-change="added"', false);
+        // The untrusted path is shown redacted only; the secret never renders.
+        $response->assertDontSee('supersecret1234');
+        // The fixed CSP stays untouched and no mutation leaves the request.
+        $response->assertHeader('Content-Security-Policy', self::STRICT_POLICY);
+        self::assertSame(0, DB::table('jobs')->count());
     }
 
     /**

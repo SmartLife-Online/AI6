@@ -377,6 +377,7 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
 
     public function test_migration_chain_restores_the_exact_ai6_006c_contract_on_ordered_down(): void
     {
+        $amendmentMigration = require database_path('migrations/2026_08_19_000000_add_contract_amendment_contract.php');
         $runMigration = require database_path('migrations/2026_08_15_000000_add_run_contract.php');
         $approvalMigration = require database_path('migrations/2026_08_14_000000_add_ticket_approval_contract.php');
         $configMigration = require database_path('migrations/2026_08_13_000000_add_project_configuration_snapshot_contract.php');
@@ -387,6 +388,9 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
         $cloneMigration = require database_path('migrations/2026_08_09_000000_add_clone_fetch_control_operation_contract.php');
         self::assertTrue(Schema::hasColumn('control_operations', 'target_control_oid'));
 
+        // AI6-020 extended the published guards; its follow-up migration must
+        // leave the chain first so every earlier down() finds its exact state.
+        $amendmentMigration->down();
         $runMigration->down();
         $approvalMigration->down();
         $configMigration->down();
@@ -419,6 +423,7 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
         $configMigration->up();
         $approvalMigration->up();
         $runMigration->up();
+        $amendmentMigration->up();
         $latestTrigger = (string) DB::table('sqlite_master')
             ->where('type', 'trigger')
             ->where('name', 'control_operations_insert_guard')
@@ -427,6 +432,7 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
         self::assertStringContainsString('remote_probed', $latestTrigger);
         self::assertStringContainsString('config_refresh', $latestTrigger);
         self::assertStringContainsString('run_start', $latestTrigger);
+        self::assertStringContainsString('contract_amendment', $latestTrigger);
         $latestMutationTrigger = (string) DB::table('sqlite_master')
             ->where('type', 'trigger')
             ->where('name', 'ticket_mutations_insert_guard')

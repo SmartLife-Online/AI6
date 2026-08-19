@@ -8,4 +8,5 @@ enum RunArtifactKind: string
     case PROVIDER_RAW = 'provider_raw';
     case LIMIT_PENDING = 'limit_pending';
     case LIMIT_GRANT = 'limit_grant';
+    case QUARANTINED_PATH = 'quarantined_path';
 }

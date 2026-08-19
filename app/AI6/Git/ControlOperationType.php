@@ -14,6 +14,7 @@ enum ControlOperationType: string
     case CONFIG_REFRESH = 'config_refresh';
     case TICKET_APPROVAL = 'ticket_approval';
     case RUN_START = 'run_start';
+    case CONTRACT_AMENDMENT = 'contract_amendment';
 
     /** @var array<string, list<string>> */
     public const PARAMETER_FIELDS = [
@@ -57,6 +58,12 @@ enum ControlOperationType: string
             'approval_id',
             'relative_path',
             'expected_binding_version',
+        ],
+        'contract_amendment' => [
+            'run_id',
+            'relative_path',
+            'expected_binding_version',
+            'human_request_id',
         ],
     ];
 

@@ -99,6 +99,20 @@ final readonly class RunPatchImporter
     public function import(Run $run, string $source, array $approvedScope): array
     {
         $changes = $this->plan($run, $source, $approvedScope);
+
+        return $this->importChanges($run, $source, $changes);
+    }
+
+    /**
+     * Apply a change set this importer previously computed via {@see plan()} or
+     * {@see partition()}. The one seam that writes into the worktree; a caller
+     * that quarantined out-of-scope changes hands only the effective subset in.
+     *
+     * @param  list<RunPatchChange>  $changes
+     * @return list<RunPatchChange>
+     */
+    public function importChanges(Run $run, string $source, array $changes): array
+    {
         $worktree = $this->boundWorktree($run);
         $sourceRoot = $this->regularDirectory($source);
         $backup = $this->backup($worktree, $changes);
@@ -111,6 +125,82 @@ final readonly class RunPatchImporter
         }
 
         return $changes;
+    }
+
+    /**
+     * Compute the change set like {@see plan()}, but split it by the effective
+     * scope instead of failing on the first outside path (TKT-007).
+     *
+     * Out-of-scope changes — including deletions outside the scope, which
+     * {@see plan()} silently ignores — carry the same validation as in-scope
+     * ones except the size accounting, so the caller can quarantine them and
+     * route each into a scope decision without a second diff path.
+     *
+     * @param  list<string>  $effectiveScope
+     * @return array{in: list<RunPatchChange>, out: list<RunPatchChange>}
+     */
+    public function partition(Run $run, string $source, array $effectiveScope): array
+    {
+        $worktree = $this->boundWorktree($run);
+        $sourceRoot = $this->regularDirectory($source);
+        if ($sourceRoot === $worktree
+            || str_starts_with($sourceRoot.'/', $worktree.'/')
+            || str_starts_with($worktree.'/', $sourceRoot.'/')) {
+            throw new RuntimeException('The isolated view must not overlap the run worktree.');
+        }
+        $scope = $this->canonicalScope($effectiveScope);
+
+        $candidates = $this->inventory($sourceRoot, rejectGitMetadata: true);
+        $present = $this->inventory($worktree, rejectGitMetadata: false);
+
+        $inScope = [];
+        $outOfScope = [];
+        $total = 0;
+        foreach ($candidates as $path => $size) {
+            if ($size > self::MAXIMUM_FILE_BYTES) {
+                throw new RuntimeException('An imported file exceeds the configured size limit.');
+            }
+            $exists = array_key_exists($path, $present);
+            if ($exists && $this->identical($sourceRoot.'/'.$path, $worktree.'/'.$path)) {
+                continue;
+            }
+            $this->assertImportableFile(
+                $sourceRoot.'/'.$path,
+                allowedBinaryOrigin: $exists && $this->isBinaryFile($worktree.'/'.$path),
+            );
+            $change = new RunPatchChange($path, $exists ? RunPatchStatus::MODIFIED : RunPatchStatus::ADDED, $size);
+            if ($this->inScope($path, $scope)) {
+                $inScope[] = $change;
+                $total += $size;
+            } else {
+                $outOfScope[] = $change;
+            }
+        }
+
+        foreach ($present as $path => $size) {
+            if (array_key_exists($path, $candidates)) {
+                continue;
+            }
+            $change = new RunPatchChange($path, RunPatchStatus::DELETED, 0);
+            if ($this->inScope($path, $scope)) {
+                $inScope[] = $change;
+            } else {
+                $outOfScope[] = $change;
+            }
+        }
+
+        if (count($inScope) + count($outOfScope) > self::MAXIMUM_CHANGES) {
+            throw new RuntimeException('The computed patch exceeds the configured change limit.');
+        }
+        if ($total > self::MAXIMUM_TOTAL_BYTES) {
+            throw new RuntimeException('The computed patch exceeds the configured total size limit.');
+        }
+
+        $order = static fn (RunPatchChange $left, RunPatchChange $right): int => strcmp($left->path, $right->path);
+        usort($inScope, $order);
+        usort($outOfScope, $order);
+
+        return ['in' => $inScope, 'out' => $outOfScope];
     }
 
     /**

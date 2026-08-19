@@ -4,6 +4,9 @@ namespace App\AI6\Runs;
 
 use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
+use App\AI6\Git\ControlOperationState;
+use App\AI6\Git\ControlOperationType;
+use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Shared\Config\ConfigurationException;
@@ -44,10 +47,20 @@ final readonly class RunPreflight
                 return 'preflight_binding_missing';
             }
         }
+        $diverged = [];
         foreach (['config_hash', 'scope_hash', 'prompt_hash', 'instruction_hash', 'runtime_profile_hash', 'agent_profile_hash', 'security_policy_hash'] as $field) {
             if (! hash_equals((string) $approval->{$field}, (string) $run->{$field})) {
-                return 'snapshot_binding_changed';
+                $diverged[] = $field;
             }
+        }
+        // Config, scope and prompt may legitimately diverge from the approval
+        // once a confirmed contract amendment binds the current run base; the
+        // instruction, runtime, agent and security bindings never move without
+        // a new approval (AC-11, AC-12).
+        if ($diverged !== []
+            && (array_diff($diverged, ['config_hash', 'scope_hash', 'prompt_hash']) !== []
+                || ! $this->confirmedAmendmentBindsRunBase($run))) {
+            return 'snapshot_binding_changed';
         }
 
         if (! is_array($run->config_snapshot) || ! is_array($run->scope_snapshot)
@@ -124,6 +137,17 @@ final readonly class RunPreflight
         }
 
         return null;
+    }
+
+    private function confirmedAmendmentBindsRunBase(Run $run): bool
+    {
+        return ControlOperation::query()
+            ->where('project_id', $run->project_id)
+            ->where('operation_type', ControlOperationType::CONTRACT_AMENDMENT->value)
+            ->where('state', ControlOperationState::COMPLETED->value)
+            ->where('target_control_oid', $run->run_base_sha)
+            ->whereRaw("json_extract(operation_parameters_jcs, '\$.run_id') = ?", [$run->getKey()])
+            ->exists();
     }
 
     private function sha(mixed $value): bool

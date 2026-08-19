@@ -91,11 +91,11 @@ final class HumanRequestResumeTest extends TicketUiTestCase
         self::assertSame('cancelled', $request->fresh()->resolution_state->value);
     }
 
-    /** TC-10 */
+    /** TC-10; AI6-020 AC-14/TC-12 extend the closed list by scope_approval and contract_change. */
     public function test_human_question_and_resource_limit_are_registered_with_resolvers(): void
     {
         $registry = $this->app->make(WaitReasonRegistry::class);
-        self::assertSame(['human_question', 'resource_limit'], $registry->registeredReasons());
+        self::assertSame(['human_question', 'resource_limit', 'scope_approval', 'contract_change'], $registry->registeredReasons());
         self::assertSame([
             'producer' => 'needs_human',
             'resolvers' => ['bound_answer'],
@@ -106,6 +106,16 @@ final class HumanRequestResumeTest extends TicketUiTestCase
             'resolvers' => ['reduce', 'increase'],
             'cancellable' => true,
         ], $registry->registration(WaitReason::RESOURCE_LIMIT));
+        self::assertSame([
+            'producer' => 'ScopeApprovalService',
+            'resolvers' => ['approve', 'reject'],
+            'cancellable' => true,
+        ], $registry->registration(WaitReason::SCOPE_APPROVAL));
+        self::assertSame([
+            'producer' => 'ContractChangeService',
+            'resolvers' => ['return_to_todo'],
+            'cancellable' => true,
+        ], $registry->registration(WaitReason::CONTRACT_CHANGE));
 
         try {
             $registry->register(WaitReason::MANUAL_GATE, 'gate');

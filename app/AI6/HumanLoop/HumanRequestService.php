@@ -5,6 +5,7 @@ namespace App\AI6\HumanLoop;
 use App\AI6\Agents\HumanRequestOption;
 use App\AI6\Agents\HumanRequestProposal;
 use App\AI6\Auth\Models\User;
+use App\AI6\Git\CanonicalJson;
 use App\AI6\HumanLoop\Jobs\SendHumanRequestNotification;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\HumanLoop\Models\Intervention;
@@ -22,6 +23,7 @@ use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
 use App\AI6\Runs\RunTransitionConflict;
+use App\AI6\Runs\ScopePathLimitExceeded;
 use App\AI6\Runs\WaitReason;
 use App\AI6\Shared\Redaction\InvalidRedactionInputException;
 use App\AI6\Shared\Redaction\RedactionContext;
@@ -41,6 +43,7 @@ final readonly class HumanRequestService
         private RunOrchestrator $orchestrator,
         private ProjectPolicy $policy,
         private HumanRequestRecipient $recipient,
+        private CanonicalJson $canonicalJson,
         private ?RunLimitPolicy $limits = null,
         private ?RunArtifactStore $artifacts = null,
     ) {}
@@ -111,7 +114,10 @@ final readonly class HumanRequestService
                     'allowed_effects' => $classification->allowedEffects,
                     'required_action' => $classification->requiredAction->value,
                     'bound_run_version' => $fresh->version,
-                    'bound_ticket_contract' => $approval->ticket_contract_sha256,
+                    // A confirmed contract amendment moves the run's own
+                    // contract binding past the approval's; the request must
+                    // bind the contract that is effective now (TC-07).
+                    'bound_ticket_contract' => $fresh->ticket_contract_sha256 ?? $approval->ticket_contract_sha256,
                     'bound_checkpoint' => $checkpoint,
                     'bound_scope' => $fresh->scope_hash,
                     'bound_agent_slot' => $agentSlotId,
@@ -261,12 +267,21 @@ final readonly class HumanRequestService
                 if ($chosenEffect === self::CANCEL_EFFECT) {
                     $this->orchestrator->cancelWait($run, $fresh->bound_run_version, $run->wait_reason ?? WaitReason::HUMAN_QUESTION);
                 } else {
+                    $expectedVersion = $fresh->bound_run_version;
                     if ($run->wait_reason === WaitReason::RESOURCE_LIMIT && $chosenEffect === 'increase') {
                         $this->applyLimitIncrease($run);
                     }
+                    if ($run->wait_reason === WaitReason::SCOPE_APPROVAL) {
+                        // A scope decision binds the run's own version (effective
+                        // scope + counter), so both the run instance and the
+                        // expected version handed to the wait resumption below
+                        // must be the ones the scope decision itself produced.
+                        $run = $this->applyScopeDecision($run, $fresh, $chosenEffect);
+                        $expectedVersion = $run->version;
+                    }
                     $this->orchestrator->resumeWait(
                         $run,
-                        $fresh->bound_run_version,
+                        $expectedVersion,
                         $fresh->bound_step_key,
                         $run->wait_reason ?? WaitReason::HUMAN_QUESTION,
                     );
@@ -312,6 +327,33 @@ final readonly class HumanRequestService
     {
         if (! hash_equals($expected, $provided)) {
             throw new HumanRequestRejected($reason, 'The answer binding does not match the stored request binding.');
+        }
+    }
+
+    private function applyScopeDecision(Run $run, HumanRequest $request, string $chosenEffect): Run
+    {
+        $path = $request->affected_paths[0] ?? null;
+        if (! is_string($path) || $path === '') {
+            throw new HumanRequestRejected('scope_path_missing', 'The scope approval request has no bound path.');
+        }
+        if (! $this->limits instanceof RunLimitPolicy) {
+            throw new HumanRequestRejected('limit_policy_unavailable', 'The scope-limit resolver is unavailable.');
+        }
+        $maxAddedScopePaths = $this->limits->effective($run)['max_added_scope_paths'];
+        try {
+            return $this->orchestrator->applyScopeDecision(
+                $run,
+                $path,
+                $chosenEffect === 'approve',
+                $request->id,
+                $maxAddedScopePaths,
+                $this->canonicalJson,
+            );
+        } catch (ScopePathLimitExceeded) {
+            throw new HumanRequestRejected(
+                'scope_path_limit_exceeded',
+                'The approval would exceed the approved max_added_scope_paths limit.',
+            );
         }
     }
 

@@ -22,8 +22,13 @@ use App\AI6\Prompts\PromptRenderingException;
 use App\AI6\Runs\ApprovalSelectionFactory;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ApprovalSnapshotVerifier;
+use App\AI6\Runs\InstructionPathPolicy;
+use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\RunOrchestrator;
+use App\AI6\Runs\RunState;
+use App\AI6\Runs\RunTransitionConflict;
+use App\AI6\Runs\WaitReason;
 use App\AI6\Shared\Process\EffectLock;
 use App\AI6\Shared\Process\EffectLockHandle;
 use App\AI6\Shared\Process\EffectLockOutcome;
@@ -63,6 +68,8 @@ final readonly class TicketMutationExecutor
         private CanonicalJson $canonicalJson,
         private ControlOperationConfiguration $controlConfiguration,
         private TicketMutationConfiguration $configuration,
+        private TicketFileDeltaProof $deltaProof,
+        private InstructionPathPolicy $instructionPaths,
         private ApprovalSelectionFactory $approvalSelections,
         private ApprovalSnapshotFactory $approvalSnapshots,
         private ApprovalSnapshotVerifier $approvalSnapshotVerifier,
@@ -377,6 +384,7 @@ final readonly class TicketMutationExecutor
         $sourceAllowed = match ($operation->operation_type) {
             ControlOperationType::TICKET_APPROVAL => $this->usePolicy->allowsApproval($readModel, $fresh, $profile),
             ControlOperationType::RUN_START => $this->usePolicy->allowsRunStart($readModel, $fresh, $profile),
+            ControlOperationType::CONTRACT_AMENDMENT => $this->usePolicy->allowsAmendment($readModel, $fresh, $profile),
             default => $this->usePolicy->allowsEditor($readModel, $fresh, $profile),
         };
         if (! hash_equals($mutation->expected_ticket_blob_sha, $blob->blobSha)
@@ -505,6 +513,11 @@ final readonly class TicketMutationExecutor
         } finally {
             $lock->release();
         }
+        if ($operation->operation_type === ControlOperationType::CONTRACT_AMENDMENT) {
+            // The proof before the patch takeover (AC-09): the prepared commit
+            // may differ from its parent tree in exactly the ticket file.
+            $this->deltaProof->assertOnlyPathChanged($repository, (string) $operation->expected_control_commit, $commitOid, $mutation->relative_path, $context);
+        }
 
         $mutationUpdated = TicketMutation::query()
             ->whereKey($mutation->status_operation_id)
@@ -577,6 +590,11 @@ final readonly class TicketMutationExecutor
         $commitOid = $this->preparedCommit($operation, $mutation, $repository, $context);
         if (! hash_equals($this->remote->resolve($project, (string) $project->control_branch, $context), $commitOid)) {
             throw new ControlOperationRecoveryRequired('The confirmed mutation commit is no longer the remote control head.');
+        }
+        if ($operation->operation_type === ControlOperationType::CONTRACT_AMENDMENT) {
+            // The proof after the patch takeover (AC-09): the confirmed commit
+            // still differs from its parent tree in exactly the ticket file.
+            $this->deltaProof->assertOnlyPathChanged($repository, (string) $operation->expected_control_commit, $commitOid, $mutation->relative_path, $context);
         }
         $confirmedBlob = $this->git->readRegularBlob(
             $repository,
@@ -658,6 +676,9 @@ final readonly class TicketMutationExecutor
                 || $published->ticket_contract_sha256 === null
                 || ! hash_equals($mutation->target_contract_sha256, $published->ticket_contract_sha256)) {
                 throw new ControlOperationRecoveryRequired('The confirmed ticket content no longer produces its safe valid projection.');
+            }
+            if ($operation->operation_type === ControlOperationType::CONTRACT_AMENDMENT) {
+                $this->finalizeAmendedRun($operation, $currentProject, $published, $commitOid);
             }
             if ($operation->operation_type === ControlOperationType::TICKET_APPROVAL) {
                 $approvalUpdated = TicketApproval::query()
@@ -749,7 +770,8 @@ final readonly class TicketMutationExecutor
         $mutation = $operation->ticketMutation()->firstOrFail();
         $parameters = $this->parameters($operation);
         $authorized = match ($operation->operation_type) {
-            ControlOperationType::TICKET_EDIT => $this->projectPolicy->editTicket($actor, $project),
+            ControlOperationType::TICKET_EDIT,
+            ControlOperationType::CONTRACT_AMENDMENT => $this->projectPolicy->editTicket($actor, $project),
             ControlOperationType::TICKET_APPROVAL => $this->projectPolicy->approveTicket($actor, $project),
             ControlOperationType::RUN_START => $this->projectPolicy->startRun($actor, $project),
             default => $this->projectPolicy->changeTicketStatus($actor, $project),
@@ -782,7 +804,7 @@ final readonly class TicketMutationExecutor
         ];
     }
 
-    /** @return array{relative_path: string, expected_binding_version: int, status_operation?: string, approval_id?: string} */
+    /** @return array{relative_path: string, expected_binding_version: int, status_operation?: string, approval_id?: string, run_id?: string|null, human_request_id?: string|null} */
     private function parameters(ControlOperation $operation): array
     {
         try {
@@ -811,7 +833,7 @@ final readonly class TicketMutationExecutor
             throw new ControlOperationTerminalConflict('mutation_parameters_not_canonical', 'Die Mutationsparameter sind nicht kanonisch gebunden.');
         }
 
-        /** @var array{relative_path: string, expected_binding_version: int, status_operation?: string} $parameters */
+        /** @var array{relative_path: string, expected_binding_version: int, status_operation?: string, approval_id?: string, run_id?: string|null, human_request_id?: string|null} $parameters */
         return $parameters;
     }
 
@@ -854,7 +876,7 @@ final readonly class TicketMutationExecutor
         } catch (TicketParseException) {
             $sourceStatus = null;
         }
-        if (is_string($sourceStatus) && ! in_array($sourceStatus, ['todo', 'ready', 'blocked', 'review'], true)) {
+        if (is_string($sourceStatus) && ! in_array($sourceStatus, ['todo', 'ready', 'blocked', 'review', 'in_progress'], true)) {
             throw new ControlOperationTerminalConflict('source_status_unavailable', 'Der Quellstatus ist nicht als Reparaturbasis gebunden.');
         }
         if (is_string($sourceStatus) && ! hash_equals($mutation->source_status, $sourceStatus)) {
@@ -865,6 +887,11 @@ final readonly class TicketMutationExecutor
         }
 
         $parameters = $this->parameters($operation);
+        if ($operation->operation_type === ControlOperationType::CONTRACT_AMENDMENT) {
+            $this->assertAmendmentContract($operation, $project, $mutation, $parameters);
+
+            return;
+        }
         if ($operation->operation_type === ControlOperationType::RUN_START) {
             $approvalId = $parameters['approval_id'] ?? null;
             $approval = is_string($approvalId) ? TicketApproval::query()->whereKey($approvalId)->first() : null;
@@ -917,6 +944,134 @@ final readonly class TicketMutationExecutor
         }
         if (! hash_equals($target, $mutation->target_status)) {
             throw new ControlOperationTerminalConflict('status_target_mismatch', 'Die Statusoperation führt nicht zum gebundenen Zielstatus.');
+        }
+    }
+
+    /**
+     * @param  array{relative_path: string, expected_binding_version: int, run_id?: string|null, human_request_id?: string|null}  $parameters
+     */
+    private function assertAmendmentContract(
+        ControlOperation $operation,
+        Project $project,
+        TicketMutation $mutation,
+        array $parameters,
+    ): void {
+        $runId = $parameters['run_id'] ?? null;
+        $run = is_string($runId) ? Run::query()->whereKey($runId)->first() : null;
+        $approvalPath = $run instanceof Run
+            ? TicketApproval::query()->whereKey($run->ticket_approval_id)->value('relative_path')
+            : null;
+        if (! $run instanceof Run
+            || $run->project_id !== $project->getKey()
+            || $project->active_run_id !== $run->getKey()
+            || in_array($run->state, [RunState::COMPLETED, RunState::CANCELLED], true)
+            || ! hash_equals($run->run_base_sha, (string) $operation->expected_control_commit)
+            || ! is_string($approvalPath)
+            || ! hash_equals($approvalPath, $mutation->relative_path)
+            || $mutation->source_status !== 'in_progress'
+            || $mutation->target_status !== 'in_progress') {
+            throw new ControlOperationTerminalConflict(
+                'contract_amendment_binding_changed',
+                'Die Runbindung der Vertragsänderung ist nicht mehr gültig.',
+            );
+        }
+
+        // The same-run amendment must not adopt an instruction path into the
+        // ticket scope (AC-12); the separate contract_change path is the only
+        // way an instruction or runtime profile change becomes effective.
+        try {
+            $baseFiles = $this->parser->parse($mutation->base_content)->files;
+            $targetFiles = $this->parser->parse($mutation->target_content)->files;
+        } catch (TicketParseException) {
+            throw new ControlOperationTerminalConflict('target_validation_changed', 'Der vorbereitete Ticketstand ist nicht mehr gültig gebunden.');
+        }
+        foreach (array_diff($targetFiles, $baseFiles) as $added) {
+            if ($this->instructionPaths->isInstructionPath($added)) {
+                throw new ControlOperationTerminalConflict(
+                    'instruction_scope_extension_forbidden',
+                    'Ein Instruktionspfad darf nicht per Same-run-Amendment in den Scope gelangen.',
+                );
+            }
+        }
+    }
+
+    private function finalizeAmendedRun(
+        ControlOperation $operation,
+        Project $project,
+        TicketReadModel $published,
+        string $commitOid,
+    ): void {
+        $runId = $this->parameters($operation)['run_id'] ?? null;
+        $run = is_string($runId) ? Run::query()->whereKey($runId)->first() : null;
+        if (! $run instanceof Run) {
+            throw new ControlOperationRecoveryRequired('The confirmed contract amendment lost its bound run.');
+        }
+        $approval = TicketApproval::query()->whereKey($run->ticket_approval_id)->firstOrFail();
+
+        try {
+            $snapshot = $this->approvalSnapshots->create(
+                $project,
+                $published,
+                $this->approvalSelections->fromArray($approval->agent_profile_snapshot),
+                $operation->id,
+            );
+        } catch (AgentProfileSelectionException|InstructionResolutionException|PromptRenderingException|InvalidArgumentException $exception) {
+            throw new ControlOperationRecoveryRequired('The amended run bindings could not be derived deterministically.', previous: $exception);
+        }
+        // Only the ticket file changed (proven above), so the effective project
+        // configuration binding must be byte-stable; a drift here means a
+        // foreign change and is never silently adopted (AC-13).
+        if (! hash_equals((string) $run->config_hash, $snapshot->configHash)) {
+            throw new ControlOperationRecoveryRequired('The project configuration drifted during the contract amendment.');
+        }
+
+        try {
+            $this->runs->applyContractAmendment(
+                $run,
+                $commitOid,
+                $published->blob_sha,
+                (string) $published->ticket_contract_sha256,
+                $snapshot->scope,
+                $snapshot->scopeHash,
+                $snapshot->config,
+                $snapshot->configHash,
+                $snapshot->prompt,
+                $snapshot->promptHash,
+                $this->canonicalJson,
+            );
+        } catch (RunTransitionConflict $conflict) {
+            throw new ControlOperationRecoveryRequired('The amended run binding lost its compare-and-swap: '.$conflict->reason, previous: $conflict);
+        }
+    }
+
+    /**
+     * Park the amended run behind git_base_changed after a terminal amendment
+     * conflict (AC-13). The project lock and the run survive; only the wait
+     * state records that the base drifted instead of silently rebasing.
+     */
+    public function parkAmendedRunOnConflict(ControlOperation $operation): void
+    {
+        if ($operation->operation_type !== ControlOperationType::CONTRACT_AMENDMENT) {
+            return;
+        }
+        $runId = $this->parameters($operation)['run_id'] ?? null;
+        if (! is_string($runId)) {
+            return;
+        }
+        foreach ([1, 2] as $attempt) {
+            $run = Run::query()->whereKey($runId)->first();
+            if (! $run instanceof Run || $run->state !== RunState::RUNNING) {
+                return;
+            }
+            try {
+                $this->runs->transition($run, $run->version, RunState::WAITING, $run->phase, WaitReason::GIT_BASE_CHANGED);
+
+                return;
+            } catch (RunTransitionConflict $conflict) {
+                if ($attempt === 2) {
+                    throw $conflict;
+                }
+            }
         }
     }
 
@@ -1175,7 +1330,7 @@ final readonly class TicketMutationExecutor
 
     private function assertType(ControlOperation $operation): void
     {
-        if (! in_array($operation->operation_type, [ControlOperationType::TICKET_EDIT, ControlOperationType::TICKET_STATUS_CHANGE, ControlOperationType::TICKET_APPROVAL, ControlOperationType::RUN_START], true)) {
+        if (! in_array($operation->operation_type, [ControlOperationType::TICKET_EDIT, ControlOperationType::TICKET_STATUS_CHANGE, ControlOperationType::TICKET_APPROVAL, ControlOperationType::RUN_START, ControlOperationType::CONTRACT_AMENDMENT], true)) {
             throw new RuntimeException('The operation is not a ticket mutation.');
         }
     }

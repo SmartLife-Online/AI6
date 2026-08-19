@@ -445,7 +445,7 @@ final readonly class QueueTicketMutation
         } catch (\Throwable) {
             $status = null;
         }
-        if (is_string($status) && in_array($status, ['todo', 'ready', 'blocked', 'review'], true)) {
+        if (is_string($status) && in_array($status, ['todo', 'ready', 'blocked', 'review', 'in_progress'], true)) {
             return $status;
         }
         if (is_string($status)) {

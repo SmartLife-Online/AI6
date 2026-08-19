@@ -122,7 +122,12 @@ final class RunArchitectureTest extends TestCase
             self::assertIsString($source);
         }
 
-        self::assertStringContainsString('ControlOperationType::RUN_START => $this->ticketMutations->advance', $executor);
+        // Since AI6-020 the run-start arm is grouped with the contract
+        // amendment; both stay routed through the one recoverable saga.
+        self::assertStringContainsString(
+            "ControlOperationType::RUN_START,\n                    ControlOperationType::CONTRACT_AMENDMENT => \$this->ticketMutations->advance",
+            $executor,
+        );
         self::assertStringContainsString('$this->runs->finalizeClaim(', $mutation);
         self::assertStringContainsString("->whereNull('operation_lock_operation_id')", $mutation);
         self::assertStringContainsString('if (! $runStartLeaseReleased)', $mutation);

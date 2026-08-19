@@ -19,6 +19,8 @@ final class TicketStatusTransitionPolicy
         'review:cancel' => [ProjectRole::ADMIN, ProjectRole::OPERATOR, ProjectRole::APPROVER],
         'review:return_to_todo' => [ProjectRole::ADMIN, ProjectRole::OPERATOR, ProjectRole::APPROVER],
         'review:complete_review' => [ProjectRole::ADMIN, ProjectRole::APPROVER],
+        'in_progress:cancel' => [ProjectRole::ADMIN, ProjectRole::OPERATOR],
+        'in_progress:return_to_todo' => [ProjectRole::ADMIN, ProjectRole::OPERATOR],
     ];
 
     public function decide(

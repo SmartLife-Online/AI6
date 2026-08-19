@@ -50,6 +50,19 @@ final readonly class TicketReadModelUsePolicy
             && $readModel->source_blockers === [];
     }
 
+    /**
+     * A contract amendment mutates the ticket of the active run in place, so it
+     * needs the same safe, byte-clear source as a run start — the editor flag
+     * is irrelevant because the run, not an editor session, owns the ticket.
+     */
+    public function allowsAmendment(
+        TicketReadModel $readModel,
+        bool $isFresh,
+        TicketValidationProfile $requiredProfile,
+    ): bool {
+        return $this->allowsRunStart($readModel, $isFresh, $requiredProfile);
+    }
+
     private function hasRequiredProfile(TicketReadModel $readModel, TicketValidationProfile $requiredProfile): bool
     {
         return is_string($readModel->validation_profile)

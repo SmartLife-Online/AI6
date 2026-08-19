@@ -54,6 +54,7 @@ use App\AI6\HumanLoop\HumanRequestDetailPage;
 use App\AI6\HumanLoop\HumanRequestNotificationConfiguration;
 use App\AI6\HumanLoop\HumanRequestRecipient;
 use App\AI6\HumanLoop\HumanRequestService;
+use App\AI6\HumanLoop\ScopeApprovalService;
 use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Policies\ProjectPolicy;
@@ -63,10 +64,12 @@ use App\AI6\Reviews\ReviewerSlotFactory;
 use App\AI6\Runs\ApprovalSelectionFactory;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ApprovalStatusPage;
+use App\AI6\Runs\ContractChangeService;
 use App\AI6\Runs\ExecutionStepDispatcher;
 use App\AI6\Runs\InstructionBindingVerifier;
 use App\AI6\Runs\InstructionCandidateCollector;
 use App\AI6\Runs\InstructionCandidateSource;
+use App\AI6\Runs\InstructionPathPolicy;
 use App\AI6\Runs\RunArtifactRoot;
 use App\AI6\Runs\RunArtifactStore;
 use App\AI6\Runs\RunImplementation;
@@ -207,6 +210,9 @@ final class AI6ServiceProvider extends ServiceProvider
         );
         $this->app->singleton(HumanRequestRecipient::class);
         $this->app->singleton(HumanRequestService::class);
+        $this->app->singleton(ScopeApprovalService::class);
+        $this->app->singleton(InstructionPathPolicy::class);
+        $this->app->singleton(ContractChangeService::class);
         $this->app->singleton(InstructionCandidateCollector::class);
         $this->app->singleton(InstructionCandidateSource::class, InstructionCandidateCollector::class);
         $this->app->singleton(DependencySatisfiedStatusAllowlist::class, static fn (): DependencySatisfiedStatusAllowlist => DependencySatisfiedStatusAllowlist::fromConfiguredValues());
@@ -412,6 +418,18 @@ final class AI6ServiceProvider extends ServiceProvider
             WaitReason::RESOURCE_LIMIT,
             'RunLimitPolicy',
             ['reduce', 'increase'],
+            true,
+        );
+        $this->app->make(WaitReasonRegistry::class)->register(
+            WaitReason::SCOPE_APPROVAL,
+            'ScopeApprovalService',
+            ['approve', 'reject'],
+            true,
+        );
+        $this->app->make(WaitReasonRegistry::class)->register(
+            WaitReason::CONTRACT_CHANGE,
+            'ContractChangeService',
+            ['return_to_todo'],
             true,
         );
         $this->app->make(RunArtifactRoot::class);

@@ -18,4 +18,16 @@ final readonly class ProjectConfiguration
     {
         return TicketValidationProfile::from($this->values['ticket_validation_profile']);
     }
+
+    /** @return array{auto_allow: list<string>, require_approval: list<string>} */
+    public function scope(): array
+    {
+        return $this->values['scope'];
+    }
+
+    /** @return array<string, int> */
+    public function limits(): array
+    {
+        return $this->values['limits'];
+    }
 }

@@ -21,13 +21,17 @@ use App\AI6\Git\CanonicalJson;
 use App\AI6\Git\IsolatedTreeExporter;
 use App\AI6\Git\RunPatchChange;
 use App\AI6\Git\RunPatchImporter;
+use App\AI6\Git\RunPatchStatus;
 use App\AI6\HumanLoop\HumanRequestRejected;
 use App\AI6\HumanLoop\HumanRequestService;
+use App\AI6\HumanLoop\ScopeApprovalService;
+use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Prompts\PromptSnapshot;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunAgent;
+use App\AI6\Runs\Models\ScopeDecision;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Shared\Json\JsonDecodingException;
 use App\AI6\Shared\Redaction\InvalidRedactionInputException;
@@ -52,10 +56,13 @@ final readonly class RunImplementation
         private RunLimitPolicy $limits,
         private RunArtifactStore $artifacts,
         private HumanRequestService $humanRequests,
+        private ScopeApprovalService $scopeApprovals,
+        private EffectiveProjectConfiguration $projectConfiguration,
         private Redactor $redactor,
         private CanonicalJson $canonicalJson,
         private TicketV1Parser $tickets,
         private ProviderRuntimeProfileRegistry $runtimeProfiles,
+        private InstructionPathPolicy $instructionPaths,
     ) {}
 
     public function execute(ExecutionJob $job, Run $run, string $owner): void
@@ -193,7 +200,7 @@ final readonly class RunImplementation
             return;
         }
 
-        $scope = $this->approvedScope($run);
+        $run = Run::query()->findOrFail($run->getKey());
         if ($instructionUpdate && $validated->instructionPatch !== null) {
             try {
                 $this->importInstructionReplacement($run, $isolated, $validated);
@@ -205,12 +212,14 @@ final readonly class RunImplementation
         }
 
         try {
-            $changes = $this->patches->plan($run, $isolated, $scope);
+            $partition = $this->patches->partition($run, $isolated, $this->effectiveScope($run));
         } catch (RuntimeException $exception) {
             $this->failNamed($job, $run, $owner, $this->importFailureCode($exception), $exception->getMessage());
 
             return;
         }
+        $changes = [...$partition['in'], ...$partition['out']];
+        usort($changes, static fn (RunPatchChange $left, RunPatchChange $right): int => strcmp($left->path, $right->path));
 
         $actualPaths = array_map(static fn (RunPatchChange $change): string => $change->path, $changes);
         sort($actualPaths);
@@ -252,7 +261,7 @@ final readonly class RunImplementation
         }
 
         $artifactCandidates = $this->artifactCandidates($validated, $bytes);
-        $limit = $this->limits->evaluate($run, $changes, $artifactCandidates, strlen($bytes));
+        $limit = $this->limits->evaluate($run, $partition['in'], $artifactCandidates, strlen($bytes));
         if ($limit instanceof ImportLimitResult) {
             $this->openResourceLimit($job, $run, $slot, $limit);
 
@@ -265,9 +274,17 @@ final readonly class RunImplementation
             return;
         }
 
-        if ($changes !== []) {
+        if ($partition['out'] !== []) {
+            $resolved = $this->resolveOutOfScopeChanges($job, $run, $owner, $slot, $isolated, $partition['out'], $context);
+            if (! $resolved) {
+                return;
+            }
+            // Approved paths joined the effective scope; recompute the split so
+            // they import through the same seam, and only rejected changes stay
+            // quarantined and without effect (AC-01, AC-06).
+            $run = Run::query()->findOrFail($run->getKey());
             try {
-                $this->patches->import($run, $isolated, $scope);
+                $partition = $this->patches->partition($run, $isolated, $this->effectiveScope($run));
             } catch (RuntimeException $exception) {
                 $this->failNamed($job, $run, $owner, $this->importFailureCode($exception), $exception->getMessage());
 
@@ -275,10 +292,156 @@ final readonly class RunImplementation
             }
         }
 
-        $this->persistOutcome($run, $validated, $bytes, $changes, $context);
+        $imported = $partition['in'];
+        if ($imported !== []) {
+            try {
+                $this->patches->importChanges($run, $isolated, $imported);
+            } catch (RuntimeException $exception) {
+                $this->failNamed($job, $run, $owner, $this->importFailureCode($exception), $exception->getMessage());
+
+                return;
+            }
+        }
+
+        $run = Run::query()->findOrFail($run->getKey());
+        $this->orchestrator->bindActualChangedPaths(
+            $run,
+            $run->version,
+            array_map(static fn (RunPatchChange $change): string => $change->path, $imported),
+            $this->canonicalJson,
+        );
+
+        $this->persistOutcome($run, $validated, $bytes, $imported, $context);
         $this->orchestrator->recordStepEvent($run->id, ExecutionStepType::IMPLEMENT->value, ExecutionJobState::SUCCEEDED, 'Implementierung abgeschlossen.');
         $this->orchestrator->finishStep($job, $owner, ExecutionJobState::SUCCEEDED, 'Implementierung abgeschlossen.');
         $this->orchestrator->applyPreparedStepEffect($run->fresh() ?? $run, ExecutionStepType::IMPLEMENT);
+    }
+
+    /**
+     * Route every changed path outside the effective scope into the one
+     * deterministic scope policy (TKT-007).
+     *
+     * Each undecided path is quarantined first: the proposed change never
+     * reaches the run worktree and survives as a redacted artifact. An
+     * auto-allowed path joins the effective scope without a decision, the
+     * first path that needs one parks the step behind exactly one
+     * scope_approval request, and an already rejected path stays quarantined
+     * and without effect. Returns true when no decision is pending any more.
+     *
+     * @param  list<RunPatchChange>  $outOfScope
+     */
+    private function resolveOutOfScopeChanges(
+        ExecutionJob $job,
+        Run $run,
+        string $owner,
+        RunAgent $slot,
+        string $isolated,
+        array $outOfScope,
+        RedactionContext $context,
+    ): bool {
+        $configuration = $this->projectConfiguration->for($run->project()->firstOrFail())->configuration;
+        foreach ($outOfScope as $change) {
+            $decision = ScopeDecision::query()
+                ->where('run_id', $run->getKey())
+                ->where('path', $change->path)
+                ->first();
+            if ($decision instanceof ScopeDecision && $decision->outcome === 'rejected') {
+                // Only the AI6-own change is dropped; the quarantined artifact
+                // and the decision stay as the audit trail (AC-06).
+                $this->orchestrator->recordStepEvent(
+                    $run->id,
+                    ExecutionStepType::IMPLEMENT->value,
+                    ExecutionJobState::RUNNING,
+                    'Abgelehnter Zusatzpfad wurde nicht übernommen.',
+                    'scope-rejected:'.$run->id.':'.hash('sha256', $change->path),
+                );
+
+                continue;
+            }
+
+            // The decision later resolves by the request's stored path. A path
+            // the redactor would alter cannot round-trip through that binding;
+            // failing named beats an unresolvable request loop.
+            if ($this->redactor->redact($change->path, $context)->text !== $change->path) {
+                $this->failNamed($job, $run, $owner, 'scope_path_not_bindable', 'Der Zusatzpfad kann nicht verlustfrei an eine Entscheidung gebunden werden.');
+
+                return false;
+            }
+
+            $this->quarantine($run, $isolated, $change, $context);
+            try {
+                $request = $this->scopeApprovals->requestOrAutoAllow(
+                    Run::query()->findOrFail($run->getKey()),
+                    $configuration,
+                    $change->path,
+                    $change->status === RunPatchStatus::DELETED,
+                    $slot->slot_id,
+                    $job->idempotency_key,
+                );
+            } catch (HumanRequestRejected $rejected) {
+                if ($rejected->reason === 'open_request_exists') {
+                    $this->orchestrator->parkBoundStep($job);
+
+                    return false;
+                }
+                $this->failNamed($job, $run, $owner, $rejected->reason, $rejected->getMessage());
+
+                return false;
+            }
+            if ($request !== null) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Preserve an out-of-scope change as a redacted artifact before any
+     * decision (AC-06). The proposed bytes never touch the run worktree.
+     */
+    private function quarantine(Run $run, string $isolated, RunPatchChange $change, RedactionContext $context): void
+    {
+        $payload = [
+            'path' => $change->path,
+            'change' => $change->status->value,
+            'bytes' => $change->bytes,
+        ];
+        if ($change->status !== RunPatchStatus::DELETED) {
+            $bytes = file_get_contents(rtrim($isolated, '/\\').'/'.$change->path);
+            if (is_string($bytes)) {
+                $payload['content_sha256'] = hash('sha256', $bytes);
+                if (preg_match('//u', $bytes) === 1) {
+                    $payload['content'] = $bytes;
+                }
+            }
+        }
+        $this->artifacts->store(
+            $run,
+            RunArtifactKind::QUARANTINED_PATH,
+            json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            [
+                'kind' => RunArtifactKind::QUARANTINED_PATH->value,
+                'path' => $change->path,
+                'change' => $change->status->value,
+            ],
+            $context,
+        );
+    }
+
+    /**
+     * The bound effective scope: initial scope plus approved exact paths.
+     *
+     * @return list<string>
+     */
+    private function effectiveScope(Run $run): array
+    {
+        $effective = $run->effective_scope_snapshot;
+        if (is_array($effective) && $effective !== []) {
+            return array_values(array_filter($effective, 'is_string'));
+        }
+
+        return $this->approvedScope($run);
     }
 
     private function openHumanQuestion(Run $run, RunAgent $slot, ExecutionJob $job, AgentResult $result): void
@@ -536,8 +699,7 @@ final readonly class RunImplementation
 
     private function looksLikeInstruction(string $path): bool
     {
-        return in_array($path, ['AGENTS.md', 'CLAUDE.md'], true)
-            || str_starts_with($path, 'instructions/');
+        return $this->instructionPaths->isInstructionPath($path);
     }
 
     private function isInstructionUpdate(Run $run, InstructionSnapshot $snapshot): bool

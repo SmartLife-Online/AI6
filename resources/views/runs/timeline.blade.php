@@ -38,6 +38,41 @@
         @endforelse
     </ul>
 
+    <h2>Wirksamer Scope</h2>
+    <p data-scope-limit-used="{{ $addedScopePathsUsed }}" data-scope-limit-max="{{ $addedScopePathsLimit ?? '' }}">
+        Verbrauchte Zusatzpfade: {{ $addedScopePathsUsed }} von {{ $addedScopePathsLimit ?? '–' }}
+    </p>
+    <h3>Initialer Scope</h3>
+    <ul>
+        @forelse ($initialScope as $path)
+            <li data-initial-scope-path="{{ $path }}"><code>{{ $path }}</code></li>
+        @empty
+            <li>Kein initialer Scope gebunden.</li>
+        @endforelse
+    </ul>
+    <h3>Scope-Entscheidungen</h3>
+    <ul>
+        @forelse ($scopeDecisions as $decision)
+            <li data-scope-decision-path="{{ $decision['path'] }}" data-scope-decision-outcome="{{ $decision['outcome'] }}" data-scope-decision-reason="{{ $decision['reason'] }}">
+                <code>{{ $decision['path'] }}</code>
+                ({{ $decision['outcome'] === 'approved' ? 'genehmigt' : 'abgelehnt' }},
+                {{ $decision['reason'] === 'auto_allow' ? 'automatisch risikoarm' : 'menschliche Entscheidung' }})
+            </li>
+        @empty
+            <li>Noch keine Scope-Erweiterung.</li>
+        @endforelse
+    </ul>
+    <h3>Quarantänierte Pfade</h3>
+    <ul>
+        @forelse ($quarantinedPaths as $entry)
+            <li data-quarantined-path="{{ $entry['path'] }}" data-quarantined-change="{{ $entry['change'] }}">
+                <code>{{ $entry['path'] }}</code> ({{ $entry['change'] }})
+            </li>
+        @empty
+            <li>Keine quarantänierten Pfade.</li>
+        @endforelse
+    </ul>
+
     <h2>Geänderte Dateien</h2>
     <ul>
         @forelse ($changedFiles as $change)

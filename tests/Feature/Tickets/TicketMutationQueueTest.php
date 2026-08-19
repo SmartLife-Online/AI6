@@ -201,7 +201,16 @@ final class TicketMutationQueueTest extends TicketUiTestCase
     {
         $actor = $this->createUser(['is_global_admin' => true]);
         $project = $this->provisionedProject($actor);
-        foreach (['in_progress', 'done', 'cancelled'] as $status) {
+        // Since AI6-020, in_progress is a readable source for the controlled
+        // status reset; an edit of it stays refused with its own named
+        // conflict instead of the repair fallback. done and cancelled remain
+        // unreadable sources altogether.
+        $expected = [
+            'in_progress' => 'edit_status_not_editable',
+            'done' => 'source_status_unavailable',
+            'cancelled' => 'source_status_unavailable',
+        ];
+        foreach ($expected as $status => $conflict) {
             $base = $this->validTicketMarkdown('T-'.$status, $status);
             $readModel = $this->publishReadModel($actor, $project, 'tickets/T-'.$status.'.md', $base);
 
@@ -220,7 +229,7 @@ final class TicketMutationQueueTest extends TicketUiTestCase
                 );
                 self::fail('A readable non-human source status used the repair fallback.');
             } catch (TicketMutationConflict $exception) {
-                self::assertSame('source_status_unavailable', $exception->conflict);
+                self::assertSame($conflict, $exception->conflict);
             }
         }
 

@@ -10,4 +10,5 @@ enum ImportLimit: string
     case MAX_ARTIFACT_BYTES = 'max_artifact_bytes';
     case MAX_TOTAL_ARTIFACT_BYTES = 'max_total_artifact_bytes';
     case MAX_PROVIDER_OUTPUT_BYTES = 'max_provider_output_bytes';
+    case MAX_ADDED_SCOPE_PATHS = 'max_added_scope_paths';
 }

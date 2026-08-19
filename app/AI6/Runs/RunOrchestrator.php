@@ -2,6 +2,7 @@
 
 namespace App\AI6\Runs;
 
+use App\AI6\Git\CanonicalJson;
 use App\AI6\Git\ControlOperationPhase;
 use App\AI6\Git\ControlOperationState;
 use App\AI6\Git\ControlOperationType;
@@ -13,6 +14,7 @@ use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Runs\Models\RunEvent;
+use App\AI6\Runs\Models\ScopeDecision;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
@@ -494,6 +496,7 @@ final readonly class RunOrchestrator
                 'checkpoint_commit_sha' => $commitSha,
                 'checkpoint_tree_sha' => $treeSha,
                 'checkpoint_diff_hash' => $diffHash,
+                'checkpoint_evidence_epoch' => DB::raw('evidence_epoch'),
                 'version' => $expectedVersion + 1,
             ]);
         if ($updated !== 1) {
@@ -703,5 +706,212 @@ final readonly class RunOrchestrator
     public function discardImplementationSessions(Run $run): void
     {
         RunAgent::query()->where('run_id', $run->getKey())->where('role', 'implementation')->update(['session_id' => null]);
+    }
+
+    public function resumeScopeApproval(Run $run, int $expectedVersion, string $boundStepKey): Run
+    {
+        return $this->resumeWait($run, $expectedVersion, $boundStepKey, WaitReason::SCOPE_APPROVAL);
+    }
+
+    public function cancelScopeApproval(Run $run, int $expectedVersion): Run
+    {
+        return $this->cancelWait($run, $expectedVersion, WaitReason::SCOPE_APPROVAL);
+    }
+
+    /**
+     * Idempotently record one exact-path scope decision and, if approved within
+     * the freigegebene max_added_scope_paths, extend the run's bound effective
+     * scope (TKT-007).
+     *
+     * A path already decided for this run returns the run unchanged: retry,
+     * partial approval and a later contract amendment all consume the same
+     * idempotent counter through this one seam (AC-05). Approving beyond the
+     * limit records nothing and throws {@see ScopePathLimitExceeded} so the
+     * caller can route the run into the resource_limit wait instead (AC-04).
+     */
+    public function applyScopeDecision(
+        Run $run,
+        string $path,
+        bool $approved,
+        ?string $humanRequestId,
+        int $maxAddedScopePaths,
+        CanonicalJson $canonicalJson,
+    ): Run {
+        return DB::transaction(function () use ($run, $path, $approved, $humanRequestId, $maxAddedScopePaths, $canonicalJson): Run {
+            DB::table('runs')->where('id', $run->getKey())->lockForUpdate()->first();
+            $fresh = Run::query()->findOrFail($run->getKey());
+
+            $existing = ScopeDecision::query()->where('run_id', $fresh->getKey())->where('path', $path)->first();
+            if ($existing instanceof ScopeDecision) {
+                return $fresh;
+            }
+
+            if ($approved && $fresh->added_scope_paths_count >= $maxAddedScopePaths) {
+                throw new ScopePathLimitExceeded($fresh->added_scope_paths_count + 1, $maxAddedScopePaths);
+            }
+
+            ScopeDecision::query()->create([
+                'id' => (string) Str::uuid(),
+                'run_id' => $fresh->getKey(),
+                'path' => $path,
+                'outcome' => $approved ? 'approved' : 'rejected',
+                'human_request_id' => $humanRequestId,
+            ]);
+
+            if (! $approved) {
+                return $fresh;
+            }
+
+            /** @var list<string> $initialScope */
+            $initialScope = $fresh->scope_snapshot['ticket_files'] ?? [];
+            /** @var list<string> $approvedAdditions */
+            $approvedAdditions = ScopeDecision::query()
+                ->where('run_id', $fresh->getKey())
+                ->where('outcome', 'approved')
+                ->pluck('path')
+                ->all();
+            $effective = EffectiveScope::compute($initialScope, $approvedAdditions, $canonicalJson);
+
+            // An approved addition changes the effective scope, so every piece of
+            // evidence bound to the previous scope loses its effectiveness (AC-10).
+            // The originals stay untouched; only the epoch moves.
+            $updated = Run::query()->whereKey($fresh->getKey())->where('version', $fresh->version)->update([
+                'effective_scope_snapshot' => $effective->effectiveScope,
+                'effective_scope_hash' => $effective->hash,
+                'added_scope_paths_count' => DB::raw('added_scope_paths_count + 1'),
+                'evidence_epoch' => DB::raw('evidence_epoch + 1'),
+                'version' => DB::raw('version + 1'),
+                'updated_at' => now(),
+            ]);
+            if ($updated !== 1) {
+                throw new RunTransitionConflict('stale_run_version', 'The run changed before the scope decision could be bound.');
+            }
+            $this->recordEvidenceInvalidation($fresh->getKey(), 'scope_extension:'.$path);
+
+            return Run::query()->findOrFail($fresh->getKey());
+        });
+    }
+
+    /**
+     * Whether the bound checkpoint is still effective evidence.
+     *
+     * A checkpoint stays readable forever; it is effective only while no scope
+     * or contract change moved the run's evidence epoch past the one the
+     * checkpoint was bound under (AC-10).
+     */
+    public function hasEffectiveCheckpoint(Run $run): bool
+    {
+        return $run->checkpoint_commit_sha !== null
+            && $run->checkpoint_evidence_epoch === $run->evidence_epoch;
+    }
+
+    /**
+     * Bind the actually changed paths of the current import to the run.
+     *
+     * @param  list<string>  $paths
+     */
+    public function bindActualChangedPaths(Run $run, int $expectedVersion, array $paths, CanonicalJson $canonicalJson): Run
+    {
+        $paths = array_values(array_unique($paths));
+        sort($paths, SORT_STRING);
+        $hash = hash('sha256', "AI6-ACTUAL-CHANGED-PATHS-V1\0".$canonicalJson->normalizeAndEncode(['paths' => $paths]));
+
+        $updated = Run::query()->whereKey($run->getKey())->where('version', $expectedVersion)->update([
+            'actual_changed_paths_snapshot' => $paths,
+            'actual_changed_paths_hash' => $hash,
+            'version' => $expectedVersion + 1,
+            'updated_at' => now(),
+        ]);
+        if ($updated !== 1) {
+            throw new RunTransitionConflict('stale_run_version', 'The run changed before the actual paths could be bound.');
+        }
+
+        return Run::query()->findOrFail($run->getKey());
+    }
+
+    /**
+     * Bind a confirmed contract amendment to its run (AC-07, AC-08, AC-10).
+     *
+     * Only run_base_sha moves forward; initial_run_base_sha stays immutable
+     * behind its trigger. The new ticket blob, contract, scope, config and
+     * prompt bindings replace the previous ones, the effective scope is
+     * recomputed over the amended initial scope plus the already approved
+     * additions, and the evidence epoch invalidates dependent evidence.
+     *
+     * @param  array<string, mixed>  $scopeSnapshot
+     * @param  array<string, mixed>  $configSnapshot
+     * @param  array<string, mixed>  $promptSnapshot
+     */
+    public function applyContractAmendment(
+        Run $run,
+        string $newRunBaseSha,
+        string $ticketBlobSha,
+        string $ticketContractSha256,
+        array $scopeSnapshot,
+        string $scopeHash,
+        array $configSnapshot,
+        string $configHash,
+        array $promptSnapshot,
+        string $promptHash,
+        CanonicalJson $canonicalJson,
+    ): Run {
+        foreach ([$newRunBaseSha, $ticketBlobSha, $ticketContractSha256, $scopeHash, $configHash, $promptHash] as $value) {
+            if (preg_match('/\A[0-9a-f]{64}\z/D', $value) !== 1) {
+                throw new RunTransitionConflict('invalid_amendment_binding', 'The contract amendment binding is invalid.');
+            }
+        }
+
+        return DB::transaction(function () use ($run, $newRunBaseSha, $ticketBlobSha, $ticketContractSha256, $scopeSnapshot, $scopeHash, $configSnapshot, $configHash, $promptSnapshot, $promptHash, $canonicalJson): Run {
+            DB::table('runs')->where('id', $run->getKey())->lockForUpdate()->first();
+            $fresh = Run::query()->findOrFail($run->getKey());
+            if (in_array($fresh->state, [RunState::COMPLETED, RunState::CANCELLED], true)) {
+                throw new RunTransitionConflict('run_terminal', 'A terminal run cannot receive a contract amendment.');
+            }
+
+            /** @var list<string> $initialScope */
+            $initialScope = array_values(array_filter($scopeSnapshot['ticket_files'] ?? [], 'is_string'));
+            /** @var list<string> $approvedAdditions */
+            $approvedAdditions = ScopeDecision::query()
+                ->where('run_id', $fresh->getKey())
+                ->where('outcome', 'approved')
+                ->pluck('path')
+                ->all();
+            $effective = EffectiveScope::compute($initialScope, $approvedAdditions, $canonicalJson);
+            $hasEffectiveState = $approvedAdditions !== [] || $fresh->effective_scope_snapshot !== null;
+
+            $updated = Run::query()->whereKey($fresh->getKey())->where('version', $fresh->version)->update([
+                'run_base_sha' => $newRunBaseSha,
+                'ticket_blob_sha' => $ticketBlobSha,
+                'ticket_contract_sha256' => $ticketContractSha256,
+                'scope_snapshot' => $scopeSnapshot,
+                'scope_hash' => $scopeHash,
+                'config_snapshot' => $configSnapshot,
+                'config_hash' => $configHash,
+                'prompt_snapshot' => $promptSnapshot,
+                'prompt_hash' => $promptHash,
+                'effective_scope_snapshot' => $hasEffectiveState ? $effective->effectiveScope : null,
+                'effective_scope_hash' => $hasEffectiveState ? $effective->hash : null,
+                'evidence_epoch' => DB::raw('evidence_epoch + 1'),
+                'version' => DB::raw('version + 1'),
+                'updated_at' => now(),
+            ]);
+            if ($updated !== 1) {
+                throw new RunTransitionConflict('stale_run_version', 'The run changed before the contract amendment could be bound.');
+            }
+            $this->recordEvidenceInvalidation($fresh->getKey(), 'contract_amendment:'.$newRunBaseSha);
+
+            return Run::query()->findOrFail($fresh->getKey());
+        });
+    }
+
+    private function recordEvidenceInvalidation(string $runId, string $cause): void
+    {
+        RunEvent::query()->firstOrCreate([
+            'event_key' => hash('sha256', implode(':', [$runId, 'evidence.invalidated', $cause])),
+        ], [
+            'run_id' => $runId,
+            'event_type' => 'evidence.invalidated',
+            'redacted_payload' => 'Abhängige Evidenz wurde durch eine Scope- oder Vertragsänderung unwirksam.',
+        ]);
     }
 }

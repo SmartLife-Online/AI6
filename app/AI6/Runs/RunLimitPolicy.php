@@ -57,7 +57,7 @@ final readonly class RunLimitPolicy
         }
 
         $effective = [];
-        foreach (['max_changed_files', 'max_changed_bytes', 'max_artifacts', 'max_artifact_bytes', 'max_total_artifact_bytes', 'max_provider_output_bytes'] as $name) {
+        foreach (['max_changed_files', 'max_changed_bytes', 'max_artifacts', 'max_artifact_bytes', 'max_total_artifact_bytes', 'max_provider_output_bytes', 'max_added_scope_paths'] as $name) {
             $value = $approved[$name] ?? $defaults[$name] ?? null;
             $maximum = $maxima[$name] ?? null;
             if (! is_int($value) || ! is_int($maximum) || $value < 1) {

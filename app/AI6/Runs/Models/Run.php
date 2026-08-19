@@ -32,6 +32,15 @@ use Illuminate\Support\Carbon;
  * @property string $config_hash
  * @property array<string, mixed>|null $scope_snapshot
  * @property string $scope_hash
+ * @property list<string>|null $effective_scope_snapshot
+ * @property string|null $effective_scope_hash
+ * @property int $added_scope_paths_count
+ * @property string|null $ticket_blob_sha
+ * @property string|null $ticket_contract_sha256
+ * @property list<string>|null $actual_changed_paths_snapshot
+ * @property string|null $actual_changed_paths_hash
+ * @property int $evidence_epoch
+ * @property int|null $checkpoint_evidence_epoch
  * @property array<string, mixed>|null $prompt_snapshot
  * @property string $prompt_hash
  * @property array<string, mixed>|null $instruction_snapshot
@@ -72,6 +81,10 @@ final class Run extends Model
             'instruction_snapshot' => 'array',
             'runtime_profile_snapshot' => 'array',
             'agent_profile_snapshot' => 'array',
+            'effective_scope_snapshot' => 'array',
+            'actual_changed_paths_snapshot' => 'array',
+            'evidence_epoch' => 'integer',
+            'checkpoint_evidence_epoch' => 'integer',
             'version' => 'integer',
         ];
     }
