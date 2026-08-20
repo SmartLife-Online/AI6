@@ -114,6 +114,12 @@ final class ExecutionMailboxTest extends TestCase
         self::assertSame('1730', substr(sprintf('%o', fileperms(dirname($result))), -4));
         self::assertSame('640', substr(sprintf('%o', fileperms($request)), -3));
         self::assertSame('640', substr(sprintf('%o', fileperms($result)), -3));
+
+        mkdir($this->root.'/checker-input', 0700);
+        mkdir($this->root.'/checker-output', 0700);
+        $checker = new ExecutionMailbox(ExecutionRole::CHECKER, $this->root.'/checker-input', 1, 4096, $this->redactor(), $this->root.'/checker-output');
+        $checkerResult = $checker->write(MailboxMessageType::RESULT, 'slot-1', 'checker-result-mode', 'result');
+        self::assertSame('0730', substr(sprintf('%o', fileperms(dirname($checkerResult))), -4));
     }
 
     public function test_incomplete_size_mismatched_and_foreign_slot_envelopes_are_named_rejections(): void
@@ -185,6 +191,78 @@ final class ExecutionMailboxTest extends TestCase
 
         $this->assertRejection($checker, MailboxRejection::INCOMPLETE, 'slot-1', 'agent-only');
         $this->assertRejection($agent, MailboxRejection::INCOMPLETE, 'slot-2', 'checker-only');
+    }
+
+    public function test_discovery_claims_a_complete_envelope_once_without_caller_parsing(): void
+    {
+        $mailbox = $this->mailbox(ExecutionRole::CHECKER);
+        $mailbox->write(MailboxMessageType::REQUEST, 'check-run-1', 'delivery-1', "request\n");
+
+        $claimed = $mailbox->claimNext(MailboxMessageType::REQUEST, $this->context());
+        self::assertNotNull($claimed);
+        self::assertSame('check-run-1', $claimed->slotId);
+        self::assertSame('delivery-1', $claimed->deliveryId);
+        self::assertSame("request\n", $claimed->content);
+        self::assertNull($mailbox->claimNext(MailboxMessageType::REQUEST, $this->context()));
+
+        $mailbox->cleanupDelivery('delivery-1');
+        self::assertFileDoesNotExist($this->root.'/requests/delivery-1.json');
+    }
+
+    public function test_two_parallel_consumers_can_claim_one_request_only_once(): void
+    {
+        if (DIRECTORY_SEPARATOR !== '/' || ! function_exists('pcntl_fork')) {
+            self::markTestSkipped('The parallel mailbox claim proof requires Linux and pcntl.');
+        }
+        $mailbox = $this->mailbox(ExecutionRole::CHECKER);
+        $mailbox->write(MailboxMessageType::REQUEST, 'check-run-1', 'parallel-delivery', "request\n");
+        $children = [];
+        foreach ([1, 2] as $index) {
+            $pid = pcntl_fork();
+            self::assertGreaterThanOrEqual(0, $pid);
+            if ($pid === 0) {
+                while (! is_file($this->root.'/parallel-go')) {
+                    usleep(1000);
+                }
+                try {
+                    $message = $mailbox->claimNext(MailboxMessageType::REQUEST, $this->context());
+                    file_put_contents($this->root.'/parallel-'.$index, $message === null ? 'empty' : 'claimed');
+                    exit(0);
+                } catch (\Throwable) {
+                    file_put_contents($this->root.'/parallel-'.$index, 'error');
+                    exit(1);
+                }
+            }
+            $children[] = $pid;
+        }
+        file_put_contents($this->root.'/parallel-go', 'go');
+        foreach ($children as $pid) {
+            pcntl_waitpid($pid, $status);
+            self::assertTrue(pcntl_wifexited($status));
+            self::assertSame(0, pcntl_wexitstatus($status));
+        }
+        $outcomes = [
+            file_get_contents($this->root.'/parallel-1'),
+            file_get_contents($this->root.'/parallel-2'),
+        ];
+        sort($outcomes);
+        self::assertSame(['claimed', 'empty'], $outcomes);
+
+        $mailbox->cleanupDelivery('parallel-delivery');
+    }
+
+    public function test_discovery_names_an_invalid_untrusted_envelope_without_claiming_it(): void
+    {
+        mkdir($this->root.'/requests', 0700);
+        file_put_contents($this->root.'/requests/invalid.json', "{not-json}\n");
+
+        try {
+            $this->mailbox(ExecutionRole::CHECKER)->claimNext(MailboxMessageType::REQUEST, $this->context());
+            self::fail('The invalid discovered envelope must be rejected.');
+        } catch (MailboxRejectedException $exception) {
+            self::assertSame(MailboxRejection::INVALID_ENCODING, $exception->reason);
+        }
+        self::assertFileDoesNotExist($this->root.'/consumed/'.hash('sha256', "request\0invalid"));
     }
 
     private function assertRejection(ExecutionMailbox $mailbox, MailboxRejection $reason, string $slot, string $delivery): void

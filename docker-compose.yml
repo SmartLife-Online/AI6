@@ -321,9 +321,13 @@
       "read_only": true,
       "user": "10003:10001",
       "network_mode": "none",
+      "security_opt": ["seccomp=./docker/checker-seccomp-moby-29.6.1.json"],
       "environment": {
         "AI6_CHECKER_EXECUTION_ROOT": "/var/lib/ai6/checker-executions",
         "AI6_CHECKER_OUTPUT_ROOT": "/var/lib/ai6/checker-outputs",
+        "AI6_CHECKER_WORKSPACE_ROOT": "/var/lib/ai6/checker-workspace",
+        "AI6_CHECKER_UNSHARE_BINARY": "/usr/bin/unshare",
+        "AI6_CHECKER_NAMESPACE_WRAPPER": "/opt/ai6/app/AI6/Shared/Process/checker-process-wrapper.sh",
         "AI6_HEARTBEAT_DIRECTORY": "/run/ai6/heartbeat/checker",
         "AI6_HEARTBEAT_INTERVAL": "${AI6_IDLE_HEARTBEAT_INTERVAL:-5}",
         "AI6_HEARTBEAT_MAX_AGE": "${AI6_CHECKER_HEARTBEAT_MAX_AGE:-15}",
@@ -335,6 +339,7 @@
       "volumes": [
         { "type": "volume", "source": "ai6_checker_executions", "target": "/var/lib/ai6/checker-executions", "read_only": true },
         { "type": "volume", "source": "ai6_checker_outputs", "target": "/var/lib/ai6/checker-outputs" },
+        { "type": "volume", "source": "ai6_checker_workspace", "target": "/var/lib/ai6/checker-workspace" },
         { "type": "tmpfs", "target": "/run/ai6/heartbeat/checker", "tmpfs": { "mode": 511, "size": 1048576 } },
         { "type": "tmpfs", "target": "/tmp", "tmpfs": { "mode": 1023, "size": 67108864 } }
       ],
@@ -371,6 +376,9 @@
     },
     "ai6_checker_outputs": {
       "driver_opts": { "type": "tmpfs", "device": "tmpfs", "o": "uid=10001,gid=10001,mode=1730,nosuid,nodev,noexec" }
+    },
+    "ai6_checker_workspace": {
+      "driver_opts": { "type": "tmpfs", "device": "tmpfs", "o": "uid=10003,gid=10001,mode=0700,nosuid,nodev,noexec,size=1073741824" }
     },
     "ai6_managed": {}
   }

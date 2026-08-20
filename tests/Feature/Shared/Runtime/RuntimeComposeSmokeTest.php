@@ -2,11 +2,15 @@
 
 namespace Tests\Feature\Shared\Runtime;
 
-use PHPUnit\Framework\TestCase;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\Process\Process;
+use Tests\Feature\Checks\BuildsCheckFixture;
+use Tests\Feature\Tickets\TicketUiTestCase;
 
-final class RuntimeComposeSmokeTest extends TestCase
+final class RuntimeComposeSmokeTest extends TicketUiTestCase
 {
+    use BuildsCheckFixture;
+
     private int $port = 0;
 
     private string $project = '';
@@ -19,6 +23,8 @@ final class RuntimeComposeSmokeTest extends TestCase
 
     /** @var array<string, string> */
     private array $networkEnvironment = [];
+
+    private ?string $checkerSmokeDatabase = null;
 
     protected function setUp(): void
     {
@@ -58,6 +64,9 @@ final class RuntimeComposeSmokeTest extends TestCase
         if ($this->started) {
             $down = $this->compose(['down', '--volumes', '--remove-orphans', '--timeout', '10'], 60);
             $down->run();
+        }
+        if (is_string($this->checkerSmokeDatabase) && is_file($this->checkerSmokeDatabase)) {
+            unlink($this->checkerSmokeDatabase);
         }
 
         parent::tearDown();
@@ -190,6 +199,53 @@ final class RuntimeComposeSmokeTest extends TestCase
         $network->mustRun();
         self::assertSame('lo', trim($network->getOutput()));
 
+        $namespaceProbeCode = <<<'PHP'
+$roots = ['/var/lib/ai6/checker-executions', '/var/lib/ai6/checker-outputs', '/run/ai6/heartbeat/checker'];
+$paths = [
+    '/var/lib/ai6/checker-executions/requests',
+    '/var/lib/ai6/checker-outputs/consumed',
+    '/var/lib/ai6/checker-outputs/results',
+    '/var/lib/ai6/checker-outputs/heartbeats',
+];
+foreach ($roots as $root) {
+    if (is_readable($root) || is_writable($root) || @scandir($root) !== false) {
+        fwrite(STDERR, 'accessible-root:'.$root."\n");
+        exit(10);
+    }
+}
+foreach ($paths as $path) {
+    if (file_exists($path) || is_readable($path) || is_writable($path)) {
+        fwrite(STDERR, 'visible-path:'.$path."\n");
+        exit(11);
+    }
+}
+$interfaces = array_values(array_diff(scandir('/sys/class/net'), ['.', '..', 'lo']));
+if ($interfaces !== []) {
+    fwrite(STDERR, 'network:'.implode(',', $interfaces)."\n");
+    exit(12);
+}
+if (! is_writable(getcwd())) {
+    fwrite(STDERR, "workspace-not-writable\n");
+    exit(13);
+}
+fwrite(STDOUT, 'checker-wrapper-ok');
+PHP;
+        $namespaceProbe = $this->compose([
+            'exec', '-T', '--workdir', '/var/lib/ai6/checker-workspace', 'checker',
+            '/usr/bin/unshare', '--user', '--map-root-user', '--mount', '--pid', '--fork', '--mount-proc',
+            '/opt/ai6/app/AI6/Shared/Process/checker-process-wrapper.sh',
+            '/var/lib/ai6/checker-workspace',
+            '/var/lib/ai6/checker-executions',
+            '/var/lib/ai6/checker-outputs',
+            '/run/ai6/heartbeat/checker',
+            '--', '/usr/local/bin/php', '-r', $namespaceProbeCode,
+        ], 30);
+        $namespaceProbe->mustRun();
+        self::assertSame('checker-wrapper-ok', trim($namespaceProbe->getOutput()));
+
+        $this->assertCheckerPromisesRejectBeforeProgram();
+        $this->assertRealCheckerExecutionRoundTrip();
+
         $prepareCode = <<<'PHP'
 require '/opt/ai6/vendor/autoload.php';
 $app = require '/opt/ai6/bootstrap/app.php';
@@ -260,6 +316,273 @@ PHP;
         foreach ([$home['root'], $home['outputRoot']] as $removedRoot) {
             $removed = $this->compose(['exec', '-T', 'worker', 'test', '!', '-e', $removedRoot], 30);
             $removed->mustRun();
+        }
+    }
+
+    private function assertRealCheckerExecutionRoundTrip(): void
+    {
+        ['run' => $fixtureRun, 'worktree' => $fixtureWorktree] = $this->checkableRun('AI6-045-COMPOSE-SMOKE');
+        $this->checkerSmokeDatabase = sys_get_temp_dir().'/ai6-checker-smoke-'.bin2hex(random_bytes(8)).'.sqlite';
+        $quotedDatabase = DB::connection('sqlite')->getPdo()->quote($this->checkerSmokeDatabase);
+        self::assertIsString($quotedDatabase);
+        DB::connection('sqlite')->getPdo()->exec('VACUUM INTO '.$quotedDatabase);
+
+        $containerDatabase = '/tmp/ai6-checker-smoke.sqlite';
+        $containerWorktree = '/tmp/ai6-checker-smoke-worktree';
+        $this->copyFileIntoService('worker', $this->checkerSmokeDatabase, $containerDatabase);
+        $this->copyTreeIntoService('worker', $fixtureWorktree, $containerWorktree);
+
+        $stageCode = <<<'PHP'
+require '/opt/ai6/vendor/autoload.php';
+$app = require '/opt/ai6/bootstrap/app.php';
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+$executionId = 'smoke-check-'.bin2hex(random_bytes(6));
+$runId = $argv[1];
+config(['database.connections.sqlite.database' => $argv[2]]);
+$app->make('db')->purge('sqlite');
+$run = App\AI6\Runs\Models\Run::query()->findOrFail($runId);
+$run->setAttribute('worktree_path', $argv[3]);
+$deadline = time() + 60;
+$record = $app->make(App\AI6\Checks\CheckRunner::class)->dispatchOrCollect(
+    $run,
+    App\AI6\Checks\CheckPhase::BEFORE_REVIEW,
+    'git-diff-check',
+    $executionId,
+    $deadline,
+);
+if ($record !== null) { throw new RuntimeException('The initial checker poll returned a result.'); }
+$deliveryId = App\AI6\Checks\CheckerExecutionProcessor::deliveryId($executionId);
+echo json_encode([
+    'execution_id' => $executionId, 'run_id' => $runId, 'delivery_id' => $deliveryId,
+    'database' => $argv[2], 'worktree' => $argv[3], 'deadline' => $deadline,
+], JSON_THROW_ON_ERROR);
+PHP;
+        $stage = $this->compose([
+            'exec', '-T', 'worker', 'php', '-r', $stageCode,
+            $fixtureRun->id, $containerDatabase, $containerWorktree,
+        ], 30);
+        $stage->mustRun();
+        $binding = json_decode($stage->getOutput(), true, 8, JSON_THROW_ON_ERROR);
+        self::assertIsArray($binding);
+        self::assertIsString($binding['execution_id'] ?? null);
+        self::assertIsString($binding['run_id'] ?? null);
+        self::assertIsString($binding['delivery_id'] ?? null);
+
+        $resultPath = '/var/lib/ai6/checker-outputs/results/'.$binding['delivery_id'].'.json';
+        $this->waitUntil(function () use ($resultPath): bool {
+            return $this->compose(['exec', '-T', 'worker', 'test', '-f', $resultPath], 30)->run() === 0;
+        }, 30, 'Der reale Checker hat innerhalb der Frist kein Ergebnis publiziert.');
+
+        foreach ([
+            'claims' => '/var/lib/ai6/checker-outputs/claims',
+            'heartbeats' => '/var/lib/ai6/checker-outputs/heartbeats',
+            'executions' => '/var/lib/ai6/checker-outputs/executions',
+            'execution' => '/var/lib/ai6/checker-outputs/executions/'.$binding['execution_id'],
+            'results' => '/var/lib/ai6/checker-outputs/results',
+        ] as $name => $path) {
+            $stat = $this->compose(['exec', '-T', 'worker', 'stat', '-c', '%u|%g|%a', $path], 30);
+            $stat->mustRun();
+            self::assertSame($name === 'execution' ? '10003|10001|770' : '10003|10001|730', trim($stat->getOutput()), $name);
+        }
+
+        $consumeCode = <<<'PHP'
+require '/opt/ai6/vendor/autoload.php';
+$app = require '/opt/ai6/bootstrap/app.php';
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+$database = $argv[4];
+config(['database.connections.sqlite.database' => $database]);
+$app->make('db')->purge('sqlite');
+$run = App\AI6\Runs\Models\Run::query()->findOrFail($argv[2]);
+$run->setAttribute('worktree_path', $argv[5]);
+$record = $app->make(App\AI6\Checks\CheckRunner::class)->dispatchOrCollect(
+    $run,
+    App\AI6\Checks\CheckPhase::BEFORE_REVIEW,
+    'git-diff-check',
+    $argv[1],
+    (int) $argv[6],
+);
+if (! $record instanceof App\AI6\Checks\Models\CheckResultRecord) {
+    throw new RuntimeException('The bound checker result was not persisted.');
+}
+echo json_encode([
+    'record_count' => App\AI6\Checks\Models\CheckResultRecord::query()->where('run_id', $argv[2])->count(),
+    'execution_id' => $record->getAttribute('checker_execution_id'),
+    'run_id' => $record->run_id,
+    'checker_boot_id' => $record->getAttribute('checker_boot_id'),
+    'deadline_at' => $record->getAttribute('checker_deadline_at'),
+    'phase' => $record->phase->value,
+    'state' => $record->state->value,
+    'profile' => $record->profile,
+    'source_tree_sha256' => $record->tree_sha,
+    'result_tree_sha256' => $record->result_tree_sha,
+], JSON_THROW_ON_ERROR);
+PHP;
+        $consume = $this->compose([
+            'exec', '-T', 'worker', 'php', '-r', $consumeCode,
+            $binding['execution_id'], $binding['run_id'], $binding['delivery_id'],
+            $binding['database'], $binding['worktree'], (string) $binding['deadline'],
+        ], 30);
+        if ($consume->run() !== 0) {
+            $diagnostic = $this->compose([
+                'exec', '-T', 'worker', 'find',
+                '/var/lib/ai6/checker-executions/staged/'.$binding['execution_id'],
+                '/var/lib/ai6/checker-outputs/executions/'.$binding['execution_id'],
+                '-printf', '%p|%U|%G|%m|%y\n',
+            ], 30);
+            $diagnostic->run();
+            self::fail($consume->getErrorOutput()."\nCleanup state:\n".$diagnostic->getOutput().$diagnostic->getErrorOutput());
+        }
+        $result = json_decode($consume->getOutput(), true, 8, JSON_THROW_ON_ERROR);
+        self::assertSame($binding['execution_id'], $result['execution_id'] ?? null);
+        self::assertSame($binding['run_id'], $result['run_id'] ?? null);
+        self::assertSame(1, $result['record_count'] ?? null);
+        self::assertMatchesRegularExpression('/\A[0-9a-f]{32}\z/D', $result['checker_boot_id'] ?? '');
+        self::assertSame($binding['deadline'], $result['deadline_at'] ?? null);
+        self::assertSame('before_review', $result['phase'] ?? null);
+        self::assertSame('succeeded', $result['state'] ?? null);
+        self::assertSame('git-diff-check', $result['profile'] ?? null);
+        self::assertSame($result['source_tree_sha256'] ?? null, $result['result_tree_sha256'] ?? null);
+
+        foreach ([
+            '/var/lib/ai6/checker-executions/staged/'.$binding['execution_id'],
+            '/var/lib/ai6/checker-outputs/claims/'.$binding['execution_id'].'.json',
+            '/var/lib/ai6/checker-outputs/heartbeats/'.$binding['execution_id'].'.json',
+            '/var/lib/ai6/checker-outputs/executions/'.$binding['execution_id'],
+            '/var/lib/ai6/checker-outputs/results/'.$binding['delivery_id'].'.json',
+            '/var/lib/ai6/checker-outputs/consumed/'.$binding['delivery_id'].'.json',
+        ] as $removed) {
+            $absent = $this->compose(['exec', '-T', 'worker', 'test', '!', '-e', $removed], 30);
+            $absent->mustRun();
+        }
+    }
+
+    private function assertCheckerPromisesRejectBeforeProgram(): void
+    {
+        $probeCode = <<<'PHP'
+require '/opt/ai6/vendor/autoload.php';
+$app = require '/opt/ai6/bootstrap/app.php';
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+$suffix = getmypid().'-'.bin2hex(random_bytes(4));
+$workspace = '/tmp/ai6-checker-promise-test-'.$suffix;
+$output = '/var/lib/ai6/checker-outputs/promise-test-'.$suffix;
+$originalWorkspaceRoot = config('ai6.checks.runtime.workspace_root');
+$originalWorkingRoots = config('ai6.process.policies.checker.working_roots');
+$cleanup = static function (string $root): void {
+    if (! is_dir($root)) {
+        if (is_file($root) || is_link($root)) { @unlink($root); }
+
+        return;
+    }
+
+    try {
+        $entries = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($entries as $entry) {
+            if ($entry->isDir() && ! $entry->isLink()) {
+                @rmdir($entry->getPathname());
+            } else {
+                @unlink($entry->getPathname());
+            }
+        }
+    } catch (Throwable) {
+        // Keep the original probe failure visible; the isolated path is test-only.
+    }
+
+    @rmdir($root);
+};
+$names = ['input_read_only', 'output_separate', 'workspace_private', 'container_read_only', 'network_isolated', 'namespace_tooling'];
+try {
+    foreach ([$workspace, $output.'/result', $output.'/artifact'] as $directory) {
+        if (! mkdir($directory, 0770, true)) { throw new RuntimeException('promise-test-directory'); }
+    }
+    config([
+        'ai6.checks.runtime.workspace_root' => $workspace,
+        'ai6.process.policies.checker.working_roots' => [$workspace],
+    ]);
+    $app->forgetInstance(App\AI6\Shared\Process\ProcessPolicyRegistry::class);
+
+    foreach ($names as $violated) {
+        $states = array_fill_keys($names, true);
+        $states[$violated] = false;
+        $runtime = new class($states) implements App\AI6\Shared\Process\ProcessRuntimeProbe {
+            public function __construct(private array $states) {}
+            public function checkerRuntimePromises(): array { return $this->states; }
+            public function mountOptions(string $path): array { return ['rw', 'nosuid', 'nodev', 'noexec']; }
+        };
+        $app->instance(
+            App\AI6\Shared\Process\ProcessIsolationBoundary::class,
+            new App\AI6\Shared\Process\ProcessIsolationVerifier($runtime),
+        );
+        $app->forgetInstance(App\AI6\Shared\Process\ControlProcessRunner::class);
+        $marker = $workspace.'/'.$violated;
+        $result = $app->make(App\AI6\Shared\Process\ControlProcessRunner::class)->run(new App\AI6\Shared\Process\ProcessRequest(
+            [PHP_BINARY, '-r', 'file_put_contents($argv[1], "started");', $marker],
+            $workspace,
+            [],
+            [],
+            new App\AI6\Shared\Redaction\RedactionContext('checker', null, 'promise-test'),
+            policy: App\AI6\Shared\Process\ProcessPolicyName::CHECKER,
+            resultDirectory: $output.'/result',
+            artifactDirectory: $output.'/artifact',
+        ));
+        if ($result->outcome !== App\AI6\Shared\Process\ProcessOutcome::START_REJECTED
+            || ! str_contains($result->errorOutput, $violated) || file_exists($marker)) {
+            throw new RuntimeException('checker-promise-not-rejected:'.$violated);
+        }
+    }
+} finally {
+    config([
+        'ai6.checks.runtime.workspace_root' => $originalWorkspaceRoot,
+        'ai6.process.policies.checker.working_roots' => $originalWorkingRoots,
+    ]);
+    $app->forgetInstance(App\AI6\Shared\Process\ProcessPolicyRegistry::class);
+    $app->forgetInstance(App\AI6\Shared\Process\ControlProcessRunner::class);
+    $cleanup($output);
+    $cleanup($workspace);
+}
+if (file_exists($output) || file_exists($workspace)) {
+    throw new RuntimeException('promise-test-cleanup');
+}
+echo 'checker-promises-rejected';
+PHP;
+        $probe = $this->compose(['exec', '-T', 'checker', 'php', '-r', $probeCode], 30);
+        $probe->mustRun();
+        self::assertSame('checker-promises-rejected', trim($probe->getOutput()));
+    }
+
+    private function copyFileIntoService(string $service, string $source, string $target): void
+    {
+        $bytes = file_get_contents($source);
+        self::assertIsString($bytes);
+        $copy = $this->compose([
+            'exec', '-T', $service, 'sh', '-c', 'umask 0077; dd of="$1" status=none', 'sh', $target,
+        ], 30);
+        $copy->setInput($bytes);
+        $copy->mustRun();
+    }
+
+    private function copyTreeIntoService(string $service, string $source, string $target): void
+    {
+        $createRoot = $this->compose(['exec', '-T', $service, 'mkdir', '-p', $target], 30);
+        $createRoot->mustRun();
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($source, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::SELF_FIRST,
+        );
+        foreach ($iterator as $entry) {
+            $relative = substr(str_replace('\\', '/', $entry->getPathname()), strlen(str_replace('\\', '/', $source)) + 1);
+            if ($relative === '.git' || str_starts_with($relative, '.git/')) {
+                continue;
+            }
+            $destination = $target.'/'.$relative;
+            if ($entry->isDir()) {
+                $create = $this->compose(['exec', '-T', $service, 'mkdir', '-p', $destination], 30);
+                $create->mustRun();
+            } else {
+                $this->copyFileIntoService($service, $entry->getPathname(), $destination);
+            }
         }
     }
 

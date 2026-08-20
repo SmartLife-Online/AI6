@@ -53,8 +53,24 @@ final class ControlProcessRunner
     public function start(ProcessRequest $request): RunningControlProcess
     {
         [$timeout, $outputLimit, $cancelGrace, $limits] = $this->resolvePolicy($request);
+        $payload = $request->command;
+        if (DIRECTORY_SEPARATOR === '/' && $request->policy === ProcessPolicyName::CHECKER
+            && config('ai6.runtime_role') === ExecutionRole::CHECKER->value) {
+            $unshare = config('ai6.checks.runtime.unshare_binary');
+            $wrapper = config('ai6.checks.runtime.namespace_wrapper');
+            $workspace = config('ai6.checks.runtime.workspace_root');
+            $input = config('ai6.execution_mailboxes.checker_root');
+            $output = config('ai6.execution_mailboxes.checker_output_root');
+            $heartbeat = getenv('AI6_HEARTBEAT_DIRECTORY');
+            if (! is_string($unshare) || ! is_executable($unshare) || ! is_string($wrapper) || ! is_executable($wrapper)
+                || ! is_string($workspace) || ! is_string($input) || ! is_string($output) || ! is_string($heartbeat)) {
+                throw new ProcessStartRejectedException('The checker namespace boundary is unavailable.');
+            }
+            $payload = [$unshare, '--user', '--map-root-user', '--mount', '--pid', '--fork', '--mount-proc',
+                $wrapper, $workspace, $input, $output, $heartbeat, '--', ...$payload];
+        }
         $command = DIRECTORY_SEPARATOR === '/'
-            ? $this->wrapperCommand(['direct', '--', ...$request->command])
+            ? $this->wrapperCommand(['direct', '--', ...$payload])
             : $request->command;
         $process = new Process($command, $request->workingDirectory, $this->environment($request), null, null);
         $process->start();

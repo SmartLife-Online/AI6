@@ -110,7 +110,7 @@ Stand der abgeleiteten Ansicht: 20. August 2026, abgeleitet aus Planrevision V1.
 | [AI6-019](./AI6-019.md) | Implementierungsagent-Turn und sicherer Diff-Import | high | Detailticket | AI6-014, AI6-016, AI6-017, AI6-018 |
 | [AI6-020](./AI6-020.md) | Adaptive Scope- und Vertragsänderungen | high | Detailticket | AI6-009, AI6-018, AI6-019 |
 | [AI6-021](./AI6-021.md) | Checkprofile und credentialfreier Checker | high | Detailticket | AI6-010, AI6-015, AI6-017 |
-| AI6-045 | Checkausführung in der Checkerrolle | high | Blueprint | AI6-015, AI6-017, AI6-021 |
+| [AI6-045](./AI6-045.md) | Checkausführung in der Checkerrolle | high | Detailticket | AI6-015, AI6-017, AI6-021 |
 | [AI6-022](./AI6-022.md) | Pre-Review-Verifikation und Checkpoint-Bereitschaft | medium | Detailticket | AI6-019, AI6-020, AI6-021, AI6-045 |
 
 ### M4 — Multi-Review und Fixschleife

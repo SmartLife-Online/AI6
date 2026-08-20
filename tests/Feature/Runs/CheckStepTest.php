@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Runs;
 
+use App\AI6\Checks\CheckerExecutionProcessor;
 use App\AI6\Checks\CheckFailureResolver;
 use App\AI6\Checks\CheckPhase;
 use App\AI6\Checks\CheckResult;
@@ -20,10 +21,14 @@ use App\AI6\Runs\RunCheckStep;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunPhase;
 use App\AI6\Runs\RunState;
+use App\AI6\Runs\RunStepReconciler;
 use App\AI6\Runs\WaitReason;
 use App\AI6\Shared\Process\ExecutionMailboxFactory;
 use App\AI6\Shared\Process\ExecutionRole;
 use App\AI6\Shared\Process\MailboxMessageType;
+use App\AI6\Shared\Security\SecurityMeasure;
+use App\AI6\Shared\Security\SecurityPolicy;
+use App\AI6\Shared\Security\SecurityProfile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Tests\Feature\Checks\BuildsCheckFixture;
@@ -334,6 +339,52 @@ final class CheckStepTest extends TicketUiTestCase
         $profiles = CheckResultRecord::query()->where('run_id', $prepared['run']->id)->pluck('profile')->all();
         self::assertSame(['probe-ok'], $profiles);
         self::assertSame(ExecutionJobState::SUCCEEDED, $job->fresh()?->state);
+    }
+
+    public function test_result_polls_keep_the_execution_identity_and_do_not_consume_attempts(): void
+    {
+        Mail::fake();
+        $this->bindCheckRuntime(['probe-ok' => $this->probeProfile(['ai6-check-ok.php'])]);
+        $prepared = $this->preparedCheckRun('AI6-045-POLL', ['probe-ok']);
+        $this->executeImplement($prepared['run']);
+        $job = $this->checkJob($prepared['run']->fresh() ?? $prepared['run']);
+        self::assertInstanceOf(ExecutionJob::class, $job);
+
+        config([
+            'ai6.security.profile' => SecurityProfile::STRICT->value,
+            'ai6.security.measures.'.SecurityMeasure::REQUIRE_CHECKER_NETWORK_ISOLATION->value => 'true',
+            'ai6.security.acknowledge_reduced_mode' => 'false',
+        ]);
+        $this->app->forgetInstance(SecurityPolicy::class);
+        $this->app->forgetInstance(CheckRunner::class);
+
+        $this->deliver($job);
+        $firstPoll = $job->fresh();
+        self::assertInstanceOf(ExecutionJob::class, $firstPoll);
+        $firstIntent = $firstPoll->intent;
+        self::assertSame(ExecutionJobState::WAITING, $firstPoll->state);
+        self::assertSame(0, $firstPoll->attempts);
+        self::assertIsString($firstIntent);
+        $intentDocument = json_decode($firstIntent, true, 8, JSON_THROW_ON_ERROR);
+        self::assertIsArray($intentDocument);
+        $executions = json_decode((string) $intentDocument['executions'], true, 8, JSON_THROW_ON_ERROR);
+        self::assertIsArray($executions);
+        $executionId = $executions['probe-ok']['id'] ?? null;
+        self::assertIsString($executionId);
+        $requestPath = config('ai6.execution_mailboxes.checker_root').'/requests/'.CheckerExecutionProcessor::deliveryId($executionId).'.json';
+        $requestHash = hash_file('sha256', $requestPath);
+        self::assertIsString($requestHash);
+
+        $this->app->make(RunStepReconciler::class)->reconcile();
+        DB::table('jobs')->delete();
+        $this->deliver($job);
+        $secondPoll = $job->fresh();
+        self::assertInstanceOf(ExecutionJob::class, $secondPoll);
+        self::assertSame(ExecutionJobState::WAITING, $secondPoll->state);
+        self::assertSame(0, $secondPoll->attempts);
+        self::assertSame($firstIntent, $secondPoll->intent);
+        self::assertSame($requestHash, hash_file('sha256', $requestPath));
+        self::assertSame(0, CheckResultRecord::query()->where('run_id', $prepared['run']->id)->count());
     }
 
     /**

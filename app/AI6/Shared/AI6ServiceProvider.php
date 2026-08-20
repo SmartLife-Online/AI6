@@ -25,7 +25,9 @@ use App\AI6\Auth\PasskeyCeremony;
 use App\AI6\Auth\PasskeyRelyingParty;
 use App\AI6\Auth\PasskeyRelyingPartyFactory;
 use App\AI6\Auth\Policies\UserPolicy;
+use App\AI6\Checks\CheckerRuntimeConfiguration;
 use App\AI6\Checks\CheckFailureResolver;
+use App\AI6\Checks\CheckProcessResultInterpreter;
 use App\AI6\Checks\CheckProfileAllowlist;
 use App\AI6\Checks\CheckProfileRegistry;
 use App\AI6\Checks\CheckRunner;
@@ -90,6 +92,7 @@ use App\AI6\Runs\WaitReasonRegistry;
 use App\AI6\Shared\Config\ConfigurationException;
 use App\AI6\Shared\Config\StrictEnumParser;
 use App\AI6\Shared\Config\StrictPositiveIntegerParser;
+use App\AI6\Shared\Doctor\CheckerRuntimeDoctorCheck;
 use App\AI6\Shared\Doctor\DoctorCommand;
 use App\AI6\Shared\Doctor\RedactionKeyringDoctorCheck;
 use App\AI6\Shared\Doctor\SecurityPolicyDoctorCheck;
@@ -154,6 +157,7 @@ final class AI6ServiceProvider extends ServiceProvider
             ),
         );
         $this->app->singleton(CheckTreeBinding::class);
+        $this->app->singleton(CheckerRuntimeConfiguration::class, static fn (): CheckerRuntimeConfiguration => CheckerRuntimeConfiguration::fromConfiguredValues());
         $this->app->singleton(
             CheckRunner::class,
             static fn (Application $app): CheckRunner => new CheckRunner(
@@ -163,8 +167,10 @@ final class AI6ServiceProvider extends ServiceProvider
                 $app->make(IsolatedTreeExporter::class),
                 $app->make(CheckTreeBinding::class),
                 $app->make(Redactor::class),
+                $app->make(CheckProcessResultInterpreter::class),
                 $app->make(ProcessPolicyRegistry::class),
                 $app->make(SecurityPolicy::class),
+                $app->make(CheckerRuntimeConfiguration::class),
             ),
         );
         $this->app->singleton(
@@ -433,10 +439,12 @@ final class AI6ServiceProvider extends ServiceProvider
             static fn (Application $app): DoctorCommand => new DoctorCommand([
                 new SecurityPolicyDoctorCheck($app->make(SecurityPolicy::class)),
                 new RedactionKeyringDoctorCheck($app->make(RedactionKeyringFactory::class)),
+                new CheckerRuntimeDoctorCheck,
             ]),
         );
 
         $this->app->make(SecurityPolicy::class);
+        $this->app->make(CheckerRuntimeConfiguration::class);
         $agentProfiles = $this->app->make(AgentProfileRegistry::class);
         $runtimeProfiles = $this->app->make(ProviderRuntimeProfileRegistry::class);
         $instructionProfiles = $this->app->make(InstructionProfileRegistry::class);

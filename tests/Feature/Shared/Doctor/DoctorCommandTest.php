@@ -10,6 +10,31 @@ use Tests\TestCase;
 
 final class DoctorCommandTest extends TestCase
 {
+    private string $checkerRuntime;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->checkerRuntime = sys_get_temp_dir().'/ai6-doctor-'.bin2hex(random_bytes(6));
+        mkdir($this->checkerRuntime.'/input', 0700, true);
+        mkdir($this->checkerRuntime.'/output/attestations', 0700, true);
+        config([
+            'ai6.execution_mailboxes.checker_root' => $this->checkerRuntime.'/input',
+            'ai6.execution_mailboxes.checker_output_root' => $this->checkerRuntime.'/output',
+        ]);
+        $this->writeAttestation();
+    }
+
+    protected function tearDown(): void
+    {
+        $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($this->checkerRuntime, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::CHILD_FIRST);
+        foreach ($iterator as $entry) {
+            $entry->isDir() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
+        }
+        rmdir($this->checkerRuntime);
+        parent::tearDown();
+    }
+
     public function test_strict_doctor_reports_complete_policy_and_keyring_without_secret_values(): void
     {
         $secret = str_repeat('private-key-material-', 2);
@@ -140,5 +165,17 @@ final class DoctorCommandTest extends TestCase
         } finally {
             ini_set('zend.exception_ignore_args', is_string($previous) ? $previous : '1');
         }
+    }
+
+    private function writeAttestation(): void
+    {
+        $document = [
+            'schema' => 'ai6.checker-attestation.v1', 'checker_boot_id' => str_repeat('a', 32),
+            'recorded_at' => time(), 'role' => 'checker', 'input_read_only' => true,
+            'output_separate' => true, 'workspace_private' => true, 'container_read_only' => true,
+            'network_isolated' => true, 'namespace_tooling' => true, 'profiles_executable' => true,
+            'profile_programs' => ['php-targeted' => true],
+        ];
+        file_put_contents($this->checkerRuntime.'/output/attestations/checker.json', json_encode($document, JSON_THROW_ON_ERROR)."\n");
     }
 }

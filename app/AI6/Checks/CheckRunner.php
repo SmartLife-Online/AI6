@@ -6,16 +6,16 @@ use App\AI6\Checks\Models\CheckResultRecord;
 use App\AI6\Git\IsolatedTreeExporter;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Shared\Process\ControlProcessRunner;
+use App\AI6\Shared\Process\ExecutionMailbox;
 use App\AI6\Shared\Process\ExecutionMailboxFactory;
 use App\AI6\Shared\Process\ExecutionRole;
 use App\AI6\Shared\Process\MailboxMessageType;
 use App\AI6\Shared\Process\MailboxRejectedException;
-use App\AI6\Shared\Process\ProcessOutcome;
+use App\AI6\Shared\Process\MailboxRejection;
 use App\AI6\Shared\Process\ProcessPolicyName;
 use App\AI6\Shared\Process\ProcessPolicyRegistry;
 use App\AI6\Shared\Process\ProcessRequest;
 use App\AI6\Shared\Process\ProcessResult;
-use App\AI6\Shared\Redaction\InvalidRedactionInputException;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
 use App\AI6\Shared\Security\SecurityMeasure;
@@ -34,12 +34,6 @@ use Throwable;
  */
 final readonly class CheckRunner
 {
-    /**
-     * Exit code a POSIX runtime uses for a command that could not be executed.
-     * The distinction matters: a missing tool is not a failed check.
-     */
-    private const COMMAND_NOT_FOUND = 127;
-
     public function __construct(
         private CheckProfileRegistry $profiles,
         private ControlProcessRunner $processes,
@@ -47,8 +41,10 @@ final readonly class CheckRunner
         private IsolatedTreeExporter $exporter,
         private CheckTreeBinding $treeBinding,
         private Redactor $redactor,
+        private CheckProcessResultInterpreter $interpreter,
         private ProcessPolicyRegistry $policies,
         private SecurityPolicy $security,
+        private CheckerRuntimeConfiguration $runtime,
     ) {}
 
     /**
@@ -65,6 +61,202 @@ final readonly class CheckRunner
     {
         return config('ai6.runtime_role') === ExecutionRole::CHECKER->value
             || ! $this->security->isEnabled(SecurityMeasure::REQUIRE_CHECKER_NETWORK_ISOLATION);
+    }
+
+    /**
+     * Stage or collect one strict role-correct execution.
+     *
+     * A null return means that the immutable request is published but no bound
+     * result exists yet. Repeated worker polls reuse the same execution id,
+     * staging directory and delivery id and therefore cannot start a second
+     * checker process.
+     */
+    public function dispatchOrCollect(
+        Run $run,
+        CheckPhase $phase,
+        string $profileName,
+        string $executionId,
+        int $deadlineAt,
+    ): ?CheckResultRecord {
+        $profile = $this->profiles->get($profileName);
+        if (! $profile->allowsPhase($phase) || $profile->requiresNetwork) {
+            throw new CheckProfileConfigurationException('check_profile_phase_not_allowed', 'The check profile is not allowed in this checker phase.');
+        }
+        $root = config('ai6.execution_mailboxes.checker_root');
+        if (! is_string($root) || ! is_dir($root) || is_link($root)) {
+            throw new RuntimeException('The checker execution root is unavailable.');
+        }
+        $stagedRoot = rtrim(str_replace('\\', '/', (string) realpath($root)), '/').'/staged';
+        if (! is_dir($stagedRoot) && ! mkdir($stagedRoot, 0750, true) && ! is_dir($stagedRoot)) {
+            throw new RuntimeException('The checker staging root could not be created.');
+        }
+        $batch = $stagedRoot.'/'.$executionId;
+        if (! is_dir($batch)) {
+            if (! mkdir($batch, 0750)) {
+                throw new RuntimeException('The checker staging directory could not be created.');
+            }
+            try {
+                $worktree = $run->worktree_path;
+                if (! is_string($worktree) || ! is_dir($worktree) || is_link($worktree)) {
+                    throw new RuntimeException('The bound run worktree is unavailable.');
+                }
+                $this->exporter->export($worktree, $batch.'/tree', false);
+                if (! mkdir($batch.'/baseline', 0750)) {
+                    throw new RuntimeException('The check baseline directory could not be created.');
+                }
+            } catch (Throwable $exception) {
+                $this->remove($batch);
+                throw $exception;
+            }
+        }
+
+        $before = $this->treeBinding->hash($batch.'/tree');
+        $baseline = $this->treeBinding->hash($batch.'/baseline');
+        $key = CheckResult::key($run->id, $phase, $profileName, $before);
+        if (($record = $this->liveResult($key)) instanceof CheckResultRecord) {
+            return $record;
+        }
+        $request = new CheckExecutionRequest($executionId, $run->id, $phase, $profileName, $before, $baseline, $deadlineAt);
+        $mailbox = $this->mailboxes->forRole(ExecutionRole::CHECKER);
+        $deliveryId = CheckerExecutionProcessor::deliveryId($executionId);
+        $context = new RedactionContext((string) $run->project_id, $run->id, 'check:'.$phase->value);
+
+        try {
+            $message = $mailbox->read(MailboxMessageType::RESULT, 'check-'.$run->id, $deliveryId, $context);
+        } catch (MailboxRejectedException $exception) {
+            if ($exception->reason !== MailboxRejection::INCOMPLETE) {
+                throw $exception;
+            }
+            try {
+                $mailbox->write(MailboxMessageType::REQUEST, 'check-'.$run->id, $deliveryId, $request->toJson());
+            } catch (MailboxRejectedException $writeFailure) {
+                if ($writeFailure->reason !== MailboxRejection::REPLAY) {
+                    throw $writeFailure;
+                }
+            }
+
+            try {
+                $this->assertExecutionAlive($executionId, $deadlineAt);
+            } catch (CheckExecutionBoundaryReached $boundary) {
+                $this->cleanupAsyncExecution($mailbox, $deliveryId, $batch, $executionId);
+                throw $boundary;
+            }
+
+            return null;
+        }
+
+        try {
+            $document = CheckExecutionResultDocument::fromJson($message->content);
+            if ($document->executionId !== $executionId || $document->runId !== $run->id
+                || $document->phase !== $phase || $document->profile !== $profileName
+                || $document->deadlineAt !== $deadlineAt
+                || ! hash_equals($before, $document->sourceTreeSha256)
+                || ! hash_equals($baseline, $document->baselineSha256)
+                || (! $profile->mutatesTree && ! hash_equals($before, $document->resultTreeSha256))
+                || ($document->state === CheckResultState::SUCCEEDED
+                    && ! hash_equals($baseline, $document->observedBaselineSha256))
+                || $document->metadata !== $profile->declaredMetadata()) {
+                throw new CheckExecutionContractException('check_result_binding_invalid');
+            }
+            if (time() >= $deadlineAt) {
+                throw new CheckExecutionContractException('check_result_after_terminal_boundary');
+            }
+            $this->assertResultBootBinding($executionId, $document->checkerBootId);
+        } catch (CheckExecutionContractException $exception) {
+            $this->cleanupAsyncExecution($mailbox, $deliveryId, $batch, $executionId);
+            throw $exception;
+        }
+        $result = new CheckResult(
+            $profileName, $phase, $document->state, $document->exitCode, $document->reason,
+            $document->durationMilliseconds, $document->redactedOutput, $before,
+            $document->resultTreeSha256, $document->metadata,
+        );
+        $this->cleanupAsyncExecution($mailbox, $deliveryId, $batch, $executionId);
+        $record = $this->persist($run, $result, $key);
+        // These transient attributes are consumed immediately by RunCheckStep
+        // for the durable timeline event. The published check_results schema
+        // remains the immutable AI6-021 contract.
+        $record->setAttribute('checker_execution_id', $document->executionId);
+        $record->setAttribute('checker_boot_id', $document->checkerBootId);
+        $record->setAttribute('checker_deadline_at', $document->deadlineAt);
+
+        return $record;
+    }
+
+    private function assertExecutionAlive(string $executionId, int $deadlineAt): void
+    {
+        if (time() >= $deadlineAt) {
+            throw new CheckExecutionBoundaryReached('check_execution_deadline_exceeded');
+        }
+        $output = config('ai6.execution_mailboxes.checker_output_root');
+        if (! is_string($output)) {
+            return;
+        }
+        $heartbeatPath = rtrim($output, '/\\').'/heartbeats/'.$executionId.'.json';
+        if (! is_file($heartbeatPath) || is_link($heartbeatPath)) {
+            $claimPath = rtrim($output, '/\\').'/claims/'.$executionId.'.json';
+            if (! is_file($claimPath) || is_link($claimPath)) {
+                return;
+            }
+            $claim = json_decode((string) file_get_contents($claimPath), true);
+            $attestationPath = rtrim($output, '/\\').'/attestations/checker.json';
+            $attestation = is_file($attestationPath) && ! is_link($attestationPath)
+                ? json_decode((string) file_get_contents($attestationPath), true) : null;
+            if (! is_array($claim) || ! is_int($claim['recorded_at'] ?? null) || ! is_string($claim['checker_boot_id'] ?? null)) {
+                throw new CheckExecutionBoundaryReached('check_execution_claim_invalid');
+            }
+            if ((is_array($attestation) && is_string($attestation['checker_boot_id'] ?? null)
+                    && ! hash_equals($claim['checker_boot_id'], $attestation['checker_boot_id']))
+                || time() - $claim['recorded_at'] > $this->runtime->heartbeatMaxAgeSeconds) {
+                throw new CheckExecutionBoundaryReached('check_execution_checker_crashed');
+            }
+
+            return;
+        }
+        $heartbeat = json_decode((string) file_get_contents($heartbeatPath), true);
+        if (! is_array($heartbeat) || ! is_int($heartbeat['recorded_at'] ?? null) || ! is_string($heartbeat['checker_boot_id'] ?? null)) {
+            throw new CheckExecutionBoundaryReached('check_execution_heartbeat_invalid');
+        }
+        if (time() - $heartbeat['recorded_at'] > $this->runtime->heartbeatMaxAgeSeconds) {
+            throw new CheckExecutionBoundaryReached('check_execution_heartbeat_stale');
+        }
+        $attestationPath = rtrim($output, '/\\').'/attestations/checker.json';
+        if (is_file($attestationPath) && ! is_link($attestationPath)) {
+            $attestation = json_decode((string) file_get_contents($attestationPath), true);
+            if (is_array($attestation) && is_string($attestation['checker_boot_id'] ?? null)
+                && ! hash_equals($heartbeat['checker_boot_id'], $attestation['checker_boot_id'])) {
+                throw new CheckExecutionBoundaryReached('check_execution_checker_boot_changed');
+            }
+        }
+    }
+
+    private function assertResultBootBinding(string $executionId, string $bootId): void
+    {
+        $output = config('ai6.execution_mailboxes.checker_output_root');
+        if (! is_string($output)) {
+            throw new CheckExecutionContractException('check_result_boot_binding_missing');
+        }
+        $root = rtrim($output, '/\\');
+        $heartbeat = $this->readBoundRuntimeDocument($root.'/heartbeats/'.$executionId.'.json');
+        $attestation = $this->readBoundRuntimeDocument($root.'/attestations/checker.json');
+        if (($heartbeat['execution_id'] ?? null) !== $executionId
+            || ($heartbeat['checker_boot_id'] ?? null) !== $bootId
+            || ($attestation['checker_boot_id'] ?? null) !== $bootId
+            || ! is_int($attestation['recorded_at'] ?? null)
+            || time() - $attestation['recorded_at'] > $this->runtime->attestationMaxAgeSeconds) {
+            throw new CheckExecutionContractException('check_result_boot_binding_invalid');
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private function readBoundRuntimeDocument(string $path): array
+    {
+        if (! is_file($path) || is_link($path)) {
+            throw new CheckExecutionContractException('check_result_boot_binding_missing');
+        }
+        $document = json_decode((string) file_get_contents($path), true);
+
+        return is_array($document) ? $document : throw new CheckExecutionContractException('check_result_boot_binding_invalid');
     }
 
     /**
@@ -115,6 +307,7 @@ final readonly class CheckRunner
         $baseline = $batch.'/baseline';
         $outputs = $this->createOutputs();
         $context = new RedactionContext((string) $run->project_id, $run->id, 'check:'.$phase->value);
+        $deliveryId = null;
 
         try {
             // Writable on purpose: a read-only tree could not be mutated at
@@ -126,7 +319,7 @@ final readonly class CheckRunner
 
             $before = $this->treeBinding->hash($tree);
             $key = CheckResult::key($run->id, $phase, $profile->name, $before);
-            $this->claimDelivery($run, $phase, $profile, $key, $before, $deliveryAttempt, $context);
+            $deliveryId = $this->claimDelivery($run, $phase, $profile, $key, $before, $deliveryAttempt, $context);
 
             $result = $this->execute($profile, $batch, $tree, $outputs, $context);
             $after = $this->treeBinding->hash($tree);
@@ -139,6 +332,9 @@ final readonly class CheckRunner
             $this->remove($outputs['result']);
             $this->remove($outputs['artifacts']);
             $this->remove($outputs['root']);
+            if (is_string($deliveryId)) {
+                $this->mailboxes->forRole(ExecutionRole::CHECKER)->cleanupDelivery($deliveryId);
+            }
         }
     }
 
@@ -161,7 +357,7 @@ final readonly class CheckRunner
         string $treeSha,
         int $deliveryAttempt,
         RedactionContext $context,
-    ): void {
+    ): string {
         if ($this->liveResult($key) instanceof CheckResultRecord) {
             throw new DuplicateCheckExecution($key);
         }
@@ -177,15 +373,18 @@ final readonly class CheckRunner
         ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)."\n";
 
         try {
+            $deliveryId = self::deliveryId($key, $deliveryAttempt);
             $this->mailboxes->forRole(ExecutionRole::CHECKER)->write(
                 MailboxMessageType::REQUEST,
                 'check-'.$run->id,
-                self::deliveryId($key, $deliveryAttempt),
+                $deliveryId,
                 $this->redactor->redact($order, $context)->text,
             );
         } catch (MailboxRejectedException) {
             throw new OrphanedCheckExecution($key, $deliveryAttempt);
         }
+
+        return $deliveryId;
     }
 
     /** The mailbox identity of one delivery of one execution. */
@@ -249,19 +448,7 @@ final readonly class CheckRunner
         string $after,
         RedactionContext $context,
     ): CheckResult {
-        $state = $this->state($profile, $result);
-        $reason = $this->reason($state, $result);
-        $mutated = ! hash_equals($before, $after);
-
-        if ($mutated && ! $profile->mutatesTree && $state === CheckResultState::SUCCEEDED) {
-            // A profile declared as non-mutating that changed the tree anyway is
-            // never a green result: the review state would move unnoticed. An
-            // already failed, timed out or unavailable check keeps its own more
-            // specific reason; its mutation stays visible through the two tree
-            // bindings.
-            $state = CheckResultState::FAILED;
-            $reason = 'unexpected_tree_mutation';
-        }
+        [$state, $reason] = $this->interpreter->outcome($profile, $result, $before, $after);
 
         return new CheckResult(
             $profile->name,
@@ -270,60 +457,11 @@ final readonly class CheckRunner
             $result->exitCode,
             $reason,
             (int) round($result->durationSeconds * 1000),
-            $this->safeOutput($result, $context),
+            $this->interpreter->safeOutput($result, $context),
             $before,
             $after,
             $profile->declaredMetadata(),
         );
-    }
-
-    private function state(CheckProfile $profile, ProcessResult $result): CheckResultState
-    {
-        return match (true) {
-            $result->outcome === ProcessOutcome::TIMED_OUT => CheckResultState::TIMED_OUT,
-            in_array($result->outcome, [ProcessOutcome::START_FAILED, ProcessOutcome::START_REJECTED], true) => CheckResultState::TOOL_UNAVAILABLE,
-            $result->exitCode === self::COMMAND_NOT_FOUND || ! $this->executable($profile) => CheckResultState::TOOL_UNAVAILABLE,
-            $result->exitCode !== null && in_array($result->exitCode, $profile->successExitCodes, true) => CheckResultState::SUCCEEDED,
-            default => CheckResultState::FAILED,
-        };
-    }
-
-    private function reason(CheckResultState $state, ProcessResult $result): ?string
-    {
-        if ($state === CheckResultState::SUCCEEDED) {
-            return null;
-        }
-        if ($state === CheckResultState::TIMED_OUT) {
-            return 'process_timeout';
-        }
-        if ($state === CheckResultState::TOOL_UNAVAILABLE) {
-            return $result->outcome === ProcessOutcome::START_REJECTED ? 'process_start_rejected' : 'check_tool_unavailable';
-        }
-
-        return match ($result->outcome) {
-            ProcessOutcome::OUTPUT_LIMIT_EXCEEDED => 'output_limit_exceeded',
-            ProcessOutcome::RESOURCE_LIMIT_EXCEEDED => 'resource_limit_exceeded',
-            ProcessOutcome::CANCELLED => 'process_cancelled',
-            ProcessOutcome::TERMINATION_FAILED => 'process_termination_failed',
-            default => 'check_failed',
-        };
-    }
-
-    private function executable(CheckProfile $profile): bool
-    {
-        return is_file($profile->program) && is_executable($profile->program);
-    }
-
-    /** Every byte a check produced crosses the one central redaction boundary. */
-    private function safeOutput(ProcessResult $result, RedactionContext $context): string
-    {
-        $raw = rtrim($result->output."\n".$result->errorOutput);
-
-        try {
-            return $this->redactor->redact($raw, $context)->text;
-        } catch (InvalidRedactionInputException) {
-            return 'Die Checkausgabe war kein gültiges UTF-8 und wurde verworfen.';
-        }
     }
 
     private function persist(Run $run, CheckResult $result, string $key): CheckResultRecord
@@ -410,5 +548,73 @@ final readonly class CheckRunner
             // A leftover temporary directory is a local artifact, never a
             // reason to lose an already produced check result.
         }
+    }
+
+    private function removeStrict(string $path): void
+    {
+        try {
+            $this->removeDirectoryStrict($path);
+        } catch (Throwable $exception) {
+            throw new CheckExecutionBoundaryReached('check_execution_cleanup_failed', $exception);
+        }
+    }
+
+    private function removeDirectoryStrict(string $path): void
+    {
+        if (is_link($path)) {
+            if (! unlink($path)) {
+                throw new RuntimeException('The checker cleanup link could not be removed.');
+            }
+
+            return;
+        }
+        if (! file_exists($path)) {
+            return;
+        }
+        if (! is_dir($path)) {
+            throw new RuntimeException('The checker cleanup target is not a directory.');
+        }
+
+        @chmod($path, 0770);
+        $entries = scandir($path);
+        if (! is_array($entries)) {
+            throw new RuntimeException('The checker cleanup directory could not be read.');
+        }
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $child = $path.'/'.$entry;
+            if (is_link($child) || is_file($child)) {
+                @chmod($child, 0660);
+                if (! unlink($child)) {
+                    throw new RuntimeException('The checker cleanup file could not be removed.');
+                }
+            } else {
+                $this->removeDirectoryStrict($child);
+            }
+        }
+        if (! rmdir($path)) {
+            throw new RuntimeException('The checker cleanup directory could not be removed.');
+        }
+    }
+
+    private function cleanupAsyncExecution(ExecutionMailbox $mailbox, string $deliveryId, string $batch, string $executionId): void
+    {
+        $this->removeStrict($batch);
+        $output = config('ai6.execution_mailboxes.checker_output_root');
+        if (is_string($output)) {
+            $root = rtrim(str_replace('\\', '/', $output), '/');
+            $this->removeStrict($root.'/executions/'.$executionId);
+            $heartbeat = $root.'/heartbeats/'.$executionId.'.json';
+            if ((is_file($heartbeat) || is_link($heartbeat)) && ! unlink($heartbeat)) {
+                throw new CheckExecutionBoundaryReached('check_execution_cleanup_failed');
+            }
+            $claim = $root.'/claims/'.$executionId.'.json';
+            if ((is_file($claim) || is_link($claim)) && ! unlink($claim)) {
+                throw new CheckExecutionBoundaryReached('check_execution_cleanup_failed');
+            }
+        }
+        $mailbox->cleanupDelivery($deliveryId);
     }
 }

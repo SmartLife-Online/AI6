@@ -80,7 +80,7 @@ final class GitRuntimeContractTest extends TestCase
 
         foreach ([
             'git openssh-client procps util-linux',
-            '/usr/bin/git /usr/bin/ssh /usr/bin/ssh-keygen /usr/bin/flock /usr/bin/stat /usr/bin/setsid /usr/bin/kill /usr/bin/dash',
+            '/usr/bin/git /usr/bin/ssh /usr/bin/ssh-keygen /usr/bin/flock /usr/bin/stat /usr/bin/setsid /usr/bin/kill /usr/bin/unshare /usr/bin/mount /usr/bin/find /usr/bin/setpriv /usr/bin/dash',
             'test -x "$executable"',
             'test ! -L "$executable"',
             'AI6_GIT_EXECUTION_HOME=/var/lib/ai6/git-home',

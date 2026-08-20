@@ -31,7 +31,9 @@ final readonly class ExecutionMailbox
         $this->assertIdentifier($slotId);
         $this->assertIdentifier($deliveryId);
         $directory = $this->directory($type);
-        $this->ensureDirectory($directory, $type === MailboxMessageType::REQUEST ? 0750 : 01730);
+        $this->ensureDirectory($directory, $type === MailboxMessageType::REQUEST
+            ? 0750
+            : ($this->role === ExecutionRole::CHECKER ? 0730 : 01730));
 
         $document = [
             'version' => $this->version,
@@ -159,10 +161,106 @@ final readonly class ExecutionMailbox
         );
     }
 
+    /**
+     * Atomically claim the next complete envelope without trusting identifiers
+     * parsed by a caller. Discovery, the UTF-8 boundary, strict envelope shape
+     * and the exactly-once marker deliberately stay inside this mailbox seam.
+     */
+    public function claimNext(MailboxMessageType $type, RedactionContext $context): ?MailboxMessage
+    {
+        $paths = glob($this->directory($type).'/*.json', GLOB_NOSORT);
+        if (! is_array($paths)) {
+            return null;
+        }
+        sort($paths, SORT_STRING);
+        $rejection = null;
+
+        foreach ($paths as $path) {
+            if (! is_file($path) || is_link($path)) {
+                $rejection ??= MailboxRejection::INCOMPLETE;
+
+                continue;
+            }
+            $length = filesize($path);
+            if (! is_int($length) || $length < 1 || $length > $this->maxEnvelopeBytes) {
+                $rejection ??= is_int($length) && $length > $this->maxEnvelopeBytes ? MailboxRejection::TOO_LARGE : MailboxRejection::INCOMPLETE;
+
+                continue;
+            }
+            $bytes = file_get_contents($path);
+            if (! is_string($bytes) || strlen($bytes) !== $length) {
+                $rejection ??= MailboxRejection::INCOMPLETE;
+
+                continue;
+            }
+            try {
+                $safe = $this->redactor->redact($bytes, $context)->text;
+                $document = json_decode($safe, true, 16, JSON_THROW_ON_ERROR);
+            } catch (InvalidRedactionInputException|JsonException) {
+                $rejection ??= MailboxRejection::INVALID_ENCODING;
+
+                continue;
+            }
+            $keys = ['version', 'role', 'type', 'slot_id', 'delivery_id', 'size', 'content_sha256', 'content_base64'];
+            if (! is_array($document) || array_keys($document) !== $keys) {
+                $rejection ??= MailboxRejection::INCOMPLETE;
+
+                continue;
+            }
+            if ($document['version'] !== $this->version || $document['type'] !== $type->value) {
+                $rejection ??= MailboxRejection::INVALID_VERSION;
+
+                continue;
+            }
+            if ($document['role'] !== $this->role->value) {
+                $rejection ??= MailboxRejection::FOREIGN_ROLE;
+
+                continue;
+            }
+            if (! is_string($document['slot_id']) || ! is_string($document['delivery_id'])
+                || basename($path) !== $document['delivery_id'].'.json') {
+                $rejection ??= MailboxRejection::FOREIGN_SLOT;
+
+                continue;
+            }
+            try {
+                return $this->read($type, $document['slot_id'], $document['delivery_id'], $context);
+            } catch (MailboxRejectedException $exception) {
+                if ($exception->reason !== MailboxRejection::REPLAY) {
+                    $rejection ??= $exception->reason;
+
+                    continue;
+                }
+            }
+        }
+
+        if ($rejection instanceof MailboxRejection) {
+            throw new MailboxRejectedException($rejection);
+        }
+
+        return null;
+    }
+
+    /** Remove the exact, already terminal delivery from both channel roots. */
+    public function cleanupDelivery(string $deliveryId): void
+    {
+        $this->assertIdentifier($deliveryId);
+        foreach (MailboxMessageType::cases() as $type) {
+            $envelope = $this->directory($type).'/'.$deliveryId.'.json';
+            if (is_link($envelope) || (is_file($envelope) && ! unlink($envelope))) {
+                throw new \RuntimeException('The terminal execution envelope could not be removed.');
+            }
+            $marker = $this->outputRoot.'/consumed/'.hash('sha256', $type->value."\0".$deliveryId);
+            if (is_link($marker) || (is_file($marker) && ! unlink($marker))) {
+                throw new \RuntimeException('The terminal execution claim could not be removed.');
+            }
+        }
+    }
+
     private function consumeOnce(MailboxMessageType $type, string $deliveryId): void
     {
         $directory = $this->outputRoot.'/consumed';
-        $this->ensureDirectory($directory, 01730);
+        $this->ensureDirectory($directory, $this->role === ExecutionRole::CHECKER ? 0730 : 01730);
         $marker = $directory.'/'.hash('sha256', $type->value."\0".$deliveryId);
         if (file_exists($marker)) {
             throw new MailboxRejectedException(MailboxRejection::REPLAY);

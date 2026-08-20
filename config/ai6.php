@@ -97,7 +97,10 @@ return [
                 'output_limit_bytes' => env('AI6_CHECKER_PROCESS_OUTPUT_LIMIT_BYTES', '5000000'),
                 'allowed_executables' => [PHP_BINARY, env('AI6_GIT_BINARY', '/usr/bin/git')],
                 'environment_allowlist' => ['PATH', 'HOME', 'XDG_CONFIG_HOME', 'TMPDIR', 'AI6_CHECK_PROFILE', 'LC_ALL', 'LANG'],
-                'working_roots' => [env('AI6_CHECKER_EXECUTION_ROOT', '/var/lib/ai6/checker-executions')],
+                'working_roots' => [
+                    env('AI6_CHECKER_EXECUTION_ROOT', '/var/lib/ai6/checker-executions'),
+                    env('AI6_CHECKER_WORKSPACE_ROOT', '/var/lib/ai6/checker-workspace'),
+                ],
                 'requires_process_group' => true,
                 'cancel_grace_milliseconds' => env('AI6_CHECKER_CANCEL_GRACE_MILLISECONDS', '2000'),
             ],
@@ -301,6 +304,16 @@ return [
      * code is 1, not 0.
      */
     'checks' => [
+        'runtime' => [
+            'workspace_root' => env('AI6_CHECKER_WORKSPACE_ROOT', '/var/lib/ai6/checker-workspace'),
+            'unshare_binary' => env('AI6_CHECKER_UNSHARE_BINARY', '/usr/bin/unshare'),
+            'namespace_wrapper' => env('AI6_CHECKER_NAMESPACE_WRAPPER', base_path('app/AI6/Shared/Process/checker-process-wrapper.sh')),
+            'poll_interval_seconds' => env('AI6_CHECKER_POLL_INTERVAL_SECONDS', '2'),
+            'heartbeat_interval_seconds' => env('AI6_CHECKER_EXECUTION_HEARTBEAT_INTERVAL_SECONDS', '2'),
+            'heartbeat_max_age_seconds' => env('AI6_CHECKER_EXECUTION_HEARTBEAT_MAX_AGE_SECONDS', '15'),
+            'execution_deadline_seconds' => env('AI6_CHECKER_EXECUTION_DEADLINE_SECONDS', '1200'),
+            'attestation_max_age_seconds' => env('AI6_CHECKER_ATTESTATION_MAX_AGE_SECONDS', '15'),
+        ],
         'profiles' => [
             'php-targeted' => [
                 'program' => PHP_BINARY,

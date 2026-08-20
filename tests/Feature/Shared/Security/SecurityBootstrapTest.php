@@ -12,6 +12,43 @@ use Symfony\Component\Process\Process;
 
 final class SecurityBootstrapTest extends TestCase
 {
+    private string $checkerFixtureRoot;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->checkerFixtureRoot = sys_get_temp_dir().'/ai6-security-checker-'.bin2hex(random_bytes(8));
+        mkdir($this->checkerFixtureRoot.'/input', 0770, true);
+        mkdir($this->checkerFixtureRoot.'/output/attestations', 0770, true);
+        file_put_contents($this->checkerFixtureRoot.'/output/attestations/checker.json', json_encode([
+            'schema' => 'ai6.checker-attestation.v1',
+            'checker_boot_id' => str_repeat('a', 32),
+            'recorded_at' => time(),
+            'role' => 'checker',
+            'input_read_only' => true,
+            'output_separate' => true,
+            'workspace_private' => true,
+            'container_read_only' => true,
+            'network_isolated' => true,
+            'namespace_tooling' => true,
+            'profiles_executable' => true,
+            'profile_programs' => ['php-targeted' => true],
+        ], JSON_THROW_ON_ERROR));
+    }
+
+    protected function tearDown(): void
+    {
+        $files = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($this->checkerFixtureRoot, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($files as $file) {
+            $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
+        }
+        rmdir($this->checkerFixtureRoot);
+        parent::tearDown();
+    }
+
     public function test_invalid_boolean_fails_before_command_and_http_application_code_without_echoing_value(): void
     {
         $privateValue = 'yess-private-raw-value';
@@ -246,6 +283,8 @@ PHP,
             'APP_KEY' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
             'AI6_SECURITY_PROFILE' => 'strict',
             'AI6_SECURITY_ACKNOWLEDGE_REDUCED_MODE' => 'false',
+            'AI6_CHECKER_EXECUTION_ROOT' => $this->checkerFixtureRoot.'/input',
+            'AI6_CHECKER_OUTPUT_ROOT' => $this->checkerFixtureRoot.'/output',
             'COLUMNS' => '80',
             'LOG_CHANNEL' => 'stderr',
         ];

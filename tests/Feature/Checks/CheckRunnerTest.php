@@ -2,12 +2,25 @@
 
 namespace Tests\Feature\Checks;
 
+use App\AI6\Checks\CheckerExecutionProcessor;
+use App\AI6\Checks\CheckExecutionBoundaryReached;
+use App\AI6\Checks\CheckExecutionContractException;
+use App\AI6\Checks\CheckExecutionRequest;
+use App\AI6\Checks\CheckExecutionResultDocument;
 use App\AI6\Checks\CheckPhase;
 use App\AI6\Checks\CheckProfileConfigurationException;
 use App\AI6\Checks\CheckResultState;
 use App\AI6\Checks\CheckRunner;
 use App\AI6\Checks\DuplicateCheckExecution;
 use App\AI6\Checks\Models\CheckResultRecord;
+use App\AI6\Shared\Process\ExecutionMailboxFactory;
+use App\AI6\Shared\Process\ExecutionRole;
+use App\AI6\Shared\Process\MailboxMessageType;
+use App\AI6\Shared\Redaction\RedactionContext;
+use App\AI6\Shared\Redaction\Redactor;
+use App\AI6\Shared\Security\SecurityMeasure;
+use App\AI6\Shared\Security\SecurityPolicy;
+use App\AI6\Shared\Security\SecurityProfile;
 use Illuminate\Database\QueryException;
 use Tests\Feature\Tickets\TicketUiTestCase;
 
@@ -18,6 +31,21 @@ use Tests\Feature\Tickets\TicketUiTestCase;
 final class CheckRunnerTest extends TicketUiTestCase
 {
     use BuildsCheckFixture;
+
+    public function test_the_reduced_test_path_has_a_distinct_policy_hash(): void
+    {
+        $strict = $this->app->make(SecurityPolicy::class);
+        self::assertSame(SecurityProfile::STRICT, $strict->profile);
+        self::assertTrue($strict->isEnabled(SecurityMeasure::REQUIRE_CHECKER_NETWORK_ISOLATION));
+
+        $this->bindCheckRuntime(['probe-ok' => $this->probeProfile(['ai6-check-ok.php'])]);
+        $reduced = $this->app->make(SecurityPolicy::class);
+
+        self::assertSame(SecurityProfile::CUSTOM, $reduced->profile);
+        self::assertFalse($reduced->isEnabled(SecurityMeasure::REQUIRE_CHECKER_NETWORK_ISOLATION));
+        self::assertTrue($reduced->reducedModeAcknowledged);
+        self::assertNotSame($strict->hash(), $reduced->hash());
+    }
 
     /** TC-01: four executions, four distinguishable states. */
     public function test_success_failure_timeout_and_missing_tool_are_four_distinct_states(): void
@@ -157,6 +185,295 @@ final class CheckRunnerTest extends TicketUiTestCase
         }
 
         self::assertSame(1, CheckResultRecord::query()->where('run_id', $run->id)->count());
+    }
+
+    public function test_the_strict_worker_path_stages_polls_and_accepts_one_bound_result(): void
+    {
+        $this->bindCheckRuntime(['probe-ok' => $this->probeProfile(['ai6-check-ok.php'])]);
+        ['run' => $run] = $this->checkableRun('AI6-045-ROUNDTRIP');
+        $runner = $this->app->make(CheckRunner::class);
+        $executionId = 'execution-roundtrip';
+        $deadline = time() + 60;
+
+        self::assertNull($runner->dispatchOrCollect($run, CheckPhase::BEFORE_REVIEW, 'probe-ok', $executionId, $deadline));
+        $mailbox = $this->app->make(ExecutionMailboxFactory::class)->forRole(ExecutionRole::CHECKER);
+        $delivery = CheckerExecutionProcessor::deliveryId($executionId);
+        $message = $mailbox->read(MailboxMessageType::REQUEST, 'check-'.$run->id, $delivery, new RedactionContext((string) $run->project_id, $run->id, 'test'));
+        $request = CheckExecutionRequest::fromJson($message->content);
+        self::assertSame($executionId, $request->executionId);
+        $outputRoot = (string) config('ai6.execution_mailboxes.checker_output_root');
+        if (! is_dir($outputRoot.'/heartbeats')) {
+            mkdir($outputRoot.'/heartbeats', 0700, true);
+        }
+        if (! is_dir($outputRoot.'/attestations')) {
+            mkdir($outputRoot.'/attestations', 0700, true);
+        }
+        file_put_contents($outputRoot.'/heartbeats/'.$executionId.'.json', json_encode([
+            'schema' => 'ai6.check-heartbeat.v1', 'execution_id' => $executionId,
+            'checker_boot_id' => str_repeat('a', 32), 'recorded_at' => time(),
+        ], JSON_THROW_ON_ERROR));
+        file_put_contents($outputRoot.'/attestations/checker.json', json_encode([
+            'schema' => 'ai6.checker-attestation.v1', 'checker_boot_id' => str_repeat('a', 32),
+            'recorded_at' => time(),
+        ], JSON_THROW_ON_ERROR));
+
+        $mailbox->write(MailboxMessageType::RESULT, 'check-'.$run->id, $delivery, (new CheckExecutionResultDocument(
+            $executionId, $run->id, CheckPhase::BEFORE_REVIEW, 'probe-ok', str_repeat('a', 32), $deadline, time(),
+            CheckResultState::SUCCEEDED, null, 0, 10, 'ok', $request->sourceTreeSha256,
+            $request->sourceTreeSha256, $request->baselineSha256,
+            $request->baselineSha256,
+            ['side_effects' => false, 'network' => false, 'mutates' => false],
+        ))->toJson());
+
+        $publishedBytes = (string) file_get_contents($outputRoot.'/results/'.$delivery.'.json');
+        $published = json_decode($publishedBytes, true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame('check-'.$run->id, $published['slot_id'] ?? null);
+        self::assertSame($delivery, $published['delivery_id'] ?? null);
+        $safePublished = json_decode($this->app->make(Redactor::class)->redact(
+            $publishedBytes,
+            new RedactionContext((string) $run->project_id, $run->id, 'check:before_review'),
+        )->text, true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame('check-'.$run->id, $safePublished['slot_id'] ?? null);
+        self::assertSame($delivery, $safePublished['delivery_id'] ?? null);
+
+        $freshRun = $run->fresh();
+        self::assertNotNull($freshRun);
+        self::assertSame($run->id, $freshRun->id);
+        self::assertSame($delivery, CheckerExecutionProcessor::deliveryId($executionId));
+        $record = $runner->dispatchOrCollect($freshRun, CheckPhase::BEFORE_REVIEW, 'probe-ok', $executionId, $deadline);
+        self::assertNotNull($record);
+        self::assertSame(CheckResultState::SUCCEEDED, $record->state);
+        self::assertSame(1, CheckResultRecord::query()->where('run_id', $run->id)->count());
+        self::assertFileDoesNotExist(config('ai6.execution_mailboxes.checker_root').'/staged/'.$executionId);
+        foreach (['claims/'.$executionId.'.json', 'heartbeats/'.$executionId.'.json', 'executions/'.$executionId, 'results/'.$delivery.'.json'] as $relative) {
+            self::assertFileDoesNotExist($outputRoot.'/'.$relative);
+        }
+    }
+
+    public function test_a_new_checker_boot_terminates_an_old_claim_without_reexecution(): void
+    {
+        $this->bindCheckRuntime(['probe-ok' => $this->probeProfile(['ai6-check-ok.php'])]);
+        ['run' => $run] = $this->checkableRun('AI6-045-BOOT');
+        $runner = $this->app->make(CheckRunner::class);
+        $executionId = 'execution-old-boot';
+        $deadline = time() + 60;
+        self::assertNull($runner->dispatchOrCollect($run, CheckPhase::BEFORE_REVIEW, 'probe-ok', $executionId, $deadline));
+
+        $outputRoot = (string) config('ai6.execution_mailboxes.checker_output_root');
+        if (! is_dir($outputRoot.'/claims')) {
+            mkdir($outputRoot.'/claims', 0700, true);
+        }
+        if (! is_dir($outputRoot.'/attestations')) {
+            mkdir($outputRoot.'/attestations', 0700, true);
+        }
+        file_put_contents($outputRoot.'/claims/'.$executionId.'.json', json_encode([
+            'schema' => 'ai6.check-claim.v1', 'execution_id' => $executionId,
+            'checker_boot_id' => str_repeat('a', 32), 'recorded_at' => time(), 'process_started' => true,
+        ], JSON_THROW_ON_ERROR));
+        file_put_contents($outputRoot.'/attestations/checker.json', json_encode([
+            'schema' => 'ai6.checker-attestation.v1', 'checker_boot_id' => str_repeat('b', 32),
+            'recorded_at' => time(),
+        ], JSON_THROW_ON_ERROR));
+
+        try {
+            $runner->dispatchOrCollect($run, CheckPhase::BEFORE_REVIEW, 'probe-ok', $executionId, $deadline);
+            self::fail('The old checker claim must not be revived by a new boot.');
+        } catch (CheckExecutionBoundaryReached $exception) {
+            self::assertSame('check_execution_checker_crashed', $exception->reason);
+        }
+        self::assertSame(0, CheckResultRecord::query()->where('run_id', $run->id)->count());
+        self::assertFileDoesNotExist(config('ai6.execution_mailboxes.checker_root').'/staged/'.$executionId);
+        self::assertFileDoesNotExist($outputRoot.'/claims/'.$executionId.'.json');
+        self::assertFileDoesNotExist($outputRoot.'/executions/'.$executionId);
+    }
+
+    public function test_a_stale_execution_heartbeat_reaches_a_named_terminal_boundary_and_cleans_up(): void
+    {
+        $this->bindCheckRuntime(['probe-ok' => $this->probeProfile(['ai6-check-ok.php'])]);
+        ['run' => $run] = $this->checkableRun('AI6-045-STALE-HEARTBEAT');
+        $runner = $this->app->make(CheckRunner::class);
+        $executionId = 'execution-stale-heartbeat';
+        $deadline = time() + 60;
+        self::assertNull($runner->dispatchOrCollect($run, CheckPhase::BEFORE_REVIEW, 'probe-ok', $executionId, $deadline));
+
+        $outputRoot = (string) config('ai6.execution_mailboxes.checker_output_root');
+        $bootId = str_repeat('c', 32);
+        if (! is_dir($outputRoot.'/heartbeats')) {
+            mkdir($outputRoot.'/heartbeats', 0700, true);
+        }
+        file_put_contents($outputRoot.'/heartbeats/'.$executionId.'.json', json_encode([
+            'schema' => 'ai6.check-heartbeat.v1', 'execution_id' => $executionId,
+            'checker_boot_id' => $bootId, 'recorded_at' => time() - 60,
+        ], JSON_THROW_ON_ERROR));
+        if (! is_dir($outputRoot.'/attestations')) {
+            mkdir($outputRoot.'/attestations', 0700, true);
+        }
+        file_put_contents($outputRoot.'/attestations/checker.json', json_encode([
+            'schema' => 'ai6.checker-attestation.v1', 'checker_boot_id' => $bootId,
+            'recorded_at' => time(),
+        ], JSON_THROW_ON_ERROR));
+
+        try {
+            $runner->dispatchOrCollect($run, CheckPhase::BEFORE_REVIEW, 'probe-ok', $executionId, $deadline);
+            self::fail('A stale execution heartbeat must be terminal.');
+        } catch (CheckExecutionBoundaryReached $exception) {
+            self::assertSame('check_execution_heartbeat_stale', $exception->reason);
+        }
+
+        self::assertSame(0, CheckResultRecord::query()->where('run_id', $run->id)->count());
+        self::assertFileDoesNotExist(config('ai6.execution_mailboxes.checker_root').'/staged/'.$executionId);
+        self::assertFileDoesNotExist($outputRoot.'/heartbeats/'.$executionId.'.json');
+    }
+
+    public function test_an_expired_execution_deadline_is_terminal_and_cleans_every_artifact(): void
+    {
+        $this->bindCheckRuntime(['probe-ok' => $this->probeProfile(['ai6-check-ok.php'])]);
+        ['run' => $run] = $this->checkableRun('AI6-045-DEADLINE');
+        $executionId = 'execution-expired-deadline';
+        $deadline = time() + 2;
+        $runner = $this->app->make(CheckRunner::class);
+        self::assertNull($runner->dispatchOrCollect(
+            $run, CheckPhase::BEFORE_REVIEW, 'probe-ok', $executionId, $deadline,
+        ));
+        $outputRoot = (string) config('ai6.execution_mailboxes.checker_output_root');
+        foreach (['claims', 'heartbeats', 'executions/'.$executionId] as $directory) {
+            if (! is_dir($outputRoot.'/'.$directory)) {
+                mkdir($outputRoot.'/'.$directory, 0700, true);
+            }
+        }
+        file_put_contents($outputRoot.'/claims/'.$executionId.'.json', '{}');
+        file_put_contents($outputRoot.'/heartbeats/'.$executionId.'.json', '{}');
+        file_put_contents($outputRoot.'/executions/'.$executionId.'/artifact', 'stale');
+        sleep(2);
+
+        try {
+            $runner->dispatchOrCollect(
+                $run,
+                CheckPhase::BEFORE_REVIEW,
+                'probe-ok',
+                $executionId,
+                $deadline,
+            );
+            self::fail('An expired execution deadline must be terminal.');
+        } catch (CheckExecutionBoundaryReached $exception) {
+            self::assertSame('check_execution_deadline_exceeded', $exception->reason);
+        }
+
+        self::assertSame(0, CheckResultRecord::query()->where('run_id', $run->id)->count());
+        self::assertFileDoesNotExist(config('ai6.execution_mailboxes.checker_root').'/staged/'.$executionId);
+        self::assertFileDoesNotExist($outputRoot.'/claims/'.$executionId.'.json');
+        self::assertFileDoesNotExist($outputRoot.'/heartbeats/'.$executionId.'.json');
+        self::assertDirectoryDoesNotExist($outputRoot.'/executions/'.$executionId);
+    }
+
+    public function test_each_foreign_result_binding_is_rejected_without_persistence(): void
+    {
+        $this->bindCheckRuntime(['probe-ok' => $this->probeProfile(['ai6-check-ok.php'])]);
+        $cases = [
+            'schema' => ['schema', 'ai6.check-result.v0', 'check_result_schema_invalid'],
+            'execution' => ['execution_id', 'foreign-execution', 'check_result_binding_invalid'],
+            'run' => ['run_id', 'foreign-run', 'check_result_binding_invalid'],
+            'phase' => ['phase', CheckPhase::FINAL->value, 'check_result_binding_invalid'],
+            'profile' => ['profile', 'probe-final', 'check_result_binding_invalid'],
+            'boot' => ['checker_boot_id', str_repeat('b', 32), 'check_result_boot_binding_invalid'],
+            'source tree' => ['source_tree_sha256', str_repeat('c', 64), 'check_result_binding_invalid'],
+            'result tree' => ['result_tree_sha256', str_repeat('d', 64), 'check_result_binding_invalid'],
+        ];
+
+        foreach ($cases as $label => [$field, $foreign, $reason]) {
+            ['run' => $run] = $this->checkableRun('AI6-045-RESULT-'.strtoupper(str_replace(' ', '-', $label)));
+            $runner = $this->app->make(CheckRunner::class);
+            $executionId = 'execution-result-'.str_replace(' ', '-', $label);
+            $deadline = time() + 60;
+            self::assertNull($runner->dispatchOrCollect($run, CheckPhase::BEFORE_REVIEW, 'probe-ok', $executionId, $deadline), $label);
+            $mailbox = $this->app->make(ExecutionMailboxFactory::class)->forRole(ExecutionRole::CHECKER);
+            $delivery = CheckerExecutionProcessor::deliveryId($executionId);
+            $request = CheckExecutionRequest::fromJson($mailbox->read(
+                MailboxMessageType::REQUEST,
+                'check-'.$run->id,
+                $delivery,
+                new RedactionContext((string) $run->project_id, $run->id, 'test'),
+            )->content);
+            $outputRoot = (string) config('ai6.execution_mailboxes.checker_output_root');
+            $bootId = str_repeat('a', 32);
+            if (! is_dir($outputRoot.'/heartbeats')) {
+                mkdir($outputRoot.'/heartbeats', 0700, true);
+            }
+            file_put_contents($outputRoot.'/heartbeats/'.$executionId.'.json', json_encode([
+                'schema' => 'ai6.check-heartbeat.v1', 'execution_id' => $executionId,
+                'checker_boot_id' => $bootId, 'recorded_at' => time(),
+            ], JSON_THROW_ON_ERROR));
+            if (! is_dir($outputRoot.'/attestations')) {
+                mkdir($outputRoot.'/attestations', 0700, true);
+            }
+            file_put_contents($outputRoot.'/attestations/checker.json', json_encode([
+                'schema' => 'ai6.checker-attestation.v1', 'checker_boot_id' => $bootId, 'recorded_at' => time(),
+            ], JSON_THROW_ON_ERROR));
+            $document = json_decode((new CheckExecutionResultDocument(
+                $executionId, $run->id, CheckPhase::BEFORE_REVIEW, 'probe-ok', $bootId, $deadline, time(),
+                CheckResultState::SUCCEEDED, null, 0, 10, 'ok', $request->sourceTreeSha256,
+                $request->sourceTreeSha256, $request->baselineSha256, $request->baselineSha256,
+                ['side_effects' => false, 'network' => false, 'mutates' => false],
+            ))->toJson(), true, flags: JSON_THROW_ON_ERROR);
+            $document[$field] = $foreign;
+            $mailbox->write(MailboxMessageType::RESULT, 'check-'.$run->id, $delivery, json_encode($document, JSON_THROW_ON_ERROR));
+
+            try {
+                $runner->dispatchOrCollect($run->fresh() ?? $run, CheckPhase::BEFORE_REVIEW, 'probe-ok', $executionId, $deadline);
+                self::fail('A foreign '.$label.' binding must not be persisted.');
+            } catch (CheckExecutionContractException $exception) {
+                self::assertSame($reason, $exception->reason, $label);
+            }
+            self::assertSame(0, CheckResultRecord::query()->where('run_id', $run->id)->count(), $label);
+        }
+    }
+
+    public function test_a_result_arriving_after_its_terminal_deadline_is_not_persisted(): void
+    {
+        $this->bindCheckRuntime(['probe-ok' => $this->probeProfile(['ai6-check-ok.php'])]);
+        ['run' => $run] = $this->checkableRun('AI6-045-LATE-RESULT');
+        $runner = $this->app->make(CheckRunner::class);
+        $executionId = 'execution-late-result';
+        $deadline = time() + 2;
+        self::assertNull($runner->dispatchOrCollect($run, CheckPhase::BEFORE_REVIEW, 'probe-ok', $executionId, $deadline));
+        $mailbox = $this->app->make(ExecutionMailboxFactory::class)->forRole(ExecutionRole::CHECKER);
+        $delivery = CheckerExecutionProcessor::deliveryId($executionId);
+        $request = CheckExecutionRequest::fromJson($mailbox->read(
+            MailboxMessageType::REQUEST,
+            'check-'.$run->id,
+            $delivery,
+            new RedactionContext((string) $run->project_id, $run->id, 'test'),
+        )->content);
+        $outputRoot = (string) config('ai6.execution_mailboxes.checker_output_root');
+        $bootId = str_repeat('a', 32);
+        if (! is_dir($outputRoot.'/heartbeats')) {
+            mkdir($outputRoot.'/heartbeats', 0700, true);
+        }
+        file_put_contents($outputRoot.'/heartbeats/'.$executionId.'.json', json_encode([
+            'schema' => 'ai6.check-heartbeat.v1', 'execution_id' => $executionId,
+            'checker_boot_id' => $bootId, 'recorded_at' => time(),
+        ], JSON_THROW_ON_ERROR));
+        if (! is_dir($outputRoot.'/attestations')) {
+            mkdir($outputRoot.'/attestations', 0700, true);
+        }
+        file_put_contents($outputRoot.'/attestations/checker.json', json_encode([
+            'schema' => 'ai6.checker-attestation.v1', 'checker_boot_id' => $bootId, 'recorded_at' => time(),
+        ], JSON_THROW_ON_ERROR));
+        $mailbox->write(MailboxMessageType::RESULT, 'check-'.$run->id, $delivery, (new CheckExecutionResultDocument(
+            $executionId, $run->id, CheckPhase::BEFORE_REVIEW, 'probe-ok', $bootId, $deadline, time(),
+            CheckResultState::SUCCEEDED, null, 0, 10, 'ok', $request->sourceTreeSha256,
+            $request->sourceTreeSha256, $request->baselineSha256, $request->baselineSha256,
+            ['side_effects' => false, 'network' => false, 'mutates' => false],
+        ))->toJson());
+        sleep(2);
+
+        try {
+            $runner->dispatchOrCollect($run->fresh() ?? $run, CheckPhase::BEFORE_REVIEW, 'probe-ok', $executionId, $deadline);
+            self::fail('A result after the terminal deadline must not be persisted.');
+        } catch (CheckExecutionContractException $exception) {
+            self::assertSame('check_result_after_terminal_boundary', $exception->reason);
+        }
+        self::assertSame(0, CheckResultRecord::query()->where('run_id', $run->id)->count());
     }
 
     /** The persisted result is immutable and its enum guard is enforced by the database. */

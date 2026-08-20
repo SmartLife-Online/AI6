@@ -2,7 +2,13 @@
 
 namespace App\AI6\Shared\Process;
 
+use App\AI6\Checks\CheckerExecutionProcessor;
+use App\AI6\Checks\CheckerRuntimeAttestation;
+use App\AI6\Checks\CheckerRuntimeConfiguration;
+use App\AI6\Checks\CheckExecutionContractException;
+use App\AI6\Checks\CheckProfileConfigurationException;
 use Illuminate\Console\Command;
+use Throwable;
 
 final class ExecutionMailboxCommand extends Command
 {
@@ -40,10 +46,30 @@ final class ExecutionMailboxCommand extends Command
         do {
             $requests = glob($root.'/requests/*.json', GLOB_NOSORT);
             $this->heartbeat($heartbeatDirectory, $role, $bootId, is_array($requests) ? count($requests) : 0);
+            if ($role === ExecutionRole::CHECKER) {
+                try {
+                    app(CheckerRuntimeAttestation::class)->publish($bootId);
+                    app(CheckerExecutionProcessor::class)->processNext($bootId, function (string $_executionId) use ($heartbeatDirectory, $role, $bootId): void {
+                        $this->heartbeat($heartbeatDirectory, $role, $bootId, 0);
+                        app(CheckerRuntimeAttestation::class)->publish($bootId);
+                    });
+                } catch (CheckExecutionContractException|CheckProfileConfigurationException $exception) {
+                    report($exception);
+                    $this->components->error('Checkerauftrag abgewiesen: '.$exception->reason.'.');
+                } catch (MailboxRejectedException $exception) {
+                    report($exception);
+                    $this->components->error('Checkerumschlag abgewiesen: '.$exception->reason->value.'.');
+                } catch (Throwable $exception) {
+                    report($exception);
+                    $this->components->error('A checker request was rejected or failed.');
+                }
+            }
             if ($this->option('once')) {
                 break;
             }
-            sleep((int) $interval);
+            sleep($role === ExecutionRole::CHECKER
+                ? app(CheckerRuntimeConfiguration::class)->pollIntervalSeconds
+                : (int) $interval);
         } while (true);
 
         return self::SUCCESS;

@@ -115,7 +115,7 @@ final class RuntimeComposeContractTest extends TestCase
             'DB_SYNCHRONOUS', 'LOG_CHANNEL', 'QUEUE_CONNECTION',
         ],
         'agent' => [...self::REDACTION_ENVIRONMENT, 'AI6_AGENT_EXECUTION_ROOT', 'AI6_AGENT_OUTPUT_ROOT', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'LOG_CHANNEL'],
-        'checker' => [...self::REDACTION_ENVIRONMENT, 'AI6_CHECKER_EXECUTION_ROOT', 'AI6_CHECKER_OUTPUT_ROOT', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'LOG_CHANNEL'],
+        'checker' => [...self::REDACTION_ENVIRONMENT, 'AI6_CHECKER_EXECUTION_ROOT', 'AI6_CHECKER_OUTPUT_ROOT', 'AI6_CHECKER_WORKSPACE_ROOT', 'AI6_CHECKER_UNSHARE_BINARY', 'AI6_CHECKER_NAMESPACE_WRAPPER', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'LOG_CHANNEL'],
     ];
 
     /** @var array<string, list<string>> */
@@ -162,6 +162,7 @@ final class RuntimeComposeContractTest extends TestCase
             'tmpfs::/tmp:rw',
             'volume:ai6_checker_executions:/var/lib/ai6/checker-executions:ro',
             'volume:ai6_checker_outputs:/var/lib/ai6/checker-outputs:rw',
+            'volume:ai6_checker_workspace:/var/lib/ai6/checker-workspace:rw',
         ],
     ];
 
@@ -232,6 +233,43 @@ final class RuntimeComposeContractTest extends TestCase
         self::assertSame('${AI6_WORKER_HEARTBEAT_MAX_AGE:-75}', $services['worker']['environment']['AI6_HEARTBEAT_MAX_AGE'] ?? null);
         self::assertArrayNotHasKey('build', $services['caddy']);
         self::assertMatchesRegularExpression('/\Acaddy:2\.10\.2-alpine@sha256:[0-9a-f]{64}\z/D', $services['caddy']['image'] ?? '');
+    }
+
+    public function test_only_checker_uses_the_version_bound_namespace_seccomp_policy(): void
+    {
+        $services = $this->services();
+        $policyPath = './docker/checker-seccomp-moby-29.6.1.json';
+
+        self::assertSame(['seccomp='.$policyPath], $services['checker']['security_opt'] ?? null);
+
+        foreach ($services as $name => $service) {
+            self::assertArrayNotHasKey('cap_add', $service, $name.' must not add Linux capabilities.');
+
+            if ($name !== 'checker') {
+                self::assertArrayNotHasKey('security_opt', $service, $name.' must not load the checker seccomp policy.');
+            }
+        }
+
+        $policyBytes = file_get_contents(dirname(__DIR__, 4).'/'.substr($policyPath, 2));
+        self::assertIsString($policyBytes);
+        self::assertStringNotContainsString('SCMP_ACT_ALLOW_ALL', $policyBytes);
+
+        $policy = json_decode($policyBytes, true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($policy);
+        self::assertSame('SCMP_ACT_ERRNO', $policy['defaultAction'] ?? null);
+
+        $ai6Rules = array_values(array_filter(
+            $policy['syscalls'] ?? [],
+            static fn (mixed $rule): bool => is_array($rule)
+                && ($rule['comment'] ?? null) === 'AI6 checker user-namespace boundary; based on Moby docker-v29.6.1 default profile',
+        ));
+
+        self::assertCount(1, $ai6Rules);
+        self::assertSame(['mount', 'umount2', 'unshare'], $ai6Rules[0]['names'] ?? null);
+        self::assertSame('SCMP_ACT_ALLOW', $ai6Rules[0]['action'] ?? null);
+        self::assertArrayNotHasKey('args', $ai6Rules[0]);
+        self::assertArrayNotHasKey('includes', $ai6Rules[0]);
+        self::assertArrayNotHasKey('excludes', $ai6Rules[0]);
     }
 
     public function test_positive_environment_and_mount_allowlists_cover_all_services(): void
@@ -357,7 +395,7 @@ final class RuntimeComposeContractTest extends TestCase
     public function test_heartbeat_mounts_are_private_tmpfs_and_persistent_targets_are_named_volumes(): void
     {
         $compose = $this->compose();
-        self::assertSame(['ai6_agent_executions', 'ai6_agent_outputs', 'ai6_checker_executions', 'ai6_checker_outputs', 'ai6_database', 'ai6_executions', 'ai6_managed', 'ai6_storage'], $this->sortedKeys($compose['volumes'] ?? []));
+        self::assertSame(['ai6_agent_executions', 'ai6_agent_outputs', 'ai6_checker_executions', 'ai6_checker_outputs', 'ai6_checker_workspace', 'ai6_database', 'ai6_executions', 'ai6_managed', 'ai6_storage'], $this->sortedKeys($compose['volumes'] ?? []));
 
         foreach (['worker', 'scheduler', 'agent', 'checker'] as $role) {
             $heartbeatMounts = array_values(array_filter(

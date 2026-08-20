@@ -239,6 +239,29 @@ final readonly class RunOrchestrator
         return $this->finishStep($job, $owner, ExecutionJobState::WAITING, 'Schritt wartet auf eine Entscheidung.');
     }
 
+    /** Park an asynchronous poll without charging it as another execution attempt. */
+    public function parkPollingStep(ExecutionJob $job, string $owner): bool
+    {
+        $updated = ExecutionJob::query()->whereKey($job->getKey())
+            ->where('state', ExecutionJobState::RUNNING->value)
+            ->where('lease_owner', $owner)
+            ->where('attempts', '>', 0)
+            ->update([
+                'state' => ExecutionJobState::WAITING,
+                'failure_code' => null,
+                'lease_owner' => null,
+                'lease_expires_at' => null,
+                'attempts' => DB::raw('attempts - 1'),
+                'updated_at' => now(),
+            ]);
+        if ($updated !== 1) {
+            return false;
+        }
+        $this->recordStepEvent($job->run_id, $job->step_type, ExecutionJobState::WAITING, 'Schritt wartet auf ein gebundenes externes Ergebnis.', 'polling:'.$job->id);
+
+        return true;
+    }
+
     /** Return a parked step to the planned state once its run no longer waits. */
     public function resumeStep(ExecutionJob $job): bool
     {

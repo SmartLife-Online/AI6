@@ -8,6 +8,26 @@ use RecursiveIteratorIterator;
 
 final readonly class ProcessIsolationVerifier implements ProcessIsolationBoundary
 {
+    public function __construct(private ProcessRuntimeProbe $runtime = new NativeProcessRuntimeProbe) {}
+
+    /** @return array<string, bool> */
+    public function checkerRuntimePromises(): array
+    {
+        return $this->runtime->checkerRuntimePromises();
+    }
+
+    public function assertCheckerRuntime(): void
+    {
+        if (DIRECTORY_SEPARATOR !== '/' || config('ai6.runtime_role') !== ExecutionRole::CHECKER->value) {
+            throw new ProcessStartRejectedException('The checker supervisor role is not isolated.');
+        }
+        foreach ($this->checkerRuntimePromises() as $promise => $satisfied) {
+            if (! $satisfied) {
+                throw new ProcessStartRejectedException('The checker runtime promise is not satisfied: '.$promise.'.');
+            }
+        }
+    }
+
     public function assertIsolated(ProcessRequest $request, ProcessPolicy $policy): void
     {
         if (DIRECTORY_SEPARATOR !== '/' || config('ai6.runtime_role') !== $policy->name->value) {
@@ -16,12 +36,20 @@ final readonly class ProcessIsolationVerifier implements ProcessIsolationBoundar
 
         $inputRoot = config('ai6.execution_mailboxes.'.$policy->name->value.'_root');
         $outputRoot = config('ai6.execution_mailboxes.'.$policy->name->value.'_output_root');
-        if (! is_string($inputRoot) || ! is_string($outputRoot)
-            || ! $this->within($request->workingDirectory, $inputRoot)
+        $workspaceRoot = $policy->name === ProcessPolicyName::CHECKER ? config('ai6.checks.runtime.workspace_root') : $inputRoot;
+        if (! is_string($inputRoot) || ! is_string($outputRoot) || ! is_string($workspaceRoot)
+            || ! $this->within($request->workingDirectory, $workspaceRoot)
             || $request->resultDirectory === null || ! $this->within($request->resultDirectory, $outputRoot)
             || $request->artifactDirectory === null || ! $this->within($request->artifactDirectory, $outputRoot)
             || realpath($inputRoot) === realpath($outputRoot)) {
             throw new ProcessStartRejectedException('The process input and output roots are not isolated.');
+        }
+
+        if ($policy->name === ProcessPolicyName::CHECKER) {
+            $this->assertCheckerTree($workspaceRoot);
+            $this->assertCheckerRuntime();
+
+            return;
         }
 
         $home = dirname((string) realpath($request->workingDirectory));
@@ -36,12 +64,6 @@ final readonly class ProcessIsolationVerifier implements ProcessIsolationBoundar
         $this->assertMount($outputRoot, false);
         $this->assertRootReadOnly();
 
-        if ($policy->name === ProcessPolicyName::CHECKER) {
-            $interfaces = array_values(array_diff(scandir('/sys/class/net') ?: [], ['.', '..', 'lo']));
-            if ($interfaces !== []) {
-                throw new ProcessStartRejectedException('The checker network boundary is not isolated.');
-            }
-        }
     }
 
     private function assertTree(string $home): void
@@ -51,6 +73,16 @@ final readonly class ProcessIsolationVerifier implements ProcessIsolationBoundar
         foreach ($iterator as $entry) {
             if ($entry->isLink() || in_array($entry->getFilename(), $forbidden, true)) {
                 throw new ProcessStartRejectedException('The process tree contains a forbidden discovery or Git path.');
+            }
+        }
+    }
+
+    private function assertCheckerTree(string $workspace): void
+    {
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($workspace, FilesystemIterator::SKIP_DOTS));
+        foreach ($iterator as $entry) {
+            if ($entry->isLink() || $entry->getFilename() === '.git') {
+                throw new ProcessStartRejectedException('The checker tree contains Git metadata or a symbolic link.');
             }
         }
     }
@@ -75,7 +107,7 @@ final readonly class ProcessIsolationVerifier implements ProcessIsolationBoundar
 
     private function assertMount(string $path, bool $readOnly): void
     {
-        $options = $this->mountOptions((string) realpath($path));
+        $options = $this->runtime->mountOptions((string) realpath($path));
         foreach (['nosuid', 'nodev', 'noexec'] as $required) {
             if (! in_array($required, $options, true)) {
                 throw new ProcessStartRejectedException('The execution mount isolation is incomplete.');
@@ -88,34 +120,9 @@ final readonly class ProcessIsolationVerifier implements ProcessIsolationBoundar
 
     private function assertRootReadOnly(): void
     {
-        if (! in_array('ro', $this->mountOptions('/'), true)) {
+        if (! in_array('ro', $this->runtime->mountOptions('/'), true)) {
             throw new ProcessStartRejectedException('The executor container root is not read-only.');
         }
-    }
-
-    /** @return list<string> */
-    private function mountOptions(string $path): array
-    {
-        $lines = file('/proc/self/mountinfo', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        $selected = null;
-        $selectedLength = -1;
-        foreach (is_array($lines) ? $lines : [] as $line) {
-            $parts = explode(' ', $line);
-            $separator = array_search('-', $parts, true);
-            if ($separator === false || ! isset($parts[4], $parts[5], $parts[$separator + 3])) {
-                continue;
-            }
-            $mount = str_replace(['\\040', '\\011', '\\134'], [' ', "\t", '\\'], $parts[4]);
-            if (($path === $mount || str_starts_with($path, rtrim($mount, '/').'/')) && strlen($mount) > $selectedLength) {
-                $selected = array_values(array_unique([...explode(',', $parts[5]), ...explode(',', $parts[$separator + 3])]));
-                $selectedLength = strlen($mount);
-            }
-        }
-        if ($selected === null) {
-            throw new ProcessStartRejectedException('The execution mount could not be verified.');
-        }
-
-        return $selected;
     }
 
     private function within(string $path, string $root): bool
