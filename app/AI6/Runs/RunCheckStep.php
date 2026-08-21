@@ -12,8 +12,19 @@ use App\AI6\Checks\CheckRunner;
 use App\AI6\Checks\DuplicateCheckExecution;
 use App\AI6\Checks\Models\CheckResultRecord;
 use App\AI6\Checks\OrphanedCheckExecution;
+use App\AI6\Git\CanonicalDiff;
+use App\AI6\Git\RunCheckpointConflict;
+use App\AI6\Git\RunCheckpointService;
+use App\AI6\Git\RunTreeService;
+use App\AI6\HumanLoop\HumanRequestRejected;
+use App\AI6\HumanLoop\ScopeApprovalService;
+use App\AI6\Projects\EffectiveProjectConfiguration;
+use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\Models\TicketApproval;
+use App\AI6\Shared\Redaction\RedactionContext;
+use App\AI6\Tickets\TicketV1Parser;
 use Illuminate\Support\Str;
 use JsonException;
 use Throwable;
@@ -35,6 +46,12 @@ final readonly class RunCheckStep
         private RunOrchestrator $orchestrator,
         private CheckRunner $checks,
         private CheckerRuntimeConfiguration $checkerRuntime,
+        private RunCheckpointService $checkpoints,
+        private RunTreeService $trees,
+        private TicketV1Parser $tickets,
+        private ScopeReconciliation $scopeReconciliation,
+        private ScopeApprovalService $scopeApprovals,
+        private EffectiveProjectConfiguration $projectConfiguration,
     ) {}
 
     public function execute(ExecutionJob $job, Run $run, string $owner): void
@@ -155,8 +172,200 @@ final readonly class RunCheckStep
             return;
         }
 
-        $this->orchestrator->finishStep($job, $owner, ExecutionJobState::SUCCEEDED, 'Checks abgeschlossen.');
-        $this->orchestrator->applyPreparedStepEffect($run->fresh() ?? $run, ExecutionStepType::CHECK);
+        $this->finalizeReviewBoundary($job, $run->fresh() ?? $run, $owner);
+    }
+
+    private function finalizeReviewBoundary(ExecutionJob $job, Run $run, string $owner): void
+    {
+        if (config('ai6.runtime_role') !== 'worker') {
+            // Unit/feature probes may exercise the explicitly reduced direct
+            // checker path outside the worker. They prove the CheckRunner
+            // contract, but they must neither create a Git checkpoint nor mark
+            // the run review-ready. The production worker performs this bound
+            // transition after collecting the same result.
+            $this->orchestrator->finishStep($job, $owner, ExecutionJobState::SUCCEEDED, 'Checks abgeschlossen; Reviewbereitschaft erfordert die Workerrolle.');
+
+            return;
+        }
+
+        try {
+            $approval = TicketApproval::query()->findOrFail($run->ticket_approval_id);
+            $readModel = TicketReadModel::query()->where('project_id', $run->project_id)
+                ->where('relative_path', $approval->relative_path)->firstOrFail();
+            $this->orchestrator->prepareGates(
+                $run,
+                $this->tickets->parse($readModel->redacted_content),
+                $readModel->ticket_contract_sha256,
+            );
+
+            $project = $run->project()->firstOrFail();
+            if (! is_string($project->project_identifier) || $project->project_identifier === '') {
+                throw new \RuntimeException('The run project identifier is unavailable.');
+            }
+            $context = new RedactionContext((string) $run->project_id, $run->id, 'review-readiness');
+            $run = $this->checkpoints->create($run, $project->project_identifier, $context);
+            $diff = $this->trees->workingTreeDiff($run, $run->initial_run_base_sha, $context);
+            $decision = $this->orchestrator->reviewReadiness($run, $diff->hash, $this->checks->currentTreeBinding($run));
+            $run = $this->orchestrator->recordReviewReadiness($run, $decision);
+        } catch (RunCheckpointConflict $conflict) {
+            $decision = new ReviewReadinessDecision([
+                new ReviewBlocker($conflict->reason, 'Ein importierter Pfad fehlt im gebundenen Checkpoint.'),
+            ], []);
+            $run = $this->orchestrator->recordReviewReadiness($run, $decision);
+            $this->orchestrator->finishStep(
+                $job,
+                $owner,
+                ExecutionJobState::FAILED,
+                'Der Checkpoint bindet nicht alle importierten Pfade.',
+                $conflict->reason,
+            );
+            $this->orchestrator->failRun($run->id);
+
+            return;
+        } catch (RunTransitionConflict $conflict) {
+            if ($conflict->reason === 'ticket_contract_drift') {
+                $decision = new ReviewReadinessDecision([
+                    new ReviewBlocker('ticket_contract_drift', 'Der freigegebene Ticketvertrag hat sich geändert.'),
+                ], []);
+                $run = $this->orchestrator->recordReviewReadiness($run, $decision);
+                $this->orchestrator->recordStepEvent(
+                    $run->id,
+                    ExecutionStepType::CHECK->value,
+                    ExecutionJobState::FAILED,
+                    $decision->blockers[0]->message,
+                    'review_blocker:ticket_contract_drift:'.$run->version,
+                );
+                $this->orchestrator->parkOnBaseDrift($run, $run->version);
+                $this->orchestrator->parkStep($job, $owner);
+
+                return;
+            }
+            $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Die Reviewbereitschaft konnte nicht gebunden werden.', $conflict->reason);
+            $this->orchestrator->failRun($run->id);
+
+            return;
+        } catch (Throwable) {
+            $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Die Reviewbereitschaft konnte nicht gebunden werden.', 'review_readiness_failed');
+            $this->orchestrator->failRun($run->id);
+
+            return;
+        }
+
+        if (! $decision->ready()) {
+            foreach ($decision->blockers as $index => $blocker) {
+                $this->orchestrator->recordStepEvent(
+                    $run->id, ExecutionStepType::CHECK->value, ExecutionJobState::FAILED,
+                    $blocker->message, 'review_blocker:'.$index.':'.$blocker->code.':'.$run->version,
+                );
+            }
+            $drift = array_filter($decision->blockers, static fn (ReviewBlocker $blocker): bool => in_array(
+                $blocker->code, ['ticket_contract_drift', 'control_head_drift'], true,
+            ));
+            if ($drift !== []) {
+                $this->orchestrator->parkOnBaseDrift($run, $run->version);
+                $this->orchestrator->parkStep($job, $owner);
+
+                return;
+            }
+            $scope = array_filter(
+                $decision->blockers,
+                static fn (ReviewBlocker $blocker): bool => $blocker->code === 'scope_unresolved',
+            );
+            if ($scope !== []) {
+                try {
+                    $this->routeUnresolvedScope($job, $run, $owner, $diff);
+                } catch (ImplementationImportException|RunTransitionConflict $conflict) {
+                    $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Die Scope-Entscheidung konnte nicht abgeschlossen werden.', $conflict->reason);
+                    $this->orchestrator->failRun($run->id);
+                } catch (Throwable) {
+                    $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Die Scope-Entscheidung konnte nicht abgeschlossen werden.', 'scope_reconciliation_failed');
+                    $this->orchestrator->failRun($run->id);
+                }
+
+                return;
+            }
+            $checks = array_filter(
+                $decision->blockers,
+                static fn (ReviewBlocker $blocker): bool => $blocker->code === 'check_snapshot_invalid'
+                    || str_starts_with($blocker->code, 'required_check_'),
+            );
+            if ($checks !== []) {
+                $this->parkOnReadinessWait($job, $run, $owner, WaitReason::CHECK_FAILURE);
+
+                return;
+            }
+            $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Reviewbereitschaft ist blockiert.', 'review_readiness_blocked');
+            $this->orchestrator->failRun($run->id);
+
+            return;
+        }
+
+        $this->orchestrator->advancePhase($run, $run->version, RunPhase::REVIEW);
+        $this->orchestrator->finishStep($job, $owner, ExecutionJobState::SUCCEEDED, 'Checks und Reviewbereitschaft abgeschlossen.');
+    }
+
+    private function parkOnReadinessWait(ExecutionJob $job, Run $run, string $owner, WaitReason $reason): void
+    {
+        $fresh = Run::query()->findOrFail($run->getKey());
+        try {
+            $this->orchestrator->transition($fresh, $fresh->version, RunState::WAITING, RunPhase::CHECK, $reason);
+        } catch (RunTransitionConflict) {
+            // Another writer already moved the run; the step still has to
+            // release its lease so the reconciler can resume it safely.
+        }
+        $this->orchestrator->parkStep($job, $owner);
+    }
+
+    private function routeUnresolvedScope(ExecutionJob $job, Run $run, string $owner, CanonicalDiff $diff): void
+    {
+        $snapshotId = ($run->config_snapshot ?? [])['snapshot_id'] ?? null;
+        if ($snapshotId !== null && ! is_string($snapshotId)) {
+            throw new RunTransitionConflict('check_snapshot_invalid', 'The bound configuration snapshot is invalid.');
+        }
+
+        $scope = $run->effective_scope_snapshot
+            ?? array_values(array_filter(($run->scope_snapshot ?? [])['ticket_files'] ?? [], 'is_string'));
+        $unresolved = $this->scopeReconciliation->unresolved($run->actual_changed_paths_snapshot ?? [], $scope);
+        $statuses = [];
+        foreach ($diff->entries as $entry) {
+            $statuses[$entry['path']] = $entry['status'];
+        }
+        $configuration = $this->projectConfiguration
+            ->bound($run->project()->firstOrFail(), $snapshotId)
+            ->configuration;
+        $slot = $this->orchestrator->ensureImplementationSlot($run);
+
+        foreach ($unresolved as $path) {
+            try {
+                $request = $this->scopeApprovals->requestOrAutoAllow(
+                    Run::query()->findOrFail($run->getKey()),
+                    $configuration,
+                    $path,
+                    ($statuses[$path] ?? null) === 'D',
+                    $slot->slot_id,
+                    $job->idempotency_key,
+                );
+            } catch (HumanRequestRejected $rejected) {
+                if ($rejected->reason === 'open_request_exists') {
+                    $this->orchestrator->parkStep($job, $owner);
+
+                    return;
+                }
+                $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Die Scope-Entscheidung konnte nicht angefordert werden.', $rejected->reason);
+                $this->orchestrator->failRun($run->id);
+
+                return;
+            }
+
+            if ($request !== null) {
+                return;
+            }
+        }
+
+        // Auto-Allow changes the evidence epoch. Replan with a fresh intent so
+        // the checks execute under that new binding instead of reusing an old
+        // mailbox order or result identity.
+        $this->orchestrator->replanStepAfterEvidenceChange($job, $owner);
     }
 
     /**

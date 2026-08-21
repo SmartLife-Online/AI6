@@ -64,6 +64,39 @@ final class RunWorkspaceGitTest extends TestCase
         self::assertNotSame($renamedHash, $modeHash);
     }
 
+    public function test_the_staged_worktree_diff_covers_added_modified_and_deleted_paths_with_full_object_ids(): void
+    {
+        $root = $this->runWorkspaceRoot();
+        $runner = $this->runWorkspaceRunner($root);
+        [$repository, $base] = $this->runWorkspaceRepository($root);
+        $context = new RedactionContext('project-1', null, 'run-worktree-diff');
+
+        self::assertNotFalse(file_put_contents($repository.'/a.txt', "modified\n"));
+        self::assertTrue(unlink($repository.'/sub/b.txt'));
+        self::assertNotFalse(file_put_contents($repository.'/new.txt', "added\n"));
+        $this->runWorkspaceGit(['add', '--all', '--no-renormalize'], $repository);
+
+        $working = $this->hasher()->fromRaw(
+            $runner->canonicalWorkingTreeDiff($repository, $base, $context)->output,
+            $context,
+        );
+        self::assertSame(['M', 'A', 'D'], array_column($working->entries, 'status'));
+        foreach ($working->entries as $entry) {
+            if ($entry['status'] !== 'D') {
+                self::assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/D', $entry['new_oid']);
+                self::assertNotSame(str_repeat('0', 64), $entry['new_oid']);
+            }
+        }
+
+        $this->runWorkspaceGit(['commit', '-m', 'complete change set'], $repository);
+        $checkpoint = trim($this->runWorkspaceGit(['rev-parse', 'HEAD'], $repository));
+        $committed = $this->hasher()->fromRaw(
+            $runner->canonicalRawDiff($repository, $base, $checkpoint, $context)->output,
+            $context,
+        );
+        self::assertSame($committed->hash, $working->hash);
+    }
+
     public function test_the_run_diff_executes_no_repository_or_host_configured_helper(): void
     {
         $root = $this->runWorkspaceRoot();

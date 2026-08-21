@@ -351,7 +351,15 @@ final readonly class RunImplementation
         array $outOfScope,
         RedactionContext $context,
     ): bool {
-        $configuration = $this->projectConfiguration->for($run->project()->firstOrFail())->configuration;
+        $snapshotId = ($run->config_snapshot ?? [])['snapshot_id'] ?? null;
+        if ($snapshotId !== null && ! is_string($snapshotId)) {
+            $this->failNamed($job, $run, $owner, 'check_snapshot_invalid', 'Der gebundene Konfigurations-Snapshot ist ungültig.');
+
+            return false;
+        }
+        $configuration = $this->projectConfiguration
+            ->bound($run->project()->firstOrFail(), $snapshotId)
+            ->configuration;
         foreach ($outOfScope as $change) {
             $decision = ScopeDecision::query()
                 ->where('run_id', $run->getKey())

@@ -326,6 +326,27 @@ final class HardenedGitRunner
         return $this->runRepositoryCommand($repository, ['rev-parse', '--quiet', '--verify', $commit.'^{tree}'], $redactionContext);
     }
 
+    /** Stage the complete worktree so untracked paths receive real object identifiers. */
+    public function stageRunCheckpoint(
+        string $worktree,
+        string $effectLockName,
+        RedactionContext $redactionContext,
+    ): ProcessResult {
+        return $this->runEffectingRepositoryCommand(
+            $worktree,
+            ['add', '--all', '--no-renormalize'],
+            $effectLockName,
+            $redactionContext,
+        );
+    }
+
+    public function resolveFirstParent(string $repository, string $commit, RedactionContext $redactionContext): ProcessResult
+    {
+        $this->assertOid($commit);
+
+        return $this->runRepositoryCommand($repository, ['rev-parse', '--quiet', '--verify', $commit.'^1'], $redactionContext);
+    }
+
     public function canonicalRawDiff(
         string $repository,
         string $fromCommit,
@@ -337,6 +358,27 @@ final class HardenedGitRunner
 
         return $this->runRepositoryCommand($repository, [
             'diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--raw', '-z', '--no-abbrev', $fromCommit, $toCommit,
+        ], $redactionContext);
+    }
+
+    /** Compare a bound commit with the complete index/worktree state without mutating it. */
+    public function canonicalWorkingTreeDiff(
+        string $repository,
+        string $fromCommit,
+        RedactionContext $redactionContext,
+    ): ProcessResult {
+        $this->assertOid($fromCommit);
+
+        return $this->runRepositoryCommand($repository, [
+            'diff', '--cached', '--no-ext-diff', '--no-textconv', '--no-renames', '--raw', '-z', '--no-abbrev', $fromCommit,
+        ], $redactionContext);
+    }
+
+    /** Read the complete index/worktree status, including every untracked path. */
+    public function workingTreeStatus(string $repository, RedactionContext $redactionContext): ProcessResult
+    {
+        return $this->runRepositoryCommand($repository, [
+            '--no-optional-locks', 'status', '--porcelain=v2', '-z', '--untracked-files=all',
         ], $redactionContext);
     }
 

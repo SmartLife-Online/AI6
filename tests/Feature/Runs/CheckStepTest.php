@@ -10,13 +10,21 @@ use App\AI6\Checks\CheckResultState;
 use App\AI6\Checks\CheckRunner;
 use App\AI6\Checks\CheckTreeBinding;
 use App\AI6\Checks\Models\CheckResultRecord;
+use App\AI6\Git\CanonicalJson;
+use App\AI6\Git\HardenedGitRunner;
 use App\AI6\Git\IsolatedTreeExporter;
+use App\AI6\Git\RunCheckpointService;
+use App\AI6\HumanLoop\HumanRequestService;
+use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Projects\EffectiveProjectConfiguration;
+use App\AI6\Projects\Models\TicketReadModel;
+use App\AI6\Projects\ProjectRole;
 use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\ExecutionStepType;
 use App\AI6\Runs\Jobs\ExecuteRunStep;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\Models\RunCheckpoint;
 use App\AI6\Runs\RunCheckStep;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunPhase;
@@ -26,12 +34,17 @@ use App\AI6\Runs\WaitReason;
 use App\AI6\Shared\Process\ExecutionMailboxFactory;
 use App\AI6\Shared\Process\ExecutionRole;
 use App\AI6\Shared\Process\MailboxMessageType;
+use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Security\SecurityMeasure;
 use App\AI6\Shared\Security\SecurityPolicy;
 use App\AI6\Shared\Security\SecurityProfile;
+use App\AI6\Tickets\TicketReadModelProjector;
+use App\AI6\Tickets\TicketValidationProfile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use PHPUnit\Framework\Attributes\After;
 use Tests\Feature\Checks\BuildsCheckFixture;
+use Tests\Feature\Git\BuildsRunWorkspaceGitFixture;
 use Tests\Feature\Tickets\TicketUiTestCase;
 
 /**
@@ -42,6 +55,13 @@ use Tests\Feature\Tickets\TicketUiTestCase;
 final class CheckStepTest extends TicketUiTestCase
 {
     use BuildsCheckFixture;
+    use BuildsRunWorkspaceGitFixture;
+
+    #[After]
+    public function removeGitRunnerFixture(): void
+    {
+        $this->removeRunWorkspaceFixture();
+    }
 
     /** The implement step hands over to a planned check step in the check phase. */
     public function test_a_finished_implement_step_plans_the_check_step_in_the_check_phase(): void
@@ -50,7 +70,8 @@ final class CheckStepTest extends TicketUiTestCase
         $this->bindCheckRuntime(['probe-ok' => $this->probeProfile(['ai6-check-ok.php'])]);
         $prepared = $this->preparedCheckRun('AI6-021-PLAN', ['probe-ok']);
 
-        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeImplement($prepared['run'])->state);
+        $implemented = $this->executeImplement($prepared['run']);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $implemented->state, (string) $implemented->failure_code);
 
         $run = $prepared['run']->fresh();
         self::assertInstanceOf(Run::class, $run);
@@ -387,18 +408,285 @@ final class CheckStepTest extends TicketUiTestCase
         self::assertSame(0, CheckResultRecord::query()->where('run_id', $prepared['run']->id)->count());
     }
 
+    public function test_the_worker_boundary_parks_ticket_drift_without_persisting_gates(): void
+    {
+        Mail::fake();
+        $this->bindCheckRuntime(['probe-ok' => $this->probeProfile(['ai6-check-ok.php'])]);
+        $prepared = $this->preparedCheckRun('AI6-022-WORKER-DRIFT', ['probe-ok']);
+        $this->executeImplement($prepared['run']);
+        $job = $this->checkJob($prepared['run']->fresh() ?? $prepared['run']);
+        self::assertInstanceOf(ExecutionJob::class, $job);
+        $readModel = TicketReadModel::query()->where('project_id', $prepared['run']->project_id)->firstOrFail();
+        $changed = str_replace('Ziel des Tickets.', 'Geändertes Ziel des Tickets.', $readModel->redacted_content);
+        $projection = $this->app->make(TicketReadModelProjector::class)->project(
+            $changed,
+            $readModel->relative_path,
+            TicketValidationProfile::GENERIC_V1,
+        );
+        self::assertNotNull($projection->contractHash);
+        self::assertSame(1, DB::table('ticket_read_models')->where('id', $readModel->id)->update([
+            'control_operation_id' => $prepared['run']->status_operation_id,
+            'control_commit' => $prepared['run']->run_base_sha,
+            'blob_sha' => hash('sha256', 'blob '.strlen($changed)."\0".$changed),
+            'redacted_content' => $changed,
+            'ticket_contract_sha256' => $projection->contractHash,
+            'document_state' => 'valid',
+            'editor_eligible' => true,
+            'approval_eligible' => true,
+            'generated_at' => now(),
+            'updated_at' => now(),
+        ]));
+        config(['ai6.runtime_role' => 'worker']);
+
+        $this->deliver($job);
+
+        $run = $prepared['run']->fresh();
+        self::assertInstanceOf(Run::class, $run);
+        self::assertSame(RunState::WAITING, $run->state);
+        self::assertSame(WaitReason::GIT_BASE_CHANGED, $run->wait_reason);
+        self::assertSame('blocked', $run->review_readiness_state);
+        self::assertSame('ticket_contract_drift', $run->review_blockers[0]['code'] ?? null);
+        self::assertSame(ExecutionJobState::WAITING, $job->fresh()?->state);
+        self::assertDatabaseCount('run_gates', 0);
+    }
+
+    public function test_the_worker_recovers_a_committed_checkpoint_and_reaches_review_readiness(): void
+    {
+        Mail::fake();
+        $this->bindCheckRuntime(['probe-ok' => $this->probeProfile(['ai6-check-ok.php'])]);
+        $prepared = $this->preparedCheckRun('AI6-022-WORKER-READY', ['probe-ok'], true);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeImplement($prepared['run'])->state);
+        $job = $this->checkJob($prepared['run']->fresh() ?? $prepared['run']);
+        self::assertInstanceOf(ExecutionJob::class, $job);
+
+        // Reproduce a worker crash after Git committed the complete tree but
+        // before the orchestrator bound that checkpoint revision.
+        $this->gitOutput(['add', '--all', '--no-renormalize'], $prepared['worktree']);
+        $this->gitOutput(['commit', '-m', 'checkpoint before simulated crash'], $prepared['worktree']);
+        $runner = $this->runWorkspaceRunner($this->runWorkspaceRoot());
+        $this->app->instance(HardenedGitRunner::class, $runner);
+        $this->app->forgetInstance(RunCheckpointService::class);
+        $context = new RedactionContext((string) $prepared['run']->project_id, $prepared['run']->id, 'checkpoint-recovery-test');
+        $probe = $runner->canonicalRawDiff(
+            $prepared['worktree'],
+            $prepared['run']->initial_run_base_sha,
+            $this->gitOutput(['rev-parse', 'HEAD'], $prepared['worktree']),
+            $context,
+        );
+        self::assertTrue($probe->succeeded(), $probe->errorOutput);
+        $recovered = $this->app->make(RunCheckpointService::class)->create(
+            $prepared['run']->fresh() ?? $prepared['run'],
+            (string) $prepared['run']->project()->value('project_identifier'),
+            $context,
+        );
+        self::assertSame($this->gitOutput(['rev-parse', 'HEAD'], $prepared['worktree']), $recovered->checkpoint_commit_sha);
+        config(['ai6.runtime_role' => 'worker']);
+
+        $this->deliver($job);
+
+        $run = $prepared['run']->fresh();
+        self::assertInstanceOf(Run::class, $run);
+        self::assertSame(RunState::RUNNING, $run->state, (string) $job->fresh()?->failure_code);
+        self::assertSame(RunPhase::REVIEW, $run->phase);
+        self::assertSame('ready', $run->review_readiness_state);
+        self::assertSame([], $run->review_blockers);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $job->fresh()?->state, (string) $job->fresh()?->failure_code);
+        self::assertSame(2, RunCheckpoint::query()->where('run_id', $run->id)->count());
+        self::assertSame($this->gitOutput(['rev-parse', 'HEAD'], $prepared['worktree']), $run->checkpoint_commit_sha);
+    }
+
+    public function test_the_worker_parks_unresolved_scope_for_approval_instead_of_failing_the_run(): void
+    {
+        Mail::fake();
+        $this->bindCheckRuntime(['probe-ok' => $this->probeProfile(['ai6-check-ok.php'])]);
+        config(['ai6.project_config.server_defaults.scope.unlisted_paths' => 'require_approval']);
+        $this->app->forgetInstance(EffectiveProjectConfiguration::class);
+        $prepared = $this->preparedCheckRun('AI6-022-WORKER-SCOPE', ['probe-ok'], true);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeImplement($prepared['run'])->state);
+        $job = $this->checkJob($prepared['run']->fresh() ?? $prepared['run']);
+        self::assertInstanceOf(ExecutionJob::class, $job);
+        $run = $prepared['run']->fresh() ?? $prepared['run'];
+        $run = $this->app->make(RunOrchestrator::class)->bindActualChangedPaths(
+            $run,
+            $run->version,
+            ['outside/Unresolved.php'],
+            $this->app->make(CanonicalJson::class),
+        );
+        self::assertTrue(mkdir($prepared['worktree'].'/outside', 0700, true));
+        self::assertNotFalse(file_put_contents($prepared['worktree'].'/outside/Unresolved.php', "<?php\n"));
+        $this->gitOutput(['add', '--all', '--no-renormalize'], $prepared['worktree']);
+        $this->gitOutput(['commit', '-m', 'checkpoint before scope reconciliation'], $prepared['worktree']);
+        $runner = $this->runWorkspaceRunner($this->runWorkspaceRoot());
+        $this->app->instance(HardenedGitRunner::class, $runner);
+        $this->app->forgetInstance(RunCheckpointService::class);
+        $context = new RedactionContext((string) $run->project_id, $run->id, 'scope-checkpoint-recovery-test');
+        $this->app->make(RunCheckpointService::class)->create(
+            $run,
+            (string) $run->project()->value('project_identifier'),
+            $context,
+        );
+        config(['ai6.runtime_role' => 'worker']);
+
+        $this->deliver($job);
+
+        $fresh = $run->fresh();
+        self::assertInstanceOf(Run::class, $fresh);
+        self::assertSame(RunState::WAITING, $fresh->state);
+        self::assertSame(WaitReason::SCOPE_APPROVAL, $fresh->wait_reason);
+        self::assertSame('blocked', $fresh->review_readiness_state);
+        self::assertSame('scope_unresolved', $fresh->review_blockers[0]['code'] ?? null);
+        self::assertSame(ExecutionJobState::WAITING, $job->fresh()?->state);
+        $firstCheckEpoch = CheckResultRecord::query()->where('run_id', $fresh->id)->value('evidence_epoch');
+        self::assertIsInt($firstCheckEpoch);
+
+        $request = HumanRequest::query()->where('run_id', $fresh->id)->where('kind', 'scope_approval')->firstOrFail();
+        self::assertSame(['outside/Unresolved.php'], $request->affected_paths);
+        $approver = $this->createUser();
+        $this->addMembership($approver, $fresh->project()->firstOrFail(), ProjectRole::APPROVER);
+        $this->app->make(HumanRequestService::class)->answer(
+            $request,
+            $approver,
+            $request->bound_run_version,
+            $request->bound_ticket_contract,
+            $request->bound_checkpoint,
+            $request->bound_scope,
+            $request->bound_agent_slot,
+            $request->bound_requested_effect,
+            'approve',
+        );
+
+        $resumed = $fresh->fresh();
+        self::assertInstanceOf(Run::class, $resumed);
+        self::assertSame(RunState::RUNNING, $resumed->state);
+        self::assertContains('outside/Unresolved.php', $resumed->effective_scope_snapshot);
+        self::assertSame(ExecutionJobState::PLANNED, $job->fresh()->state);
+
+        // Reproduce the productive empty checkpoint commit without requiring
+        // the POSIX effect-lock runtime on this Windows proof.
+        $this->gitOutput(['commit', '--allow-empty', '-m', 'checkpoint after scope approval'], $prepared['worktree']);
+        $resumed = $this->app->make(RunCheckpointService::class)->create(
+            $resumed,
+            (string) $resumed->project()->value('project_identifier'),
+            new RedactionContext((string) $resumed->project_id, $resumed->id, 'scope-resume-checkpoint-test'),
+        );
+
+        config(['ai6.runtime_role' => 'worker']);
+        $resumedJob = $job->fresh();
+        self::assertInstanceOf(ExecutionJob::class, $resumedJob);
+        $this->deliver($resumedJob);
+
+        $ready = $resumed->fresh();
+        self::assertInstanceOf(Run::class, $ready);
+        self::assertSame('ready', $ready->review_readiness_state, (string) $resumedJob->fresh()?->failure_code.' / '.($resumedJob->fresh()?->state->value ?? 'missing'));
+        self::assertSame(RunPhase::REVIEW, $ready->phase);
+        self::assertSame([$firstCheckEpoch, $ready->evidence_epoch], CheckResultRecord::query()->where('run_id', $ready->id)
+            ->orderBy('evidence_epoch')->pluck('evidence_epoch')->all());
+    }
+
+    public function test_an_imported_path_ignored_by_the_project_cannot_disappear_from_the_checkpoint(): void
+    {
+        Mail::fake();
+        $this->bindCheckRuntime(['probe-ok' => $this->probeProfile(['ai6-check-ok.php'])]);
+        $prepared = $this->preparedCheckRun('AI6-022-IGNORED-CHECKPOINT', ['probe-ok'], true);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeImplement($prepared['run'])->state);
+        $job = $this->checkJob($prepared['run']->fresh() ?? $prepared['run']);
+        self::assertInstanceOf(ExecutionJob::class, $job);
+
+        self::assertNotFalse(file_put_contents($prepared['worktree'].'/.gitignore', "ignored.php\n"));
+        self::assertNotFalse(file_put_contents($prepared['worktree'].'/ignored.php', "<?php\n"));
+        $run = $prepared['run']->fresh() ?? $prepared['run'];
+        $run = $this->app->make(RunOrchestrator::class)->bindActualChangedPaths(
+            $run,
+            $run->version,
+            ['ignored.php'],
+            $this->app->make(CanonicalJson::class),
+        );
+        $this->gitOutput(['add', '--all', '--no-renormalize'], $prepared['worktree']);
+        $this->gitOutput(['commit', '-m', 'checkpoint missing ignored path'], $prepared['worktree']);
+        $this->app->instance(HardenedGitRunner::class, $this->runWorkspaceRunner($this->runWorkspaceRoot()));
+        $this->app->forgetInstance(RunCheckpointService::class);
+        config(['ai6.runtime_role' => 'worker']);
+
+        $this->deliver($job);
+
+        $fresh = $run->fresh();
+        self::assertInstanceOf(Run::class, $fresh);
+        self::assertSame(RunState::FAILED, $fresh->state);
+        self::assertSame('blocked', $fresh->review_readiness_state);
+        self::assertSame('checkpoint_path_missing', $fresh->review_blockers[0]['code'] ?? null);
+        self::assertSame('checkpoint_path_missing', $job->fresh()?->failure_code);
+    }
+
+    public function test_the_worker_auto_allows_an_unlisted_scope_path_and_rechecks_the_new_epoch(): void
+    {
+        Mail::fake();
+        $this->bindCheckRuntime(['probe-ok' => $this->probeProfile(['ai6-check-ok.php'])]);
+        $prepared = $this->preparedCheckRun('AI6-022-WORKER-AUTO-SCOPE', ['probe-ok'], true);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeImplement($prepared['run'])->state);
+        $job = $this->checkJob($prepared['run']->fresh() ?? $prepared['run']);
+        self::assertInstanceOf(ExecutionJob::class, $job);
+        $run = $prepared['run']->fresh() ?? $prepared['run'];
+        $run = $this->app->make(RunOrchestrator::class)->bindActualChangedPaths(
+            $run,
+            $run->version,
+            ['outside/Auto.php'],
+            $this->app->make(CanonicalJson::class),
+        );
+        self::assertTrue(mkdir($prepared['worktree'].'/outside', 0700, true));
+        self::assertNotFalse(file_put_contents($prepared['worktree'].'/outside/Auto.php', "<?php\n"));
+        $this->gitOutput(['add', '--all', '--no-renormalize'], $prepared['worktree']);
+        $this->gitOutput(['commit', '-m', 'checkpoint before automatic scope'], $prepared['worktree']);
+        $this->app->instance(HardenedGitRunner::class, $this->runWorkspaceRunner($this->runWorkspaceRoot()));
+        $this->app->forgetInstance(RunCheckpointService::class);
+        $run = $this->app->make(RunCheckpointService::class)->create(
+            $run,
+            (string) $run->project()->value('project_identifier'),
+            new RedactionContext((string) $run->project_id, $run->id, 'auto-scope-checkpoint-test'),
+        );
+        config(['ai6.runtime_role' => 'worker']);
+
+        $this->deliver($job);
+
+        $extended = $run->fresh();
+        self::assertInstanceOf(Run::class, $extended);
+        self::assertSame(RunState::RUNNING, $extended->state);
+        self::assertContains('outside/Auto.php', $extended->effective_scope_snapshot);
+        self::assertSame(0, HumanRequest::query()->where('run_id', $extended->id)->count());
+        self::assertSame(ExecutionJobState::PLANNED, $job->fresh()->state);
+        self::assertNull($job->fresh()?->intent);
+
+        $this->gitOutput(['commit', '--allow-empty', '-m', 'checkpoint after automatic scope'], $prepared['worktree']);
+        $extended = $this->app->make(RunCheckpointService::class)->create(
+            $extended,
+            (string) $extended->project()->value('project_identifier'),
+            new RedactionContext((string) $extended->project_id, $extended->id, 'auto-scope-resume-test'),
+        );
+        $replanned = $job->fresh();
+        self::assertInstanceOf(ExecutionJob::class, $replanned);
+        $this->deliver($replanned);
+
+        $ready = $extended->fresh();
+        self::assertInstanceOf(Run::class, $ready);
+        self::assertSame('ready', $ready->review_readiness_state, (string) $replanned->fresh()?->failure_code);
+        self::assertSame(RunPhase::REVIEW, $ready->phase);
+    }
+
     /**
      * A run whose bound snapshot names the check profiles under test.
      *
      * @param  list<string>  $profiles
      * @return array{run: Run, worktree: string}
      */
-    private function preparedCheckRun(string $ticketId, array $profiles): array
+    private function preparedCheckRun(string $ticketId, array $profiles, bool $coherentGitBinding = false): array
     {
         config(['ai6.project_config.server_defaults.checks.before_review' => $profiles]);
         $this->app->forgetInstance(EffectiveProjectConfiguration::class);
 
-        $prepared = $this->checkableRun($ticketId);
+        $prepared = $this->checkableRun($ticketId, $coherentGitBinding);
+        // These AI6-021 contract tests execute the reduced in-process checker
+        // probe directly; they do not impersonate the productive worker-side
+        // AI6-022 readiness boundary.
+        config(['ai6.runtime_role' => 'testing']);
         $snapshot = $prepared['run']->config_snapshot;
         self::assertIsArray($snapshot);
         self::assertSame($profiles, $snapshot['values']['checks']['before_review'] ?? null, 'The run snapshot must carry the profiles under test.');
@@ -413,6 +701,7 @@ final class CheckStepTest extends TicketUiTestCase
         $this->app->make(IsolatedTreeExporter::class)->export((string) $run->worktree_path, $tree.'/tree', true);
         $key = CheckResult::key(
             $run->id,
+            $run->evidence_epoch,
             CheckPhase::BEFORE_REVIEW,
             'probe-ok',
             $this->app->make(CheckTreeBinding::class)->hash($tree.'/tree'),

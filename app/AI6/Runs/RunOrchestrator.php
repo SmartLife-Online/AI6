@@ -2,6 +2,10 @@
 
 namespace App\AI6\Runs;
 
+use App\AI6\Auth\Models\User;
+use App\AI6\Checks\CheckPhase;
+use App\AI6\Checks\CheckResultState;
+use App\AI6\Checks\Models\CheckResultRecord;
 use App\AI6\Git\CanonicalJson;
 use App\AI6\Git\ControlOperationPhase;
 use App\AI6\Git\ControlOperationState;
@@ -10,14 +14,20 @@ use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\TicketMutation;
 use App\AI6\Git\RunBranchName;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Projects\Models\TicketReadModel;
+use App\AI6\Projects\Policies\ProjectPolicy;
+use App\AI6\Projects\ProjectAction;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunAgent;
+use App\AI6\Runs\Models\RunCheckpoint;
 use App\AI6\Runs\Models\RunEvent;
+use App\AI6\Runs\Models\RunGate;
 use App\AI6\Runs\Models\ScopeDecision;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
+use App\AI6\Tickets\TicketDocument;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -30,6 +40,8 @@ final readonly class RunOrchestrator
         private RunStepConfiguration $stepConfiguration,
         private RunPreflight $preflight,
         private ExecutionStepDispatcher $dispatcher,
+        private ScopeReconciliation $scopeReconciliation,
+        private ProjectPolicy $projectPolicy,
     ) {}
 
     /**
@@ -263,20 +275,51 @@ final readonly class RunOrchestrator
     }
 
     /** Return a parked step to the planned state once its run no longer waits. */
-    public function resumeStep(ExecutionJob $job): bool
+    public function resumeStep(ExecutionJob $job, bool $clearIntent = false): bool
+    {
+        $values = [
+            'state' => ExecutionJobState::PLANNED,
+            'lease_owner' => null,
+            'lease_expires_at' => null,
+            'updated_at' => now(),
+        ];
+        if ($clearIntent) {
+            $values['intent'] = null;
+        }
+        $updated = ExecutionJob::query()->whereKey($job->getKey())
+            ->where('state', ExecutionJobState::WAITING->value)->update($values);
+        if ($updated !== 1) {
+            return false;
+        }
+
+        $this->recordStepEvent($job->run_id, $job->step_type, ExecutionJobState::PLANNED, 'Schritt erneut geplant.', 'planned:'.$job->id.':'.$job->attempts);
+
+        return true;
+    }
+
+    /** Replan a claimed check step after its evidence binding changed in-place. */
+    public function replanStepAfterEvidenceChange(ExecutionJob $job, string $owner): bool
     {
         $updated = ExecutionJob::query()->whereKey($job->getKey())
-            ->where('state', ExecutionJobState::WAITING->value)->update([
+            ->where('state', ExecutionJobState::RUNNING->value)
+            ->where('lease_owner', $owner)
+            ->where('attempts', '>', 0)
+            ->update([
                 'state' => ExecutionJobState::PLANNED,
+                'intent' => null,
+                'failure_code' => null,
                 'lease_owner' => null,
                 'lease_expires_at' => null,
+                'attempts' => DB::raw('attempts - 1'),
                 'updated_at' => now(),
             ]);
         if ($updated !== 1) {
             return false;
         }
 
-        $this->recordStepEvent($job->run_id, $job->step_type, ExecutionJobState::PLANNED, 'Schritt erneut geplant.', 'planned:'.$job->id.':'.$job->attempts);
+        $fresh = ExecutionJob::query()->findOrFail($job->getKey());
+        $this->recordStepEvent($job->run_id, $job->step_type, ExecutionJobState::PLANNED, 'Schritt nach Evidenzänderung erneut geplant.', 'evidence-replan:'.$job->id.':'.$fresh->attempts);
+        $this->redeliverStep($fresh);
 
         return true;
     }
@@ -538,19 +581,55 @@ final readonly class RunOrchestrator
                 throw new RunTransitionConflict('invalid_checkpoint_binding', 'The checkpoint binding is invalid.');
             }
         }
-        $updated = Run::query()->whereKey($run->getKey())->where('version', $expectedVersion)
-            ->whereNull('checkpoint_commit_sha')->whereNull('checkpoint_tree_sha')->whereNull('checkpoint_diff_hash')->update([
+
+        return DB::transaction(function () use ($run, $expectedVersion, $commitSha, $treeSha, $diffHash): Run {
+            DB::table('runs')->where('id', $run->getKey())->lockForUpdate()->first();
+            $fresh = Run::query()->findOrFail($run->getKey());
+            if ($fresh->version !== $expectedVersion) {
+                throw new RunTransitionConflict('stale_run_version', 'The run changed before its checkpoint could be bound.');
+            }
+            if ($fresh->checkpoint_commit_sha === $commitSha && $fresh->checkpoint_tree_sha === $treeSha
+                && $fresh->checkpoint_diff_hash === $diffHash && $this->hasEffectiveCheckpoint($fresh)) {
+                return $fresh;
+            }
+            if (RunCheckpoint::query()->where('run_id', $fresh->getKey())->where('commit_sha', $commitSha)->exists()) {
+                throw new RunTransitionConflict('checkpoint_rollback', 'A superseded checkpoint cannot become current again.');
+            }
+
+            $generation = ((int) RunCheckpoint::query()->where('run_id', $fresh->getKey())->max('generation')) + 1;
+            RunCheckpoint::query()->where('run_id', $fresh->getKey())->where('is_current', true)->update(['is_current' => false]);
+            RunCheckpoint::query()->create([
+                'id' => (string) Str::uuid(),
+                'run_id' => $fresh->id,
+                'generation' => $generation,
+                'predecessor_commit_sha' => $fresh->checkpoint_commit_sha,
+                'commit_sha' => $commitSha,
+                'tree_sha' => $treeSha,
+                'diff_hash' => $diffHash,
+                'evidence_epoch' => $fresh->evidence_epoch,
+                'is_current' => true,
+            ]);
+
+            $updated = Run::query()->whereKey($fresh->getKey())->where('version', $expectedVersion)->update([
                 'checkpoint_commit_sha' => $commitSha,
                 'checkpoint_tree_sha' => $treeSha,
                 'checkpoint_diff_hash' => $diffHash,
-                'checkpoint_evidence_epoch' => DB::raw('evidence_epoch'),
+                'checkpoint_evidence_epoch' => $fresh->evidence_epoch,
+                'review_readiness_state' => null,
+                'review_blockers' => null,
+                'review_readiness_assessed_at' => null,
                 'version' => $expectedVersion + 1,
+                'updated_at' => now(),
             ]);
-        if ($updated !== 1) {
-            throw new RunTransitionConflict('stale_run_version', 'The run changed before its checkpoint could be bound.');
-        }
+            if ($updated !== 1) {
+                throw new RunTransitionConflict('stale_run_version', 'The run changed before its checkpoint could be bound.');
+            }
+            if ($fresh->checkpoint_commit_sha !== null && ! hash_equals($fresh->checkpoint_commit_sha, $commitSha)) {
+                $this->invalidateGateEvidence($fresh->id, 'checkpoint_changed:'.$commitSha);
+            }
 
-        return Run::query()->findOrFail($run->getKey());
+            return Run::query()->findOrFail($fresh->getKey());
+        });
     }
 
     public function transition(
@@ -712,7 +791,7 @@ final readonly class RunOrchestrator
             ->where('run_id', $run->getKey())
             ->where('idempotency_key', $boundStepKey)
             ->first();
-        if ($job instanceof ExecutionJob && $this->resumeStep($job)) {
+        if ($job instanceof ExecutionJob && $this->resumeStep($job, $reason === WaitReason::SCOPE_APPROVAL)) {
             $this->redeliverStep($job);
         }
 
@@ -891,6 +970,9 @@ final readonly class RunOrchestrator
                 'effective_scope_hash' => $effective->hash,
                 'added_scope_paths_count' => DB::raw('added_scope_paths_count + 1'),
                 'evidence_epoch' => DB::raw('evidence_epoch + 1'),
+                'review_readiness_state' => null,
+                'review_blockers' => null,
+                'review_readiness_assessed_at' => null,
                 'version' => DB::raw('version + 1'),
                 'updated_at' => now(),
             ]);
@@ -898,6 +980,9 @@ final readonly class RunOrchestrator
                 throw new RunTransitionConflict('stale_run_version', 'The run changed before the scope decision could be bound.');
             }
             $this->recordEvidenceInvalidation($fresh->getKey(), 'scope_extension:'.$path);
+            RunGate::query()->where('run_id', $fresh->getKey())->where('state', GateState::CLOSED->value)->update([
+                'state' => GateState::OPEN, 'invalidated_at' => now(), 'updated_at' => now(),
+            ]);
 
             return Run::query()->findOrFail($fresh->getKey());
         });
@@ -930,11 +1015,22 @@ final readonly class RunOrchestrator
         $updated = Run::query()->whereKey($run->getKey())->where('version', $expectedVersion)->update([
             'actual_changed_paths_snapshot' => $paths,
             'actual_changed_paths_hash' => $hash,
+            'evidence_epoch' => $run->checkpoint_commit_sha === null ? $run->evidence_epoch : DB::raw('evidence_epoch + 1'),
+            'review_readiness_state' => null,
+            'review_blockers' => null,
+            'review_readiness_assessed_at' => null,
             'version' => $expectedVersion + 1,
             'updated_at' => now(),
         ]);
         if ($updated !== 1) {
             throw new RunTransitionConflict('stale_run_version', 'The run changed before the actual paths could be bound.');
+        }
+
+        if ($run->checkpoint_commit_sha !== null) {
+            $this->recordEvidenceInvalidation($run->getKey(), 'implementation_diff:'.$hash);
+            RunGate::query()->where('run_id', $run->getKey())->where('state', GateState::CLOSED->value)->update([
+                'state' => GateState::OPEN, 'invalidated_at' => now(), 'updated_at' => now(),
+            ]);
         }
 
         return Run::query()->findOrFail($run->getKey());
@@ -1047,6 +1143,9 @@ final readonly class RunOrchestrator
                 'effective_scope_snapshot' => $hasEffectiveState ? $effective->effectiveScope : null,
                 'effective_scope_hash' => $hasEffectiveState ? $effective->hash : null,
                 'evidence_epoch' => DB::raw('evidence_epoch + 1'),
+                'review_readiness_state' => null,
+                'review_blockers' => null,
+                'review_readiness_assessed_at' => null,
                 'version' => DB::raw('version + 1'),
                 'updated_at' => now(),
             ]);
@@ -1054,9 +1153,158 @@ final readonly class RunOrchestrator
                 throw new RunTransitionConflict('stale_run_version', 'The run changed before the contract amendment could be bound.');
             }
             $this->recordEvidenceInvalidation($fresh->getKey(), 'contract_amendment:'.$newRunBaseSha);
+            RunGate::query()->where('run_id', $fresh->getKey())->where('state', GateState::CLOSED->value)->update([
+                'state' => GateState::OPEN, 'invalidated_at' => now(), 'updated_at' => now(),
+            ]);
 
             return Run::query()->findOrFail($fresh->getKey());
         });
+    }
+
+    /** Persist every gate declared by the approved ticket exactly once. */
+    public function prepareGates(Run $run, TicketDocument $ticket, ?string $observedContract = null): void
+    {
+        $contract = $run->ticket_contract_sha256
+            ?? TicketApproval::query()->whereKey($run->ticket_approval_id)->value('ticket_contract_sha256');
+        if (! is_string($contract) || preg_match('/\A[0-9a-f]{64}\z/D', $contract) !== 1) {
+            throw new RunTransitionConflict('gate_contract_missing', 'The approved ticket contract is not bound.');
+        }
+        if ($observedContract !== null && ! hash_equals($contract, $observedContract)) {
+            throw new RunTransitionConflict('ticket_contract_drift', 'The current ticket contract differs from the approved contract.');
+        }
+
+        foreach ([GateKind::MANUAL->value => $ticket->manualGateIds, GateKind::EXTERNAL->value => $ticket->externalGateIds] as $kind => $ids) {
+            foreach ($ids as $gateId) {
+                $gate = RunGate::query()->firstOrCreate(['run_id' => $run->id, 'gate_id' => $gateId], [
+                    'id' => (string) Str::uuid(),
+                    'kind' => $kind,
+                    'state' => GateState::OPEN,
+                    'ticket_contract_sha256' => $contract,
+                ]);
+                if (! hash_equals($gate->ticket_contract_sha256, $contract)) {
+                    $gate->forceFill([
+                        'state' => GateState::OPEN,
+                        'ticket_contract_sha256' => $contract,
+                        'invalidated_at' => now(),
+                    ])->save();
+                }
+            }
+        }
+    }
+
+    public function authorizeGateEvidence(Run $run, string $gateId, int $actorId, string $reference): RunGate
+    {
+        $actor = User::query()->find($actorId);
+        $project = Project::query()->find($run->project_id);
+        if (! $actor instanceof User || ! $project instanceof Project
+            || ! $this->projectPolicy->decide(ProjectAction::AUTHORIZE_GATE_EVIDENCE, $actor, $project)) {
+            throw new RunTransitionConflict('gate_evidence_unauthorized', 'The actor may not authorize gate evidence for this project.');
+        }
+        if (preg_match('/\A[A-Za-z0-9][A-Za-z0-9._:\/@+-]{0,511}\z/D', $reference) !== 1
+            || preg_match('/\A(?:MG|EXT)-[0-9]{2}\z/D', $gateId) !== 1
+            || ! $this->hasEffectiveCheckpoint($run) || $run->checkpoint_commit_sha === null) {
+            throw new RunTransitionConflict('gate_evidence_binding_invalid', 'Gate evidence requires the current ticket contract and checkpoint.');
+        }
+        $gate = RunGate::query()->where('run_id', $run->id)->where('gate_id', $gateId)->firstOrFail();
+        $gate->forceFill([
+            'state' => GateState::CLOSED,
+            'evidence_reference' => $reference,
+            'evidence_ticket_contract_sha256' => $gate->ticket_contract_sha256,
+            'checkpoint_commit_sha' => $run->checkpoint_commit_sha,
+            'authorized_by' => $actorId,
+            'authorized_at' => now(),
+            'invalidated_at' => null,
+        ])->save();
+
+        return $gate->fresh() ?? $gate;
+    }
+
+    /** The one application-wide review-readiness decision. */
+    public function reviewReadiness(Run $run, string $observedDiffHash, string $observedTreeBinding): ReviewReadinessDecision
+    {
+        $blockers = [];
+        $scope = $run->effective_scope_snapshot
+            ?? array_values(array_filter(($run->scope_snapshot ?? [])['ticket_files'] ?? [], 'is_string'));
+        foreach ($this->scopeReconciliation->unresolved($run->actual_changed_paths_snapshot ?? [], $scope) as $path) {
+            $blockers[] = new ReviewBlocker('scope_unresolved', 'Geänderter Pfad ist im wirksamen Scope ungeklärt: '.$path);
+        }
+
+        $profiles = ($run->config_snapshot ?? [])['values']['checks'][CheckPhase::BEFORE_REVIEW->value] ?? null;
+        if (! is_array($profiles) || ! array_is_list($profiles)) {
+            $blockers[] = new ReviewBlocker('check_snapshot_invalid', 'Der gebundene Konfigurations-Snapshot enthält keine gültige before_review-Checkliste.');
+        } else {
+            foreach (array_values(array_unique(array_filter($profiles, 'is_string'))) as $profile) {
+                $result = CheckResultRecord::query()->where('run_id', $run->id)
+                    ->where('phase', CheckPhase::BEFORE_REVIEW->value)->where('profile', $profile)
+                    ->where('evidence_epoch', $run->evidence_epoch)
+                    ->whereNull('superseded_at')->orderByDesc('created_at')->get()->first();
+                if ($result === null) {
+                    $blockers[] = new ReviewBlocker('required_check_missing', 'Pflichtcheck wurde für den aktuellen Stand nicht ausgeführt: '.$profile);
+                } elseif ($result->state !== CheckResultState::SUCCEEDED) {
+                    $blockers[] = new ReviewBlocker('required_check_'.$result->state->value, 'Pflichtcheck ist nicht bestanden: '.$profile.' ('.$result->state->value.').');
+                } elseif (! hash_equals($result->tree_sha, $observedTreeBinding)) {
+                    $blockers[] = new ReviewBlocker('required_check_tree_mismatch', 'Pflichtcheck gehört nicht zum finalen Checkpoint-Baum: '.$profile.'.');
+                }
+            }
+        }
+
+        $openGates = RunGate::query()->where('run_id', $run->id)->where('state', GateState::OPEN->value)
+            ->orderBy('gate_id')->pluck('gate_id')->map(static fn (mixed $id): string => (string) $id)->all();
+
+        $approval = TicketApproval::query()->find($run->ticket_approval_id);
+        $project = Project::query()->find($run->project_id);
+        $readModel = $approval instanceof TicketApproval ? TicketReadModel::query()
+            ->where('project_id', $run->project_id)->where('relative_path', $approval->relative_path)->first() : null;
+        $contract = $run->ticket_contract_sha256 ?? $approval?->ticket_contract_sha256;
+        if (! is_string($contract) || ! $readModel instanceof TicketReadModel
+            || ! is_string($readModel->ticket_contract_sha256) || ! hash_equals($contract, $readModel->ticket_contract_sha256)) {
+            $blockers[] = new ReviewBlocker('ticket_contract_drift', 'Der freigegebene Ticketvertrag hat sich geändert.');
+        }
+        if (! $project instanceof Project || ! is_string($project->control_oid) || ! hash_equals($run->run_base_sha, $project->control_oid)) {
+            $blockers[] = new ReviewBlocker('control_head_drift', 'Der Control-Branch-Head oder die Runbasis hat sich geändert.');
+        }
+
+        if (! $this->hasEffectiveCheckpoint($run) || $run->checkpoint_diff_hash === null) {
+            $blockers[] = new ReviewBlocker('checkpoint_missing', 'Für den aktuellen Stand fehlt ein gebundener Checkpoint.');
+        } elseif (! hash_equals($run->checkpoint_diff_hash, $observedDiffHash)) {
+            $blockers[] = new ReviewBlocker('checkpoint_diff_mismatch', 'Der tatsächliche Diff stimmt nicht mit dem Checkpoint überein.');
+        }
+
+        return new ReviewReadinessDecision($blockers, $openGates);
+    }
+
+    public function recordReviewReadiness(Run $run, ReviewReadinessDecision $decision): Run
+    {
+        $context = new RedactionContext((string) $run->project_id, $run->id, 'review-readiness');
+        $blockers = array_map(
+            fn (ReviewBlocker $blocker): array => [
+                'code' => $blocker->code,
+                'message' => $this->redactor->redact($blocker->message, $context)->text,
+            ],
+            $decision->blockers,
+        );
+        $updated = Run::query()->whereKey($run->getKey())->where('version', $run->version)->update([
+            'review_readiness_state' => $decision->ready() ? 'ready' : 'blocked',
+            'review_blockers' => $blockers,
+            'review_readiness_assessed_at' => now(),
+            'version' => DB::raw('version + 1'),
+            'updated_at' => now(),
+        ]);
+        if ($updated !== 1) {
+            throw new RunTransitionConflict('stale_run_version', 'The run changed before review readiness could be recorded.');
+        }
+
+        return Run::query()->findOrFail($run->getKey());
+    }
+
+    private function invalidateGateEvidence(string $runId, string $cause): void
+    {
+        RunGate::query()->where('run_id', $runId)->where('state', GateState::CLOSED->value)->update([
+            'state' => GateState::OPEN,
+            'invalidated_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $this->recordEvidenceInvalidation($runId, 'gate:'.$cause);
     }
 
     private function recordEvidenceInvalidation(string $runId, string $cause): void

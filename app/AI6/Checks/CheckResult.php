@@ -40,12 +40,12 @@ final readonly class CheckResult
     /**
      * The deterministic identity of this execution.
      *
-     * Run, phase, profile and the checked tree are the four coordinates a
+     * Run, evidence epoch, phase, profile and the checked tree are the coordinates a
      * repeated delivery shares, so the key rejects the duplicate instead of
      * producing a second process and a second row.
      */
-    public static function key(string $runId, CheckPhase $phase, string $profile, string $treeSha): string
+    public static function key(string $runId, int $evidenceEpoch, CheckPhase $phase, string $profile, string $treeSha): string
     {
-        return hash('sha256', implode("\0", [$runId, $phase->value, $profile, $treeSha]));
+        return hash('sha256', implode("\0", [$runId, (string) $evidenceEpoch, $phase->value, $profile, $treeSha]));
     }
 }

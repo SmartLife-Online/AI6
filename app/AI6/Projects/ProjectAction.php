@@ -12,6 +12,7 @@ enum ProjectAction: string
     case REFRESH_CONFIGURATION = 'refresh_configuration';
     case APPROVE_CONFIGURATION = 'approve_configuration';
     case APPROVE_TICKET = 'approve_ticket';
+    case AUTHORIZE_GATE_EVIDENCE = 'authorize_gate_evidence';
     case START_RUN = 'start_run';
     case VIEW_RUN = 'view_run';
     case ANSWER_HUMAN_REQUEST = 'answer_human_request';

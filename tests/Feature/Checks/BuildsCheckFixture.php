@@ -27,9 +27,9 @@ trait BuildsCheckFixture
     use BuildsImplementationTurnFixture;
 
     /** @return array{run: Run, worktree: string} */
-    protected function checkableRun(string $ticketId): array
+    protected function checkableRun(string $ticketId, bool $coherentGitBinding = false): array
     {
-        $fixture = $this->preparedImplementationRun($ticketId);
+        $fixture = $this->preparedImplementationRun($ticketId, coherentGitBinding: $coherentGitBinding);
         $worktree = $fixture['worktree'];
 
         // Ordinary script files inside the checked tree. Their content is what

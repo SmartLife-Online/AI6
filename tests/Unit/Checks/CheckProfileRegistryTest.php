@@ -196,18 +196,19 @@ final class CheckProfileRegistryTest extends TestCase
         );
     }
 
-    /** The execution key separates every one of its four coordinates. */
+    /** The execution key separates every one of its five coordinates. */
     public function test_the_execution_key_separates_run_phase_profile_and_tree(): void
     {
         $run = '2f1d4a3c-0000-4000-8000-000000000001';
         $tree = str_repeat('a', 64);
-        $key = CheckResult::key($run, CheckPhase::BEFORE_REVIEW, 'php-targeted', $tree);
+        $key = CheckResult::key($run, 0, CheckPhase::BEFORE_REVIEW, 'php-targeted', $tree);
 
-        self::assertSame($key, CheckResult::key($run, CheckPhase::BEFORE_REVIEW, 'php-targeted', $tree));
+        self::assertSame($key, CheckResult::key($run, 0, CheckPhase::BEFORE_REVIEW, 'php-targeted', $tree));
+        self::assertNotSame($key, CheckResult::key($run, 1, CheckPhase::BEFORE_REVIEW, 'php-targeted', $tree));
         self::assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/D', $key);
-        self::assertNotSame($key, CheckResult::key($run, CheckPhase::FINAL, 'php-targeted', $tree));
-        self::assertNotSame($key, CheckResult::key($run, CheckPhase::BEFORE_REVIEW, 'php-all', $tree));
-        self::assertNotSame($key, CheckResult::key($run, CheckPhase::BEFORE_REVIEW, 'php-targeted', str_repeat('b', 64)));
-        self::assertNotSame($key, CheckResult::key('2f1d4a3c-0000-4000-8000-000000000002', CheckPhase::BEFORE_REVIEW, 'php-targeted', $tree));
+        self::assertNotSame($key, CheckResult::key($run, 0, CheckPhase::FINAL, 'php-targeted', $tree));
+        self::assertNotSame($key, CheckResult::key($run, 0, CheckPhase::BEFORE_REVIEW, 'php-all', $tree));
+        self::assertNotSame($key, CheckResult::key($run, 0, CheckPhase::BEFORE_REVIEW, 'php-targeted', str_repeat('b', 64)));
+        self::assertNotSame($key, CheckResult::key('2f1d4a3c-0000-4000-8000-000000000002', 0, CheckPhase::BEFORE_REVIEW, 'php-targeted', $tree));
     }
 }

@@ -124,9 +124,11 @@ final class CheckRunnerTest extends TicketUiTestCase
         $this->bindCheckRuntime(['probe-ok' => $this->probeProfile(['ai6-check-ok.php'])]);
         ['run' => $run] = $this->checkableRun('AI6-021-STABLE');
 
-        $record = $this->app->make(CheckRunner::class)->run($run, CheckPhase::BEFORE_REVIEW, 'probe-ok');
+        $runner = $this->app->make(CheckRunner::class);
+        $record = $runner->run($run, CheckPhase::BEFORE_REVIEW, 'probe-ok');
 
         self::assertSame($record->tree_sha, $record->result_tree_sha);
+        self::assertSame($record->tree_sha, $runner->currentTreeBinding($run));
         self::assertSame(CheckResultState::SUCCEEDED, $record->state);
     }
 

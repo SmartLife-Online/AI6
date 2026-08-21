@@ -46,13 +46,13 @@ trait BuildsFinalizedRunFixture
     }
 
     /** @param array{operator: User, project: Project, approval: TicketApproval} $fixture */
-    protected function finalizedRun(array $fixture): Run
+    protected function finalizedRun(array $fixture, ?string $confirmedCommitSha = null): Run
     {
         $operation = $this->queueStart($fixture);
         DB::table('jobs')->delete();
         $attemptToken = $this->app->make(ProjectOperationLease::class)->claim($operation, str_repeat('f', 32));
         self::assertIsInt($attemptToken);
-        $target = str_repeat('c', 64);
+        $target = $confirmedCommitSha ?? str_repeat('c', 64);
         Project::query()->whereKey($fixture['project']->getKey())->update([
             'control_oid' => $target,
             'control_binding_version' => DB::raw('control_binding_version + 1'),

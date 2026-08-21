@@ -73,6 +73,42 @@
         @endforelse
     </ul>
 
+    <h2>Reviewbereitschaft</h2>
+    <p data-review-readiness="{{ $reviewReadinessState ?? '' }}">
+        {{ $reviewReadinessState === 'ready' ? 'Reviewbereit' : ($reviewReadinessState === 'blocked' ? 'Nicht reviewbereit' : 'Noch nicht bewertet') }}
+    </p>
+    <h3>Blockadegründe</h3>
+    <ul>
+        @forelse ($reviewBlockers as $blocker)
+            <li data-review-blocker="{{ $blocker['code'] }}"><strong>{{ $blocker['code'] }}</strong>: {{ $blocker['message'] }}</li>
+        @empty
+            <li>Keine gespeicherten Blockadegründe.</li>
+        @endforelse
+    </ul>
+    <h3>Pflichtchecks</h3>
+    <ul>
+        @forelse ($checkResults as $result)
+            <li data-check-profile="{{ $result->profile }}" data-check-state="{{ $result->state->value }}">
+                <strong>{{ $result->profile }}</strong> ({{ $result->phase->value }}): {{ $result->state->value }}
+            </li>
+        @empty
+            <li>Noch keine Prüfergebnisse.</li>
+        @endforelse
+    </ul>
+    <h3>Manuelle und externe Gates</h3>
+    <ul>
+        @forelse ($runGates as $gate)
+            <li data-run-gate="{{ $gate->gate_id }}" data-gate-state="{{ $gate->state->value }}"
+                data-blocks-candidate="{{ $gate->blocks_candidate ? '1' : '0' }}"
+                data-blocks-final-commit="{{ $gate->blocks_final_commit ? '1' : '0' }}"
+                data-blocks-push="{{ $gate->blocks_push ? '1' : '0' }}">
+                <strong>{{ $gate->gate_id }}</strong>: {{ $gate->state === \App\AI6\Runs\GateState::OPEN ? 'offen' : 'geschlossen' }}
+            </li>
+        @empty
+            <li>Keine Gates deklariert.</li>
+        @endforelse
+    </ul>
+
     <h2>Geänderte Dateien</h2>
     <ul>
         @forelse ($changedFiles as $change)

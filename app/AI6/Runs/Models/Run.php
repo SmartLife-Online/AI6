@@ -41,6 +41,9 @@ use Illuminate\Support\Carbon;
  * @property string|null $actual_changed_paths_hash
  * @property int $evidence_epoch
  * @property int|null $checkpoint_evidence_epoch
+ * @property string|null $review_readiness_state
+ * @property array<int, mixed>|null $review_blockers
+ * @property Carbon|null $review_readiness_assessed_at
  * @property array<string, mixed>|null $prompt_snapshot
  * @property string $prompt_hash
  * @property array<string, mixed>|null $instruction_snapshot
@@ -85,6 +88,8 @@ final class Run extends Model
             'actual_changed_paths_snapshot' => 'array',
             'evidence_epoch' => 'integer',
             'checkpoint_evidence_epoch' => 'integer',
+            'review_blockers' => 'array',
+            'review_readiness_assessed_at' => 'immutable_datetime',
             'version' => 'integer',
         ];
     }

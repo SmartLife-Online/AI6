@@ -41,6 +41,8 @@ final readonly class TicketV1Parser
             $frontmatter, $body, $sections, $duplicates,
             $this->ids($body, '/(?m)^- \[ \] \*\*(AC-\d{2})\*\*(?:\s|$)/'),
             $this->ids($body, '/(?m)^- \*\*(TC-\d{2})\*\*(?:\s|$)/'),
+            $this->gateIds($sections['Manual and External Gates'] ?? '', 'MG'),
+            $this->gateIds($sections['Manual and External Gates'] ?? '', 'EXT'),
             $files, $specRefs,
         );
     }
@@ -71,5 +73,13 @@ final readonly class TicketV1Parser
         preg_match_all($pattern, $body, $matches);
 
         return $matches[1] ?? [];
+    }
+
+    /** @return list<string> */
+    private function gateIds(string $section, string $kind): array
+    {
+        preg_match_all('/(?m)^- \*\*('.$kind.'-\d{2})\*\*(?:\s|$)/', $section, $matches);
+
+        return array_values(array_unique($matches[1] ?? []));
     }
 }

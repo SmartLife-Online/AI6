@@ -9,6 +9,7 @@ use App\AI6\Git\RunWorkspaceLifecycle;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Runs\InstructionCandidateSource;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\Models\RunCheckpoint;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunPhase;
 use App\AI6\Runs\RunState;
@@ -100,7 +101,7 @@ final class RunWorkspaceLifecycleTest extends TicketUiTestCase
         self::assertNull(Run::query()->findOrFail($run->id)->run_branch);
     }
 
-    public function test_a_bound_checkpoint_stays_immutable_and_cannot_be_cleared(): void
+    public function test_a_bound_checkpoint_advances_auditably_and_cannot_roll_back_or_be_cleared(): void
     {
         $fixture = $this->completedApproval('AI6-WS-3');
         $run = $this->finalizedRun($fixture);
@@ -114,11 +115,16 @@ final class RunWorkspaceLifecycleTest extends TicketUiTestCase
         self::assertSame($tree, $bound->checkpoint_tree_sha);
         self::assertSame($diff, $bound->checkpoint_diff_hash);
 
+        $advanced = $orchestrator->bindCheckpoint($bound, $bound->version, str_repeat('4', 64), $tree, $diff);
+        self::assertSame(str_repeat('4', 64), $advanced->checkpoint_commit_sha);
+        self::assertSame(2, RunCheckpoint::query()->where('run_id', $run->id)->count());
+        self::assertSame(1, RunCheckpoint::query()->where('run_id', $run->id)->where('is_current', true)->count());
+
         try {
-            $orchestrator->bindCheckpoint($bound, $bound->version, str_repeat('4', 64), $tree, $diff);
-            self::fail('A second checkpoint binding was accepted.');
+            $orchestrator->bindCheckpoint($advanced, $advanced->version, $commit, $tree, $diff);
+            self::fail('A superseded checkpoint was rebound.');
         } catch (RunTransitionConflict $conflict) {
-            self::assertSame('stale_run_version', $conflict->reason);
+            self::assertSame('checkpoint_rollback', $conflict->reason);
         }
 
         $this->expectException(QueryException::class);
@@ -126,7 +132,7 @@ final class RunWorkspaceLifecycleTest extends TicketUiTestCase
             'checkpoint_commit_sha' => null,
             'checkpoint_tree_sha' => null,
             'checkpoint_diff_hash' => null,
-            'version' => $bound->version + 1,
+            'version' => $advanced->version + 1,
         ]);
     }
 

@@ -86,6 +86,7 @@ use App\AI6\Runs\RunStepConfiguration;
 use App\AI6\Runs\RunStepReconciler;
 use App\AI6\Runs\RunTimelinePage;
 use App\AI6\Runs\RunTransitionMap;
+use App\AI6\Runs\ScopeReconciliation;
 use App\AI6\Runs\TicketApprovalPage;
 use App\AI6\Runs\WaitReason;
 use App\AI6\Runs\WaitReasonRegistry;
@@ -235,6 +236,7 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(ApprovalSelectionFactory::class);
         $this->app->singleton(ApprovalSnapshotFactory::class);
         $this->app->singleton(RunTransitionMap::class);
+        $this->app->singleton(ScopeReconciliation::class);
         $this->app->singleton(
             RunStepConfiguration::class,
             static fn (Application $app): RunStepConfiguration => RunStepConfiguration::fromConfiguredValues(

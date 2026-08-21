@@ -2,12 +2,14 @@
 
 namespace App\AI6\Runs;
 
+use App\AI6\Checks\Models\CheckResultRecord;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Runs\Models\RunArtifact;
 use App\AI6\Runs\Models\RunEvent;
+use App\AI6\Runs\Models\RunGate;
 use App\AI6\Runs\Models\ScopeDecision;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
@@ -88,6 +90,12 @@ final class RunTimelinePage extends Component
                 'change' => (string) ($artifact->redacted_metadata['change'] ?? ''),
             ];
         }
+        $reviewBlockers = [];
+        foreach ($run->review_blockers ?? [] as $blocker) {
+            if (is_array($blocker) && is_string($blocker['code'] ?? null) && is_string($blocker['message'] ?? null)) {
+                $reviewBlockers[] = ['code' => $blocker['code'], 'message' => $blocker['message']];
+            }
+        }
 
         return view('runs.timeline', [
             'run' => $run,
@@ -103,6 +111,11 @@ final class RunTimelinePage extends Component
             'quarantinedPaths' => $quarantined,
             'addedScopePathsUsed' => $run->added_scope_paths_count,
             'addedScopePathsLimit' => $limits->effective($run)['max_added_scope_paths'] ?? null,
+            'reviewReadinessState' => $run->review_readiness_state,
+            'reviewBlockers' => $reviewBlockers,
+            'checkResults' => CheckResultRecord::query()->where('run_id', $run->getKey())
+                ->whereNull('superseded_at')->orderBy('phase')->orderBy('profile')->get(),
+            'runGates' => RunGate::query()->where('run_id', $run->getKey())->orderBy('gate_id')->get(),
         ]);
     }
 

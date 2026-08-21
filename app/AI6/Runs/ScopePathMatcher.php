@@ -15,6 +15,18 @@ use App\AI6\Projects\ProjectConfigurationParser;
  */
 final class ScopePathMatcher
 {
+    /** @param list<string> $scope */
+    public static function coveredBy(string $path, array $scope): bool
+    {
+        foreach ($scope as $entry) {
+            if ($path === $entry || str_starts_with($path, rtrim($entry, '/').'/')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /** @param list<string> $patterns */
     public static function matchesAny(string $path, array $patterns): bool
     {

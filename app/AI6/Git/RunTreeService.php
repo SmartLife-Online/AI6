@@ -36,6 +36,17 @@ final readonly class RunTreeService
         return $this->diffs->fromRaw($raw->output, $context);
     }
 
+    /** Compute the canonical difference from a bound commit to the complete staged worktree. */
+    public function workingTreeDiff(Run $run, string $fromOid, RedactionContext $context): CanonicalDiff
+    {
+        $raw = $this->git->canonicalWorkingTreeDiff($this->repository($run), $fromOid, $context);
+        if (! $raw->succeeded()) {
+            throw new RuntimeException('The current run worktree difference could not be resolved.');
+        }
+
+        return $this->diffs->fromRaw($raw->output, $context);
+    }
+
     /**
      * Inventory the direct children of the bound checkpoint tree.
      *

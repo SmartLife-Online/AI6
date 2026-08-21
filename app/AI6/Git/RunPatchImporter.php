@@ -3,6 +3,7 @@
 namespace App\AI6\Git;
 
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\ScopePathMatcher;
 use App\AI6\Shared\Redaction\InvalidRedactionInputException;
 use App\AI6\Shared\Redaction\Redactor;
 use FilesystemIterator;
@@ -51,7 +52,7 @@ final readonly class RunPatchImporter
         $changes = [];
         $total = 0;
         foreach ($candidates as $path => $size) {
-            if (! $this->inScope($path, $scope)) {
+            if (! ScopePathMatcher::coveredBy($path, $scope)) {
                 throw new RuntimeException('The isolated view changes a path outside the approved scope.');
             }
             if ($size > self::MAXIMUM_FILE_BYTES) {
@@ -72,7 +73,7 @@ final readonly class RunPatchImporter
         }
 
         foreach ($present as $path => $size) {
-            if (array_key_exists($path, $candidates) || ! $this->inScope($path, $scope)) {
+            if (array_key_exists($path, $candidates) || ! ScopePathMatcher::coveredBy($path, $scope)) {
                 continue;
             }
             $changes[] = new RunPatchChange($path, RunPatchStatus::DELETED, 0);
@@ -169,7 +170,7 @@ final readonly class RunPatchImporter
                 allowedBinaryOrigin: $exists && $this->isBinaryFile($worktree.'/'.$path),
             );
             $change = new RunPatchChange($path, $exists ? RunPatchStatus::MODIFIED : RunPatchStatus::ADDED, $size);
-            if ($this->inScope($path, $scope)) {
+            if (ScopePathMatcher::coveredBy($path, $scope)) {
                 $inScope[] = $change;
                 $total += $size;
             } else {
@@ -182,7 +183,7 @@ final readonly class RunPatchImporter
                 continue;
             }
             $change = new RunPatchChange($path, RunPatchStatus::DELETED, 0);
-            if ($this->inScope($path, $scope)) {
+            if (ScopePathMatcher::coveredBy($path, $scope)) {
                 $inScope[] = $change;
             } else {
                 $outOfScope[] = $change;
@@ -372,18 +373,6 @@ final readonly class RunPatchImporter
         }
 
         return $scope;
-    }
-
-    /** @param list<string> $scope */
-    private function inScope(string $path, array $scope): bool
-    {
-        foreach ($scope as $entry) {
-            if ($path === $entry || str_starts_with($path, $entry.'/')) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private function identical(string $left, string $right): bool

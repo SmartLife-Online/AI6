@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_017(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_022(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -262,6 +262,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Git/RecoveryEvidenceReference.php',
             'app/AI6/Git/RefreshPathPolicy.php',
             'app/AI6/Git/RunBranchName.php',
+            'app/AI6/Git/RunCheckpointConflict.php',
             'app/AI6/Git/RunCheckpointService.php',
             'app/AI6/Git/RunHistoryContext.php',
             'app/AI6/Git/RunPatchChange.php',
@@ -368,6 +369,8 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Runs/ExecutionJobState.php',
             'app/AI6/Runs/ExecutionStepDispatcher.php',
             'app/AI6/Runs/ExecutionStepType.php',
+            'app/AI6/Runs/GateKind.php',
+            'app/AI6/Runs/GateState.php',
             'app/AI6/Runs/ImplementationImportException.php',
             'app/AI6/Runs/ImportLimit.php',
             'app/AI6/Runs/ImportLimitResult.php',
@@ -382,11 +385,15 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Runs/Models/Run.php',
             'app/AI6/Runs/Models/RunAgent.php',
             'app/AI6/Runs/Models/RunArtifact.php',
+            'app/AI6/Runs/Models/RunCheckpoint.php',
             'app/AI6/Runs/Models/RunEvent.php',
+            'app/AI6/Runs/Models/RunGate.php',
             'app/AI6/Runs/Models/ScopeDecision.php',
             'app/AI6/Runs/Models/TicketApproval.php',
             'app/AI6/Runs/Models/TicketApprovalEvaluation.php',
             'app/AI6/Runs/Models/TicketApprovalPreview.php',
+            'app/AI6/Runs/ReviewBlocker.php',
+            'app/AI6/Runs/ReviewReadinessDecision.php',
             'app/AI6/Runs/RunArtifactKind.php',
             'app/AI6/Runs/RunArtifactRoot.php',
             'app/AI6/Runs/RunArtifactStore.php',
@@ -407,6 +414,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Runs/ScopeCategory.php',
             'app/AI6/Runs/ScopePathLimitExceeded.php',
             'app/AI6/Runs/ScopePathMatcher.php',
+            'app/AI6/Runs/ScopeReconciliation.php',
             'app/AI6/Runs/TicketApprovalController.php',
             'app/AI6/Runs/TicketApprovalPage.php',
             'app/AI6/Runs/WaitReason.php',
@@ -783,7 +791,7 @@ final class ScaffoldStructureTest extends TestCase
         }
     }
 
-    public function test_migrations_match_the_approved_state_through_ai6_017(): void
+    public function test_migrations_match_the_approved_state_through_ai6_022(): void
     {
         $migrations = glob($this->path('database/migrations/*.php'));
         self::assertIsArray($migrations);
@@ -823,6 +831,8 @@ final class ScaffoldStructureTest extends TestCase
             '2026_08_19_000000_add_contract_amendment_contract.php',
             '2026_08_19_010000_add_scope_decision_reason.php',
             '2026_08_19_020000_add_check_result_contract.php',
+            '2026_08_20_000000_add_run_gate_contract.php',
+            '2026_08_20_010000_add_run_checkpoint_revision_contract.php',
         ], $migrations);
     }
 

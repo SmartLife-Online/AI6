@@ -9,6 +9,8 @@ final readonly class TicketDocument
      * @param  list<string>  $duplicateSections
      * @param  list<string>  $acceptanceCriterionIds
      * @param  list<string>  $testCaseIds
+     * @param  list<string>  $manualGateIds
+     * @param  list<string>  $externalGateIds
      * @param  list<string>  $files
      * @param  list<string>  $specRefs
      */
@@ -19,6 +21,8 @@ final readonly class TicketDocument
         public array $duplicateSections,
         public array $acceptanceCriterionIds,
         public array $testCaseIds,
+        public array $manualGateIds,
+        public array $externalGateIds,
         public array $files,
         public array $specRefs,
     ) {}

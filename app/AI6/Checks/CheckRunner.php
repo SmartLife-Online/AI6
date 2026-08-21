@@ -112,7 +112,7 @@ final readonly class CheckRunner
 
         $before = $this->treeBinding->hash($batch.'/tree');
         $baseline = $this->treeBinding->hash($batch.'/baseline');
-        $key = CheckResult::key($run->id, $phase, $profileName, $before);
+        $key = CheckResult::key($run->id, $run->evidence_epoch, $phase, $profileName, $before);
         if (($record = $this->liveResult($key)) instanceof CheckResultRecord) {
             return $record;
         }
@@ -318,7 +318,7 @@ final readonly class CheckRunner
             }
 
             $before = $this->treeBinding->hash($tree);
-            $key = CheckResult::key($run->id, $phase, $profile->name, $before);
+            $key = CheckResult::key($run->id, $run->evidence_epoch, $phase, $profile->name, $before);
             $deliveryId = $this->claimDelivery($run, $phase, $profile, $key, $before, $deliveryAttempt, $context);
 
             $result = $this->execute($profile, $batch, $tree, $outputs, $context);
@@ -335,6 +335,26 @@ final readonly class CheckRunner
             if (is_string($deliveryId)) {
                 $this->mailboxes->forRole(ExecutionRole::CHECKER)->cleanupDelivery($deliveryId);
             }
+        }
+    }
+
+    /** Bind the complete current run tree through the same export used by every check. */
+    public function currentTreeBinding(Run $run): string
+    {
+        $worktree = $run->worktree_path;
+        if (! is_string($worktree) || ! is_dir($worktree) || is_link($worktree)) {
+            throw new RuntimeException('The bound run worktree is unavailable.');
+        }
+
+        $batch = $this->createBatch();
+        $tree = $batch.'/tree';
+        try {
+            $this->exporter->export($worktree, $tree, false);
+
+            return $this->treeBinding->hash($tree);
+        } finally {
+            $this->remove($tree);
+            $this->remove($batch);
         }
     }
 
@@ -397,7 +417,7 @@ final readonly class CheckRunner
      * The one live result of an execution key, if there is one.
      *
      * A key can carry several rows: a retry on the unchanged tree supersedes
-     * its predecessor and keeps the same four coordinates. Only the row that is
+     * its predecessor and keeps the same five coordinates. Only the row that is
      * not superseded is the current result, and it is never the oldest one, so
      * the distinction cannot be left to row order.
      */
@@ -469,6 +489,7 @@ final readonly class CheckRunner
         return CheckResultRecord::query()->create([
             'id' => (string) Str::uuid(),
             'run_id' => $run->id,
+            'evidence_epoch' => $run->evidence_epoch,
             'phase' => $result->phase,
             'profile' => $result->profile,
             'state' => $result->state,

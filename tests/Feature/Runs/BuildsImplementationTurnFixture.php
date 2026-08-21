@@ -7,6 +7,7 @@ use App\AI6\Agents\AgentScenario;
 use App\AI6\Agents\FakeAgentAdapter;
 use App\AI6\Auth\Models\User;
 use App\AI6\Git\Actions\QueueTicketMutation;
+use App\AI6\Git\CanonicalDiffHasher;
 use App\AI6\Git\ControlOperationPhase;
 use App\AI6\Git\ControlOperationRuntimeIdentity;
 use App\AI6\Git\ControlOperationState;
@@ -34,6 +35,7 @@ use App\AI6\Shared\Process\ProcessPolicyRegistry;
 use App\AI6\Shared\Redaction\RedactionContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\After;
 use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
 
@@ -41,12 +43,31 @@ trait BuildsImplementationTurnFixture
 {
     use BuildsFinalizedRunFixture;
 
+    private ?string $implementationFixtureRoot = null;
+
+    #[After]
+    public function removeImplementationFixture(): void
+    {
+        $root = $this->implementationFixtureRoot;
+        $temporary = str_replace('\\', '/', (string) realpath(sys_get_temp_dir()));
+        $resolved = is_string($root) ? realpath($root) : false;
+        if ($resolved !== false && str_starts_with(str_replace('\\', '/', $resolved).'/', $temporary.'/ai6-019-')) {
+            $this->removeImplementationFixtureTree($resolved);
+        }
+        $this->implementationFixtureRoot = null;
+    }
+
     /**
      * @param  list<string>  $files
      * @return array{run: Run, project: Project, operator: User, worktree: string, isolatedRoot: string}
      */
-    protected function preparedImplementationRun(string $ticketId, array $files = ['app/Example.php'], ?AgentScenario $scenario = null, bool $shippedProcessPolicy = false): array
-    {
+    protected function preparedImplementationRun(
+        string $ticketId,
+        array $files = ['app/Example.php'],
+        ?AgentScenario $scenario = null,
+        bool $shippedProcessPolicy = false,
+        bool $coherentGitBinding = false,
+    ): array {
         $this->app->instance(ControlOperationRuntimeIdentity::class, new ControlOperationRuntimeIdentity('worker', 'testing'));
         $this->app->instance(InstructionCandidateSource::class, new class implements InstructionCandidateSource
         {
@@ -61,6 +82,9 @@ trait BuildsImplementationTurnFixture
         config([
             'ai6.runtime_role' => 'worker',
             'ai6.run_artifacts.root' => $this->implementationTemp('artifacts'),
+            'ai6.execution_mailboxes.agent_root' => $this->implementationTemp('isolated'),
+            'ai6.execution_mailboxes.agent_output_root' => $this->implementationTemp('agent-outputs'),
+            'ai6.process.policies.agent.working_roots' => [$this->implementationTemp('isolated')],
         ]);
         $this->app->forgetInstance(RunArtifactRoot::class);
         $this->app->forgetInstance(RunArtifactStore::class);
@@ -69,6 +93,15 @@ trait BuildsImplementationTurnFixture
             $adapter = new FakeAgentAdapter($scenario);
             $this->app->instance(FakeAgentAdapter::class, $adapter);
             $this->app->instance(AgentAdapter::class, $adapter);
+        }
+
+        $worktree = null;
+        $controlOid = str_repeat('a', 64);
+        if ($coherentGitBinding) {
+            $worktree = $this->implementationTemp('worktree-coherent');
+            $this->writeInitialWorktree($worktree, $files);
+            $this->initWorktreeGit($worktree, true);
+            $controlOid = $this->gitOutput(['rev-parse', 'HEAD'], $worktree);
         }
 
         $markdown = $this->implementationTicketMarkdown($ticketId, $files);
@@ -85,7 +118,7 @@ trait BuildsImplementationTurnFixture
             'provisioning_status' => ProjectProvisioningStatus::PROVISIONED,
             'deploy_key_reference' => '/managed/test-key',
             'public_deploy_key' => "ssh-ed25519 fixture\n",
-            'control_oid' => str_repeat('a', 64),
+            'control_oid' => $controlOid,
         ]);
         $this->addMembership($administrator, $project, ProjectRole::ADMIN);
         $this->addMembership($approver, $project, ProjectRole::APPROVER);
@@ -159,26 +192,14 @@ trait BuildsImplementationTurnFixture
             'approval' => TicketApproval::query()->findOrFail($operationId),
             'attention' => $attention,
         ];
-        $run = $this->finalizedRun($fixture);
-        $worktree = $this->implementationTemp('worktree-'.$run->id);
-        if (! is_dir($worktree.'/app')) {
-            self::assertTrue(mkdir($worktree.'/app', 0700, true));
+        $run = $this->finalizedRun($fixture, $coherentGitBinding ? $controlOid : null);
+        if ($worktree === null) {
+            $worktree = $this->implementationTemp('worktree-'.$run->id);
+            $this->writeInitialWorktree($worktree, $files);
+            $this->initWorktreeGit($worktree);
+        } else {
+            $this->gitOutput(['checkout', '-b', 'ai6/runs/'.$project->project_identifier.'/'.$run->id], $worktree);
         }
-        self::assertNotFalse(file_put_contents($worktree.'/app/Example.php', "<?php\n\n// original\n"));
-        foreach ($files as $file) {
-            if ($file === 'app/Example.php') {
-                continue;
-            }
-            $target = $worktree.'/'.$file;
-            $directory = dirname($target);
-            if (! is_dir($directory)) {
-                self::assertTrue(mkdir($directory, 0700, true));
-            }
-            if (! is_file($target)) {
-                self::assertNotFalse(file_put_contents($target, "# fixture\n"));
-            }
-        }
-        $this->initWorktreeGit($worktree);
         $orchestrator = $this->app->make(RunOrchestrator::class);
         $run = $orchestrator->bindWorkspace(
             $run,
@@ -186,7 +207,18 @@ trait BuildsImplementationTurnFixture
             'refs/heads/ai6/runs/'.$project->project_identifier.'/'.$run->id,
             $worktree,
         );
-        $run = $orchestrator->bindCheckpoint($run, $run->version, str_repeat('1', 64), str_repeat('2', 64), str_repeat('3', 64));
+        if ($coherentGitBinding) {
+            $run = $orchestrator->bindCheckpoint(
+                $run,
+                $run->version,
+                $controlOid,
+                $this->gitOutput(['rev-parse', $controlOid.'^{tree}'], $worktree),
+                $this->app->make(CanonicalDiffHasher::class)
+                    ->fromRaw('', new RedactionContext((string) $project->id, $run->id, 'test-checkpoint'))->hash,
+            );
+        } else {
+            $run = $orchestrator->bindCheckpoint($run, $run->version, str_repeat('1', 64), str_repeat('2', 64), str_repeat('3', 64));
+        }
         $preflight = ExecutionJob::query()->where('run_id', $run->id)
             ->where('step_type', ExecutionStepType::PREFLIGHT->value)->firstOrFail();
         (new ExecuteRunStep($preflight->id))->handle($orchestrator);
@@ -253,20 +285,59 @@ trait BuildsImplementationTurnFixture
         $this->app->bind(AgentAdapter::class, FakeAgentAdapter::class);
     }
 
-    protected function initWorktreeGit(string $worktree): void
+    protected function initWorktreeGit(string $worktree, bool $sha256 = false): void
     {
         $git = (new ExecutableFinder)->find('git');
         self::assertIsString($git);
-        (new Process([$git, 'init', '--initial-branch=main'], $worktree))->mustRun();
+        $arguments = [$git, 'init'];
+        if ($sha256) {
+            $arguments[] = '--object-format=sha256';
+        }
+        $arguments[] = '--initial-branch=main';
+        (new Process($arguments, $worktree))->mustRun();
         (new Process([$git, 'config', 'user.email', 'ai6@example.test'], $worktree))->mustRun();
         (new Process([$git, 'config', 'user.name', 'AI6 Fixture'], $worktree))->mustRun();
         (new Process([$git, 'add', '.'], $worktree))->mustRun();
         (new Process([$git, 'commit', '-m', 'fixture'], $worktree))->mustRun();
     }
 
+    /** @param list<string> $files */
+    private function writeInitialWorktree(string $worktree, array $files): void
+    {
+        if (! is_dir($worktree.'/app')) {
+            self::assertTrue(mkdir($worktree.'/app', 0700, true));
+        }
+        self::assertNotFalse(file_put_contents($worktree.'/app/Example.php', "<?php\n\n// original\n"));
+        foreach ($files as $file) {
+            if ($file === 'app/Example.php') {
+                continue;
+            }
+            $target = $worktree.'/'.$file;
+            $directory = dirname($target);
+            if (! is_dir($directory)) {
+                self::assertTrue(mkdir($directory, 0700, true));
+            }
+            if (! is_file($target)) {
+                self::assertNotFalse(file_put_contents($target, "# fixture\n"));
+            }
+        }
+    }
+
+    /** @param list<string> $arguments */
+    protected function gitOutput(array $arguments, string $worktree): string
+    {
+        $git = (new ExecutableFinder)->find('git');
+        self::assertIsString($git);
+        $process = new Process([$git, ...$arguments], $worktree);
+        $process->mustRun();
+
+        return trim($process->getOutput());
+    }
+
     protected function implementationTemp(string $suffix): string
     {
-        $root = sys_get_temp_dir().DIRECTORY_SEPARATOR.'ai6-019-'.$suffix;
+        $this->implementationFixtureRoot ??= sys_get_temp_dir().DIRECTORY_SEPARATOR.'ai6-019-'.bin2hex(random_bytes(8));
+        $root = $this->implementationFixtureRoot.DIRECTORY_SEPARATOR.$suffix;
         if (! is_dir($root)) {
             mkdir($root, 0700, true);
         }
@@ -274,5 +345,23 @@ trait BuildsImplementationTurnFixture
         self::assertNotFalse($real);
 
         return str_replace('\\', '/', $real);
+    }
+
+    private function removeImplementationFixtureTree(string $path): void
+    {
+        foreach (scandir($path) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $child = $path.DIRECTORY_SEPARATOR.$entry;
+            @chmod($child, is_dir($child) && ! is_link($child) ? 0700 : 0600);
+            if (is_dir($child) && ! is_link($child)) {
+                $this->removeImplementationFixtureTree($child);
+            } else {
+                @unlink($child);
+            }
+        }
+        @chmod($path, 0700);
+        @rmdir($path);
     }
 }

@@ -12,6 +12,7 @@ use Illuminate\Support\Carbon;
 /**
  * @property string $id
  * @property string $run_id
+ * @property int $evidence_epoch
  * @property CheckPhase $phase
  * @property string $profile
  * @property CheckResultState $state
@@ -51,6 +52,7 @@ final class CheckResultRecord extends Model
     {
         return [
             'phase' => CheckPhase::class,
+            'evidence_epoch' => 'integer',
             'state' => CheckResultState::class,
             'exit_code' => 'integer',
             'duration_ms' => 'integer',

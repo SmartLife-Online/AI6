@@ -56,6 +56,12 @@ final class ExpectedAuthorizationMatrix
                 'operator' => false,
                 'approver' => true,
             ],
+            'authorize_gate_evidence' => [
+                'admin' => false,
+                'viewer' => false,
+                'operator' => false,
+                'approver' => true,
+            ],
             'start_run' => [
                 'admin' => true,
                 'viewer' => false,

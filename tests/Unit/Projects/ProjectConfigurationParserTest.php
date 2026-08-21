@@ -12,6 +12,18 @@ use Tests\TestCase;
 
 final class ProjectConfigurationParserTest extends TestCase
 {
+    public function test_run_scope_decisions_share_the_bound_effective_configuration_source(): void
+    {
+        $implementation = file_get_contents(base_path('app/AI6/Runs/RunImplementation.php'));
+        $checkStep = file_get_contents(base_path('app/AI6/Runs/RunCheckStep.php'));
+
+        self::assertIsString($implementation);
+        self::assertIsString($checkStep);
+        self::assertStringContainsString('->bound($run->project()->firstOrFail(), $snapshotId)', $implementation);
+        self::assertStringContainsString('->bound($run->project()->firstOrFail(), $snapshotId)', $checkStep);
+        self::assertStringNotContainsString('new ProjectConfiguration(', $checkStep);
+    }
+
     public function test_strict_schema_accepts_plan_shape_and_hashes_semantics_not_yaml_syntax(): void
     {
         $parser = $this->app->make(ProjectConfigurationParser::class);

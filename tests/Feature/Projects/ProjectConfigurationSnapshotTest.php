@@ -91,6 +91,8 @@ final class ProjectConfigurationSnapshotTest extends AuthFeatureTestCase
         self::assertSame(1, $project->control_generation);
         self::assertSame(ProjectConfigurationSource::SERVER_DEFAULTS, $resolver->for($project)->source);
         self::assertSame($snapshot->getKey(), $resolver->snapshot((string) $snapshot->getKey())->snapshotId);
+        self::assertSame($snapshot->getKey(), $resolver->bound($project, (string) $snapshot->getKey())->snapshotId);
+        self::assertSame(ProjectConfigurationSource::SERVER_DEFAULTS, $resolver->bound($project, null)->source);
 
         try {
             $snapshot->forceFill(['config_hash' => str_repeat('f', 64)])->save();

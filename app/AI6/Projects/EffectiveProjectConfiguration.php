@@ -57,6 +57,23 @@ final readonly class EffectiveProjectConfiguration
         return $this->fromSnapshot(ProjectConfigSnapshot::query()->findOrFail($snapshotId));
     }
 
+    /**
+     * Resolve the configuration frozen for a run. Server-default bindings have
+     * no durable snapshot row and deliberately use the effective project
+     * fallback; an approved snapshot id always resolves the historic row.
+     */
+    public function bound(Project $project, ?string $snapshotId): ProjectConfigurationBinding
+    {
+        if ($snapshotId === null) {
+            return $this->for($project);
+        }
+
+        return $this->fromSnapshot(ProjectConfigSnapshot::query()
+            ->whereKey($snapshotId)
+            ->where('project_id', $project->getKey())
+            ->firstOrFail());
+    }
+
     private function defaults(Project $project): ProjectConfigurationBinding
     {
         return new ProjectConfigurationBinding(
