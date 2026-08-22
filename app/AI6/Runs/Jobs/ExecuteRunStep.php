@@ -2,6 +2,7 @@
 
 namespace App\AI6\Runs\Jobs;
 
+use App\AI6\Reviews\ReviewRound;
 use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\ExecutionStepType;
 use App\AI6\Runs\Models\ExecutionJob;
@@ -29,8 +30,12 @@ final class ExecuteRunStep implements ShouldQueue
 
     public function __construct(public readonly int $executionJobId) {}
 
-    public function handle(RunOrchestrator $orchestrator, ?RunImplementation $implementation = null, ?RunCheckStep $checks = null): void
-    {
+    public function handle(
+        RunOrchestrator $orchestrator,
+        ?RunImplementation $implementation = null,
+        ?RunCheckStep $checks = null,
+        ?ReviewRound $reviews = null,
+    ): void {
         $job = ExecutionJob::query()->find($this->executionJobId);
         if (! $job instanceof ExecutionJob
             || in_array($job->state, [ExecutionJobState::SUCCEEDED, ExecutionJobState::FAILED], true)) {
@@ -70,6 +75,12 @@ final class ExecuteRunStep implements ShouldQueue
 
         if ($type === ExecutionStepType::CHECK) {
             ($checks ?? app(RunCheckStep::class))->execute($claimed, $run, $owner);
+
+            return;
+        }
+
+        if ($type === ExecutionStepType::REVIEW) {
+            ($reviews ?? app(ReviewRound::class))->execute($claimed, $run, $owner);
 
             return;
         }

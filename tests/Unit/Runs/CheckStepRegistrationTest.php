@@ -20,7 +20,7 @@ final class CheckStepRegistrationTest extends TestCase
     {
         self::assertTrue(ExecutionStepType::CHECK->hasRegisteredHandler());
         self::assertSame(
-            ['preflight', 'implement', 'check'],
+            ['preflight', 'implement', 'check', 'review'],
             array_map(static fn (ExecutionStepType $type): string => $type->value, ExecutionStepType::cases()),
         );
 
@@ -28,7 +28,11 @@ final class CheckStepRegistrationTest extends TestCase
             ExecutionStepType::CHECK,
             RunOrchestrator::decideNextStep(RunState::RUNNING, null, ['preflight', 'implement']),
         );
-        self::assertNull(RunOrchestrator::decideNextStep(RunState::RUNNING, null, ['preflight', 'implement', 'check']));
+        self::assertSame(
+            ExecutionStepType::REVIEW,
+            RunOrchestrator::decideNextStep(RunState::RUNNING, null, ['preflight', 'implement', 'check']),
+        );
+        self::assertNull(RunOrchestrator::decideNextStep(RunState::RUNNING, null, ['preflight', 'implement', 'check', 'review']));
         self::assertNull(RunOrchestrator::decideNextStep(RunState::WAITING, WaitReason::CHECK_FAILURE, ['preflight', 'implement']));
     }
 

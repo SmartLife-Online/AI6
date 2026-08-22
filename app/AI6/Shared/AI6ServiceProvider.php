@@ -45,8 +45,10 @@ use App\AI6\Git\GitRemotePolicy;
 use App\AI6\Git\HardenedControlRemoteProbe;
 use App\AI6\Git\HardenedGitEnvironment;
 use App\AI6\Git\HardenedGitRunner;
+use App\AI6\Git\IsolatedTreeExport;
 use App\AI6\Git\IsolatedTreeExporter;
 use App\AI6\Git\KnownHostsVerifier;
+use App\AI6\Git\ReviewCheckpointVerifier;
 use App\AI6\Git\RunCheckpointService;
 use App\AI6\Git\RunHistoryContext;
 use App\AI6\Git\RunPatchImporter;
@@ -67,6 +69,8 @@ use App\AI6\Projects\Policies\ProjectPolicy;
 use App\AI6\Prompts\PromptCatalog;
 use App\AI6\Prompts\PromptRenderer;
 use App\AI6\Reviews\ReviewerSlotFactory;
+use App\AI6\Reviews\ReviewResultStore;
+use App\AI6\Reviews\ReviewRound;
 use App\AI6\Runs\ApprovalSelectionFactory;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ApprovalStatusPage;
@@ -211,6 +215,8 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(RunLimitPolicy::class);
         $this->app->singleton(InstructionBindingVerifier::class);
         $this->app->singleton(RunImplementation::class);
+        $this->app->singleton(ReviewResultStore::class);
+        $this->app->singleton(ReviewRound::class);
         $this->app->singleton(CredentialRevisionRegistry::class, static fn (): CredentialRevisionRegistry => CredentialRevisionRegistry::fromConfiguredValues());
         $this->app->singleton(
             ExecutionHomeManager::class,
@@ -227,8 +233,13 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(PromptRenderer::class);
         $this->app->singleton(CanonicalDiffHasher::class);
         $this->app->singleton(IsolatedTreeExporter::class);
+        $this->app->singleton(
+            IsolatedTreeExport::class,
+            static fn (Application $app): IsolatedTreeExport => $app->make(IsolatedTreeExporter::class),
+        );
         $this->app->singleton(RunWorkspaceLifecycle::class);
         $this->app->singleton(RunCheckpointService::class);
+        $this->app->singleton(ReviewCheckpointVerifier::class);
         $this->app->singleton(RunTreeService::class);
         $this->app->singleton(RunHistoryContext::class);
         $this->app->singleton(RunPatchImporter::class);

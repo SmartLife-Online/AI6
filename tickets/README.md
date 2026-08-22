@@ -19,8 +19,8 @@ Diese README formuliert keine dieser Regeln neu. Bei Änderungen an Plan, Templa
 
 | Dateistand | Bedeutung | Anzahl |
 |---|---|---|
-| **Detailticket** | Reguläre Ticketdatei vorhanden | 29 |
-| **Blueprint** | Noch keine reguläre Ticketdatei vorhanden | 22 |
+| **Detailticket** | Reguläre Ticketdatei vorhanden | 37 |
+| **Blueprint** | Noch keine reguläre Ticketdatei vorhanden | 14 |
 
 `Dateistand` beschreibt ausschließlich, ob eine reguläre Ticketdatei existiert. Er sagt nichts über Gültigkeit, Freigabe oder Umsetzungsbereitschaft aus. Der Bearbeitungsstand eines Tickets steht in `status` der Ticketdatei. Die hier gezeigten `depends_on`-Werte liefern ausschließlich die Abhängigkeitsbedingung — nicht die Startbarkeit: Nach `RUN-008` wird die Eligibility unmittelbar vor jedem Claim und Start vollständig neu bewertet und hängt zusätzlich von gültiger Approval, Git- und Snapshotbindung, Policy, Capabilities, Projektsperre, Runabschluss und Queuezustand ab. Aus einer erfüllten `depends_on`-Liste folgt daher kein startbares Ticket.
 
@@ -30,8 +30,8 @@ Die Werte in den Spalten `Titel`, `Risiko` und `depends_on` sind ausschließlich
 
 | Ableitungsbasis | Tickets |
 |---|---|
-| Gegen den realen Repositoryzustand abgeleitet oder rebased | AI6-001, AI6-002, AI6-003, AI6-004, AI6-005A, AI6-005B, AI6-006A, AI6-006B, AI6-006C, AI6-006D, AI6-006E, AI6-007, AI6-008, AI6-009, AI6-010, AI6-011, AI6-012, AI6-013, AI6-016, AI6-018, AI6-021 |
-| Gegen den erwarteten Zustand nach den Vorgängertickets abgeleitet | AI6-006F, AI6-044, AI6-014, AI6-015, AI6-017, AI6-019, AI6-020, AI6-022 |
+| Gegen den realen Repositoryzustand abgeleitet oder rebased | AI6-001, AI6-002, AI6-003, AI6-004, AI6-005A, AI6-005B, AI6-006A, AI6-006B, AI6-006C, AI6-006D, AI6-006E, AI6-007, AI6-008, AI6-009, AI6-010, AI6-011, AI6-012, AI6-013, AI6-016, AI6-018, AI6-021, AI6-023 |
+| Gegen den erwarteten Zustand nach den Vorgängertickets abgeleitet | AI6-006F, AI6-044, AI6-014, AI6-015, AI6-017, AI6-019, AI6-020, AI6-022, AI6-024, AI6-025, AI6-026, AI6-039, AI6-040, AI6-043 |
 
 `AI6-001` bis `AI6-020` sowie `AI6-044` sind im Repository integriert und menschlich abgenommen. `AI6-002` wurde am 1. August 2026 gegen den realen `AI6-001`-Stand rebased; `AI6-003` wurde am 2. August 2026 nach der menschlichen Abnahme beider Abhängigkeiten gegen den integrierten `AI6-002`-Stand `29d67fa` rebased. `AI6-004` wurde am 3. August 2026 mit ausdrücklicher menschlicher Freigabe gegen den integrierten Stand `c8b99b2` neu abgeleitet. `AI6-005A` wurde am 3. August 2026 mit ausdrücklicher menschlicher Freigabe gegen den integrierten `main`-Stand `38b3c1d` neu abgeleitet; dabei wurde insbesondere das fehlende `config/mail.php` als neuer Pfad berichtigt. `AI6-006A` wurde am 5. August 2026 mit ausdrücklicher menschlicher Freigabe gegen den integrierten M0-Stand `b29d802` rebased; dabei wurden die reale Symfony-Process-Version, die Redaction-Aufrufnaht, Provider, Konfiguration und Containerbaseline verifiziert. `AI6-006B` wurde am 5. August 2026 mit ausdrücklicher menschlicher Freigabe gegen den integrierten Stand `d6e329f` rebased; dabei wurden die realen Projekt-, Policy-, Controller-, Git-Remote-, Pin- und globalen Inventurverträge verifiziert und die notwendigen eng begrenzten Git- und Unit-Testpfade in den Scope aufgenommen. `AI6-006C` wurde am 6. August 2026 auf ausdrücklichen menschlichen Auftrag gegen den integrierten Stand `e7a9059` rebased; dabei wurden Step-up-, Prozess-, Lock-, Git-, Projekt-, Provider-, Scheduler-, Compose- und Init-Nähte verifiziert und die notwendigen Querschnittstests für Inventur, Compose-Allowlist, Init-Skript, reale Compose-Harness und Runtime-Dokumentation in den Scope aufgenommen. Die später menschlich freigegebene Reviewkorrektur nahm zusätzlich den optionalen Lease-Heartbeat-Callback der bestehenden Process-Naht samt vorhandenem Unit-Test sowie `deploy/Caddyfile` für die an ein separates Caddy-/App-Proxynetz gekoppelte Loopback-Normalisierung in den Scope auf. Diese Abgleiche haben den jeweiligen Status nicht verändert; Statusänderungen blieben getrennte menschliche Entscheidungen.
 
@@ -59,9 +59,13 @@ Klarstellung zum aktuellen Stand von `AI6-013`: Die Aussage, der Rebase belasse 
 
 Die M3-Tickets `AI6-018` bis `AI6-022` wurden am 18. August 2026 gegen den integrierten Stand `d480a87eb6705580515f2bf11d2c3fcc135c77b5` erzeugt. `AI6-018` und `AI6-021` waren vollständig gegen den realen Repositoryzustand abgeleitet, weil alle ihre `depends_on`-Tickets umgesetzt und menschlich abgenommen sind. `AI6-018` wurde am 18. August 2026 gegen den integrierten Stand `9b168040ede18f8d70c5f181a63b985e22bd33d9` rebased; dabei wurden der reale Namespace der Run-Modelle sowie die bestehenden Orchestrator-, Wartestatus-, Vorschlags-, Mail-, Autorisierungs-, Provider-, Routen- und Testnähte erneut verifiziert. Der Rebase hat die vorhandenen AC-/TC-IDs und den Ticketstatus nicht verändert. `AI6-019`, `AI6-020` und `AI6-022` wurden auf ausdrückliche menschliche Anordnung vor der Umsetzung ihrer noch offenen Abhängigkeiten erzeugt und sind damit **ahead-derived** im Sinne von Plan §13.6: `AI6-019` fehlt `AI6-018`, `AI6-020` fehlen `AI6-018` und `AI6-019`, `AI6-022` fehlen `AI6-019`, `AI6-020` und `AI6-021`. Jede fehlende Voraussetzung ist ein bereits in Plan §15 definierter Blueprint der eigenen `depends_on`-Liste. Ihre `## Context`-Abschnitte benennen die noch fehlenden Pfade samt erzeugendem Ticket, ihre `## Notes` tragen die Rebase-Verpflichtung, und ihre `existing`-Marker bezeichnen die Runbasis nach dem Landen der `depends_on`-Tickets. Bis zu ihrem Rebase bleiben sie auf `status: todo` und dürfen weder freigegeben noch beansprucht werden. Diese Erzeugung hat keinen Status verändert; Statusänderungen bleiben getrennte menschliche Entscheidungen.
 
+Die M4-Tickets `AI6-023` bis `AI6-026`, `AI6-039`, `AI6-040` und `AI6-043` wurden am 21. August 2026 gegen den integrierten Stand `f69d227` erzeugt. `AI6-023` ist vollständig gegen den realen Repositoryzustand abgeleitet, weil alle seine `depends_on`-Tickets `AI6-012`, `AI6-016` und `AI6-022` umgesetzt und menschlich abgenommen sind; verifiziert wurden dabei insbesondere die Slot-, Approval-, Ergebnisvalidierungs-, Export-, Baumbindungs-, Execution-Home-, Human-Request- und Wartestatusregisternähte sowie der reale Zustand von `app/AI6/Reviews/` als reines Slot-Wertobjektmodul. `AI6-024`, `AI6-025`, `AI6-026`, `AI6-039`, `AI6-040` und `AI6-043` wurden auf ausdrückliche menschliche Anordnung vor der Umsetzung ihrer noch offenen Abhängigkeiten erzeugt und sind damit **ahead-derived** im Sinne von Plan §13.6: `AI6-024` fehlt `AI6-023`; `AI6-025` fehlt `AI6-024`; `AI6-026` fehlt `AI6-025`; `AI6-039` fehlt `AI6-026`; `AI6-040` fehlen `AI6-024` und `AI6-039`; `AI6-043` fehlen `AI6-024` und `AI6-026`. Jede fehlende Voraussetzung ist ein bereits in Plan §15 definierter Blueprint der eigenen `depends_on`-Liste. Ihre `## Context`-Abschnitte benennen die noch fehlenden Artefakte samt erzeugendem Ticket und verwenden dafür ausschließlich Namen, die der Plan selbst führt; ihre `## Notes` tragen die Rebase-Verpflichtung, und ihre `existing`-Marker bezeichnen die Runbasis nach dem Landen der `depends_on`-Tickets — insbesondere entsteht `tests/Feature/Reviews/` erst mit `AI6-023`. Bis zu ihrem Rebase bleiben sie auf `status: todo` und dürfen weder freigegeben noch beansprucht werden. Diese Erzeugung hat keinen Status verändert; Statusänderungen bleiben getrennte menschliche Entscheidungen.
+
+`AI6-026` nimmt in seinem `## Context` ausdrücklich die Ausnahme aus Plan §13.2 für die atomare Aktivierung der neuen Wartestatus in Anspruch und begründet sie: Das Wartestatusregister weist einen produktiven Producer ohne Resolver oder Cancelpfad bereits beim Bootstrap ab; vorbereitende interne Schritte dürften daher getrennt noch keinen Producer aktivieren und wären kein eigenständig nutzbares Blueprint-Outcome. Eine abweichende menschliche Bewertung der veröffentlichten fachlichen Outcomes führt nach Plan §13.7 zu einer Planrevision mit einer neuen, nie verwendeten Blueprint-ID und niemals zu einer stillen Aufteilung.
+
 ## 3. Backlog
 
-Stand der abgeleiteten Ansicht: 20. August 2026, abgeleitet aus Planrevision V1.7.4 und dem vorhandenen Dateibestand. Revision V1.7.4 trennt den rollenrichtigen Checkvollzug als neuen Blueprint `AI6-045` von `AI6-021` ab; ein Detailticket dazu existiert noch nicht.
+Stand der abgeleiteten Ansicht: 21. August 2026, abgeleitet aus Planrevision V1.7.4 und dem vorhandenen Dateibestand. Revision V1.7.4 trennt den rollenrichtigen Checkvollzug als neuen Blueprint `AI6-045` von `AI6-021` ab; sein Detailticket ist inzwischen vorhanden. Mit der Erzeugung der M4-Tickets sind 37 der 51 Blueprints als Detailticket vorhanden.
 
 ### M0 — Fundament und sichere Laufzeit
 
@@ -117,13 +121,13 @@ Stand der abgeleiteten Ansicht: 20. August 2026, abgeleitet aus Planrevision V1.
 
 | ID | Titel | Risiko | Dateistand | depends_on |
 |---|---|---|---|---|
-| AI6-023 | Read-only Review-Workspaces und Multi-Reviewer-Ausführung | high | Blueprint | AI6-012, AI6-016, AI6-022 |
-| AI6-024 | Findings, AC-Abdeckung und Reviewdarstellung | high | Blueprint | AI6-023 |
-| AI6-025 | Fixturn und vollständige Re-Review-Schleife | high | Blueprint | AI6-019, AI6-020, AI6-022, AI6-024 |
-| AI6-026 | Reviewlimits, Stall-Erkennung und Interventionsaktionen | high | Blueprint | AI6-018, AI6-025 |
-| AI6-039 | Review-only-Runvertrag: Claim und report-only Abschluss-Saga | high | Blueprint | AI6-013, AI6-026 |
-| AI6-040 | Review-only-Quellbindung, Ausführung, Bericht und Bedienung | high | Blueprint | AI6-014, AI6-021, AI6-024, AI6-039 |
-| AI6-043 | Quellenabhängige advisory Finding-Verifikation | high | Blueprint | AI6-011, AI6-024, AI6-026 |
+| [AI6-023](./AI6-023.md) | Read-only Review-Workspaces und Multi-Reviewer-Ausführung | high | Detailticket | AI6-012, AI6-016, AI6-022 |
+| [AI6-024](./AI6-024.md) | Findings, AC-Abdeckung und Reviewdarstellung | high | Detailticket | AI6-023 |
+| [AI6-025](./AI6-025.md) | Fixturn und vollständige Re-Review-Schleife | high | Detailticket | AI6-019, AI6-020, AI6-022, AI6-024 |
+| [AI6-026](./AI6-026.md) | Reviewlimits, Stall-Erkennung und Interventionsaktionen | high | Detailticket | AI6-018, AI6-025 |
+| [AI6-039](./AI6-039.md) | Review-only-Runvertrag: Claim und report-only Abschluss-Saga | high | Detailticket | AI6-013, AI6-026 |
+| [AI6-040](./AI6-040.md) | Review-only-Quellbindung, Ausführung, Bericht und Bedienung | high | Detailticket | AI6-014, AI6-021, AI6-024, AI6-039 |
+| [AI6-043](./AI6-043.md) | Quellenabhängige advisory Finding-Verifikation | high | Detailticket | AI6-011, AI6-024, AI6-026 |
 
 ### M5 — Finalisierung und vollständiger Fake-Workflow
 

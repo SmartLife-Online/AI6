@@ -21,5 +21,7 @@ final readonly class AgentResultContext
         public bool $instructionUpdate = false,
         public array $initialScope = [],
         public array $expectedInstructionBlobs = [],
+        public string $slotId = '',
+        public int $attempt = 1,
     ) {}
 }

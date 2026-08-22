@@ -5,6 +5,7 @@ namespace Tests\Feature\Runs;
 use App\AI6\Agents\AgentAdapter;
 use App\AI6\Agents\AgentScenario;
 use App\AI6\Agents\FakeAgentAdapter;
+use App\AI6\Agents\InstructionCandidate;
 use App\AI6\Auth\Models\User;
 use App\AI6\Git\Actions\QueueTicketMutation;
 use App\AI6\Git\CanonicalDiffHasher;
@@ -59,6 +60,7 @@ trait BuildsImplementationTurnFixture
 
     /**
      * @param  list<string>  $files
+     * @param  list<InstructionCandidate>  $instructionCandidates
      * @return array{run: Run, project: Project, operator: User, worktree: string, isolatedRoot: string}
      */
     protected function preparedImplementationRun(
@@ -67,13 +69,22 @@ trait BuildsImplementationTurnFixture
         ?AgentScenario $scenario = null,
         bool $shippedProcessPolicy = false,
         bool $coherentGitBinding = false,
+        array $instructionCandidates = [],
     ): array {
         $this->app->instance(ControlOperationRuntimeIdentity::class, new ControlOperationRuntimeIdentity('worker', 'testing'));
-        $this->app->instance(InstructionCandidateSource::class, new class implements InstructionCandidateSource
+        $this->app->instance(InstructionCandidateSource::class, new class(...$instructionCandidates) implements InstructionCandidateSource
         {
+            /** @var list<InstructionCandidate> */
+            private readonly array $candidates;
+
+            public function __construct(InstructionCandidate ...$candidates)
+            {
+                $this->candidates = $candidates;
+            }
+
             public function collect(Project $project, string $providerProfile, array $ticketFiles, RedactionContext $context): array
             {
-                return [];
+                return $this->candidates;
             }
         });
         if (! $shippedProcessPolicy) {
@@ -98,10 +109,11 @@ trait BuildsImplementationTurnFixture
         $worktree = null;
         $controlOid = str_repeat('a', 64);
         if ($coherentGitBinding) {
-            $worktree = $this->implementationTemp('worktree-coherent');
-            $this->writeInitialWorktree($worktree, $files);
-            $this->initWorktreeGit($worktree, true);
-            $controlOid = $this->gitOutput(['rev-parse', 'HEAD'], $worktree);
+            $repository = $this->implementationTemp('repository-coherent');
+            $this->writeInitialWorktree($repository, $files);
+            $this->initWorktreeGit($repository, true);
+            $controlOid = $this->gitOutput(['rev-parse', 'HEAD'], $repository);
+            $worktree = $this->linkedWorktree($repository, $controlOid);
         }
 
         $markdown = $this->implementationTicketMarkdown($ticketId, $files);
@@ -299,6 +311,19 @@ trait BuildsImplementationTurnFixture
         (new Process([$git, 'config', 'user.name', 'AI6 Fixture'], $worktree))->mustRun();
         (new Process([$git, 'add', '.'], $worktree))->mustRun();
         (new Process([$git, 'commit', '-m', 'fixture'], $worktree))->mustRun();
+    }
+
+    private function linkedWorktree(string $repository, string $commit): string
+    {
+        $worktree = $this->implementationTemp('worktree-coherent');
+        self::assertTrue(rmdir($worktree));
+        $git = (new ExecutableFinder)->find('git');
+        self::assertIsString($git);
+        (new Process([$git, 'worktree', 'add', '--detach', $worktree, $commit], $repository))->mustRun();
+        $real = realpath($worktree);
+        self::assertNotFalse($real);
+
+        return str_replace('\\', '/', $real);
     }
 
     /** @param list<string> $files */

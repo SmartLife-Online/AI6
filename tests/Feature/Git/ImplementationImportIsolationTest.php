@@ -2,12 +2,14 @@
 
 namespace Tests\Feature\Git;
 
+use App\AI6\Agents\AgentAdapter;
 use App\AI6\Agents\AgentScenario;
 use App\AI6\Agents\DelegatingProcessIsolationBoundary;
 use App\AI6\Agents\FakeAgentAdapter;
 use App\AI6\Git\IsolatedTreeExporter;
 use App\AI6\Git\RunPatchImporter;
 use App\AI6\Runs\ExecutionJobState;
+use App\AI6\Runs\RunImplementation;
 use App\AI6\Shared\Process\ProcessIsolationBoundary;
 use App\AI6\Shared\Process\ProcessPolicyName;
 use App\AI6\Shared\Process\ProcessPolicyRegistry;
@@ -90,12 +92,24 @@ final class ImplementationImportIsolationTest extends TicketUiTestCase
     public function test_the_agent_process_cannot_reach_credentials_or_the_managed_worktree(): void
     {
         $forbidden = ['APP_KEY', 'MAIL_PASSWORD', 'AI6_GIT_SSH_KEY'];
+        $foreignBatch = null;
+        $foreignSecret = null;
         foreach ($forbidden as $name) {
             putenv($name.'=must-not-pass');
         }
         try {
             $prepared = $this->preparedImplementationRun('AI6-019-TC04');
-            $adapter = $this->app->make(FakeAgentAdapter::class);
+            $foreignBatch = $prepared['isolatedRoot'].'/foreign-batch';
+            self::assertTrue(mkdir($foreignBatch, 0700));
+            $foreignSecret = $foreignBatch.'/foreign-state';
+            self::assertNotFalse(file_put_contents($foreignSecret, 'foreign-state-bytes'));
+            $adapter = new FakeAgentAdapter(
+                AgentScenario::SUCCESS,
+                additionalPathProbes: [$foreignBatch, $foreignSecret],
+            );
+            $this->app->instance(FakeAgentAdapter::class, $adapter);
+            $this->app->instance(AgentAdapter::class, $adapter);
+            $this->app->forgetInstance(RunImplementation::class);
             $job = $this->executeImplement($prepared['run']);
             self::assertSame(ExecutionJobState::SUCCEEDED, $job->state, (string) $job->failure_code);
             self::assertGreaterThan(0, $adapter->turnCount);
@@ -104,7 +118,15 @@ final class ImplementationImportIsolationTest extends TicketUiTestCase
             }
             self::assertSame('denied', $adapter->lastAccessProbes['path:'.$prepared['worktree']] ?? null);
             self::assertSame('denied', $adapter->lastAccessProbes['path:'.$prepared['worktree'].'/.git'] ?? null);
+            self::assertSame('denied', $adapter->lastAccessProbes['path:'.$foreignBatch] ?? null);
+            self::assertSame('denied', $adapter->lastAccessProbes['path:'.$foreignSecret] ?? null);
         } finally {
+            if (is_string($foreignSecret) && is_file($foreignSecret)) {
+                self::assertTrue(unlink($foreignSecret));
+            }
+            if (is_string($foreignBatch) && is_dir($foreignBatch)) {
+                self::assertTrue(rmdir($foreignBatch));
+            }
             foreach ($forbidden as $name) {
                 putenv($name);
             }

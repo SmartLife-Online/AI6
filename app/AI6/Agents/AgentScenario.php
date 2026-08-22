@@ -12,4 +12,5 @@ enum AgentScenario: string
     case INVALID_JSON = 'invalid_json';
     case PROVIDER_ERROR = 'provider_error';
     case SECURITY_FINDINGS = 'security_findings';
+    case UNTRUSTED_EVIDENCE = 'untrusted_evidence';
 }

@@ -31,4 +31,14 @@ final readonly class CredentialRevisionRegistry
             throw new CredentialProjectionException('The bound credential revision is no longer current.');
         }
     }
+
+    public function revision(string $providerProfileAlias): string
+    {
+        $revision = $this->revisions[$providerProfileAlias] ?? null;
+        if (! is_string($revision) || $revision === '') {
+            throw new CredentialProjectionException('The provider credential revision is unavailable.');
+        }
+
+        return $revision;
+    }
 }

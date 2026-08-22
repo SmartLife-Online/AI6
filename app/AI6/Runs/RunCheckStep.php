@@ -300,7 +300,11 @@ final readonly class RunCheckStep
             return;
         }
 
-        $this->orchestrator->advancePhase($run, $run->version, RunPhase::REVIEW);
+        if (! $this->orchestrator->applyPreparedStepEffect($run, ExecutionStepType::CHECK)) {
+            $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Der Run ist nicht mehr ausführbar.', 'run_not_executable');
+
+            return;
+        }
         $this->orchestrator->finishStep($job, $owner, ExecutionJobState::SUCCEEDED, 'Checks und Reviewbereitschaft abgeschlossen.');
     }
 

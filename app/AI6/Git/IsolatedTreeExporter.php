@@ -7,7 +7,7 @@ use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use RuntimeException;
 
-final class IsolatedTreeExporter
+final class IsolatedTreeExporter implements IsolatedTreeExport
 {
     public function export(string $source, string $destination, bool $writable = false): void
     {

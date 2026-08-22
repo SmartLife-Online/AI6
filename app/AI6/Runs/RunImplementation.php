@@ -22,6 +22,7 @@ use App\AI6\Git\IsolatedTreeExporter;
 use App\AI6\Git\RunPatchChange;
 use App\AI6\Git\RunPatchImporter;
 use App\AI6\Git\RunPatchStatus;
+use App\AI6\Git\WorktreeGitMetadataPaths;
 use App\AI6\HumanLoop\HumanRequestRejected;
 use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\HumanLoop\ScopeApprovalService;
@@ -63,6 +64,7 @@ final readonly class RunImplementation
         private TicketV1Parser $tickets,
         private ProviderRuntimeProfileRegistry $runtimeProfiles,
         private InstructionPathPolicy $instructionPaths,
+        private WorktreeGitMetadataPaths $gitMetadataPaths,
     ) {}
 
     public function execute(ExecutionJob $job, Run $run, string $owner): void
@@ -155,7 +157,7 @@ final readonly class RunImplementation
                 $this->initialScope($run),
                 $this->expectedInstructionBlobs($instruction, $this->initialScope($run)),
             );
-            $bytes = $this->adapter->turn($agentContext, $isolated, $this->unreachablePaths($worktree));
+            $bytes = $this->adapter->turn($agentContext, $isolated, $this->gitMetadataPaths->resolve($worktree));
             $this->handleResult($job, $run, $owner, $slot, $isolated, $bytes, $agentContext, $context, $instructionUpdate);
         } catch (ImplementationImportException $exception) {
             $this->failNamed($job, $run, $owner, $exception->reason, $exception->getMessage());
@@ -758,22 +760,6 @@ final readonly class RunImplementation
             static fn (RunPatchChange $change): string => $change->status->value.' '.$change->path,
             $changes,
         ));
-    }
-
-    /** @return list<string> */
-    private function unreachablePaths(string $worktree): array
-    {
-        $paths = [$worktree];
-        $git = rtrim($worktree, '/\\').'/.git';
-        $paths[] = $git;
-        if (is_file($git) && ! is_link($git)) {
-            $bytes = file_get_contents($git);
-            if (is_string($bytes) && preg_match('/^gitdir:\s*(.+)$/m', $bytes, $matches) === 1) {
-                $paths[] = trim($matches[1]);
-            }
-        }
-
-        return $paths;
     }
 
     private function importFailureCode(RuntimeException $exception): string

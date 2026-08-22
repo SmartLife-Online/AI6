@@ -53,6 +53,26 @@ final class AgentResultBoundaryTest extends TestCase
         }
     }
 
+    public function test_slot_scenario_drives_implementation_status_and_change_report_together(): void
+    {
+        $slotId = 'implementation-slot';
+        $context = $this->context(AgentRole::IMPLEMENTATION, slotId: $slotId);
+
+        $changed = json_decode((new FakeAgentAdapter(
+            AgentScenario::NO_CHANGE_REQUIRED,
+            slotScenarios: [$slotId => AgentScenario::SUCCESS],
+        ))->result($context), true, 16, JSON_THROW_ON_ERROR);
+        self::assertSame('completed', $changed['status']);
+        self::assertSame(['app/Example.php'], $changed['changed_paths']);
+
+        $unchanged = json_decode((new FakeAgentAdapter(
+            AgentScenario::SUCCESS,
+            slotScenarios: [$slotId => AgentScenario::NO_CHANGE_REQUIRED],
+        ))->result($context), true, 16, JSON_THROW_ON_ERROR);
+        self::assertSame('no_change_required', $unchanged['status']);
+        self::assertSame([], $unchanged['changed_paths']);
+    }
+
     public function test_invalid_provider_bytes_leave_no_side_effect_and_never_echo_provider_text(): void
     {
         $patchDirectory = sys_get_temp_dir().'/ai6-agent-result-'.bin2hex(random_bytes(4));
@@ -176,8 +196,13 @@ final class AgentResultBoundaryTest extends TestCase
         }
     }
 
-    private function context(AgentRole $role, string $actualDiff = '', bool $instructionUpdate = false, bool $newInstructionPath = false): AgentResultContext
-    {
+    private function context(
+        AgentRole $role,
+        string $actualDiff = '',
+        bool $instructionUpdate = false,
+        bool $newInstructionPath = false,
+        string $slotId = '',
+    ): AgentResultContext {
         $prompt = $this->app->make(PromptRenderer::class)->snapshot([
             new PromptRenderRequest('implementation', new PromptVariables(['context' => 'Test'])),
         ], $this->redactionContext());
@@ -194,6 +219,7 @@ final class AgentResultBoundaryTest extends TestCase
             $instructionUpdate,
             [$targetPath],
             [$targetPath => $newInstructionPath ? null : str_repeat('a', 40)],
+            slotId: $slotId,
         );
     }
 

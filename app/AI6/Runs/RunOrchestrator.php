@@ -154,6 +154,10 @@ final readonly class RunOrchestrator
         if ($completed === ExecutionStepType::IMPLEMENT && $fresh->phase === RunPhase::IMPLEMENT) {
             $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::CHECK);
         }
+        if ($completed === ExecutionStepType::CHECK && $fresh->phase === RunPhase::CHECK
+            && $fresh->review_readiness_state === 'ready') {
+            $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::REVIEW);
+        }
 
         $this->planNextStep($fresh, $completed);
 
@@ -882,6 +886,76 @@ final readonly class RunOrchestrator
     public function discardImplementationSessions(Run $run): void
     {
         RunAgent::query()->where('run_id', $run->getKey())->where('role', 'implementation')->update(['session_id' => null]);
+    }
+
+    /**
+     * Materialize the immutable reviewer set from the run-bound approval snapshot.
+     *
+     * @return non-empty-list<RunAgent>
+     */
+    public function materializeReviewSlots(Run $run): array
+    {
+        $reviewers = ($run->agent_profile_snapshot ?? [])['reviewers'] ?? null;
+        if (! is_array($reviewers) || ! array_is_list($reviewers) || $reviewers === []) {
+            throw new ImplementationImportException('approval_reviewers_missing', 'The approval snapshot contains no reviewer slots.');
+        }
+
+        $slots = [];
+        foreach ($reviewers as $reviewer) {
+            if (! is_array($reviewer)) {
+                throw new ImplementationImportException('approval_reviewer_incomplete', 'A reviewer slot is incomplete.');
+            }
+            $values = [
+                'slot_id' => $reviewer['id'] ?? null,
+                'provider_profile' => $reviewer['provider_profile'] ?? null,
+                'model' => $reviewer['model'] ?? null,
+                'effort' => $reviewer['effort'] ?? null,
+                'prompt_profile' => $reviewer['prompt_profile_id'] ?? null,
+            ];
+            foreach ($values as $value) {
+                if (! is_string($value) || $value === '') {
+                    throw new ImplementationImportException('approval_reviewer_incomplete', 'A reviewer slot is incomplete.');
+                }
+            }
+
+            $slot = RunAgent::query()->firstOrCreate([
+                'run_id' => $run->id,
+                'slot_id' => $values['slot_id'],
+            ], [
+                'role' => 'quality_review',
+                'provider_profile' => $values['provider_profile'],
+                'model' => $values['model'],
+                'effort' => $values['effort'],
+                'prompt_profile' => $values['prompt_profile'],
+                'session_id' => null,
+            ]);
+            foreach (['role' => 'quality_review', ...$values] as $field => $expected) {
+                if ($slot->getAttribute($field) !== $expected) {
+                    throw new ImplementationImportException('approval_reviewer_mismatch', 'A materialized reviewer no longer matches the approval snapshot.');
+                }
+            }
+            $slots[] = $slot;
+        }
+
+        return $slots;
+    }
+
+    public function bindReviewSession(Run $run, string $slotId, string $sessionId): RunAgent
+    {
+        $slot = RunAgent::query()->where('run_id', $run->id)->where('slot_id', $slotId)
+            ->where('role', 'quality_review')->firstOrFail();
+        if (is_string($slot->session_id) && $slot->session_id !== '') {
+            return $slot;
+        }
+        $slot->forceFill(['session_id' => $sessionId])->save();
+
+        return $slot->fresh() ?? $slot;
+    }
+
+    public function discardReviewSession(Run $run, string $slotId): void
+    {
+        RunAgent::query()->where('run_id', $run->id)->where('slot_id', $slotId)
+            ->where('role', 'quality_review')->update(['session_id' => null]);
     }
 
     public function resumeScopeApproval(Run $run, int $expectedVersion, string $boundStepKey): Run

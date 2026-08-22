@@ -2,6 +2,7 @@
 
 namespace App\AI6\Runs;
 
+use App\AI6\Agents\InstructionResolutionException;
 use App\AI6\Agents\InstructionSnapshot;
 use App\AI6\Agents\InstructionSnapshotResolver;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
@@ -27,6 +28,11 @@ final readonly class InstructionBindingVerifier
             return 'instruction_binding_missing';
         }
 
+        return $this->driftCodeForProfile($run, $provider, $runtimeProfileId);
+    }
+
+    public function driftCodeForProfile(Run $run, string $provider, string $runtimeProfileId): ?string
+    {
         $bound = ($run->instruction_snapshot ?? [])[$provider] ?? null;
         if (! is_array($bound) || ! is_string($boundHash = $bound['instruction_snapshot_hash'] ?? null)) {
             return 'instruction_binding_missing';
@@ -41,11 +47,15 @@ final readonly class InstructionBindingVerifier
             $files = [];
         }
         $context = new RedactionContext((string) $run->project_id, $run->id, 'instruction-binding');
-        $resolved = $this->resolver->resolve(
-            $provider,
-            $this->candidates->collect($project, $provider, array_values(array_filter($files, 'is_string')), $context),
-            $context,
-        );
+        try {
+            $resolved = $this->resolver->resolve(
+                $provider,
+                $this->candidates->collect($project, $provider, array_values(array_filter($files, 'is_string')), $context),
+                $context,
+            );
+        } catch (InstructionResolutionException $exception) {
+            return 'instruction_'.$exception->reason->value;
+        }
         if (! $this->sameSnapshot($bound, $resolved, $boundHash)) {
             return 'instruction_binding_drift';
         }
