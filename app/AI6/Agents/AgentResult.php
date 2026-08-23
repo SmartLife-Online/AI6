@@ -10,6 +10,7 @@ final readonly class AgentResult
      * @param  list<ImplementationDecision>  $decisions
      * @param  list<string>  $changedPaths
      * @param  list<string>  $openManualGates
+     * @param  list<InstructionRecommendation>  $instructionRecommendations
      */
     public function __construct(
         public string $schemaVersion,
@@ -23,5 +24,6 @@ final readonly class AgentResult
         public array $changedPaths = [],
         public array $openManualGates = [],
         public ?ImplementationSummary $implementationSummary = null,
+        public array $instructionRecommendations = [],
     ) {}
 }

@@ -14,9 +14,17 @@ use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\TicketMutation;
 use App\AI6\Git\RunBranchName;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Projects\Models\ProjectMembership;
 use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Projects\Policies\ProjectPolicy;
 use App\AI6\Projects\ProjectAction;
+use App\AI6\Reviews\EffectiveFindingState;
+use App\AI6\Reviews\FindingDispositionSource;
+use App\AI6\Reviews\FindingDispositionType;
+use App\AI6\Reviews\Models\Finding;
+use App\AI6\Reviews\Models\FindingDisposition;
+use App\AI6\Reviews\Models\ReviewResult;
+use App\AI6\Reviews\ReviewInvocationOutcome;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunAgent;
@@ -42,7 +50,142 @@ final readonly class RunOrchestrator
         private ExecutionStepDispatcher $dispatcher,
         private ScopeReconciliation $scopeReconciliation,
         private ProjectPolicy $projectPolicy,
+        private EffectiveFindingState $findingState,
     ) {}
+
+    public function recordHumanFindingDisposition(
+        Run $run,
+        Finding $finding,
+        int $expectedVersion,
+        FindingDispositionType $type,
+        string $reason,
+        User $actor,
+        string $stepUpProofHash,
+    ): Run {
+        if (! $type->isHumanOverride() || trim($reason) === '' || $finding->run_id !== $run->id) {
+            throw new RunTransitionConflict('finding_disposition_invalid', 'The finding disposition is invalid.');
+        }
+        $project = Project::query()->findOrFail($run->project_id);
+        if (! $this->projectPolicy->decide(ProjectAction::DISPOSE_FINDING, $actor, $project)) {
+            throw new RunTransitionConflict('finding_disposition_unauthorized', 'The actor cannot dispose findings.');
+        }
+        // The policy above owns the authorization decision; the membership is read only to
+        // record which role decided, never to decide a second time.
+        $membership = ProjectMembership::query()->where('project_id', $project->id)
+            ->where('user_id', $actor->getKey())->first();
+        if (! $membership instanceof ProjectMembership) {
+            throw new RunTransitionConflict('finding_disposition_unauthorized', 'The actor has no project membership.');
+        }
+
+        $requestHash = hash('sha256', implode(':', [
+            $finding->id, $type->value, trim($reason), $actor->getKey(), $expectedVersion,
+        ]));
+        if (FindingDisposition::query()->where('request_hash', $requestHash)->exists()) {
+            return Run::query()->findOrFail($run->id);
+        }
+
+        return DB::transaction(function () use ($run, $finding, $expectedVersion, $type, $reason, $actor, $membership, $stepUpProofHash, $requestHash): Run {
+            DB::table('runs')->where('id', $run->id)->lockForUpdate()->first();
+            $fresh = Run::query()->findOrFail($run->id);
+            if ($fresh->version !== $expectedVersion) {
+                throw new RunTransitionConflict('stale_run_version', 'The run changed before the finding disposition was recorded.');
+            }
+            FindingDisposition::query()->create([
+                'id' => (string) Str::uuid(),
+                'finding_id' => $finding->id,
+                'type' => $type,
+                'reason' => trim($reason),
+                'decision_source' => FindingDispositionSource::HUMAN_OVERRIDE,
+                'decided_by' => $actor->getKey(),
+                'decision_role' => $membership->role->value,
+                'step_up_proof_hash' => $stepUpProofHash,
+                'expected_run_version' => $expectedVersion,
+                'request_hash' => $requestHash,
+                ...$this->findingDispositionBindings($fresh, $finding),
+            ]);
+            $updated = Run::query()->whereKey($fresh->id)->where('version', $expectedVersion)
+                ->update(['version' => $expectedVersion + 1, 'updated_at' => now()]);
+            if ($updated !== 1) {
+                throw new RunTransitionConflict('stale_run_version', 'The run changed before the finding disposition was recorded.');
+            }
+
+            return Run::query()->findOrFail($fresh->id);
+        });
+    }
+
+    public function recordFixedFinding(
+        Run $run,
+        Finding $finding,
+        ReviewResult $evidence,
+        int $expectedVersion,
+        string $reason,
+    ): Run {
+        if (trim($reason) === '' || $finding->run_id !== $run->id || $evidence->run_id !== $run->id
+            || $evidence->invocation_outcome !== ReviewInvocationOutcome::VALID_RESULT
+            || $evidence->id === $finding->review_result_id
+            || $evidence->result_status !== 'nothing_to_fix'
+            || ! hash_equals((string) $run->checkpoint_tree_sha, $evidence->checkpoint_tree_sha)
+            || ! hash_equals((string) $run->checkpoint_diff_hash, $evidence->diff_hash)
+            || hash_equals($finding->checkpoint_tree_sha, $evidence->checkpoint_tree_sha)) {
+            throw new RunTransitionConflict('fixed_evidence_invalid', 'The fixed disposition lacks current server review evidence.');
+        }
+
+        return DB::transaction(function () use ($run, $finding, $evidence, $expectedVersion, $reason): Run {
+            DB::table('runs')->where('id', $run->id)->lockForUpdate()->first();
+            $fresh = Run::query()->findOrFail($run->id);
+            if ($fresh->version !== $expectedVersion || $fresh->checkpoint_tree_sha !== $evidence->checkpoint_tree_sha
+                || $fresh->checkpoint_diff_hash !== $evidence->diff_hash
+                || $fresh->checkpoint_tree_sha === $finding->checkpoint_tree_sha) {
+                throw new RunTransitionConflict('stale_run_version', 'The run changed before fixed evidence was recorded.');
+            }
+            $requestHash = hash('sha256', implode(':', [$finding->id, $evidence->id, $expectedVersion, trim($reason)]));
+            FindingDisposition::query()->firstOrCreate(['request_hash' => $requestHash], [
+                'id' => (string) Str::uuid(),
+                'finding_id' => $finding->id,
+                'type' => FindingDispositionType::FIXED,
+                'reason' => trim($reason),
+                'decision_source' => FindingDispositionSource::SERVER_REVIEW,
+                'evidence_review_result_id' => $evidence->id,
+                'expected_run_version' => $expectedVersion,
+                ...$this->findingDispositionBindings($fresh, $finding),
+            ]);
+            $updated = Run::query()->whereKey($fresh->id)->where('version', $expectedVersion)
+                ->update(['version' => $expectedVersion + 1, 'updated_at' => now()]);
+            if ($updated !== 1) {
+                throw new RunTransitionConflict('stale_run_version', 'The run changed before fixed evidence was recorded.');
+            }
+
+            return Run::query()->findOrFail($fresh->id);
+        });
+    }
+
+    /** @return array<string, string> */
+    private function findingDispositionBindings(Run $run, Finding $finding): array
+    {
+        $ticketContract = $run->ticket_contract_sha256
+            ?? TicketApproval::query()->whereKey($run->ticket_approval_id)->value('ticket_contract_sha256');
+        $bindings = [
+            'ticket_contract_sha256' => $ticketContract,
+            'config_hash' => $run->config_hash,
+            'scope_hash' => $run->scope_hash,
+            'prompt_hash' => $run->prompt_hash,
+            'instruction_hash' => $run->instruction_hash,
+            'runtime_profile_hash' => $run->runtime_profile_hash,
+            'agent_profile_hash' => $run->agent_profile_hash,
+            'security_policy_hash' => $run->security_policy_hash,
+            'checkpoint_tree_sha' => $run->checkpoint_tree_sha,
+            'diff_hash' => $run->checkpoint_diff_hash,
+            'reviewer_binding_hash' => $this->findingState->reviewerBindingHash($finding),
+        ];
+        foreach ($bindings as $field => $value) {
+            if (! is_string($value)) {
+                throw new RunTransitionConflict('finding_binding_missing_'.$field, 'The run lacks a finding disposition binding.');
+            }
+        }
+
+        /** @var array<string, string> $bindings */
+        return $bindings;
+    }
 
     /**
      * Derive the stable idempotency key of a step.

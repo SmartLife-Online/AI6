@@ -2,6 +2,9 @@
 
 namespace Tests\Feature\Reviews;
 
+use App\AI6\Agents\AgentFinding;
+use App\AI6\Agents\AgentResult;
+use App\AI6\Agents\AgentResultStatus;
 use App\AI6\Agents\AgentRole;
 use App\AI6\Agents\AgentScenario;
 use App\AI6\Agents\InstructionCandidate;
@@ -15,8 +18,13 @@ use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
+use App\AI6\Reviews\Models\CriterionCoverage;
+use App\AI6\Reviews\Models\Finding;
+use App\AI6\Reviews\Models\InstructionRecommendation;
 use App\AI6\Reviews\Models\ReviewResult;
 use App\AI6\Reviews\ReviewInvocationOutcome;
+use App\AI6\Reviews\ReviewResultParseException;
+use App\AI6\Reviews\ReviewResultStore;
 use App\AI6\Reviews\ReviewRound;
 use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\InstructionBindingVerifier;
@@ -36,6 +44,94 @@ use Tests\Feature\Tickets\TicketUiTestCase;
 final class ReviewRoundTest extends TicketUiTestCase
 {
     use BuildsReviewRoundFixture;
+
+    public function test_exact_duplicate_groups_keep_each_reviewer_source(): void
+    {
+        $prepared = $this->preparedReviewRun('AI6-024-DUPLICATES');
+        $this->reviewAdapter([
+            $this->reviewSlotIds[0] => AgentScenario::FINDINGS,
+            $this->reviewSlotIds[1] => AgentScenario::FINDINGS,
+        ]);
+
+        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReview($prepared['run'])->state);
+
+        $findings = Finding::query()->where('run_id', $prepared['run']->id)->get();
+        self::assertCount(2, $findings);
+        self::assertCount(1, $findings->pluck('duplicate_group')->unique());
+        self::assertEqualsCanonicalizing($this->reviewSlotIds, $findings->pluck('slot_id')->all());
+        self::assertCount(1, $findings->pluck('severity')->unique());
+        self::assertCount(1, $findings->pluck('original_disposition')->unique());
+    }
+
+    public function test_parser_failure_rolls_back_the_valid_result_and_every_normalized_row(): void
+    {
+        $prepared = $this->preparedReviewRun('AI6-024-ATOMIC');
+        $this->reviewAdapter([$this->reviewSlotIds[0] => AgentScenario::FINDINGS]);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReview($prepared['run'])->state);
+
+        $source = ReviewResult::query()->where('run_id', $prepared['run']->id)->where('slot_id', $this->reviewSlotIds[0])->sole();
+        $slot = RunAgent::query()->where('run_id', $prepared['run']->id)->where('slot_id', $source->slot_id)->sole();
+        $bindings = $source->only([
+            'checkpoint_commit_sha', 'checkpoint_tree_sha', 'diff_hash',
+            'approval_config_hash', 'approval_scope_hash', 'approval_prompt_hash',
+            'approval_instruction_hash', 'approval_runtime_profile_hash', 'approval_agent_profile_hash',
+            'approval_security_policy_hash', 'approval_snapshot_hash', 'slot_prompt_hash',
+            'slot_instruction_hash', 'slot_runtime_profile_hash', 'workspace_tree_hash',
+        ]);
+        $result = new AgentResult(
+            'ai6.quality-review.v1',
+            AgentResultStatus::FINDINGS_TO_FIX,
+            'Atomarer Negativtest.',
+            null,
+            [
+                new AgentFinding('valid-first', 'high', 'must_fix', 'contract', 'app/A.php', 1, 'Erster Befund', 'Evidenz', 'Erwartung', ['AC-01']),
+                new AgentFinding('invalid-second', 'high', 'must_fix', 'unknown', 'app/B.php', 2, 'Zweiter Befund', 'Evidenz', 'Erwartung', ['AC-02']),
+            ],
+            [],
+            null,
+        );
+
+        try {
+            $this->app->make(ReviewResultStore::class)->appendValid(
+                $prepared['run']->fresh(),
+                $slot,
+                2,
+                1,
+                $bindings,
+                $result,
+                $source->raw_artifact_id,
+                new RedactionContext((string) $prepared['run']->project_id, $prepared['run']->id, 'atomic-review'),
+            );
+            self::fail('The parser accepted an unknown category.');
+        } catch (ReviewResultParseException $exception) {
+            self::assertSame('finding_category_unknown', $exception->reason);
+        }
+
+        self::assertSame(0, ReviewResult::query()->where('run_id', $prepared['run']->id)->where('round_number', 2)->count());
+        self::assertSame(0, Finding::query()->where('run_id', $prepared['run']->id)->where('local_id', 'valid-first')->count());
+        self::assertSame(0, CriterionCoverage::query()->where('run_id', $prepared['run']->id)->where('round_number', 2)->count());
+    }
+
+    /** TC-09: a criterion reference outside the approved contract ends named and persists nothing. */
+    public function test_an_unknown_criterion_reference_ends_named_without_finding_or_coverage(): void
+    {
+        config(['logging.default' => 'null']);
+        $prepared = $this->preparedReviewRun('AI6-024-CRITERION');
+        $this->reviewAdapter([$this->reviewSlotIds[0] => AgentScenario::INVALID_CRITERION_REFERENCE]);
+
+        self::assertSame(ExecutionJobState::FAILED, $this->executeReview($prepared['run'])->state);
+
+        $result = ReviewResult::query()->where('run_id', $prepared['run']->id)
+            ->where('slot_id', $this->reviewSlotIds[0])->sole();
+        self::assertSame(ReviewInvocationOutcome::INVALID_JSON, $result->invocation_outcome);
+        self::assertSame('criterion_reference', $result->failure_code);
+        self::assertNull($result->result_status);
+        // Nothing of the rejected result is persisted; the unaffected second slot keeps its own rows.
+        self::assertSame(0, Finding::query()->where('review_result_id', $result->id)->count());
+        self::assertSame(0, CriterionCoverage::query()->where('review_result_id', $result->id)->count());
+        self::assertSame(0, InstructionRecommendation::query()->where('review_result_id', $result->id)->count());
+        self::assertSame(0, Finding::query()->where('run_id', $prepared['run']->id)->count());
+    }
 
     /** TC-01, TC-06 and TC-07. */
     public function test_two_reviewers_run_serially_with_separate_bindings_sessions_and_homes(): void
@@ -78,6 +174,14 @@ final class ReviewRoundTest extends TicketUiTestCase
         self::assertCount(2, $results->pluck('slot_instruction_hash')->unique());
         self::assertCount(2, $results->pluck('slot_runtime_profile_hash')->unique());
         self::assertCount(2, $results->pluck('session_id')->unique());
+        self::assertSame(1, Finding::query()->where('run_id', $prepared['run']->id)->count());
+        self::assertSame(2, CriterionCoverage::query()->where('run_id', $prepared['run']->id)->count());
+        $finding = Finding::query()->where('run_id', $prepared['run']->id)->sole();
+        self::assertSame($this->reviewSlotIds[0], $finding->slot_id);
+        self::assertSame('fake', $finding->provider_profile);
+        self::assertSame('fake-model', $finding->model);
+        self::assertSame('high', $finding->effort);
+        self::assertSame('security', $finding->prompt_profile);
         $run = $prepared['run']->fresh();
         $reviewers = $run->agent_profile_snapshot['reviewers'] ?? null;
         self::assertIsArray($reviewers);
@@ -540,6 +644,9 @@ final class ReviewRoundTest extends TicketUiTestCase
     public function test_instruction_shaped_evidence_cannot_mutate_run_ticket_policy_or_slots(): void
     {
         $prepared = $this->preparedReviewRun('AI6-023-TC11');
+        $instructionPath = dirname(__DIR__, 3).'/AGENTS.md';
+        $instructionBytes = file_get_contents($instructionPath);
+        self::assertIsString($instructionBytes);
         $before = $prepared['run']->fresh();
         $ticket = TicketReadModel::query()->where('project_id', $before->project_id)->sole();
         $ticketBytes = $ticket->redacted_content;
@@ -559,6 +666,12 @@ final class ReviewRoundTest extends TicketUiTestCase
         self::assertSame($before->agent_profile_snapshot, $after->agent_profile_snapshot);
         self::assertSame($ticketBytes, $ticket->fresh()->redacted_content);
         self::assertCount(2, $this->orchestratorReviewSlots($after));
+        self::assertSame($instructionBytes, file_get_contents($instructionPath));
+
+        $recommendation = InstructionRecommendation::query()->where('run_id', $after->id)->sole();
+        self::assertSame('<script>instruction-title</script>', $recommendation->title);
+        self::assertStringNotContainsString('instruction-secret', $recommendation->recommendation);
+        self::assertStringContainsString(RedactionMatchType::SECRET->marker(), $recommendation->recommendation);
 
         $result = ReviewResult::query()->where('run_id', $after->id)
             ->where('slot_id', $this->reviewSlotIds[0])->sole();

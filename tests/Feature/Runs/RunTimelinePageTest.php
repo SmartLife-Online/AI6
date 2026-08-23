@@ -181,14 +181,14 @@ final class RunTimelinePageTest extends TicketUiTestCase
             ->where('step_type', ExecutionStepType::IMPLEMENT->value)->count());
     }
 
-    /** TC-10: the base page shows no detail area that AI6-031 only adds later. */
+    /** TC-10: the base page shows no remaining detail area that AI6-031 only adds later. */
     public function test_the_base_page_does_not_fake_the_later_detail_areas(): void
     {
         [$run, $project, $operator] = $this->preparedRun('AI6-017-UI-8');
 
         $response = $this->actingAs($operator)->get(route('projects.runs.show', [$project, $run->id]));
 
-        foreach (['Diff', 'Checks', 'Findings', 'Security-Gate', 'Pushstatus', 'Interventionen'] as $later) {
+        foreach (['Diff', 'Checks', 'Security-Gate', 'Pushstatus', 'Interventionen'] as $later) {
             $response->assertDontSee($later);
         }
     }

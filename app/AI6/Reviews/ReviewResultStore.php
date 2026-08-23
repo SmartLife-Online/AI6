@@ -2,14 +2,19 @@
 
 namespace App\AI6\Reviews;
 
+use App\AI6\Agents\AgentResult;
 use App\AI6\Reviews\Models\ReviewResult;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunAgent;
+use App\AI6\Shared\Redaction\RedactionContext;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /** Append-only persistence for one review invocation. */
 final readonly class ReviewResultStore
 {
+    public function __construct(private ReviewResultParser $parser) {}
+
     /** @param array<string, mixed> $bindings */
     public function append(
         Run $run,
@@ -40,6 +45,34 @@ final readonly class ReviewResultStore
             'result_status' => $resultStatus,
             'raw_artifact_id' => $artifactId,
         ]);
+    }
+
+    /** @param array<string, mixed> $bindings */
+    public function appendValid(
+        Run $run,
+        RunAgent $slot,
+        int $round,
+        int $attempt,
+        array $bindings,
+        AgentResult $result,
+        string $artifactId,
+        RedactionContext $context,
+    ): ReviewResult {
+        return DB::transaction(function () use ($run, $slot, $round, $attempt, $bindings, $result, $artifactId, $context): ReviewResult {
+            $review = $this->append(
+                $run,
+                $slot,
+                $round,
+                $attempt,
+                ReviewInvocationOutcome::VALID_RESULT,
+                $bindings,
+                resultStatus: $result->status->value,
+                artifactId: $artifactId,
+            );
+            $this->parser->persist($review, $run, $result, $context);
+
+            return $review;
+        });
     }
 
     public function attempt(Run $run, int $round, string $slotId): int

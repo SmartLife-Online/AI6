@@ -96,6 +96,7 @@ final class PublicRouteInventoryTest extends TestCase
             'POST /projects/{project}/managed-clone [web, auth, can:synchronizeManagedClone,project]',
             'POST /projects/{project}/managed-fetch [web, auth, can:synchronizeManagedClone,project]',
             'POST /projects/{project}/operations/{operation}/recovery [web, auth, can:decideRecovery,project]',
+            'POST /projects/{project}/runs/{runId}/findings/{findingId}/disposition [web, auth, can:disposeFinding,project]',
             'POST /projects/{project}/ticket-read-model [web, auth, can:refreshReadModel,project]',
             'POST /projects/{project}/tickets/{readModel}/approval [web, auth, can:approveTicket,project]',
             'POST /projects/{project}/tickets/{readModel}/edit [web, auth, can:editTicket,project]',

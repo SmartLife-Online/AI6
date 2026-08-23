@@ -68,7 +68,9 @@ use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Policies\ProjectPolicy;
 use App\AI6\Prompts\PromptCatalog;
 use App\AI6\Prompts\PromptRenderer;
+use App\AI6\Reviews\EffectiveFindingState;
 use App\AI6\Reviews\ReviewerSlotFactory;
+use App\AI6\Reviews\ReviewResultParser;
 use App\AI6\Reviews\ReviewResultStore;
 use App\AI6\Reviews\ReviewRound;
 use App\AI6\Runs\ApprovalSelectionFactory;
@@ -215,6 +217,8 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(RunLimitPolicy::class);
         $this->app->singleton(InstructionBindingVerifier::class);
         $this->app->singleton(RunImplementation::class);
+        $this->app->singleton(EffectiveFindingState::class);
+        $this->app->singleton(ReviewResultParser::class);
         $this->app->singleton(ReviewResultStore::class);
         $this->app->singleton(ReviewRound::class);
         $this->app->singleton(CredentialRevisionRegistry::class, static fn (): CredentialRevisionRegistry => CredentialRevisionRegistry::fromConfiguredValues());

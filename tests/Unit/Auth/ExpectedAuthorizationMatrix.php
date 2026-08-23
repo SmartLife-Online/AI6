@@ -80,6 +80,12 @@ final class ExpectedAuthorizationMatrix
                 'operator' => true,
                 'approver' => true,
             ],
+            'dispose_finding' => [
+                'admin' => false,
+                'viewer' => false,
+                'operator' => false,
+                'approver' => true,
+            ],
         ];
     }
 

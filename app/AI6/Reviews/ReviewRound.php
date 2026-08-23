@@ -313,16 +313,29 @@ final readonly class ReviewRound
             }
         }
 
-        $this->results->append(
-            $run,
-            $slot,
-            self::ROUND,
-            $attempt,
-            ReviewInvocationOutcome::VALID_RESULT,
-            $bindings,
-            resultStatus: $result->status->value,
-            artifactId: $artifact->id,
-        );
+        try {
+            $this->results->appendValid(
+                $run,
+                $slot,
+                self::ROUND,
+                $attempt,
+                $bindings,
+                $result,
+                $artifact->id,
+                $context,
+            );
+        } catch (ReviewResultParseException $exception) {
+            $this->results->append(
+                $run,
+                $slot,
+                self::ROUND,
+                $attempt,
+                ReviewInvocationOutcome::INVALID_JSON,
+                $bindings,
+                $exception->reason,
+                artifactId: $artifact->id,
+            );
+        }
 
         return false;
     }

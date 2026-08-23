@@ -16,6 +16,7 @@ use App\AI6\Git\ProjectOperationLease;
 use App\AI6\Projects\ProjectProvisioningStatus;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
+use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -388,6 +389,20 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
         $cloneMigration = require database_path('migrations/2026_08_09_000000_add_clone_fetch_control_operation_contract.php');
         self::assertTrue(Schema::hasColumn('control_operations', 'target_control_oid'));
 
+        // Every migration younger than the checked chain must leave the schema first.
+        // Otherwise its triggers survive the tables they reference, and SQLite rejects
+        // the next table rebuild with an error that points at a foreign migration. The
+        // chain below is deliberately partial and does not restore the schema; the next
+        // test rebuilds it through migrate:fresh.
+        $younger = $this->migrationsYoungerThan('2026_08_19_000000_add_contract_amendment_contract.php');
+        self::assertNotSame([], $younger);
+        foreach (array_reverse($younger) as $migration) {
+            $migration->down();
+        }
+        foreach (['findings', 'finding_dispositions', 'review_results', 'run_checkpoints'] as $youngerTable) {
+            self::assertFalse(Schema::hasTable($youngerTable), $youngerTable.' outlived its migration.');
+        }
+
         // AI6-020 extended the published guards; its follow-up migration must
         // leave the chain first so every earlier down() finds its exact state.
         $amendmentMigration->down();
@@ -438,6 +453,29 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
             ->where('name', 'ticket_mutations_insert_guard')
             ->value('sql');
         self::assertMatchesRegularExpression('/source_status[^;]+in_progress/s', $latestMutationTrigger);
+    }
+
+    /**
+     * Derived from the real directory so a new migration never silently rots this chain.
+     *
+     * @return list<mixed> chronologically ordered migrations younger than the boundary file
+     */
+    private function migrationsYoungerThan(string $boundary): array
+    {
+        $files = glob(database_path('migrations/*.php'));
+        self::assertIsArray($files);
+        sort($files, SORT_STRING);
+        $migrations = [];
+        foreach ($files as $file) {
+            if (basename($file) <= $boundary) {
+                continue;
+            }
+            $migration = require $file;
+            self::assertInstanceOf(Migration::class, $migration);
+            $migrations[] = $migration;
+        }
+
+        return $migrations;
     }
 
     public function test_launch_fetch_publish_and_cleanup_keep_the_single_process_and_effect_lock_boundaries(): void

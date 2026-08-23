@@ -121,6 +121,98 @@
         @endforelse
     </ul>
 
+    <section aria-labelledby="findings-heading">
+        <h2 id="findings-heading">Findings und AC-Abdeckung</h2>
+        <div>
+            <label for="reviewer-filter">Reviewer</label>
+            <select id="reviewer-filter" wire:model.live="reviewerFilter">
+                <option value="">Alle Reviewer</option>
+                @foreach ($reviewers as $slotId => $label)
+                    <option value="{{ $slotId }}">{{ $label }}</option>
+                @endforeach
+            </select>
+            <label for="disposition-filter">Wirksame Disposition</label>
+            <select id="disposition-filter" wire:model.live="dispositionFilter">
+                <option value="">Alle Dispositionen</option>
+                @foreach (['open', 'must_fix', 'human_required', 'suggestion', 'follow_up', 'fixed', 'not_applicable', 'accepted_risk'] as $value)
+                    <option value="{{ $value }}">{{ $value }}</option>
+                @endforeach
+            </select>
+        </div>
+
+        <h3>Findings</h3>
+        <ul data-findings-list>
+            @forelse ($findingRows as $finding)
+                <li wire:key="finding-{{ $finding['id'] }}" data-finding-id="{{ $finding['id'] }}" data-reviewer="{{ $finding['slot_id'] }}"
+                    data-original-disposition="{{ $finding['original_disposition'] }}"
+                    data-effective-disposition="{{ $finding['effective_disposition'] }}"
+                    data-blocking="{{ $finding['blocks'] ? '1' : '0' }}">
+                    <h4>{{ $finding['title'] }}</h4>
+                    <p><strong>Quelle:</strong> {{ $finding['source'] }}, Runde {{ $finding['round'] }}</p>
+                    <p><strong>Original:</strong> {{ $finding['severity'] }} / {{ $finding['original_disposition'] }} / {{ $finding['category'] }}</p>
+                    <p><strong>Wirksam:</strong> {{ $finding['effective_disposition'] }} — {{ $finding['blocks'] ? 'blockierend' : 'nicht blockierend' }}</p>
+                    <p><strong>Ort:</strong> <code>{{ $finding['file'] }}:{{ $finding['line'] }}</code></p>
+                    <p><strong>Evidenz:</strong> {{ $finding['evidence'] }}</p>
+                    <p><strong>Erwartet:</strong> {{ $finding['expected_result'] }}</p>
+                    <p><strong>AC:</strong> {{ implode(', ', $finding['criterion_refs']) }}</p>
+                    <p><strong>Checkpoint:</strong> <code>{{ $finding['checkpoint_tree'] }}</code> · <strong>Diff:</strong> <code>{{ $finding['diff_hash'] }}</code></p>
+                    <p><strong>Exakte Duplikatgruppe:</strong> <code>{{ $finding['duplicate_group'] }}</code></p>
+                    @if ($finding['history'] !== [])
+                        <h5>Dispositionshistorie</h5>
+                        <ol>
+                            @foreach ($finding['history'] as $entry)
+                                <li data-disposition-effective="{{ $entry['effective'] ? '1' : '0' }}">
+                                    {{ $entry['type'] }} ({{ $entry['source'] }}): {{ $entry['reason'] }}
+                                    @if ($entry['evidence_review_result_id'] !== null)
+                                        · Reviewnachweis: {{ $entry['evidence_review_result_id'] }}
+                                    @endif
+                                </li>
+                            @endforeach
+                        </ol>
+                    @endif
+                    @if ($canDisposeFindings)
+                        <input type="hidden" name="expected_version" value="{{ $run->version }}"
+                            form="finding-disposition-{{ $finding['id'] }}">
+                        <form wire:ignore id="finding-disposition-{{ $finding['id'] }}" method="post"
+                            action="{{ route('projects.runs.findings.disposition', [$project, $run->id, $finding['id']]) }}">
+                            @csrf
+                            <label>Disposition
+                                <select name="disposition" required>
+                                    <option value="not_applicable">not_applicable</option>
+                                    <option value="accepted_risk">accepted_risk</option>
+                                </select>
+                            </label>
+                            <label>Begründung <textarea name="reason" required maxlength="2000"></textarea></label>
+                            <button type="submit">Disposition speichern</button>
+                        </form>
+                    @endif
+                </li>
+            @empty
+                <li>Keine Findings für diesen Filter.</li>
+            @endforelse
+        </ul>
+
+        <h3>AC-Abdeckung</h3>
+        <ul data-coverage-list>
+            @forelse ($coverageRows as $entry)
+                <li data-coverage-reviewer="{{ $entry['slot_id'] }}" data-coverage-criterion="{{ $entry['criterion_id'] }}">
+                    <strong>{{ $entry['criterion_id'] }}</strong> — {{ $entry['status'] }} · {{ $entry['source'] }}: {{ $entry['evidence'] }}
+                </li>
+            @empty
+                <li>Keine AC-Abdeckung für diesen Filter.</li>
+            @endforelse
+        </ul>
+
+        <h3>Instruktionsempfehlungen</h3>
+        <ul data-instruction-recommendations>
+            @forelse ($instructionRecommendations as $entry)
+                <li><strong>{{ $entry['title'] }}</strong> · {{ $entry['source'] }}: {{ $entry['recommendation'] }} ({{ $entry['reason'] }})</li>
+            @empty
+                <li>Keine Instruktionsempfehlungen.</li>
+            @endforelse
+        </ul>
+    </section>
+
     <h2>Entscheidungen</h2>
     <ul>
         @forelse ($decisions as $decision)

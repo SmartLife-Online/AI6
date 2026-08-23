@@ -38,6 +38,7 @@ final readonly class AgentResultValidator
         } else {
             $allowedKeys[] = 'findings';
             $allowedKeys[] = 'criterion_coverage';
+            $allowedKeys[] = 'instruction_recommendations';
         }
         $this->assertKeys($document, $allowedKeys, $requiredKeys);
 
@@ -59,6 +60,9 @@ final readonly class AgentResultValidator
         $humanRequest = array_key_exists('human_request', $document) ? $this->humanRequest($document['human_request'], $context) : null;
         $findings = array_key_exists('findings', $document) ? $this->findings($document['findings'], $context) : [];
         $coverage = array_key_exists('criterion_coverage', $document) ? $this->coverage($document['criterion_coverage'], $context) : [];
+        $recommendations = $context->role === AgentRole::IMPLEMENTATION
+            ? []
+            : $this->instructionRecommendations($document['instruction_recommendations'] ?? []);
         $patch = array_key_exists('instruction_patch', $document) ? $this->instructionPatch($document['instruction_patch'], $context, $redactionContext) : null;
         $decisions = $context->role === AgentRole::IMPLEMENTATION ? $this->decisions($document['decisions'] ?? null) : [];
         $changedPaths = $context->role === AgentRole::IMPLEMENTATION ? $this->paths($document['changed_paths'] ?? null) : [];
@@ -96,7 +100,30 @@ final readonly class AgentResultValidator
             $changedPaths,
             $openManualGates,
             $summaryDocument,
+            $recommendations,
         );
+    }
+
+    /** @return list<InstructionRecommendation> */
+    private function instructionRecommendations(mixed $value): array
+    {
+        if (! is_array($value) || ! array_is_list($value)) {
+            throw new AgentResultValidationException(AgentResultValidationError::SCHEMA);
+        }
+        $recommendations = [];
+        foreach ($value as $entry) {
+            if (! is_array($entry) || array_is_list($entry)) {
+                throw new AgentResultValidationException(AgentResultValidationError::SCHEMA);
+            }
+            $this->assertKeys($entry, ['title', 'recommendation', 'reason']);
+            $recommendations[] = new InstructionRecommendation(
+                $this->nonEmpty($entry, 'title'),
+                $this->nonEmpty($entry, 'recommendation'),
+                $this->nonEmpty($entry, 'reason'),
+            );
+        }
+
+        return $recommendations;
     }
 
     /** @return list<ImplementationDecision> */

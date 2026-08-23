@@ -4,6 +4,10 @@ namespace App\AI6\Runs;
 
 use App\AI6\Checks\Models\CheckResultRecord;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Reviews\EffectiveFindingState;
+use App\AI6\Reviews\Models\CriterionCoverage;
+use App\AI6\Reviews\Models\Finding;
+use App\AI6\Reviews\Models\InstructionRecommendation;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunAgent;
@@ -14,9 +18,11 @@ use App\AI6\Runs\Models\ScopeDecision;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Locked;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 
 /**
@@ -35,6 +41,12 @@ final class RunTimelinePage extends Component
 
     #[Locked]
     public string $runId = '';
+
+    #[Url]
+    public string $reviewerFilter = '';
+
+    #[Url]
+    public string $dispositionFilter = '';
 
     public function mount(Project $project, string $runId): void
     {
@@ -57,7 +69,7 @@ final class RunTimelinePage extends Component
         'amendment' => 'per Vertragsänderung aufgenommen',
     ];
 
-    public function render(Redactor $redactor, RunLimitPolicy $limits): View
+    public function render(Redactor $redactor, RunLimitPolicy $limits, EffectiveFindingState $findingState): View
     {
         Gate::authorize('viewRun', $this->project);
         $run = $this->run($this->project, $this->runId);
@@ -96,6 +108,76 @@ final class RunTimelinePage extends Component
                 $reviewBlockers[] = ['code' => $blocker['code'], 'message' => $blocker['message']];
             }
         }
+        $findingRows = [];
+        $reviewers = [];
+        foreach (RunAgent::query()->where('run_id', $run->id)->where('role', 'quality_review')->orderBy('slot_id')->get() as $reviewer) {
+            $reviewers[$reviewer->slot_id] = $reviewer->provider_profile.' · '.$reviewer->model.' · '.$reviewer->effort;
+        }
+        /** @var Collection<int, Finding> $findings */
+        $findings = Finding::query()->with('dispositions')->where('run_id', $run->id)
+            ->orderBy('round_number')->orderBy('slot_id')->orderBy('created_at')->get();
+        foreach ($findings as $finding) {
+            $effective = $findingState->currentDisposition($finding, $run);
+            $effectiveValue = $effective?->type->value ?? $finding->original_disposition->value;
+            if ($this->reviewerFilter !== '' && $finding->slot_id !== $this->reviewerFilter) {
+                continue;
+            }
+            if ($this->dispositionFilter !== '' && $effectiveValue !== $this->dispositionFilter) {
+                continue;
+            }
+            $history = [];
+            foreach ($finding->dispositions->sortBy('expected_run_version') as $disposition) {
+                $history[] = [
+                    'type' => $disposition->type->value,
+                    'source' => $disposition->decision_source->value,
+                    'evidence_review_result_id' => $disposition->evidence_review_result_id,
+                    'reason' => $redact($disposition->reason),
+                    'effective' => $effective?->id === $disposition->id,
+                ];
+            }
+            $findingRows[] = [
+                'id' => $finding->id,
+                'slot_id' => $finding->slot_id,
+                'source' => $reviewers[$finding->slot_id] ?? $finding->slot_id,
+                'round' => $finding->round_number,
+                'checkpoint_tree' => $finding->checkpoint_tree_sha,
+                'diff_hash' => $finding->diff_hash,
+                'severity' => $finding->severity->value,
+                'original_disposition' => $finding->original_disposition->value,
+                'effective_disposition' => $effectiveValue,
+                'blocks' => $findingState->blocks($finding, $run, $effective),
+                'category' => $finding->category->value,
+                'file' => $redact($finding->file),
+                'line' => $finding->line,
+                'title' => $redact($finding->title),
+                'evidence' => $redact($finding->evidence),
+                'expected_result' => $redact($finding->expected_result),
+                'criterion_refs' => $finding->criterion_refs,
+                'duplicate_group' => $finding->duplicate_group,
+                'history' => $history,
+            ];
+        }
+        /** @var Collection<int, CriterionCoverage> $coverage */
+        $coverage = CriterionCoverage::query()->where('run_id', $run->id)
+            ->when($this->reviewerFilter !== '', fn ($query) => $query->where('slot_id', $this->reviewerFilter))
+            ->orderBy('round_number')->orderBy('slot_id')->orderBy('criterion_id')->get();
+        $coverageRows = $coverage->map(fn (CriterionCoverage $entry): array => [
+            'slot_id' => $entry->slot_id,
+            'source' => $reviewers[$entry->slot_id] ?? $entry->slot_id,
+            'criterion_id' => $entry->criterion_id,
+            'status' => $entry->status,
+            'evidence' => $redact($entry->evidence),
+        ])->all();
+        /** @var Collection<int, InstructionRecommendation> $recommendationModels */
+        $recommendationModels = InstructionRecommendation::query()->where('run_id', $run->id)
+            ->when($this->reviewerFilter !== '', fn ($query) => $query->where('slot_id', $this->reviewerFilter))
+            ->orderBy('round_number')->orderBy('slot_id')->orderBy('created_at')->get();
+        $recommendations = $recommendationModels->map(fn (InstructionRecommendation $entry): array => [
+            'source' => $reviewers[$entry->slot_id] ?? $entry->slot_id,
+            'title' => $redact($entry->title),
+            'recommendation' => $redact($entry->recommendation),
+            'reason' => $redact($entry->reason),
+        ])->all();
 
         return view('runs.timeline', [
             'run' => $run,
@@ -116,6 +198,11 @@ final class RunTimelinePage extends Component
             'checkResults' => CheckResultRecord::query()->where('run_id', $run->getKey())
                 ->whereNull('superseded_at')->orderBy('phase')->orderBy('profile')->get(),
             'runGates' => RunGate::query()->where('run_id', $run->getKey())->orderBy('gate_id')->get(),
+            'findingRows' => $findingRows,
+            'coverageRows' => $coverageRows,
+            'instructionRecommendations' => $recommendations,
+            'reviewers' => $reviewers,
+            'canDisposeFindings' => Gate::allows('disposeFinding', $this->project),
         ]);
     }
 

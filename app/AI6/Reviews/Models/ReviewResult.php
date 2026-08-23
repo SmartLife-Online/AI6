@@ -19,6 +19,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $failure_code
  * @property string|null $result_status
  * @property string|null $workspace_tree_hash
+ * @property string $provider_profile
+ * @property string $model
+ * @property string $effort
+ * @property string $prompt_profile
+ * @property string $checkpoint_tree_sha
+ * @property string $diff_hash
+ * @property string|null $raw_artifact_id
  */
 final class ReviewResult extends Model
 {

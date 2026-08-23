@@ -16,6 +16,7 @@ use App\AI6\Projects\Http\ProjectConfigurationController;
 use App\AI6\Projects\Http\ProjectController;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Prompts\Livewire\PromptHelp;
+use App\AI6\Reviews\FindingDispositionController;
 use App\AI6\Runs\ApprovalStatusPage;
 use App\AI6\Runs\RunStartController;
 use App\AI6\Runs\RunTimelinePage;
@@ -123,6 +124,9 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/projects/{project}/runs/{runId}', RunTimelinePage::class)
         ->middleware('can:viewRun,project')
         ->name('projects.runs.show');
+    Route::post('/projects/{project}/runs/{runId}/findings/{findingId}/disposition', [FindingDispositionController::class, 'store'])
+        ->middleware('can:disposeFinding,project')
+        ->name('projects.runs.findings.disposition');
     Route::get('/projects/{project}/human-requests/{requestId}', HumanRequestDetailPage::class)
         ->middleware('can:answerHumanRequest,project')
         ->name('projects.human-requests.show');

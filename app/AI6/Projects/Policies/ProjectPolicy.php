@@ -85,6 +85,12 @@ final class ProjectPolicy
             'operator' => true,
             'approver' => true,
         ],
+        'dispose_finding' => [
+            'admin' => false,
+            'viewer' => false,
+            'operator' => false,
+            'approver' => true,
+        ],
     ];
 
     public function create(User $user): bool
@@ -165,6 +171,11 @@ final class ProjectPolicy
     public function answerHumanRequest(User $user, Project $project): bool
     {
         return $this->decide(ProjectAction::ANSWER_HUMAN_REQUEST, $user, $project);
+    }
+
+    public function disposeFinding(User $user, Project $project): bool
+    {
+        return $this->decide(ProjectAction::DISPOSE_FINDING, $user, $project);
     }
 
     public function decide(ProjectAction $action, User $user, Project $project): bool

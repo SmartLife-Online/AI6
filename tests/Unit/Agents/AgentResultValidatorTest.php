@@ -46,16 +46,57 @@ final class AgentResultValidatorTest extends TestCase
         }
     }
 
+    public function test_review_instruction_recommendations_are_structured_and_review_only(): void
+    {
+        $context = $this->context(AgentRole::QUALITY_REVIEW);
+        $document = json_decode((new FakeAgentAdapter(AgentScenario::SUCCESS))->result($context), true, 16, JSON_THROW_ON_ERROR);
+        $document['instruction_recommendations'] = [[
+            'title' => 'Wiederverwendbare Regel',
+            'recommendation' => 'Prüfe den gebundenen Checkpoint.',
+            'reason' => 'Verhindert Drift.',
+        ]];
+        $result = $this->app->make(AgentResultValidator::class)->validate(
+            json_encode($document, JSON_THROW_ON_ERROR),
+            $context,
+            $this->redactionContext(),
+        );
+        self::assertSame('Wiederverwendbare Regel', $result->instructionRecommendations[0]->title);
+
+        $implementation = $this->context(AgentRole::IMPLEMENTATION);
+        $document = $this->document($implementation, AgentResultStatus::COMPLETED);
+        $document['instruction_recommendations'] = [];
+        $this->assertValidation($document, $implementation, AgentResultValidationError::SCHEMA);
+    }
+
     public function test_it_rejects_schema_binding_and_criterion_failures_before_a_result_exists(): void
     {
         $context = $this->context(AgentRole::QUALITY_REVIEW);
         $document = $this->document($context, AgentResultStatus::NOTHING_TO_FIX);
-        $document['criterion_coverage'] = ['AC-99'];
+        $document['criterion_coverage'] = [
+            ['criterion_id' => 'AC-99', 'status' => 'satisfied', 'evidence' => 'Unbekannt.'],
+            ['criterion_id' => 'AC-02', 'status' => 'satisfied', 'evidence' => 'Nachweis.'],
+        ];
+        $this->assertValidation($document, $context, AgentResultValidationError::CRITERION_REFERENCE);
+
+        $document = $this->document($context, AgentResultStatus::NOTHING_TO_FIX);
+        $document['criterion_coverage'] = [
+            ['criterion_id' => 'AC-01', 'status' => 'satisfied', 'evidence' => 'Nachweis.'],
+        ];
+        $this->assertValidation($document, $context, AgentResultValidationError::CRITERION_REFERENCE);
+
+        $document = $this->document($context, AgentResultStatus::NOTHING_TO_FIX);
+        $document['criterion_coverage'] = [
+            ['criterion_id' => 'AC-01', 'status' => 'satisfied', 'evidence' => 'Erster Nachweis.'],
+            ['criterion_id' => 'AC-01', 'status' => 'satisfied', 'evidence' => 'Doppelter Nachweis.'],
+        ];
         $this->assertValidation($document, $context, AgentResultValidationError::CRITERION_REFERENCE);
 
         $document = $this->document($context, AgentResultStatus::NOTHING_TO_FIX);
         $document['prompt_snapshot_hash'] = str_repeat('0', 64);
-        $document['criterion_coverage'] = ['AC-01', 'AC-02'];
+        $document['criterion_coverage'] = [
+            ['criterion_id' => 'AC-01', 'status' => 'satisfied', 'evidence' => 'Nachweis.'],
+            ['criterion_id' => 'AC-02', 'status' => 'satisfied', 'evidence' => 'Nachweis.'],
+        ];
         $this->assertValidation($document, $context, AgentResultValidationError::BINDING);
 
         try {
