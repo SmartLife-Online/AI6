@@ -59,5 +59,17 @@
         "role": "quality_review",
         "error": "criterion_reference",
         "bytes": "{\"schema_version\":\"ai6.quality-review.v1\",\"status\":\"findings_to_fix\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"findings\":[{\"local_id\":\"finding-1\",\"severity\":\"high\",\"disposition\":\"must_fix\",\"category\":\"contract\",\"file\":\"app/Example.php\",\"line\":1,\"title\":\"Deterministischer Befund\",\"evidence\":\"Das erwartete Ergebnis fehlt.\",\"expected_result\":\"Der Vertrag ist erfüllt.\",\"criterion_refs\":[\"AC-99\"]}],\"criterion_coverage\":[{\"criterion_id\":\"AC-01\",\"status\":\"satisfied\",\"evidence\":\"Deterministischer Nachweis.\"},{\"criterion_id\":\"AC-02\",\"status\":\"satisfied\",\"evidence\":\"Deterministischer Nachweis.\"}]}"
+    },
+    {
+        "scenario": "regression_after_fix",
+        "role": "quality_review",
+        "status": "findings_to_fix",
+        "bytes": "{\"schema_version\":\"ai6.quality-review.v1\",\"status\":\"findings_to_fix\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"findings\":[{\"local_id\":\"regression-1\",\"severity\":\"high\",\"disposition\":\"must_fix\",\"category\":\"contract\",\"file\":\"app/Regression.php\",\"line\":1,\"title\":\"Neu eingeschleppte Regression\",\"evidence\":\"Das erwartete Ergebnis fehlt.\",\"expected_result\":\"Der Vertrag ist erfüllt.\",\"criterion_refs\":[\"AC-01\",\"AC-02\"]}],\"criterion_coverage\":[{\"criterion_id\":\"AC-01\",\"status\":\"satisfied\",\"evidence\":\"Deterministischer Nachweis.\"},{\"criterion_id\":\"AC-02\",\"status\":\"satisfied\",\"evidence\":\"Deterministischer Nachweis.\"}]}"
+    },
+    {
+        "scenario": "rejects_finding",
+        "role": "implementation",
+        "status": "no_change_required",
+        "bytes": "{\"schema_version\":\"ai6.agent.v1\",\"status\":\"no_change_required\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"decisions\":[{\"key\":\"d1\",\"title\":\"Umsetzung\",\"rationale\":\"Deterministische Entscheidung.\"}],\"changed_paths\":[],\"open_manual_gates\":[],\"implementation_summary\":{\"changed_components\":[],\"decisions\":[\"Deterministische Entscheidung.\"],\"assumptions\":[],\"deviations\":[],\"known_limits\":[],\"tests\":[],\"review_focus\":[]}}"
     }
 ]

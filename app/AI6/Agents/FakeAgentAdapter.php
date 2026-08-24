@@ -57,8 +57,16 @@ final class FakeAgentAdapter implements AgentAdapter
             AgentScenario::SECURITY_FINDINGS,
             AgentScenario::UNTRUSTED_EVIDENCE,
             AgentScenario::INVALID_CRITERION_REFERENCE,
+            AgentScenario::REGRESSION_AFTER_FIX,
         ], true)) {
             $document['findings'] = [$this->finding($context)];
+            if ($scenario === AgentScenario::REGRESSION_AFTER_FIX) {
+                // A defect the fix newly introduced elsewhere. It deliberately sits
+                // outside every earlier finding list (AC-04).
+                $document['findings'][0]['local_id'] = 'regression-1';
+                $document['findings'][0]['file'] = 'app/Regression.php';
+                $document['findings'][0]['title'] = 'Neu eingeschleppte Regression';
+            }
             if ($scenario === AgentScenario::INVALID_CRITERION_REFERENCE) {
                 // A finding that binds a criterion the approved ticket contract does not declare.
                 $document['findings'][0]['criterion_refs'] = ['AC-99'];
@@ -92,6 +100,21 @@ final class FakeAgentAdapter implements AgentAdapter
             && ! array_key_exists('criterion_coverage', $document)) {
             $document['criterion_coverage'] = $this->coverage($context);
         }
+        if ($context->expectedFindingIds !== []) {
+            $status = match (true) {
+                $scenario === AgentScenario::REJECTS_FINDING => 'not_applicable',
+                in_array($scenario, [AgentScenario::SUCCESS, AgentScenario::REGRESSION_AFTER_FIX], true) => 'fixed',
+                default => 'not_fixed',
+            };
+            $document['finding_statuses'] = array_map(
+                static fn (string $findingId): array => [
+                    'finding_id' => $findingId,
+                    'status' => $status,
+                    'evidence' => 'Deterministische Re-Review-Evidenz.',
+                ],
+                $context->expectedFindingIds,
+            );
+        }
 
         try {
             return json_encode($document, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
@@ -114,8 +137,10 @@ final class FakeAgentAdapter implements AgentAdapter
             'slot_id' => $context->slotId,
             'attempt' => $context->attempt,
             'criterion_count' => count($context->criterionRefs),
+            'prior_finding_count' => count($context->expectedFindingIds),
         ];
-        $this->lastRenderedImplementationPrompt = $context->promptSnapshot->renderedPrompts['implementation'] ?? '';
+        $this->lastRenderedImplementationPrompt = $context->promptSnapshot->renderedPrompts['implementation']
+            ?? $context->promptSnapshot->renderedPrompts['fix'] ?? '';
         $document = $this->result($context);
         $tree = $this->regularDirectory($isolatedTree);
         $io = basename($tree) === 'workspace' ? dirname($tree).'-io' : $tree.'-io';
@@ -129,7 +154,11 @@ final class FakeAgentAdapter implements AgentAdapter
             'write_example' => $context->role === AgentRole::IMPLEMENTATION
                 && in_array($scenario, [AgentScenario::SUCCESS, AgentScenario::NO_CHANGE_WITH_DIFF], true),
             'probe_read_only' => $context->role === AgentRole::QUALITY_REVIEW,
-            'example_contents' => "<?php\n\n// fake-agent-change\n",
+            // A fix turn binds its own finding package, so the deterministic
+            // content differs per round and a second fix produces a real diff.
+            'example_contents' => $context->expectedFindingIds !== []
+                ? "<?php\n\n// fake-agent-fix ".substr($context->promptSnapshot->hash, 0, 12)."\n"
+                : "<?php\n\n// fake-agent-change\n",
             'document' => $document,
             'env_probes' => ['APP_KEY', 'MAIL_PASSWORD', 'AI6_GIT_SSH_KEY', 'DB_DATABASE'],
             'path_probes' => array_values(array_unique([...$unreachablePaths, ...$this->additionalPathProbes])),
@@ -228,11 +257,17 @@ final class FakeAgentAdapter implements AgentAdapter
                 AgentRole::FINDING_VERIFICATION, AgentRole::SECURITY_REVIEW => AgentResultStatus::CLEAR,
             },
             AgentScenario::NO_CHANGE_REQUIRED, AgentScenario::NO_CHANGE_WITH_DIFF => AgentResultStatus::NO_CHANGE_REQUIRED,
+            AgentScenario::REJECTS_FINDING => match ($context->role) {
+                AgentRole::IMPLEMENTATION => AgentResultStatus::NO_CHANGE_REQUIRED,
+                AgentRole::QUALITY_REVIEW => AgentResultStatus::NOTHING_TO_FIX,
+                AgentRole::FINDING_VERIFICATION, AgentRole::SECURITY_REVIEW => AgentResultStatus::CLEAR,
+            },
             AgentScenario::HUMAN_REQUEST => AgentResultStatus::NEEDS_HUMAN,
             AgentScenario::FINDINGS => AgentResultStatus::FINDINGS_TO_FIX,
             AgentScenario::PROVIDER_ERROR => AgentResultStatus::FAILED,
             AgentScenario::SECURITY_FINDINGS => AgentResultStatus::SECURITY_FINDINGS,
-            AgentScenario::UNTRUSTED_EVIDENCE, AgentScenario::INVALID_CRITERION_REFERENCE => AgentResultStatus::FINDINGS_TO_FIX,
+            AgentScenario::UNTRUSTED_EVIDENCE, AgentScenario::INVALID_CRITERION_REFERENCE,
+            AgentScenario::REGRESSION_AFTER_FIX => AgentResultStatus::FINDINGS_TO_FIX,
             AgentScenario::INVALID_JSON => throw new \LogicException('Invalid JSON has no typed status.'),
         };
     }

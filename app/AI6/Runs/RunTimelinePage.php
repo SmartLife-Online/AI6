@@ -114,7 +114,7 @@ final class RunTimelinePage extends Component
             $reviewers[$reviewer->slot_id] = $reviewer->provider_profile.' · '.$reviewer->model.' · '.$reviewer->effort;
         }
         /** @var Collection<int, Finding> $findings */
-        $findings = Finding::query()->with('dispositions')->where('run_id', $run->id)
+        $findings = Finding::query()->with(['dispositions', 'statuses'])->where('run_id', $run->id)
             ->orderBy('round_number')->orderBy('slot_id')->orderBy('created_at')->get();
         foreach ($findings as $finding) {
             $effective = $findingState->currentDisposition($finding, $run);
@@ -133,6 +133,22 @@ final class RunTimelinePage extends Component
                     'evidence_review_result_id' => $disposition->evidence_review_result_id,
                     'reason' => $redact($disposition->reason),
                     'effective' => $effective?->id === $disposition->id,
+                ];
+            }
+            $statusHistory = [];
+            foreach ($finding->statuses->sortBy('slot_id')->sortBy('round_number') as $status) {
+                $statusHistory[] = [
+                    'round' => $status->round_number,
+                    'slot_id' => $status->slot_id,
+                    // The fix turn's own assessment is no reviewer slot; it is named
+                    // by its role so the rejection stays readable evidence (AC-07).
+                    'source' => $status->source_role === 'implementation'
+                        ? 'Implementierungsagent'
+                        : ($reviewers[$status->slot_id] ?? $status->slot_id),
+                    'source_role' => $status->source_role,
+                    'status' => $status->status->value,
+                    'evidence' => $redact($status->evidence),
+                    'checkpoint_tree' => $status->checkpoint_tree_sha,
                 ];
             }
             $findingRows[] = [
@@ -155,6 +171,7 @@ final class RunTimelinePage extends Component
                 'criterion_refs' => $finding->criterion_refs,
                 'duplicate_group' => $finding->duplicate_group,
                 'history' => $history,
+                'status_history' => $statusHistory,
             ];
         }
         /** @var Collection<int, CriterionCoverage> $coverage */

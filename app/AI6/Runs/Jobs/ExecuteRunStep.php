@@ -8,6 +8,7 @@ use App\AI6\Runs\ExecutionStepType;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\RunCheckStep;
+use App\AI6\Runs\RunFixTurn;
 use App\AI6\Runs\RunImplementation;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
@@ -35,6 +36,7 @@ final class ExecuteRunStep implements ShouldQueue
         ?RunImplementation $implementation = null,
         ?RunCheckStep $checks = null,
         ?ReviewRound $reviews = null,
+        ?RunFixTurn $fixes = null,
     ): void {
         $job = ExecutionJob::query()->find($this->executionJobId);
         if (! $job instanceof ExecutionJob
@@ -85,6 +87,12 @@ final class ExecuteRunStep implements ShouldQueue
             return;
         }
 
+        if ($type === ExecutionStepType::FIX) {
+            ($fixes ?? app(RunFixTurn::class))->execute($claimed, $run, $owner);
+
+            return;
+        }
+
         $this->preflight($orchestrator, $claimed, $run, $owner);
     }
 
@@ -111,7 +119,7 @@ final class ExecuteRunStep implements ShouldQueue
             return;
         }
 
-        if (! $orchestrator->applyPreparedStepEffect($run, ExecutionStepType::PREFLIGHT)) {
+        if (! $orchestrator->applyPreparedStepEffect($run, ExecutionStepType::PREFLIGHT, $job->step_number)) {
             // The run left the executable range while this step was claimed. Nothing
             // was applied, so the step must not publish a success for it either.
             $this->abandon($orchestrator, $job, $run->id, $owner);

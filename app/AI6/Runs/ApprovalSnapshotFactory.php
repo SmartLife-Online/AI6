@@ -11,6 +11,7 @@ use App\AI6\Git\CanonicalJson;
 use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
+use App\AI6\Prompts\PromptCatalog;
 use App\AI6\Prompts\PromptRenderer;
 use App\AI6\Prompts\PromptRenderRequest;
 use App\AI6\Prompts\PromptVariables;
@@ -30,6 +31,7 @@ final readonly class ApprovalSnapshotFactory
         private SecurityPolicy $securityPolicy,
         private TicketV1Parser $tickets,
         private CanonicalJson $canonicalJson,
+        private PromptCatalog $promptCatalog,
     ) {}
 
     public function create(Project $project, TicketReadModel $readModel, ApprovalSelection $selection, string $operationId): ApprovalSnapshot
@@ -38,7 +40,10 @@ final readonly class ApprovalSnapshotFactory
         $document = $this->tickets->parse($readModel->redacted_content);
         $context = new RedactionContext((string) $project->getKey(), $operationId, 'ticket-approval-snapshot');
         $promptContext = 'Ticketvertrag '.$readModel->ticket_contract_sha256.' ('.$readModel->relative_path.')';
-        $promptRequests = [new PromptRenderRequest('implementation', new PromptVariables(['context' => $promptContext]))];
+        $promptRequests = [
+            new PromptRenderRequest('implementation', new PromptVariables(['context' => $promptContext])),
+            new PromptRenderRequest('fix', new PromptVariables(['context' => $promptContext])),
+        ];
         $firstReviewer = $selection->reviewers[0];
         $promptRequests[] = new PromptRenderRequest('quality_review', new PromptVariables(['context' => $promptContext]), $firstReviewer->promptProfileId);
         $prompt = $this->prompts->snapshot($promptRequests, $context);
@@ -48,12 +53,23 @@ final readonly class ApprovalSnapshotFactory
             if (isset($reviewProfileSnapshots[$reviewer->promptProfileId])) {
                 continue;
             }
+            $reviewProfile = $this->promptCatalog->reviewProfile($reviewer->promptProfileId);
+            $reviewEntry = $this->promptCatalog->entry('quality_review');
             $reviewProfileSnapshots[$reviewer->promptProfileId] = $this->prompts->snapshot([
                 new PromptRenderRequest('quality_review', new PromptVariables(['context' => $promptContext]), $reviewer->promptProfileId),
-            ], $context)->jsonSerialize();
+            ], $context)->jsonSerialize() + [
+                'entry_version' => $reviewEntry->version,
+                'template_sha256' => hash('sha256', $reviewEntry->template),
+                'review_profile_version' => $reviewProfile->version,
+            ];
         }
         ksort($reviewProfileSnapshots, SORT_STRING);
         $promptSnapshot['review_profile_snapshots'] = $reviewProfileSnapshots;
+        $fixEntry = $this->promptCatalog->entry('fix');
+        $promptSnapshot['fix_prompt_binding'] = [
+            'entry_version' => $fixEntry->version,
+            'template_sha256' => hash('sha256', $fixEntry->template),
+        ];
 
         $providers = [$selection->implementation->profile->providerProfileAlias];
         foreach ($selection->reviewers as $reviewer) {

@@ -66,7 +66,7 @@ final readonly class RunCheckStep
             return;
         }
 
-        $intent = $this->boundIntent($run, $profiles, $job->intent === null ? $this->newExecutions($profiles) : null);
+        $intent = $this->boundIntent($run, $profiles, $job->step_number, $job->intent === null ? $this->newExecutions($profiles) : null);
         if ($job->intent === null) {
             if (! $this->orchestrator->persistIntent($job, $owner, $intent)) {
                 // The lease was taken over; the reconciler redelivers the step.
@@ -75,7 +75,7 @@ final readonly class RunCheckStep
             $job->intent = json_encode($intent, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
         } else {
             $stored = $this->decodedIntent($job->intent);
-            if ($stored === null || ! $this->intentMatches($stored, $this->boundIntent($run, $profiles))) {
+            if ($stored === null || ! $this->intentMatches($stored, $this->boundIntent($run, $profiles, $job->step_number))) {
                 $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Schritt-Intent ist nicht gebunden.', 'invalid_step_intent');
                 $this->orchestrator->failRun($run->id);
 
@@ -300,7 +300,7 @@ final readonly class RunCheckStep
             return;
         }
 
-        if (! $this->orchestrator->applyPreparedStepEffect($run, ExecutionStepType::CHECK)) {
+        if (! $this->orchestrator->applyPreparedStepEffect($run, ExecutionStepType::CHECK, $job->step_number)) {
             $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Der Run ist nicht mehr ausführbar.', 'run_not_executable');
 
             return;
@@ -440,14 +440,15 @@ final readonly class RunCheckStep
      * @param  null|array<string, array{id: string, deadline_at: int}>  $executions
      * @return array<string, scalar>
      */
-    private function boundIntent(Run $run, array $profiles, ?array $executions = null): array
+    private function boundIntent(Run $run, array $profiles, int $stepNumber, ?array $executions = null): array
     {
         $intent = [
             'effect' => 'run_check_phase',
             'run_id' => $run->id,
             'phase' => self::PHASE->value,
             'profiles' => implode(',', $profiles),
-            'idempotency_key' => RunOrchestrator::stepKey($run->id, ExecutionStepType::CHECK, 1),
+            'step_number' => $stepNumber,
+            'idempotency_key' => RunOrchestrator::stepKey($run->id, ExecutionStepType::CHECK, $stepNumber),
         ];
         if ($executions !== null) {
             $intent['executions'] = json_encode($executions, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);

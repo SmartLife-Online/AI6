@@ -35,6 +35,7 @@ use Illuminate\Support\Collection;
  * @property list<string> $criterion_refs
  * @property string $duplicate_group
  * @property-read Collection<int, FindingDisposition> $dispositions
+ * @property-read Collection<int, FindingStatus> $statuses
  */
 final class Finding extends Model
 {
@@ -61,6 +62,12 @@ final class Finding extends Model
     public function dispositions(): HasMany
     {
         return $this->hasMany(FindingDisposition::class);
+    }
+
+    /** @return HasMany<FindingStatus, $this> */
+    public function statuses(): HasMany
+    {
+        return $this->hasMany(FindingStatus::class);
     }
 
     /** @return array<string, string> */

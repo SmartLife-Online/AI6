@@ -29,6 +29,7 @@ use App\AI6\HumanLoop\ScopeApprovalService;
 use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Prompts\PromptSnapshot;
+use App\AI6\Reviews\ReviewResultParser;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunAgent;
@@ -65,10 +66,40 @@ final readonly class RunImplementation
         private ProviderRuntimeProfileRegistry $runtimeProfiles,
         private InstructionPathPolicy $instructionPaths,
         private WorktreeGitMetadataPaths $gitMetadataPaths,
+        private ReviewResultParser $reviewResults,
     ) {}
 
     public function execute(ExecutionJob $job, Run $run, string $owner): void
     {
+        $this->executeTurn($job, $run, $owner, ExecutionStepType::IMPLEMENT);
+    }
+
+    /**
+     * Execute a fix through the exact implementation export/import/scope boundary.
+     *
+     * @param  list<string>  $findingIds  the findings the bound context package presents
+     */
+    public function executeFix(
+        ExecutionJob $job,
+        Run $run,
+        string $owner,
+        PromptSnapshot $prompt,
+        string $contextHash,
+        array $findingIds = [],
+    ): void {
+        $this->executeTurn($job, $run, $owner, ExecutionStepType::FIX, $prompt, $contextHash, $findingIds);
+    }
+
+    /** @param list<string> $findingIds */
+    private function executeTurn(
+        ExecutionJob $job,
+        Run $run,
+        string $owner,
+        ExecutionStepType $stepType,
+        ?PromptSnapshot $promptOverride = null,
+        ?string $contextHash = null,
+        array $findingIds = [],
+    ): void {
         try {
             $slot = $this->orchestrator->ensureImplementationSlot($run);
         } catch (ImplementationImportException $exception) {
@@ -97,7 +128,7 @@ final readonly class RunImplementation
             return;
         }
 
-        $intent = $this->boundIntent($run);
+        $intent = $this->boundIntent($run, $stepType, $job->step_number, $promptOverride, $contextHash);
         if ($job->intent === null) {
             if (! $this->orchestrator->persistIntent($job, $owner, $intent)) {
                 return;
@@ -138,11 +169,11 @@ final readonly class RunImplementation
             return;
         }
         $isolated = str_replace('\\', '/', $resolvedBatch).'/tree';
-        $context = new RedactionContext((string) $run->project_id, $run->id, 'implementation-turn');
+        $context = new RedactionContext((string) $run->project_id, $run->id, $stepType->value.'-turn');
 
         try {
             $this->exporter->export($worktree, $isolated, true);
-            $prompt = $this->boundPrompt($run);
+            $prompt = $promptOverride ?? $this->boundPrompt($run);
             $instruction = $this->boundInstruction($run);
             $runtime = $this->boundRuntime($run);
             $instructionUpdate = $this->isInstructionUpdate($run, $instruction);
@@ -156,9 +187,10 @@ final readonly class RunImplementation
                 $instructionUpdate,
                 $this->initialScope($run),
                 $this->expectedInstructionBlobs($instruction, $this->initialScope($run)),
+                expectedFindingIds: $findingIds,
             );
             $bytes = $this->adapter->turn($agentContext, $isolated, $this->gitMetadataPaths->resolve($worktree));
-            $this->handleResult($job, $run, $owner, $slot, $isolated, $bytes, $agentContext, $context, $instructionUpdate);
+            $this->handleResult($job, $run, $owner, $slot, $isolated, $bytes, $agentContext, $context, $instructionUpdate, $stepType);
         } catch (ImplementationImportException $exception) {
             $this->failNamed($job, $run, $owner, $exception->reason, $exception->getMessage());
         } catch (Throwable $exception) {
@@ -179,6 +211,7 @@ final readonly class RunImplementation
         AgentResultContext $agentContext,
         RedactionContext $context,
         bool $instructionUpdate,
+        ExecutionStepType $stepType,
     ): void {
         try {
             $validated = $this->results->validate($bytes, $agentContext, $context);
@@ -244,6 +277,9 @@ final readonly class RunImplementation
             $agentContext->instructionUpdate,
             $agentContext->initialScope,
             $agentContext->expectedInstructionBlobs,
+            $agentContext->slotId,
+            $agentContext->attempt,
+            $agentContext->expectedFindingIds,
         );
         try {
             $validated = $this->results->validate($bytes, $boundContext, $context);
@@ -326,9 +362,21 @@ final readonly class RunImplementation
         );
 
         $this->persistOutcome($run, $validated, $bytes, $imported, $context);
-        $this->orchestrator->recordStepEvent($run->id, ExecutionStepType::IMPLEMENT->value, ExecutionJobState::SUCCEEDED, 'Implementierung abgeschlossen.');
-        $this->orchestrator->finishStep($job, $owner, ExecutionJobState::SUCCEEDED, 'Implementierung abgeschlossen.');
-        $this->orchestrator->applyPreparedStepEffect($run->fresh() ?? $run, ExecutionStepType::IMPLEMENT);
+        $this->reviewResults->persistImplementationStatuses($run, $slot, $job->step_number, $validated, $context);
+        $message = $stepType === ExecutionStepType::FIX ? 'Fixturn abgeschlossen.' : 'Implementierung abgeschlossen.';
+        if (! $this->orchestrator->applyPreparedStepEffect($run->fresh() ?? $run, $stepType, $job->step_number)) {
+            $this->orchestrator->finishStep(
+                $job,
+                $owner,
+                ExecutionJobState::FAILED,
+                'Der vorbereitete Schritteffekt konnte nicht mehr angewendet werden.',
+                'step_effect_not_applied',
+            );
+
+            return;
+        }
+        $this->orchestrator->recordStepEvent($run->id, $stepType->value, ExecutionJobState::SUCCEEDED, $message);
+        $this->orchestrator->finishStep($job, $owner, ExecutionJobState::SUCCEEDED, $message);
     }
 
     /**
@@ -372,7 +420,7 @@ final readonly class RunImplementation
                 // and the decision stay as the audit trail (AC-06).
                 $this->orchestrator->recordStepEvent(
                     $run->id,
-                    ExecutionStepType::IMPLEMENT->value,
+                    $job->step_type,
                     ExecutionJobState::RUNNING,
                     'Abgelehnter Zusatzpfad wurde nicht übernommen.',
                     'scope-rejected:'.$run->id.':'.hash('sha256', $change->path),
@@ -795,14 +843,23 @@ final readonly class RunImplementation
     }
 
     /** @return array<string, scalar> */
-    private function boundIntent(Run $run): array
-    {
+    private function boundIntent(
+        Run $run,
+        ExecutionStepType $type,
+        int $number,
+        ?PromptSnapshot $prompt = null,
+        ?string $contextHash = null,
+    ): array {
         return [
-            'effect' => 'import_implementation_result',
+            'effect' => $type === ExecutionStepType::FIX ? 'import_fix_result' : 'import_implementation_result',
             'run_id' => $run->id,
-            'step_type' => ExecutionStepType::IMPLEMENT->value,
-            'step_number' => 1,
-            'idempotency_key' => RunOrchestrator::stepKey($run->id, ExecutionStepType::IMPLEMENT, 1),
+            'step_type' => $type->value,
+            'step_number' => $number,
+            'idempotency_key' => RunOrchestrator::stepKey($run->id, $type, $number),
+            ...($type === ExecutionStepType::FIX ? [
+                'prompt_snapshot_hash' => $prompt->hash,
+                'finding_context_sha256' => $contextHash ?? '',
+            ] : []),
         ];
     }
 

@@ -2,6 +2,7 @@
 
 namespace App\AI6\Agents;
 
+use App\AI6\Reviews\FindingReviewStatus;
 use App\AI6\Shared\Json\RestrictedJsonDecoder;
 use App\AI6\Shared\Redaction\InvalidRedactionInputException;
 use App\AI6\Shared\Redaction\RedactionContext;
@@ -35,10 +36,20 @@ final readonly class AgentResultValidator
         if ($context->role === AgentRole::IMPLEMENTATION) {
             $allowedKeys = [...$allowedKeys, 'instruction_patch', 'decisions', 'changed_paths', 'open_manual_gates', 'implementation_summary'];
             $requiredKeys = [...$requiredKeys, 'decisions', 'changed_paths', 'open_manual_gates', 'implementation_summary'];
+            if ($context->expectedFindingIds !== []) {
+                // A fix turn may classify the findings it was given. The entry is
+                // evidence for a human disposition and never resolves a blockade
+                // itself, so it stays optional and never has to be complete.
+                $allowedKeys[] = 'finding_statuses';
+            }
         } else {
             $allowedKeys[] = 'findings';
             $allowedKeys[] = 'criterion_coverage';
             $allowedKeys[] = 'instruction_recommendations';
+            if ($context->expectedFindingIds !== []) {
+                $allowedKeys[] = 'finding_statuses';
+                $requiredKeys[] = 'finding_statuses';
+            }
         }
         $this->assertKeys($document, $allowedKeys, $requiredKeys);
 
@@ -63,6 +74,11 @@ final readonly class AgentResultValidator
         $recommendations = $context->role === AgentRole::IMPLEMENTATION
             ? []
             : $this->instructionRecommendations($document['instruction_recommendations'] ?? []);
+        $findingStatuses = $this->findingStatuses(
+            $document['finding_statuses'] ?? [],
+            $context,
+            $context->role !== AgentRole::IMPLEMENTATION,
+        );
         $patch = array_key_exists('instruction_patch', $document) ? $this->instructionPatch($document['instruction_patch'], $context, $redactionContext) : null;
         $decisions = $context->role === AgentRole::IMPLEMENTATION ? $this->decisions($document['decisions'] ?? null) : [];
         $changedPaths = $context->role === AgentRole::IMPLEMENTATION ? $this->paths($document['changed_paths'] ?? null) : [];
@@ -101,7 +117,45 @@ final readonly class AgentResultValidator
             $openManualGates,
             $summaryDocument,
             $recommendations,
+            $findingStatuses,
         );
+    }
+
+    /**
+     * @param  bool  $complete  whether every expected finding must be classified exactly once
+     * @return list<FindingStatusEntry>
+     */
+    private function findingStatuses(mixed $value, AgentResultContext $context, bool $complete): array
+    {
+        if (! is_array($value) || ! array_is_list($value)) {
+            throw new AgentResultValidationException(AgentResultValidationError::SCHEMA);
+        }
+        $expected = $context->expectedFindingIds;
+        sort($expected, SORT_STRING);
+        $seen = [];
+        $entries = [];
+        foreach ($value as $entry) {
+            if (! is_array($entry)) {
+                throw new AgentResultValidationException(AgentResultValidationError::SCHEMA);
+            }
+            $this->assertKeys($entry, ['finding_id', 'status', 'evidence'], ['finding_id', 'status', 'evidence']);
+            $findingId = $this->string($entry, 'finding_id');
+            $status = FindingReviewStatus::tryFrom($this->string($entry, 'status'));
+            $evidence = $this->string($entry, 'evidence');
+            if ($findingId === '' || isset($seen[$findingId]) || ! in_array($findingId, $expected, true)
+                || ! $status instanceof FindingReviewStatus || $evidence === '') {
+                throw new AgentResultValidationException(AgentResultValidationError::SCHEMA);
+            }
+            $seen[$findingId] = true;
+            $entries[] = new FindingStatusEntry($findingId, $status, $evidence);
+        }
+        $actual = array_keys($seen);
+        sort($actual, SORT_STRING);
+        if ($complete && $actual !== $expected) {
+            throw new AgentResultValidationException(AgentResultValidationError::SCHEMA);
+        }
+
+        return $entries;
     }
 
     /** @return list<InstructionRecommendation> */

@@ -111,6 +111,9 @@ final class TicketApprovalQueueTest extends TicketUiTestCase
         self::assertSame('pending_approval_effect', $approval->queue_state);
         self::assertCount(17, $approval->limits_snapshot);
         self::assertSame('2', $approval->prompt_snapshot['catalog_version']);
+        self::assertSame('1', $approval->prompt_snapshot['fix_prompt_binding']['entry_version']);
+        self::assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/D', $approval->prompt_snapshot['fix_prompt_binding']['template_sha256']);
+        self::assertArrayHasKey('fix', $approval->prompt_snapshot['rendered_prompts']);
         self::assertArrayHasKey('fake-v1', $approval->runtime_profile_snapshot);
         self::assertSame(1, DB::table('jobs')->count());
         self::assertSame(0, DB::table('runs')->count());

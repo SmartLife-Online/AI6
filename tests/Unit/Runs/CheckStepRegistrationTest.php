@@ -20,20 +20,20 @@ final class CheckStepRegistrationTest extends TestCase
     {
         self::assertTrue(ExecutionStepType::CHECK->hasRegisteredHandler());
         self::assertSame(
-            ['preflight', 'implement', 'check', 'review'],
+            ['preflight', 'implement', 'check', 'review', 'fix'],
             array_map(static fn (ExecutionStepType $type): string => $type->value, ExecutionStepType::cases()),
         );
 
         self::assertSame(
-            ExecutionStepType::CHECK,
-            RunOrchestrator::decideNextStep(RunState::RUNNING, null, ['preflight', 'implement']),
+            ['type' => ExecutionStepType::CHECK, 'number' => 1],
+            RunOrchestrator::decideNextStepRound(RunState::RUNNING, null, ['preflight:1', 'implement:1'], false),
         );
         self::assertSame(
-            ExecutionStepType::REVIEW,
-            RunOrchestrator::decideNextStep(RunState::RUNNING, null, ['preflight', 'implement', 'check']),
+            ['type' => ExecutionStepType::REVIEW, 'number' => 1],
+            RunOrchestrator::decideNextStepRound(RunState::RUNNING, null, ['preflight:1', 'implement:1', 'check:1'], false),
         );
-        self::assertNull(RunOrchestrator::decideNextStep(RunState::RUNNING, null, ['preflight', 'implement', 'check', 'review']));
-        self::assertNull(RunOrchestrator::decideNextStep(RunState::WAITING, WaitReason::CHECK_FAILURE, ['preflight', 'implement']));
+        self::assertNull(RunOrchestrator::decideNextStepRound(RunState::RUNNING, null, ['preflight:1', 'implement:1', 'check:1', 'review:1'], false));
+        self::assertNull(RunOrchestrator::decideNextStepRound(RunState::WAITING, WaitReason::CHECK_FAILURE, ['preflight:1', 'implement:1'], false));
     }
 
     public function test_the_check_step_key_is_deterministic_and_distinct(): void

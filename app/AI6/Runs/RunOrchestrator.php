@@ -198,41 +198,9 @@ final readonly class RunOrchestrator
         return hash('sha256', implode(':', [$runId, $type->value, $number]));
     }
 
-    /**
-     * The single next-step decision of this application.
-     *
-     * @param  list<string>  $completedStepTypes
-     */
-    public static function decideNextStep(RunState $state, ?WaitReason $waitReason, array $completedStepTypes): ?ExecutionStepType
+    public function nextStep(Run $run, ?ExecutionStepType $completing = null, ?int $completedNumber = null): ?ExecutionStepType
     {
-        if (in_array($state, [RunState::FAILED, RunState::COMPLETED, RunState::CANCELLED], true)) {
-            return null;
-        }
-        if ($state === RunState::WAITING || $waitReason instanceof WaitReason) {
-            return null;
-        }
-
-        foreach (ExecutionStepType::cases() as $type) {
-            if (! in_array($type->value, $completedStepTypes, true)) {
-                return $type;
-            }
-        }
-
-        return null;
-    }
-
-    public function nextStep(Run $run, ?ExecutionStepType $completing = null): ?ExecutionStepType
-    {
-        $completed = ExecutionJob::query()->where('run_id', $run->getKey())
-            ->where('state', ExecutionJobState::SUCCEEDED->value)->pluck('step_type')->all();
-        if ($completing instanceof ExecutionStepType) {
-            $completed[] = $completing->value;
-        }
-
-        /** @var list<string> $completed */
-        $completed = array_values(array_map(strval(...), $completed));
-
-        return self::decideNextStep($run->state, $run->wait_reason, $completed);
+        return $this->nextStepPlan($run, $completing, $completedNumber)['type'] ?? null;
     }
 
     /**
@@ -241,14 +209,90 @@ final readonly class RunOrchestrator
      * This is the only way an execution job is created; the decision itself never
      * happens outside this class.
      */
-    public function planNextStep(Run $run, ?ExecutionStepType $completing = null): ?ExecutionJob
+    public function planNextStep(Run $run, ?ExecutionStepType $completing = null, ?int $completedNumber = null): ?ExecutionJob
     {
-        $type = $this->nextStep($run, $completing);
-        if (! $type instanceof ExecutionStepType) {
+        $plan = $this->nextStepPlan($run, $completing, $completedNumber);
+        if ($plan === null) {
             return null;
         }
 
-        return $this->ensureStep($run, $type);
+        return $this->ensureStep($run, $plan['type'], $plan['number']);
+    }
+
+    /** @return array{type: ExecutionStepType, number: int}|null */
+    private function nextStepPlan(Run $run, ?ExecutionStepType $completing, ?int $completedNumber = null): ?array
+    {
+        if (in_array($run->state, [RunState::FAILED, RunState::COMPLETED, RunState::CANCELLED, RunState::WAITING], true)
+            || $run->wait_reason instanceof WaitReason) {
+            return null;
+        }
+        $completed = [];
+        foreach (ExecutionJob::query()->where('run_id', $run->id)
+            ->where('state', ExecutionJobState::SUCCEEDED->value)->get(['step_type', 'step_number']) as $job) {
+            $completed[$job->step_type.':'.$job->step_number] = true;
+        }
+        if ($completing instanceof ExecutionStepType) {
+            $number = $completedNumber ?? (int) ExecutionJob::query()->where('run_id', $run->id)
+                ->where('step_type', $completing->value)->where('state', ExecutionJobState::RUNNING->value)->value('step_number');
+            if ($number > 0) {
+                $completed[$completing->value.':'.$number] = true;
+            }
+        }
+
+        return self::decideNextStepRound($run->state, $run->wait_reason, array_keys($completed), $this->hasEffectiveBlockingFindings($run));
+    }
+
+    /**
+     * Pure round-aware form of the one next-step decision.
+     *
+     * @param  list<string>  $completedCoordinates  `step_type:round` values
+     * @return array{type: ExecutionStepType, number: int}|null
+     */
+    public static function decideNextStepRound(
+        RunState $state,
+        ?WaitReason $waitReason,
+        array $completedCoordinates,
+        bool $hasEffectiveBlocker,
+    ): ?array {
+        if (in_array($state, [RunState::FAILED, RunState::COMPLETED, RunState::CANCELLED, RunState::WAITING], true)
+            || $waitReason instanceof WaitReason) {
+            return null;
+        }
+        $completed = array_fill_keys($completedCoordinates, true);
+        foreach ([ExecutionStepType::PREFLIGHT, ExecutionStepType::IMPLEMENT, ExecutionStepType::CHECK, ExecutionStepType::REVIEW] as $type) {
+            if (! isset($completed[$type->value.':1'])) {
+                return ['type' => $type, 'number' => 1];
+            }
+        }
+        $reviewRound = 1;
+        while (isset($completed[ExecutionStepType::REVIEW->value.':'.($reviewRound + 1)])) {
+            $reviewRound++;
+        }
+        if (! isset($completed[ExecutionStepType::FIX->value.':'.$reviewRound])) {
+            return $hasEffectiveBlocker
+                ? ['type' => ExecutionStepType::FIX, 'number' => $reviewRound]
+                : null;
+        }
+        $nextRound = $reviewRound + 1;
+        if (! isset($completed[ExecutionStepType::CHECK->value.':'.$nextRound])) {
+            return ['type' => ExecutionStepType::CHECK, 'number' => $nextRound];
+        }
+        if (! isset($completed[ExecutionStepType::REVIEW->value.':'.$nextRound])) {
+            return ['type' => ExecutionStepType::REVIEW, 'number' => $nextRound];
+        }
+
+        return null;
+    }
+
+    public function hasEffectiveBlockingFindings(Run $run): bool
+    {
+        foreach (Finding::query()->with('dispositions')->where('run_id', $run->id)->get() as $finding) {
+            if ($this->findingState->blocks($finding, $run)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function preflightFailureCode(Run $run): ?string
@@ -285,7 +329,7 @@ final readonly class RunOrchestrator
      * false when the run left the executable range while the step was claimed; the
      * effect is then not applied, and the caller must not publish a success for it.
      */
-    public function applyPreparedStepEffect(Run $run, ExecutionStepType $completed): bool
+    public function applyPreparedStepEffect(Run $run, ExecutionStepType $completed, ?int $completedNumber = null): bool
     {
         $fresh = Run::query()->findOrFail($run->getKey());
         if (! in_array($fresh->state, [RunState::QUEUED, RunState::RUNNING], true)) {
@@ -301,8 +345,15 @@ final readonly class RunOrchestrator
             && $fresh->review_readiness_state === 'ready') {
             $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::REVIEW);
         }
+        if ($completed === ExecutionStepType::REVIEW && $fresh->phase === RunPhase::REVIEW
+            && $this->hasEffectiveBlockingFindings($fresh)) {
+            $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::FIX);
+        }
+        if ($completed === ExecutionStepType::FIX && $fresh->phase === RunPhase::FIX) {
+            $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::CHECK);
+        }
 
-        $this->planNextStep($fresh, $completed);
+        $this->planNextStep($fresh, $completed, $completedNumber);
 
         return true;
     }

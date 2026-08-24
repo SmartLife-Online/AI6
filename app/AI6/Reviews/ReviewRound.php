@@ -25,7 +25,13 @@ use App\AI6\Git\WorktreeGitMetadataPaths;
 use App\AI6\HumanLoop\HumanRequestRejected;
 use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\Projects\Models\TicketReadModel;
+use App\AI6\Prompts\PromptCatalog;
+use App\AI6\Prompts\PromptRenderer;
+use App\AI6\Prompts\PromptRenderingException;
+use App\AI6\Prompts\PromptRenderRequest;
 use App\AI6\Prompts\PromptSnapshot;
+use App\AI6\Prompts\PromptVariables;
+use App\AI6\Reviews\Models\ReviewResult;
 use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\ExecutionStepType;
 use App\AI6\Runs\ImplementationImportException;
@@ -37,6 +43,7 @@ use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\RunArtifactKind;
 use App\AI6\Runs\RunArtifactStore;
 use App\AI6\Runs\RunOrchestrator;
+use App\AI6\Runs\RunTransitionConflict;
 use App\AI6\Shared\Json\JsonDecodingException;
 use App\AI6\Shared\Redaction\InvalidRedactionInputException;
 use App\AI6\Shared\Redaction\RedactionContext;
@@ -45,11 +52,9 @@ use App\AI6\Tickets\TicketV1Parser;
 use Illuminate\Support\Str;
 use Throwable;
 
-/** The first serial, checkpoint-bound quality-review round of a run. */
+/** One serial, checkpoint-bound quality-review round of a run. */
 final readonly class ReviewRound
 {
-    private const ROUND = 1;
-
     public function __construct(
         private RunOrchestrator $orchestrator,
         private ReviewResultStore $results,
@@ -67,6 +72,10 @@ final readonly class ReviewRound
         private HumanRequestService $humanRequests,
         private TicketV1Parser $tickets,
         private WorktreeGitMetadataPaths $gitMetadataPaths,
+        private FixContextPackage $priorFindings,
+        private EffectiveFindingState $findingStates,
+        private PromptRenderer $prompts,
+        private PromptCatalog $catalog,
     ) {}
 
     public function execute(ExecutionJob $job, Run $run, string $owner): void
@@ -94,9 +103,9 @@ final readonly class ReviewRound
         $intent = [
             'effect' => 'execute_quality_review_round',
             'run_id' => $run->id,
-            'round_number' => self::ROUND,
+            'round_number' => $job->step_number,
             'step_type' => ExecutionStepType::REVIEW->value,
-            'idempotency_key' => RunOrchestrator::stepKey($run->id, ExecutionStepType::REVIEW, 1),
+            'idempotency_key' => RunOrchestrator::stepKey($run->id, ExecutionStepType::REVIEW, $job->step_number),
         ];
         if ($job->intent === null) {
             if (! $this->orchestrator->persistIntent($job, $owner, $intent)) {
@@ -109,10 +118,13 @@ final readonly class ReviewRound
         }
 
         foreach ($slots as $slot) {
-            if ($this->results->terminalOutcome($run, self::ROUND, $slot->slot_id) !== null) {
+            if ($this->results->terminalOutcome($run, $job->step_number, $slot->slot_id) !== null) {
                 continue;
             }
-            $attempt = $this->results->attempt($run, self::ROUND, $slot->slot_id);
+            $attempt = $this->results->attempt($run, $job->step_number, $slot->slot_id);
+            if ($job->step_number > 1 && $attempt === 1) {
+                $this->orchestrator->discardReviewSession($run, $slot->slot_id);
+            }
             $slot = $this->orchestrator->bindReviewSession($run, $slot->slot_id, (string) Str::uuid());
             if ($this->invoke($job, $run, $slot, $common, $criteria, $attempt)) {
                 return;
@@ -120,7 +132,7 @@ final readonly class ReviewRound
         }
 
         foreach ($slots as $slot) {
-            $terminal = $this->results->terminalOutcome($run, self::ROUND, $slot->slot_id);
+            $terminal = $this->results->terminalOutcome($run, $job->step_number, $slot->slot_id);
             if ($terminal !== ReviewInvocationOutcome::VALID_RESULT) {
                 $this->failStep($job, $run, $owner, 'review_slot_failed');
 
@@ -128,7 +140,15 @@ final readonly class ReviewRound
             }
         }
 
-        $this->orchestrator->finishStep($job, $owner, ExecutionJobState::SUCCEEDED, 'Qualitätsreview abgeschlossen.');
+        if ($job->step_number > 1) {
+            if (! $this->recordFixedPriorFindings($job, $run, $owner, $job->step_number, $slots)) {
+                return;
+            }
+        }
+
+        if ($this->orchestrator->applyPreparedStepEffect($run->fresh() ?? $run, ExecutionStepType::REVIEW, $job->step_number)) {
+            $this->orchestrator->finishStep($job, $owner, ExecutionJobState::SUCCEEDED, 'Qualitätsreview abgeschlossen.');
+        }
     }
 
     /**
@@ -153,7 +173,7 @@ final readonly class ReviewRound
         ];
         try {
             $reviewer = $this->reviewerSnapshot($run, $slot);
-            $prompt = $this->prompt($run, $slot);
+            $prompt = $this->prompt($run, $slot, $job->step_number);
             $instruction = $this->instruction($run, $slot->provider_profile);
             $runtime = $this->runtime($run, $reviewer);
             $bindings['slot_prompt_hash'] = $prompt->hash;
@@ -165,8 +185,12 @@ final readonly class ReviewRound
                 throw new ImplementationImportException($drift, 'The reviewer instruction or runtime binding changed.');
             }
         } catch (Throwable $exception) {
-            $reason = $exception instanceof ImplementationImportException ? $exception->reason : 'review_binding_invalid';
-            $this->results->append($run, $slot, self::ROUND, $attempt, ReviewInvocationOutcome::BINDING_ERROR, $bindings, $reason);
+            $reason = match (true) {
+                $exception instanceof ImplementationImportException => $exception->reason,
+                $exception instanceof PromptRenderingException => $exception->reason->value,
+                default => 'review_binding_invalid',
+            };
+            $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::BINDING_ERROR, $bindings, $reason);
 
             return false;
         }
@@ -175,21 +199,21 @@ final readonly class ReviewRound
         try {
             $this->checkpoints->verify($run, $context);
         } catch (ReviewCheckpointException $exception) {
-            $this->results->append($run, $slot, self::ROUND, $attempt, ReviewInvocationOutcome::CHECKPOINT_ERROR, $bindings, $exception->reason);
+            $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::CHECKPOINT_ERROR, $bindings, $exception->reason);
 
             return false;
         }
 
         $roots = $this->executionRoots();
         if ($roots === null || ! is_string($run->worktree_path)) {
-            $this->results->append($run, $slot, self::ROUND, $attempt, ReviewInvocationOutcome::WORKSPACE_ERROR, $bindings, 'review_workspace_unavailable');
+            $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::WORKSPACE_ERROR, $bindings, 'review_workspace_unavailable');
 
             return false;
         }
         [$inputRoot, $outputRoot] = $roots;
         $invocation = $this->invocationRoots($inputRoot, $outputRoot);
         if ($invocation === null) {
-            $this->results->append($run, $slot, self::ROUND, $attempt, ReviewInvocationOutcome::WORKSPACE_ERROR, $bindings, 'review_workspace_unavailable');
+            $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::WORKSPACE_ERROR, $bindings, 'review_workspace_unavailable');
 
             return false;
         }
@@ -200,7 +224,7 @@ final readonly class ReviewRound
         try {
             $this->exporter->export($run->worktree_path, $export);
             $bindings['workspace_tree_hash'] = $this->trees->hash($export);
-            $expectedTree = $this->results->expectedWorkspaceHash($run, self::ROUND);
+            $expectedTree = $this->results->expectedWorkspaceHash($run, $job->step_number);
             if ($expectedTree !== null && ! hash_equals($expectedTree, $bindings['workspace_tree_hash'])) {
                 throw new ImplementationImportException('review_workspace_binding_mismatch', 'Review workspaces do not bind the same tree.');
             }
@@ -223,7 +247,7 @@ final readonly class ReviewRound
         } catch (Throwable $exception) {
             $reason = $exception instanceof ImplementationImportException ? $exception->reason : 'review_workspace_unavailable';
             $this->destroy($home, $adapterIo, $export, $invocationInput, $invocationOutput);
-            $this->results->append($run, $slot, self::ROUND, $attempt, ReviewInvocationOutcome::WORKSPACE_ERROR, $bindings, $reason);
+            $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::WORKSPACE_ERROR, $bindings, $reason);
 
             return false;
         }
@@ -237,6 +261,7 @@ final readonly class ReviewRound
             '',
             slotId: $slot->slot_id,
             attempt: $attempt,
+            expectedFindingIds: $job->step_number > 1 ? $this->priorFindings->priorFindingIds($run, $job->step_number) : [],
         );
         try {
             $bytes = $this->adapter->turn($agentContext, $home->workspace, [
@@ -244,12 +269,12 @@ final readonly class ReviewRound
             ]);
         } catch (Throwable) {
             $this->destroy($home, $adapterIo, $export, $invocationInput, $invocationOutput);
-            $this->results->append($run, $slot, self::ROUND, $attempt, ReviewInvocationOutcome::PROVIDER_ERROR, $bindings, 'provider_error');
+            $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::PROVIDER_ERROR, $bindings, 'provider_error');
 
             return false;
         }
         if (! $this->destroy($home, $adapterIo, $export, $invocationInput, $invocationOutput)) {
-            $this->results->append($run, $slot, self::ROUND, $attempt, ReviewInvocationOutcome::WORKSPACE_ERROR, $bindings, 'review_home_cleanup_failed');
+            $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::WORKSPACE_ERROR, $bindings, 'review_home_cleanup_failed');
 
             return false;
         }
@@ -258,28 +283,28 @@ final readonly class ReviewRound
             $artifact = $this->artifacts->store($run, RunArtifactKind::PROVIDER_RAW, $bytes, [
                 'role' => AgentRole::QUALITY_REVIEW->value,
                 'slot_id' => $slot->slot_id,
-                'round_number' => self::ROUND,
+                'round_number' => $job->step_number,
                 'attempt' => $attempt,
             ], $context);
         } catch (InvalidRedactionInputException) {
-            $this->results->append($run, $slot, self::ROUND, $attempt, ReviewInvocationOutcome::INVALID_JSON, $bindings, 'invalid_utf8');
+            $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::INVALID_JSON, $bindings, 'invalid_utf8');
 
             return false;
         }
         try {
             $result = $this->validator->validate($bytes, $agentContext, $context);
         } catch (JsonDecodingException|InvalidRedactionInputException) {
-            $this->results->append($run, $slot, self::ROUND, $attempt, ReviewInvocationOutcome::INVALID_JSON, $bindings, 'invalid_json', artifactId: $artifact->id);
+            $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::INVALID_JSON, $bindings, 'invalid_json', artifactId: $artifact->id);
 
             return false;
         } catch (AgentResultValidationException $exception) {
-            $this->results->append($run, $slot, self::ROUND, $attempt, ReviewInvocationOutcome::INVALID_JSON, $bindings, $exception->reason->value, artifactId: $artifact->id);
+            $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::INVALID_JSON, $bindings, $exception->reason->value, artifactId: $artifact->id);
 
             return false;
         }
 
         if ($result->status === AgentResultStatus::FAILED) {
-            $this->results->append($run, $slot, self::ROUND, $attempt, ReviewInvocationOutcome::PROVIDER_ERROR, $bindings, 'provider_error', artifactId: $artifact->id);
+            $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::PROVIDER_ERROR, $bindings, 'provider_error', artifactId: $artifact->id);
 
             return false;
         }
@@ -287,7 +312,7 @@ final readonly class ReviewRound
             $this->results->append(
                 $run,
                 $slot,
-                self::ROUND,
+                $job->step_number,
                 $attempt,
                 ReviewInvocationOutcome::NEEDS_HUMAN,
                 $bindings,
@@ -302,7 +327,7 @@ final readonly class ReviewRound
                 $this->results->append(
                     $run,
                     $slot,
-                    self::ROUND,
+                    $job->step_number,
                     $attempt + 1,
                     ReviewInvocationOutcome::HUMAN_REQUEST_ERROR,
                     $bindings,
@@ -317,7 +342,7 @@ final readonly class ReviewRound
             $this->results->appendValid(
                 $run,
                 $slot,
-                self::ROUND,
+                $job->step_number,
                 $attempt,
                 $bindings,
                 $result,
@@ -328,7 +353,7 @@ final readonly class ReviewRound
             $this->results->append(
                 $run,
                 $slot,
-                self::ROUND,
+                $job->step_number,
                 $attempt,
                 ReviewInvocationOutcome::INVALID_JSON,
                 $bindings,
@@ -403,7 +428,7 @@ final readonly class ReviewRound
         throw new ImplementationImportException('approval_reviewer_missing', 'The reviewer slot is absent from the approval snapshot.');
     }
 
-    private function prompt(Run $run, RunAgent $slot): PromptSnapshot
+    private function prompt(Run $run, RunAgent $slot, int $round): PromptSnapshot
     {
         $snapshot = ($run->prompt_snapshot ?? [])['review_profile_snapshots'][$slot->prompt_profile] ?? null;
         if (! is_array($snapshot) || ! is_array($snapshot['rendered_prompts'] ?? null)
@@ -412,12 +437,112 @@ final readonly class ReviewRound
             throw new ImplementationImportException('prompt_binding_missing', 'The reviewer prompt binding is missing.');
         }
 
-        return new PromptSnapshot(
+        $bound = new PromptSnapshot(
             is_string($snapshot['catalog_version'] ?? null) ? $snapshot['catalog_version'] : '1',
             is_array($snapshot['selected_profiles'] ?? null) ? $snapshot['selected_profiles'] : [],
             $snapshot['rendered_prompts'],
             $snapshot['prompt_snapshot_hash'],
         );
+        if ($round === 1) {
+            return $bound;
+        }
+        $entry = $this->catalog->entry('quality_review');
+        $profile = $this->catalog->reviewProfile($slot->prompt_profile);
+        if ($bound->catalogVersion !== $this->catalog->version
+            || ($bound->selectedProfiles['quality_review'] ?? null) !== $slot->prompt_profile
+            || ($snapshot['entry_version'] ?? null) !== $entry->version
+            || ! is_string($snapshot['template_sha256'] ?? null)
+            || ! hash_equals($snapshot['template_sha256'], hash('sha256', $entry->template))
+            || ($snapshot['review_profile_version'] ?? null) !== $profile->version) {
+            throw new ImplementationImportException('review_prompt_binding_mismatch', 'The reviewer prompt binding changed.');
+        }
+        $package = $this->priorFindings->priorForRound($run, $round);
+        if ($package['finding_ids'] === []) {
+            throw new ImplementationImportException('review_prior_findings_missing', 'The re-review has no bound prior findings.');
+        }
+
+        $approval = TicketApproval::query()->findOrFail($run->ticket_approval_id);
+        $context = 'Ticketvertrag '.$approval->ticket_contract_sha256.' ('.$approval->relative_path.")\n\n"
+            ."Frühere gebundene Findings, je einmal einzustufen:\n".$package['json'];
+
+        return $this->prompts->snapshot([
+            new PromptRenderRequest('quality_review', new PromptVariables(['context' => $context]), $slot->prompt_profile),
+        ], new RedactionContext((string) $run->project_id, $run->id, 'quality-review-prompt-'.$slot->slot_id));
+    }
+
+    /** @param iterable<RunAgent> $slots */
+    private function recordFixedPriorFindings(ExecutionJob $job, Run $run, string $owner, int $round, iterable $slots): bool
+    {
+        $slotIds = [];
+        foreach ($slots as $slot) {
+            $slotIds[] = $slot->slot_id;
+        }
+        $expected = $slotIds;
+        sort($expected, SORT_STRING);
+        $nothingToFix = $this->results->nothingToFixResults($run, $round);
+        $evidence = $nothingToFix->first();
+        $nothingSlots = $nothingToFix->pluck('slot_id')->all();
+        sort($nothingSlots, SORT_STRING);
+        if ($nothingSlots !== $expected || ! $evidence instanceof ReviewResult) {
+            return true;
+        }
+        foreach ($this->priorFindings->priorFindingsForRound($run, $round) as $finding) {
+            if ($finding->checkpoint_tree_sha === $run->checkpoint_tree_sha) {
+                continue;
+            }
+            if (! $this->findingStates->blocks($finding, $run)) {
+                continue;
+            }
+            $fixed = $this->priorFindings->fixedSlotIds($run, $finding, $round);
+            sort($fixed, SORT_STRING);
+            if ($fixed !== $expected) {
+                continue;
+            }
+            $fresh = $run->fresh();
+            if ($fresh === null) {
+                continue;
+            }
+            try {
+                $this->orchestrator->recordFixedFinding(
+                    $fresh,
+                    $finding,
+                    $evidence,
+                    $fresh->version,
+                    'Alle erforderlichen Reviewer haben den gebundenen Checkpoint als behoben eingestuft.',
+                );
+            } catch (RunTransitionConflict $conflict) {
+                if ($conflict->reason === 'stale_run_version') {
+                    $fresh = $run->fresh();
+                    if ($fresh instanceof Run) {
+                        try {
+                            $this->orchestrator->recordFixedFinding(
+                                $fresh,
+                                $finding,
+                                $evidence,
+                                $fresh->version,
+                                'Alle erforderlichen Reviewer haben den gebundenen Checkpoint als behoben eingestuft.',
+                            );
+
+                            continue;
+                        } catch (RunTransitionConflict $retryConflict) {
+                            if ($retryConflict->reason === 'stale_run_version') {
+                                continue;
+                            }
+                            $this->failStep($job, $run, $owner, $retryConflict->reason);
+
+                            return false;
+                        }
+                    }
+
+                    continue;
+                }
+                $this->failStep($job, $run, $owner, $conflict->reason);
+
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function instruction(Run $run, string $provider): InstructionSnapshot

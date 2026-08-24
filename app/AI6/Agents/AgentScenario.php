@@ -14,4 +14,6 @@ enum AgentScenario: string
     case SECURITY_FINDINGS = 'security_findings';
     case UNTRUSTED_EVIDENCE = 'untrusted_evidence';
     case INVALID_CRITERION_REFERENCE = 'invalid_criterion_reference';
+    case REGRESSION_AFTER_FIX = 'regression_after_fix';
+    case REJECTS_FINDING = 'rejects_finding';
 }

@@ -10,6 +10,7 @@ final readonly class AgentResultContext
      * @param  list<string>  $criterionRefs
      * @param  list<string>  $initialScope
      * @param  array<string, string|null>  $expectedInstructionBlobs
+     * @param  list<string>  $expectedFindingIds
      */
     public function __construct(
         public AgentRole $role,
@@ -23,5 +24,6 @@ final readonly class AgentResultContext
         public array $expectedInstructionBlobs = [],
         public string $slotId = '',
         public int $attempt = 1,
+        public array $expectedFindingIds = [],
     ) {}
 }

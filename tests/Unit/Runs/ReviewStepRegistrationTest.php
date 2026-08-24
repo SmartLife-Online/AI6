@@ -15,8 +15,8 @@ final class ReviewStepRegistrationTest extends TestCase
     {
         self::assertTrue(ExecutionStepType::REVIEW->hasRegisteredHandler());
         self::assertSame(
-            ExecutionStepType::REVIEW,
-            RunOrchestrator::decideNextStep(RunState::RUNNING, null, ['preflight', 'implement', 'check']),
+            ['type' => ExecutionStepType::REVIEW, 'number' => 1],
+            RunOrchestrator::decideNextStepRound(RunState::RUNNING, null, ['preflight:1', 'implement:1', 'check:1'], false),
         );
 
         $job = file_get_contents(dirname(__DIR__, 3).'/app/AI6/Runs/Jobs/ExecuteRunStep.php');

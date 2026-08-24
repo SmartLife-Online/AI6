@@ -42,10 +42,12 @@ final class RunStepDecisionTest extends TestCase
         array $completed,
         ?ExecutionStepType $expected,
     ): void {
-        self::assertSame($expected, RunOrchestrator::decideNextStep($state, $waitReason, $completed));
+        $coordinates = array_map(static fn (string $type): string => $type.':1', $completed);
+        $actual = RunOrchestrator::decideNextStepRound($state, $waitReason, $coordinates, false);
+        self::assertSame($expected, $actual['type'] ?? null);
         self::assertSame(
-            RunOrchestrator::decideNextStep($state, $waitReason, $completed),
-            RunOrchestrator::decideNextStep($state, $waitReason, $completed),
+            $actual,
+            RunOrchestrator::decideNextStepRound($state, $waitReason, $coordinates, false),
         );
     }
 
@@ -53,9 +55,9 @@ final class RunStepDecisionTest extends TestCase
     {
         self::assertSame(
             ExecutionStepType::PREFLIGHT,
-            RunOrchestrator::decideNextStep(RunState::RUNNING, null, []),
+            RunOrchestrator::decideNextStepRound(RunState::RUNNING, null, [], false)['type'],
         );
-        self::assertNull(RunOrchestrator::decideNextStep(RunState::RUNNING, WaitReason::HUMAN_QUESTION, []));
+        self::assertNull(RunOrchestrator::decideNextStepRound(RunState::RUNNING, WaitReason::HUMAN_QUESTION, [], false));
     }
 
     /** TC-02: the idempotency key is a pure function of run, step type and number. */
@@ -77,5 +79,38 @@ final class RunStepDecisionTest extends TestCase
         self::assertTrue(ExecutionStepType::IMPLEMENT->hasRegisteredHandler());
         self::assertTrue(ExecutionStepType::CHECK->hasRegisteredHandler());
         self::assertTrue(ExecutionStepType::REVIEW->hasRegisteredHandler());
+        self::assertTrue(ExecutionStepType::FIX->hasRegisteredHandler());
+    }
+
+    public function test_a_fix_repeats_checks_checkpoint_readiness_and_the_complete_review_sequence(): void
+    {
+        $initial = ['preflight:1', 'implement:1', 'check:1', 'review:1'];
+        self::assertSame(
+            ['type' => ExecutionStepType::FIX, 'number' => 1],
+            RunOrchestrator::decideNextStepRound(RunState::RUNNING, null, $initial, true),
+        );
+        self::assertSame(
+            ['type' => ExecutionStepType::CHECK, 'number' => 2],
+            RunOrchestrator::decideNextStepRound(RunState::RUNNING, null, [...$initial, 'fix:1'], true),
+        );
+        self::assertSame(
+            ['type' => ExecutionStepType::REVIEW, 'number' => 2],
+            RunOrchestrator::decideNextStepRound(RunState::RUNNING, null, [...$initial, 'fix:1', 'check:2'], true),
+        );
+        self::assertNull(RunOrchestrator::decideNextStepRound(
+            RunState::RUNNING,
+            null,
+            [...$initial, 'fix:1', 'check:2', 'review:2'],
+            false,
+        ));
+        self::assertSame(
+            ['type' => ExecutionStepType::FIX, 'number' => 2],
+            RunOrchestrator::decideNextStepRound(
+                RunState::RUNNING,
+                null,
+                [...$initial, 'fix:1', 'check:2', 'review:2'],
+                true,
+            ),
+        );
     }
 }

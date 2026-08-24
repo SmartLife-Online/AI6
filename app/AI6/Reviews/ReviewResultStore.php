@@ -3,10 +3,12 @@
 namespace App\AI6\Reviews;
 
 use App\AI6\Agents\AgentResult;
+use App\AI6\Agents\AgentResultStatus;
 use App\AI6\Reviews\Models\ReviewResult;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Shared\Redaction\RedactionContext;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -106,5 +108,15 @@ final readonly class ReviewResultStore
             ->value('workspace_tree_hash');
 
         return is_string($value) ? $value : null;
+    }
+
+    /** @return Collection<int, ReviewResult> */
+    public function nothingToFixResults(Run $run, int $round): Collection
+    {
+        return ReviewResult::query()->where('run_id', $run->id)
+            ->where('round_number', $round)->where('checkpoint_tree_sha', $run->checkpoint_tree_sha)
+            ->where('invocation_outcome', ReviewInvocationOutcome::VALID_RESULT)
+            ->where('result_status', AgentResultStatus::NOTHING_TO_FIX->value)
+            ->orderBy('slot_id')->get();
     }
 }

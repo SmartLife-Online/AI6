@@ -15,7 +15,7 @@
     <ul>
         @forelse ($jobs as $job)
             <li data-step-type="{{ $job->step_type }}" data-step-state="{{ $job->state->value }}">
-                <strong>{{ $job->step_type }}</strong>: {{ $job->state->value }}
+                <strong>{{ $job->step_type }}</strong> · Runde {{ $job->step_number }}: {{ $job->state->value }}
                 @if ($job->failure_code !== null)
                     (<code>{{ $job->failure_code }}</code>)
                 @endif
@@ -166,6 +166,18 @@
                                     @if ($entry['evidence_review_result_id'] !== null)
                                         · Reviewnachweis: {{ $entry['evidence_review_result_id'] }}
                                     @endif
+                                </li>
+                            @endforeach
+                        </ol>
+                    @endif
+                    @if ($finding['status_history'] !== [])
+                        <h5>Findingstatus je Re-Review-Runde</h5>
+                        <ol>
+                            @foreach ($finding['status_history'] as $entry)
+                                <li data-finding-status="{{ $entry['status'] }}" data-review-round="{{ $entry['round'] }}"
+                                    data-status-source="{{ $entry['source_role'] }}">
+                                    Runde {{ $entry['round'] }} · {{ $entry['source'] }}: {{ $entry['status'] }} — {{ $entry['evidence'] }}
+                                    · Checkpoint <code>{{ $entry['checkpoint_tree'] }}</code>
                                 </li>
                             @endforeach
                         </ol>
