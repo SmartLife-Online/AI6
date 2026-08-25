@@ -15,6 +15,6 @@ enum ReviewInvocationOutcome: string
 
     public function terminal(): bool
     {
-        return $this !== self::NEEDS_HUMAN;
+        return ! in_array($this, [self::NEEDS_HUMAN, self::PROVIDER_ERROR, self::INVALID_JSON], true);
     }
 }

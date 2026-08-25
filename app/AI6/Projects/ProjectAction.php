@@ -16,5 +16,6 @@ enum ProjectAction: string
     case START_RUN = 'start_run';
     case VIEW_RUN = 'view_run';
     case ANSWER_HUMAN_REQUEST = 'answer_human_request';
+    case INTERVENE_RUN = 'intervene_run';
     case DISPOSE_FINDING = 'dispose_finding';
 }

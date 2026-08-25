@@ -129,6 +129,9 @@ final class ControlOperationPersistenceTest extends ControlOperationTestCase
                 $writers[] = str_replace('\\', '/', substr($file->getPathname(), strlen(base_path()) + 1));
             }
         }
+        // Directory enumeration order is filesystem-dependent; the contract is
+        // the exact writer set, not the traversal order.
+        sort($writers, SORT_STRING);
         self::assertSame([
             'app/AI6/Git/ProjectOperationLease.php',
             'app/AI6/Runs/RunOrchestrator.php',

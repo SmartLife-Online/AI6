@@ -19,8 +19,14 @@ final class TicketStatusTransitionPolicy
         'review:cancel' => [ProjectRole::ADMIN, ProjectRole::OPERATOR, ProjectRole::APPROVER],
         'review:return_to_todo' => [ProjectRole::ADMIN, ProjectRole::OPERATOR, ProjectRole::APPROVER],
         'review:complete_review' => [ProjectRole::ADMIN, ProjectRole::APPROVER],
-        'in_progress:cancel' => [ProjectRole::ADMIN, ProjectRole::OPERATOR],
+        // The approver joins the published in_progress:cancel mapping because the
+        // hard-cancel saga requires the approver role at the service boundary and
+        // must pass the persisted revalidation; the published roles stay intact.
+        // Additive extension explicitly human-approved on 25 August 2026 as a
+        // scope/contract deviation of AI6-026 beyond the approved BLOCK source.
+        'in_progress:cancel' => [ProjectRole::ADMIN, ProjectRole::OPERATOR, ProjectRole::APPROVER],
         'in_progress:return_to_todo' => [ProjectRole::ADMIN, ProjectRole::OPERATOR],
+        'in_progress:block' => [ProjectRole::APPROVER],
     ];
 
     public function decide(

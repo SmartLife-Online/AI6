@@ -74,6 +74,7 @@ use App\AI6\Reviews\ReviewerSlotFactory;
 use App\AI6\Reviews\ReviewResultParser;
 use App\AI6\Reviews\ReviewResultStore;
 use App\AI6\Reviews\ReviewRound;
+use App\AI6\Reviews\ReviewStallFingerprint;
 use App\AI6\Runs\ApprovalSelectionFactory;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ApprovalStatusPage;
@@ -85,6 +86,7 @@ use App\AI6\Runs\InstructionCandidateSource;
 use App\AI6\Runs\InstructionPathPolicy;
 use App\AI6\Runs\RunArtifactRoot;
 use App\AI6\Runs\RunArtifactStore;
+use App\AI6\Runs\RunCancellationService;
 use App\AI6\Runs\RunFixTurn;
 use App\AI6\Runs\RunImplementation;
 use App\AI6\Runs\RunLimitPolicy;
@@ -225,6 +227,7 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(ReviewResultParser::class);
         $this->app->singleton(ReviewResultStore::class);
         $this->app->singleton(ReviewRound::class);
+        $this->app->singleton(ReviewStallFingerprint::class);
         $this->app->singleton(CredentialRevisionRegistry::class, static fn (): CredentialRevisionRegistry => CredentialRevisionRegistry::fromConfiguredValues());
         $this->app->singleton(
             ExecutionHomeManager::class,
@@ -278,6 +281,7 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(ScopeApprovalService::class);
         $this->app->singleton(InstructionPathPolicy::class);
         $this->app->singleton(ContractChangeService::class);
+        $this->app->singleton(RunCancellationService::class);
         $this->app->singleton(InstructionCandidateCollector::class);
         $this->app->singleton(InstructionCandidateSource::class, InstructionCandidateCollector::class);
         $this->app->singleton(DependencySatisfiedStatusAllowlist::class, static fn (): DependencySatisfiedStatusAllowlist => DependencySatisfiedStatusAllowlist::fromConfiguredValues());
@@ -512,6 +516,36 @@ final class AI6ServiceProvider extends ServiceProvider
             // through the orchestrator for this one producer; cancel stays the
             // third, explicit path.
             ['retry_unchanged_tree', 'orchestrator_code_fix'],
+            true,
+        );
+        $this->app->make(WaitReasonRegistry::class)->register(
+            WaitReason::REVIEW_LIMIT,
+            'RunLimitPolicy',
+            ['additional_round', 'switch_reviewer', 'finding_disposition'],
+            true,
+        );
+        $this->app->make(WaitReasonRegistry::class)->register(
+            WaitReason::PROVIDER_ERROR,
+            'AgentAdapter',
+            ['retry', 'switch_profile'],
+            true,
+        );
+        $this->app->make(WaitReasonRegistry::class)->register(
+            WaitReason::INVALID_JSON,
+            'AgentResultValidator',
+            ['new_turn', 'switch_profile'],
+            true,
+        );
+        $this->app->make(WaitReasonRegistry::class)->register(
+            WaitReason::GIT_BASE_CHANGED,
+            'DriftDetector',
+            ['controlled_abort'],
+            true,
+        );
+        $this->app->make(WaitReasonRegistry::class)->register(
+            WaitReason::GIT_CONFLICT,
+            'ControlOperation',
+            ['refresh_expected_oid'],
             true,
         );
         $this->app->make(RunArtifactRoot::class);

@@ -19,6 +19,7 @@ use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\RedactionMatchType;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Tests\Feature\Runs\BuildsHumanRequestFixture;
@@ -100,7 +101,27 @@ final class HumanRequestAnswerTest extends TicketUiTestCase
         }
 
         self::assertSame(1, Intervention::query()->where('human_request_id', $request->id)->count());
-        self::assertSame($first->id, Intervention::query()->where('human_request_id', $request->id)->sole()->id);
+        $audit = Intervention::query()->where('human_request_id', $request->id)->sole();
+        self::assertSame($first->id, $audit->id);
+        self::assertSame('operator', $audit->actor_role);
+        self::assertFalse($audit->step_up_verified);
+        self::assertNull($audit->step_up_proof_hash);
+        self::assertSame($request->bound_run_version, $audit->expected_run_version);
+        self::assertSame('human_question', $audit->wait_reason);
+        self::assertSame($request->bound_step_key, $audit->bound_step_key);
+        self::assertNotSame('', trim((string) $audit->reason));
+        try {
+            DB::table('interventions')->where('id', $audit->id)->update(['reason' => 'manipuliert']);
+            self::fail('The intervention audit was mutable.');
+        } catch (QueryException) {
+            self::assertSame('Gebundene Panelantwort.', $audit->fresh()->reason);
+        }
+        try {
+            DB::table('interventions')->where('id', $audit->id)->delete();
+            self::fail('The intervention audit could be deleted.');
+        } catch (QueryException) {
+            self::assertSame($audit->id, $audit->fresh()->id);
+        }
         self::assertSame(1, ExecutionJob::query()->where('run_id', $opened['run']->id)
             ->where('idempotency_key', $request->bound_step_key)
             ->where('state', ExecutionJobState::PLANNED)->count());
@@ -351,7 +372,7 @@ final class HumanRequestAnswerTest extends TicketUiTestCase
         $detail->assertOk();
         $detail->assertSee('Nachricht');
         $detail->assertSee('name="chosen_effect"', false);
-        $detail->assertSee('value="cancel"', false);
+        $detail->assertSee('value="soft_cancel"', false);
         // The decision buttons carry the redacted German option label, not the
         // raw provider key the effect binding is built from.
         $detail->assertSee('value="a">'.$opened['request']->fresh()->options[0]['label'].'</button>', false);

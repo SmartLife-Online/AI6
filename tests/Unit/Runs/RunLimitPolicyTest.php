@@ -76,4 +76,21 @@ final class RunLimitPolicyTest extends TestCase
             self::assertLessThanOrEqual($maxima[$name], $value, $name);
         }
     }
+
+    public function test_one_additional_round_raises_exactly_one_and_never_crosses_the_server_maximum(): void
+    {
+        $policy = $this->app->make(RunLimitPolicy::class);
+        $run = new Run;
+        $limits = config('ai6.project_config.server_defaults.limits');
+        self::assertIsArray($limits);
+        $run->forceFill(['agent_profile_snapshot' => ['limits' => $limits]]);
+
+        $raised = $policy->raiseOne($run, ImportLimit::MAX_REVIEW_ROUNDS);
+        self::assertIsArray($raised);
+        self::assertSame($limits['max_review_rounds'] + 1, $raised['max_review_rounds']);
+
+        $limits['max_review_rounds'] = config('ai6.project_config.server_maxima.max_review_rounds');
+        $run->forceFill(['agent_profile_snapshot' => ['limits' => $limits]]);
+        self::assertNull($policy->raiseOne($run, ImportLimit::MAX_REVIEW_ROUNDS));
+    }
 }

@@ -13,6 +13,7 @@ use App\AI6\Git\Models\ControlOperationResult;
 use App\AI6\Git\Models\TicketMutation;
 use App\AI6\Git\ProjectOperationLease;
 use App\AI6\Git\TicketMutationExecutor;
+use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Runs\ExecutionJobState;
@@ -403,6 +404,9 @@ final class ContractAmendmentTest extends TicketUiTestCase
         $operation = $this->queueAmendment($fixture, $target);
         self::assertSame(RunState::RUNNING, $fixture['run']->fresh()->state);
 
+        // The park opens the abort request; its notification is queued like in
+        // the worker runtime instead of being delivered inline.
+        config(['queue.default' => 'database']);
         $this->app->make(TicketMutationExecutor::class)->parkAmendedRunOnConflict($operation);
 
         $run = $fixture['run']->fresh();
@@ -411,6 +415,9 @@ final class ContractAmendmentTest extends TicketUiTestCase
         // No silent rebase: the run base and the project lock survive (AC-13).
         self::assertSame($fixture['run']->run_base_sha, $run->run_base_sha);
         self::assertSame($run->id, $fixture['project']->fresh()->active_run_id);
+        // AI6-026 AC-05: the parked wait now carries its controlled-abort request.
+        self::assertSame('git_base_changed', HumanRequest::query()
+            ->where('run_id', $run->id)->where('resolution_state', 'open')->sole()->kind);
     }
 
     /**
@@ -437,6 +444,7 @@ final class ContractAmendmentTest extends TicketUiTestCase
         );
         self::assertSame(WaitReason::CONTRACT_CHANGE, $waiting->wait_reason);
 
+        config(['queue.default' => 'database']);
         $this->app->make(TicketMutationExecutor::class)->parkAmendedRunOnConflict($operation);
 
         $run = $fixture['run']->fresh();
@@ -463,6 +471,7 @@ final class ContractAmendmentTest extends TicketUiTestCase
             'version' => DB::raw('version + 1'),
         ]));
 
+        config(['queue.default' => 'database']);
         $this->app->make(TicketMutationExecutor::class)->parkAmendedRunOnConflict($operation);
 
         $run = $fixture['run']->fresh();

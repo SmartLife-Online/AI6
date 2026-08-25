@@ -91,4 +91,37 @@ final class HumanRequestBindingTest extends TicketUiTestCase
         self::assertSame('answered', $request->fresh()->resolution_state->value);
         self::assertSame('running', $opened['run']->fresh()->state->value);
     }
+
+    /** TC-07: the same effect twice yields exactly one effective entry and one effect. */
+    public function test_the_same_effect_twice_is_idempotent(): void
+    {
+        Mail::fake();
+        $opened = $this->openedHumanRequest('AI6-026-IDEM');
+        $request = $opened['request'];
+        $answer = function () use ($request, $opened): void {
+            $this->app->make(HumanRequestService::class)->answer(
+                $request->fresh() ?? $request,
+                $opened['operator'],
+                $request->bound_run_version,
+                $request->bound_ticket_contract,
+                $request->bound_checkpoint,
+                $request->bound_scope,
+                $request->bound_agent_slot,
+                $request->bound_requested_effect,
+                'a',
+            );
+        };
+
+        $answer();
+        try {
+            $answer();
+            self::fail('A second identical intervention was accepted.');
+        } catch (HumanRequestRejected $rejected) {
+            self::assertSame('request_already_resolved', $rejected->reason);
+        }
+
+        self::assertSame(1, Intervention::query()->where('human_request_id', $request->id)->count());
+        self::assertSame('answered', $request->fresh()->resolution_state->value);
+        self::assertSame('running', $opened['run']->fresh()->state->value);
+    }
 }

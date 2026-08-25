@@ -5,7 +5,11 @@ namespace Tests\Feature\Runs;
 use App\AI6\Agents\AgentAdapter;
 use App\AI6\Agents\AgentResultContext;
 use App\AI6\Agents\FakeAgentAdapter;
+use App\AI6\Auth\Models\User;
+use App\AI6\Auth\StepUpGuard;
+use App\AI6\HumanLoop\Http\HumanRequestAnswerController;
 use App\AI6\HumanLoop\HumanRequestService;
+use App\AI6\HumanLoop\InterventionAuthorization;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\Models\Run;
@@ -13,6 +17,9 @@ use App\AI6\Runs\Models\RunArtifact;
 use App\AI6\Runs\RunImplementation;
 use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunState;
+use Illuminate\Http\Request;
+use Illuminate\Session\ArraySessionHandler;
+use Illuminate\Session\Store;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Tests\Feature\Tickets\TicketUiTestCase;
@@ -121,6 +128,7 @@ final class ImplementationLimitTurnTest extends TicketUiTestCase
             $request->bound_agent_slot,
             $request->bound_requested_effect,
             'increase',
+            $this->authorization($prepared['operator'], $request, 'increase'),
         );
         $effective = $this->app->make(RunLimitPolicy::class)->effective($prepared['run']->fresh());
         self::assertGreaterThan(20, $effective['max_provider_output_bytes']);
@@ -182,6 +190,25 @@ final class ImplementationLimitTurnTest extends TicketUiTestCase
             'version' => DB::raw('version + 1'),
             'updated_at' => now(),
         ]);
+    }
+
+    private function authorization(User $actor, HumanRequest $request, string $effect): InterventionAuthorization
+    {
+        $session = new Store('test', new ArraySessionHandler(120));
+        $session->setId('implementation-limit-'.$actor->id.'-'.bin2hex(random_bytes(4)));
+        $session->start();
+        $proof = Request::create('/human-request', 'POST');
+        $proof->setLaravelSession($session);
+        $guard = $this->app->make(StepUpGuard::class);
+        $guard->markSatisfied($proof, $actor, HumanRequestAnswerController::STEP_UP_ACTION);
+
+        return InterventionAuthorization::consumeFresh(
+            $proof,
+            $actor,
+            $guard,
+            HumanRequestAnswerController::STEP_UP_ACTION,
+            [$request->run_id, $request->id, $request->bound_run_version, $effect],
+        );
     }
 
     /**

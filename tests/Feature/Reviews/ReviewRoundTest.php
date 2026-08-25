@@ -45,6 +45,36 @@ final class ReviewRoundTest extends TicketUiTestCase
 {
     use BuildsReviewRoundFixture;
 
+    public function test_reviewer_switch_creates_an_approved_slot_revision_and_preserves_old_results(): void
+    {
+        $prepared = $this->preparedReviewRun('AI6-026-REVIEWER-REVISION');
+        $this->reviewAdapter([]);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReview($prepared['run'])->state);
+        $slots = $this->orchestratorReviewSlots($prepared['run']);
+        $old = $slots[0];
+        $alternative = $slots[1];
+        $oldResultIds = ReviewResult::query()->where('run_id', $prepared['run']->id)
+            ->orderBy('id')->pluck('id')->all();
+
+        $revised = $this->app->make(RunOrchestrator::class)->reviseReviewSlot(
+            $prepared['run'],
+            $old->slot_id,
+            $alternative->provider_profile,
+            $alternative->model,
+            $alternative->effort,
+            $alternative->prompt_profile,
+        );
+
+        self::assertFalse($old->fresh()->is_active);
+        self::assertTrue($revised->is_active);
+        self::assertSame($old->slot_id, $revised->approval_slot_id);
+        self::assertSame(2, $revised->slot_revision);
+        self::assertNotSame($old->slot_id, $revised->slot_id);
+        self::assertNotNull($revised->session_id);
+        self::assertSame($oldResultIds, ReviewResult::query()->where('run_id', $prepared['run']->id)
+            ->orderBy('id')->pluck('id')->all());
+    }
+
     public function test_exact_duplicate_groups_keep_each_reviewer_source(): void
     {
         $prepared = $this->preparedReviewRun('AI6-024-DUPLICATES');
@@ -115,14 +145,17 @@ final class ReviewRoundTest extends TicketUiTestCase
     /** TC-09: a criterion reference outside the approved contract ends named and persists nothing. */
     public function test_an_unknown_criterion_reference_ends_named_without_finding_or_coverage(): void
     {
+        Mail::fake();
         config(['logging.default' => 'null']);
         $prepared = $this->preparedReviewRun('AI6-024-CRITERION');
         $this->reviewAdapter([$this->reviewSlotIds[0] => AgentScenario::INVALID_CRITERION_REFERENCE]);
 
-        self::assertSame(ExecutionJobState::FAILED, $this->executeReview($prepared['run'])->state);
+        self::assertSame(ExecutionJobState::WAITING, $this->executeReview($prepared['run'])->state);
+        self::assertSame(RunState::WAITING, $prepared['run']->fresh()->state);
+        self::assertSame('invalid_json', $prepared['run']->fresh()->wait_reason?->value);
 
         $result = ReviewResult::query()->where('run_id', $prepared['run']->id)
-            ->where('slot_id', $this->reviewSlotIds[0])->sole();
+            ->where('slot_id', $this->reviewSlotIds[0])->latest('attempt')->firstOrFail();
         self::assertSame(ReviewInvocationOutcome::INVALID_JSON, $result->invocation_outcome);
         self::assertSame('criterion_reference', $result->failure_code);
         self::assertNull($result->result_status);
@@ -269,6 +302,7 @@ final class ReviewRoundTest extends TicketUiTestCase
     /** TC-02, TC-08 and TC-10. */
     public function test_a_failed_slot_does_not_skip_the_later_slot_and_redelivery_is_idempotent(): void
     {
+        Mail::fake();
         $prepared = $this->preparedReviewRun('AI6-023-TC02');
         $adapter = $this->reviewAdapter([
             $this->reviewSlotIds[0] => AgentScenario::PROVIDER_ERROR,
@@ -277,18 +311,16 @@ final class ReviewRoundTest extends TicketUiTestCase
 
         $job = $this->executeReview($prepared['run']);
 
-        self::assertSame(ExecutionJobState::FAILED, $job->state);
-        self::assertSame('review_slot_failed', $job->failure_code);
-        self::assertSame(RunState::FAILED, $prepared['run']->fresh()->state);
-        self::assertSame(2, $adapter->turnCount);
-        self::assertEqualsCanonicalizing(
-            [ReviewInvocationOutcome::PROVIDER_ERROR, ReviewInvocationOutcome::VALID_RESULT],
-            ReviewResult::query()->where('run_id', $prepared['run']->id)->pluck('invocation_outcome')->all(),
-        );
+        self::assertSame(ExecutionJobState::WAITING, $job->state);
+        self::assertSame(RunState::WAITING, $prepared['run']->fresh()->state);
+        self::assertSame('provider_error', $prepared['run']->fresh()->wait_reason?->value);
+        self::assertSame(3, $adapter->turnCount);
+        self::assertSame(3, ReviewResult::query()->where('run_id', $prepared['run']->id)
+            ->where('invocation_outcome', ReviewInvocationOutcome::PROVIDER_ERROR)->count());
 
         (new ExecuteRunStep($job->id))->handle($this->app->make(RunOrchestrator::class), reviews: $this->app->make(ReviewRound::class));
-        self::assertSame(2, $adapter->turnCount);
-        self::assertSame(2, ReviewResult::query()->where('run_id', $prepared['run']->id)->count());
+        self::assertSame(3, $adapter->turnCount);
+        self::assertSame(3, ReviewResult::query()->where('run_id', $prepared['run']->id)->count());
     }
 
     /** TC-01 negative: a second export with other bytes is rejected before its provider call. */
@@ -422,6 +454,7 @@ final class ReviewRoundTest extends TicketUiTestCase
     /** TC-10: current configuration cannot replace the snapshot, and invalid JSON stays distinct. */
     public function test_invalid_json_is_named_without_changing_slots_or_wait_reasons(): void
     {
+        Mail::fake();
         $prepared = $this->preparedReviewRun('AI6-023-TC10');
         $expectedSlots = $this->reviewSlotIds;
         $registeredReasons = $this->app->make(WaitReasonRegistry::class)->registeredReasons();
@@ -433,16 +466,17 @@ final class ReviewRoundTest extends TicketUiTestCase
 
         $job = $this->executeReview($prepared['run']);
 
-        self::assertSame(ExecutionJobState::FAILED, $job->state);
-        self::assertSame('review_slot_failed', $job->failure_code);
-        self::assertSame(2, $adapter->turnCount);
+        self::assertSame(ExecutionJobState::WAITING, $job->state);
+        self::assertSame(RunState::WAITING, $prepared['run']->fresh()->state);
+        self::assertSame('invalid_json', $prepared['run']->fresh()->wait_reason?->value);
+        self::assertSame(3, $adapter->turnCount);
         self::assertEqualsCanonicalizing(
             $expectedSlots,
             RunAgent::query()->where('run_id', $prepared['run']->id)
                 ->where('role', AgentRole::QUALITY_REVIEW->value)->pluck('slot_id')->all(),
         );
         $invalid = ReviewResult::query()->where('run_id', $prepared['run']->id)
-            ->where('slot_id', $expectedSlots[0])->sole();
+            ->where('slot_id', $expectedSlots[0])->latest('attempt')->firstOrFail();
         self::assertSame(ReviewInvocationOutcome::INVALID_JSON, $invalid->invocation_outcome);
         self::assertSame('invalid_json', $invalid->failure_code);
         self::assertNull($invalid->result_status);
@@ -451,7 +485,10 @@ final class ReviewRoundTest extends TicketUiTestCase
             ->where('invocation_outcome', ReviewInvocationOutcome::VALID_RESULT->value)->count());
         self::assertSame($registeredReasons, $this->app->make(WaitReasonRegistry::class)->registeredReasons());
         self::assertSame(
-            ['human_question', 'resource_limit', 'scope_approval', 'contract_change', 'check_failure'],
+            [
+                'human_question', 'resource_limit', 'scope_approval', 'contract_change', 'check_failure',
+                'review_limit', 'provider_error', 'invalid_json', 'git_base_changed', 'git_conflict',
+            ],
             $registeredReasons,
         );
     }

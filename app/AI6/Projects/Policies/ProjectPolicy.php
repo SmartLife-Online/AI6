@@ -85,6 +85,12 @@ final class ProjectPolicy
             'operator' => true,
             'approver' => true,
         ],
+        'intervene_run' => [
+            'admin' => true,
+            'viewer' => false,
+            'operator' => true,
+            'approver' => true,
+        ],
         'dispose_finding' => [
             'admin' => false,
             'viewer' => false,
@@ -171,6 +177,11 @@ final class ProjectPolicy
     public function answerHumanRequest(User $user, Project $project): bool
     {
         return $this->decide(ProjectAction::ANSWER_HUMAN_REQUEST, $user, $project);
+    }
+
+    public function interveneRun(User $user, Project $project): bool
+    {
+        return $this->decide(ProjectAction::INTERVENE_RUN, $user, $project);
     }
 
     public function disposeFinding(User $user, Project $project): bool

@@ -25,6 +25,7 @@ use App\AI6\Git\RunPatchStatus;
 use App\AI6\Git\WorktreeGitMetadataPaths;
 use App\AI6\HumanLoop\HumanRequestRejected;
 use App\AI6\HumanLoop\HumanRequestService;
+use App\AI6\HumanLoop\Models\Intervention;
 use App\AI6\HumanLoop\ScopeApprovalService;
 use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\TicketReadModel;
@@ -67,6 +68,7 @@ final readonly class RunImplementation
         private InstructionPathPolicy $instructionPaths,
         private WorktreeGitMetadataPaths $gitMetadataPaths,
         private ReviewResultParser $reviewResults,
+        private RunStepConfiguration $stepConfiguration,
     ) {}
 
     public function execute(ExecutionJob $job, Run $run, string $owner): void
@@ -189,10 +191,73 @@ final readonly class RunImplementation
                 $this->expectedInstructionBlobs($instruction, $this->initialScope($run)),
                 expectedFindingIds: $findingIds,
             );
-            $bytes = $this->adapter->turn($agentContext, $isolated, $this->gitMetadataPaths->resolve($worktree));
-            $this->handleResult($job, $run, $owner, $slot, $isolated, $bytes, $agentContext, $context, $instructionUpdate, $stepType);
+            $maximumAttempts = $this->stepConfiguration->maxAttempts;
+            $bytes = '';
+            $validated = null;
+            $turnRevision = Intervention::query()->where('bound_step_key', $job->idempotency_key)
+                ->whereIn('chosen_effect', ['retry', 'new_turn', 'switch_profile'])->count();
+            for ($providerAttempt = 1; $providerAttempt <= $maximumAttempts; $providerAttempt++) {
+                $invocationLimit = $this->limits->consume(
+                    $run,
+                    ImportLimit::MAX_AGENT_INVOCATIONS,
+                    implode(':', [$job->idempotency_key, 'provider', $turnRevision, $providerAttempt]),
+                );
+                if ($invocationLimit instanceof ImportLimitResult) {
+                    $this->humanRequests->openLimitRequest(
+                        $run,
+                        $job,
+                        $invocationLimit,
+                        WaitReason::RESOURCE_LIMIT,
+                    );
+
+                    return;
+                }
+                try {
+                    $bytes = $this->adapter->turn($agentContext, $isolated, $this->gitMetadataPaths->resolve($worktree));
+                } catch (Throwable) {
+                    if ($providerAttempt < $maximumAttempts) {
+                        continue;
+                    }
+                    $this->humanRequests->openFailureRequest($run, $job, WaitReason::PROVIDER_ERROR, $slot->slot_id);
+
+                    return;
+                }
+                $afterTurn = Run::query()->find($run->id);
+                if (! $afterTurn instanceof Run || $afterTurn->pending_status_operation_id !== null
+                    || ! in_array($afterTurn->state, [RunState::QUEUED, RunState::RUNNING], true)) {
+                    // A cancellation or wait fenced this late provider response.
+                    // No artifact, result or patch is published from it.
+                    return;
+                }
+                try {
+                    $validated = $this->results->validate($bytes, $agentContext, $context);
+                } catch (JsonDecodingException|AgentResultValidationException|InvalidRedactionInputException) {
+                    if ($providerAttempt < $maximumAttempts) {
+                        continue;
+                    }
+                    $this->humanRequests->openFailureRequest($run, $job, WaitReason::INVALID_JSON, $slot->slot_id);
+
+                    return;
+                }
+                if ($validated->status !== AgentResultStatus::FAILED) {
+                    break;
+                }
+                if ($providerAttempt === $maximumAttempts) {
+                    $this->humanRequests->openFailureRequest($run, $job, WaitReason::PROVIDER_ERROR, $slot->slot_id);
+
+                    return;
+                }
+            }
+            if (! $validated instanceof AgentResult) {
+                throw new ImplementationImportException('provider_result_missing', 'The provider result is unavailable.');
+            }
+            $this->handleResult($job, $run, $owner, $slot, $isolated, $bytes, $validated, $agentContext, $context, $instructionUpdate, $stepType);
         } catch (ImplementationImportException $exception) {
             $this->failNamed($job, $run, $owner, $exception->reason, $exception->getMessage());
+        } catch (HumanRequestRejected $rejected) {
+            // A limit or failure request that cannot be bound ends the step as a
+            // named terminal failure instead of an anonymous turn error.
+            $this->failNamed($job, $run, $owner, $rejected->reason, 'Die Limitentscheidung konnte nicht gebunden werden: '.$rejected->getMessage());
         } catch (Throwable $exception) {
             $this->failNamed($job, $run, $owner, 'implementation_turn_failed', $exception::class.': '.$exception->getMessage());
         } finally {
@@ -208,33 +273,12 @@ final readonly class RunImplementation
         RunAgent $slot,
         string $isolated,
         string $bytes,
+        AgentResult $validated,
         AgentResultContext $agentContext,
         RedactionContext $context,
         bool $instructionUpdate,
         ExecutionStepType $stepType,
     ): void {
-        try {
-            $validated = $this->results->validate($bytes, $agentContext, $context);
-        } catch (JsonDecodingException) {
-            $this->failNamed($job, $run, $owner, 'invalid_json', 'Das Providerergebnis ist kein gültiges JSON.');
-
-            return;
-        } catch (AgentResultValidationException $exception) {
-            $this->failNamed($job, $run, $owner, $exception->reason->value, 'Das Providerergebnis ist schemaungültig.');
-
-            return;
-        } catch (InvalidRedactionInputException) {
-            $this->failNamed($job, $run, $owner, 'invalid_json', 'Das Providerergebnis ist kein gültiges UTF-8.');
-
-            return;
-        }
-
-        if ($validated->status === AgentResultStatus::FAILED) {
-            $this->failNamed($job, $run, $owner, 'provider_error', 'Der Providerturn ist fehlgeschlagen.');
-
-            return;
-        }
-
         $run = Run::query()->findOrFail($run->getKey());
         if ($instructionUpdate && $validated->instructionPatch !== null) {
             try {

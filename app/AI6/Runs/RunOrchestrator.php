@@ -332,7 +332,8 @@ final readonly class RunOrchestrator
     public function applyPreparedStepEffect(Run $run, ExecutionStepType $completed, ?int $completedNumber = null): bool
     {
         $fresh = Run::query()->findOrFail($run->getKey());
-        if (! in_array($fresh->state, [RunState::QUEUED, RunState::RUNNING], true)) {
+        if ($fresh->pending_status_operation_id !== null
+            || ! in_array($fresh->state, [RunState::QUEUED, RunState::RUNNING], true)) {
             return false;
         }
         if ($completed === ExecutionStepType::PREFLIGHT && $fresh->state === RunState::QUEUED) {
@@ -847,12 +848,21 @@ final readonly class RunOrchestrator
         $this->transitions->assertState($run->state, $state);
         $this->transitions->assertWait($state, $waitReason);
         $terminal = in_array($state, [RunState::COMPLETED, RunState::CANCELLED], true);
+        // The run's own pending binding — written only through the authorized
+        // bindCancellationOperation compare-and-swap — is the strongest proof
+        // that this confirmed saga belongs to this run. It stays valid after
+        // external base drift, where the refreshed decision legitimately
+        // published on a parent that differs from the run's stale base.
+        $ownBoundSaga = $confirmedStatusOperation instanceof ControlOperation
+            && $run->pending_status_operation_id !== null
+            && $confirmedStatusOperation->id === $run->pending_status_operation_id;
         if ($terminal && (! $confirmedStatusOperation instanceof ControlOperation
             || $confirmedStatusOperation->operation_type !== ControlOperationType::TICKET_STATUS_CHANGE
             || $confirmedStatusOperation->state !== ControlOperationState::COMPLETED
             || $confirmedStatusOperation->project_id !== $run->project_id
             || $confirmedStatusOperation->target_control_oid === null
-            || ! hash_equals((string) $confirmedStatusOperation->expected_control_commit, $run->run_base_sha))) {
+            || (! $ownBoundSaga
+                && ! hash_equals((string) $confirmedStatusOperation->expected_control_commit, $run->run_base_sha)))) {
             throw new RunTransitionConflict('terminal_status_not_confirmed', 'The project lock cannot be released before its terminal status saga is confirmed.');
         }
         if ($terminal) {
@@ -937,6 +947,70 @@ final readonly class RunOrchestrator
         return Run::query()->findOrFail($run->getKey());
     }
 
+    /** Park a status-saga compare-and-swap conflict without releasing its run lock. */
+    public function parkOnGitConflict(Run $run, int $expectedVersion): Run
+    {
+        if ($run->version !== $expectedVersion) {
+            throw new RunTransitionConflict('stale_run_version', 'The run changed before the Git conflict could be recorded.');
+        }
+        if ($run->state === RunState::WAITING && $run->wait_reason === WaitReason::GIT_CONFLICT) {
+            return $run;
+        }
+        if (in_array($run->state, [RunState::COMPLETED, RunState::CANCELLED], true)) {
+            throw new RunTransitionConflict('run_terminal', 'A terminal run cannot enter a Git conflict wait.');
+        }
+
+        $updated = Run::query()->whereKey($run->id)->where('version', $expectedVersion)->update([
+            'state' => RunState::WAITING,
+            'wait_reason' => WaitReason::GIT_CONFLICT,
+            'version' => $expectedVersion + 1,
+            'updated_at' => now(),
+        ]);
+        if ($updated !== 1) {
+            throw new RunTransitionConflict('stale_run_version', 'The run changed before the Git conflict could be recorded.');
+        }
+
+        return Run::query()->findOrFail($run->id);
+    }
+
+    public function bindCancellationOperation(Run $run, int $expectedVersion, ControlOperation $operation): Run
+    {
+        if ($operation->operation_type !== ControlOperationType::TICKET_STATUS_CHANGE
+            || $operation->project_id !== $run->project_id) {
+            throw new RunTransitionConflict('cancellation_operation_invalid', 'The cancellation operation does not match the run.');
+        }
+        $updated = Run::query()->whereKey($run->id)->where('version', $expectedVersion)
+            ->whereNull('pending_status_operation_id')->update([
+                'pending_status_operation_id' => $operation->id,
+                'version' => $expectedVersion + 1,
+                'updated_at' => now(),
+            ]);
+        if ($updated !== 1) {
+            throw new RunTransitionConflict('stale_run_version', 'The run changed before the cancellation saga was bound.');
+        }
+
+        return Run::query()->findOrFail($run->id);
+    }
+
+    /**
+     * Supersede a conflicted cancellation binding so a re-authorized decision
+     * can bind a fresh status operation (AC-14). The conflicted operation and
+     * its intervention stay readable as evidence; only the run's pending
+     * binding is released.
+     */
+    public function releaseCancellationOperation(Run $run, ControlOperation $operation): Run
+    {
+        Run::query()->whereKey($run->id)
+            ->where('pending_status_operation_id', $operation->id)
+            ->update([
+                'pending_status_operation_id' => null,
+                'version' => DB::raw('version + 1'),
+                'updated_at' => now(),
+            ]);
+
+        return Run::query()->findOrFail($run->id);
+    }
+
     /** Park a planned bound step while its run waits for a human decision. */
     public function parkBoundStep(ExecutionJob $job): bool
     {
@@ -948,6 +1022,12 @@ final readonly class RunOrchestrator
                 'updated_at' => now(),
             ]);
         if ($updated !== 1) {
+            $fresh = ExecutionJob::query()->find($job->getKey());
+            if ($fresh instanceof ExecutionJob && $fresh->state === ExecutionJobState::WAITING
+                && $fresh->lease_owner === null) {
+                return true;
+            }
+
             return is_string($job->lease_owner) && $job->lease_owner !== ''
                 ? $this->parkStep($job, $job->lease_owner)
                 : false;
@@ -1112,26 +1192,92 @@ final readonly class RunOrchestrator
                 }
             }
 
-            $slot = RunAgent::query()->firstOrCreate([
-                'run_id' => $run->id,
-                'slot_id' => $values['slot_id'],
-            ], [
-                'role' => 'quality_review',
-                'provider_profile' => $values['provider_profile'],
-                'model' => $values['model'],
-                'effort' => $values['effort'],
-                'prompt_profile' => $values['prompt_profile'],
-                'session_id' => null,
-            ]);
-            foreach (['role' => 'quality_review', ...$values] as $field => $expected) {
-                if ($slot->getAttribute($field) !== $expected) {
-                    throw new ImplementationImportException('approval_reviewer_mismatch', 'A materialized reviewer no longer matches the approval snapshot.');
-                }
+            $slot = RunAgent::query()->where('run_id', $run->id)
+                ->where('role', 'quality_review')->where('is_active', true)
+                ->where('slot_id', $values['slot_id'])->first();
+            $slot ??= RunAgent::query()->where('run_id', $run->id)
+                ->where('role', 'quality_review')->where('is_active', true)
+                ->where('approval_slot_id', $values['slot_id'])->orderByDesc('slot_revision')->first();
+            if (! $slot instanceof RunAgent) {
+                $slot = RunAgent::query()->create([
+                    'run_id' => $run->id,
+                    'slot_id' => $values['slot_id'],
+                    'approval_slot_id' => $values['slot_id'],
+                    'slot_revision' => 1,
+                    'is_active' => true,
+                    'role' => 'quality_review',
+                    'provider_profile' => $values['provider_profile'],
+                    'model' => $values['model'],
+                    'effort' => $values['effort'],
+                    'prompt_profile' => $values['prompt_profile'],
+                    'session_id' => null,
+                ]);
+            }
+            if ($slot->role !== 'quality_review') {
+                throw new ImplementationImportException('approval_reviewer_mismatch', 'A materialized reviewer no longer matches the approval snapshot.');
             }
             $slots[] = $slot;
         }
 
         return $slots;
+    }
+
+    /**
+     * Create a new immutable reviewer-slot revision and retire only the old
+     * active slot. Existing review results keep their original slot binding.
+     */
+    public function reviseReviewSlot(
+        Run $run,
+        string $slotId,
+        string $providerProfile,
+        string $model,
+        string $effort,
+        string $promptProfile,
+    ): RunAgent {
+        foreach ([$providerProfile, $model, $effort, $promptProfile] as $value) {
+            if ($value === '') {
+                throw new RunTransitionConflict('reviewer_revision_invalid', 'The reviewer revision is incomplete.');
+            }
+        }
+        $approved = false;
+        foreach (($run->agent_profile_snapshot ?? [])['reviewers'] ?? [] as $reviewer) {
+            if (is_array($reviewer)
+                && ($reviewer['provider_profile'] ?? null) === $providerProfile
+                && ($reviewer['model'] ?? null) === $model
+                && ($reviewer['effort'] ?? null) === $effort
+                && ($reviewer['prompt_profile_id'] ?? null) === $promptProfile) {
+                $approved = true;
+                break;
+            }
+        }
+        if (! $approved) {
+            throw new RunTransitionConflict('reviewer_revision_not_approved', 'The reviewer revision is absent from the run-bound approval snapshot.');
+        }
+
+        return DB::transaction(function () use ($run, $slotId, $providerProfile, $model, $effort, $promptProfile): RunAgent {
+            DB::table('runs')->where('id', $run->id)->lockForUpdate()->first();
+            $old = RunAgent::query()->where('run_id', $run->id)->where('slot_id', $slotId)
+                ->where('role', 'quality_review')->where('is_active', true)->first();
+            if (! $old instanceof RunAgent) {
+                throw new RunTransitionConflict('reviewer_slot_not_active', 'The reviewer slot is no longer active.');
+            }
+            $approvalSlotId = $old->approval_slot_id ?? $old->slot_id;
+            $old->forceFill(['is_active' => false])->save();
+
+            return RunAgent::query()->create([
+                'run_id' => $run->id,
+                'slot_id' => (string) Str::uuid(),
+                'approval_slot_id' => $approvalSlotId,
+                'slot_revision' => $old->slot_revision + 1,
+                'is_active' => true,
+                'role' => 'quality_review',
+                'provider_profile' => $providerProfile,
+                'model' => $model,
+                'effort' => $effort,
+                'prompt_profile' => $promptProfile,
+                'session_id' => (string) Str::uuid(),
+            ]);
+        });
     }
 
     public function bindReviewSession(Run $run, string $slotId, string $sessionId): RunAgent

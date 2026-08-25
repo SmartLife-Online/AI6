@@ -5,6 +5,9 @@ namespace App\AI6\Runs;
 use App\AI6\Git\RunPatchChange;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunArtifact;
+use App\AI6\Runs\Models\RunLimitConsumption;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
 
 /** The exclusive import-limit check. An exceedance has no partial effect. */
 final readonly class RunLimitPolicy
@@ -57,7 +60,10 @@ final readonly class RunLimitPolicy
         }
 
         $effective = [];
-        foreach (['max_changed_files', 'max_changed_bytes', 'max_artifacts', 'max_artifact_bytes', 'max_total_artifact_bytes', 'max_provider_output_bytes', 'max_added_scope_paths'] as $name) {
+        foreach (array_keys($maxima) as $name) {
+            if (! is_string($name)) {
+                throw new ImplementationImportException('limit_configuration_missing', 'The server limit names are invalid.');
+            }
             $value = $approved[$name] ?? $defaults[$name] ?? null;
             $maximum = $maxima[$name] ?? null;
             if (! is_int($value) || ! is_int($maximum) || $value < 1) {
@@ -106,6 +112,90 @@ final readonly class RunLimitPolicy
         }
         $effective = $this->effective($run);
         $effective[$name] = $result->observed;
+
+        return $effective;
+    }
+
+    /**
+     * Atomically consume a run counter before its effect.
+     *
+     * The unique consumption key makes a repeated delivery of the same turn or
+     * round free, while a genuinely new provider attempt receives a new key.
+     */
+    public function consume(Run $run, ImportLimit $limit, string $consumptionKey, int $quantity = 1): ?ImportLimitResult
+    {
+        if (! in_array($limit, [
+            ImportLimit::MAX_AGENT_INVOCATIONS,
+            ImportLimit::MAX_REVIEW_ROUNDS,
+            ImportLimit::MAX_FIX_ROUNDS,
+            ImportLimit::MAX_VERIFICATION_ROUNDS,
+        ], true) || $consumptionKey === '' || $quantity < 1) {
+            throw new ImplementationImportException('limit_consumption_invalid', 'The run limit consumption is invalid.');
+        }
+
+        return DB::transaction(function () use ($run, $limit, $consumptionKey, $quantity): ?ImportLimitResult {
+            DB::table('runs')->where('id', $run->getKey())->lockForUpdate()->first();
+            $existing = RunLimitConsumption::query()
+                ->where('run_id', $run->getKey())
+                ->where('limit_name', $limit->value)
+                ->where('consumption_key', $consumptionKey)
+                ->first();
+            if ($existing instanceof RunLimitConsumption) {
+                return null;
+            }
+
+            $used = (int) RunLimitConsumption::query()
+                ->where('run_id', $run->getKey())
+                ->where('limit_name', $limit->value)
+                ->sum('quantity');
+            $maximum = $this->effective($run)[$limit->value];
+            if ($used + $quantity > $maximum) {
+                return new ImportLimitResult($limit, $used + $quantity, $maximum);
+            }
+
+            try {
+                RunLimitConsumption::query()->create([
+                    'run_id' => $run->getKey(),
+                    'limit_name' => $limit->value,
+                    'consumption_key' => $consumptionKey,
+                    'quantity' => $quantity,
+                    'created_at' => now(),
+                ]);
+            } catch (UniqueConstraintViolationException) {
+                // A parallel delivery consumed this exact effect. It is not a
+                // second invocation and therefore consumes nothing more.
+            }
+
+            return null;
+        });
+    }
+
+    public function runtimeExceeded(Run $run): ?ImportLimitResult
+    {
+        if ($run->created_at === null) {
+            throw new ImplementationImportException('run_start_missing', 'The persisted run start is unavailable.');
+        }
+        $elapsed = (int) floor(max(0, $run->created_at->diffInMinutes(now())));
+        $maximum = $this->effective($run)[ImportLimit::MAX_RUN_MINUTES->value];
+
+        return $elapsed > $maximum
+            ? new ImportLimitResult(ImportLimit::MAX_RUN_MINUTES, $elapsed, $maximum)
+            : null;
+    }
+
+    /** @return array<string, int>|null */
+    public function raiseOne(Run $run, ImportLimit $limit): ?array
+    {
+        if (! in_array($limit, [ImportLimit::MAX_REVIEW_ROUNDS, ImportLimit::MAX_FIX_ROUNDS, ImportLimit::MAX_VERIFICATION_ROUNDS], true)) {
+            throw new ImplementationImportException('limit_grant_invalid', 'Only a round limit can receive one additional round.');
+        }
+        $effective = $this->effective($run);
+        $current = $effective[$limit->value];
+        $maximum = $this->serverMaximum($limit->value);
+        if ($current >= $maximum) {
+            return null;
+        }
+        $effective[$limit->value] = $current + 1;
 
         return $effective;
     }

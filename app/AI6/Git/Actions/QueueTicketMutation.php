@@ -119,6 +119,26 @@ final readonly class QueueTicketMutation
         );
     }
 
+    /** Queue the status-only terminal saga of an already approved in-progress run. */
+    public function changeRunStatus(
+        User $actor,
+        Project $project,
+        TicketReadModel $readModel,
+        string $operationId,
+        string $expectedControlOid,
+        string $expectedBlob,
+        string $baseContent,
+        string $reason,
+        bool $freshStepUp,
+        TicketStatusOperation $statusOperation,
+    ): ControlOperation {
+        return $this->queue(
+            $actor, $project, $readModel, $operationId, $expectedControlOid, $expectedBlob,
+            $baseContent, $baseContent, $reason, $freshStepUp, $statusOperation, false, null,
+            allowInProgressStatus: true,
+        );
+    }
+
     public function approve(
         User $actor,
         Project $project,
@@ -168,6 +188,7 @@ final readonly class QueueTicketMutation
         ?ApprovalSelection $approvalSelection,
         ?ApprovalSnapshot $confirmedApprovalSnapshot = null,
         ?string $snapshotContextId = null,
+        bool $allowInProgressStatus = false,
     ): ControlOperation {
         if (! ManagedProjectPath::validOperationIdentifier($operationId)) {
             throw new TicketMutationConflict('operation_id_invalid', 'Die Mutations-ID ist ungültig.');
@@ -189,6 +210,9 @@ final readonly class QueueTicketMutation
         $sourceAllowed = $statusOperation === TicketStatusOperation::APPROVE
             ? $this->usePolicy->allowsApproval($readModel, ! $freshness['stale'], $binding->configuration->ticketValidationProfile())
             : $this->usePolicy->allowsEditor($readModel, ! $freshness['stale'], $binding->configuration->ticketValidationProfile());
+        if (! $sourceAllowed && $allowInProgressStatus) {
+            $sourceAllowed = $this->allowsInProgressStatus($readModel, $statusOperation, ! $freshness['stale']);
+        }
         if (! $sourceAllowed) {
             throw new TicketMutationConflict('editor_unavailable', 'Diese Ticketprojektion darf nicht als Editorquelle verwendet werden.');
         }
@@ -210,7 +234,7 @@ final readonly class QueueTicketMutation
         return DB::transaction(function () use (
             $actor, $project, $readModel, $operationId, $expectedControlOid, $expectedBlob,
             $baseContent, $targetContent, $reason, $statusOperation, $externalCompletionConfirmed,
-            $approvalSelection, $confirmedApprovalSnapshot, $snapshotContextId,
+            $approvalSelection, $confirmedApprovalSnapshot, $snapshotContextId, $allowInProgressStatus,
         ): ControlOperation {
             $currentProject = Project::query()->findOrFail($project->getKey());
             $currentReadModel = TicketReadModel::query()->findOrFail($readModel->getKey());
@@ -226,7 +250,12 @@ final readonly class QueueTicketMutation
                 || $currentReadModel->redaction_state !== TicketReadModelRedactionState::CLEAR
                 || ! ($statusOperation === TicketStatusOperation::APPROVE
                     ? $this->usePolicy->allowsApproval($currentReadModel, ! $this->freshness->for($currentProject, $currentReadModel)['stale'], $binding->configuration->ticketValidationProfile())
-                    : $this->usePolicy->allowsEditor($currentReadModel, ! $this->freshness->for($currentProject, $currentReadModel)['stale'], $binding->configuration->ticketValidationProfile()))) {
+                    : ($this->usePolicy->allowsEditor($currentReadModel, ! $this->freshness->for($currentProject, $currentReadModel)['stale'], $binding->configuration->ticketValidationProfile())
+                        || ($allowInProgressStatus && $this->allowsInProgressStatus(
+                            $currentReadModel,
+                            $statusOperation,
+                            ! $this->freshness->for($currentProject, $currentReadModel)['stale'],
+                        ))))) {
                 throw new TicketMutationConflict('mutation_binding_changed', 'Die Ticket- oder Control-Bindung hat sich geändert.');
             }
             $membership = ProjectMembership::query()
@@ -456,5 +485,26 @@ final readonly class QueueTicketMutation
         }
 
         throw new TicketMutationConflict('source_status_unavailable', 'Der gebundene Quellstatus ist nicht mutierbar.');
+    }
+
+    private function allowsInProgressStatus(
+        TicketReadModel $readModel,
+        ?TicketStatusOperation $operation,
+        bool $fresh,
+    ): bool {
+        if (! $fresh || $readModel->document_state !== TicketDocumentState::VALID
+            || $readModel->redaction_state !== TicketReadModelRedactionState::CLEAR
+            || ! in_array($operation, [
+                TicketStatusOperation::RETURN_TO_TODO,
+                TicketStatusOperation::BLOCK,
+                TicketStatusOperation::CANCEL,
+            ], true)) {
+            return false;
+        }
+        try {
+            return ($this->parser->parse($readModel->redacted_content)->frontmatter['status'] ?? null) === 'in_progress';
+        } catch (TicketParseException) {
+            return false;
+        }
     }
 }

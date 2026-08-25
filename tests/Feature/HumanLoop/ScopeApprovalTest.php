@@ -2,10 +2,14 @@
 
 namespace Tests\Feature\HumanLoop;
 
+use App\AI6\Auth\Models\User;
+use App\AI6\Auth\StepUpGuard;
 use App\AI6\Git\CanonicalJson;
 use App\AI6\Git\ControlOperationRuntimeIdentity;
+use App\AI6\HumanLoop\Http\HumanRequestAnswerController;
 use App\AI6\HumanLoop\HumanRequestRejected;
 use App\AI6\HumanLoop\HumanRequestService;
+use App\AI6\HumanLoop\InterventionAuthorization;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\HumanLoop\ScopeApprovalService;
 use App\AI6\Projects\EffectiveProjectConfiguration;
@@ -22,6 +26,9 @@ use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
 use App\AI6\Runs\WaitReason;
 use App\AI6\Shared\Redaction\RedactionContext;
+use Illuminate\Http\Request;
+use Illuminate\Session\ArraySessionHandler;
+use Illuminate\Session\Store;
 use Illuminate\Support\Facades\Mail;
 use Tests\Feature\Runs\BuildsHumanRequestFixture;
 use Tests\Feature\Tickets\TicketUiTestCase;
@@ -357,6 +364,28 @@ final class ScopeApprovalTest extends TicketUiTestCase
             $request->bound_agent_slot,
             $request->bound_requested_effect,
             $effect,
+            HumanRequestService::requiresStepUp($effect)
+                ? $this->authorization($approver, $request, $effect)
+                : null,
+        );
+    }
+
+    private function authorization(User $actor, HumanRequest $request, string $effect): InterventionAuthorization
+    {
+        $session = new Store('test', new ArraySessionHandler(120));
+        $session->setId('scope-approval-'.$actor->id.'-'.bin2hex(random_bytes(4)));
+        $session->start();
+        $proof = Request::create('/human-request', 'POST');
+        $proof->setLaravelSession($session);
+        $guard = $this->app->make(StepUpGuard::class);
+        $guard->markSatisfied($proof, $actor, HumanRequestAnswerController::STEP_UP_ACTION);
+
+        return InterventionAuthorization::consumeFresh(
+            $proof,
+            $actor,
+            $guard,
+            HumanRequestAnswerController::STEP_UP_ACTION,
+            [$request->run_id, $request->id, $request->bound_run_version, $effect],
         );
     }
 

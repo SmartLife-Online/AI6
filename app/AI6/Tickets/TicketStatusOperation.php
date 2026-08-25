@@ -14,7 +14,7 @@ enum TicketStatusOperation: string
     {
         return match ($this) {
             self::APPROVE => $source === 'todo' ? 'ready' : null,
-            self::BLOCK => in_array($source, ['todo', 'ready'], true) ? 'blocked' : null,
+            self::BLOCK => in_array($source, ['todo', 'ready', 'in_progress'], true) ? 'blocked' : null,
             self::CANCEL => in_array($source, ['todo', 'ready', 'blocked', 'review', 'in_progress'], true) ? 'cancelled' : null,
             self::RETURN_TO_TODO => in_array($source, ['ready', 'blocked', 'review', 'in_progress'], true) ? 'todo' : null,
             self::COMPLETE_REVIEW => $source === 'review' ? 'done' : null,

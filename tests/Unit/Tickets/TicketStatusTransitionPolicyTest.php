@@ -44,6 +44,11 @@ final class TicketStatusTransitionPolicyTest extends TestCase
         yield 'review done' => ['review', TicketStatusOperation::COMPLETE_REVIEW, 'done', ProjectRole::APPROVER];
         yield 'review todo' => ['review', TicketStatusOperation::RETURN_TO_TODO, 'todo', ProjectRole::APPROVER];
         yield 'review cancelled' => ['review', TicketStatusOperation::CANCEL, 'cancelled', ProjectRole::ADMIN];
+        yield 'in_progress todo' => ['in_progress', TicketStatusOperation::RETURN_TO_TODO, 'todo', ProjectRole::OPERATOR];
+        yield 'in_progress blocked' => ['in_progress', TicketStatusOperation::BLOCK, 'blocked', ProjectRole::APPROVER];
+        yield 'in_progress cancelled approver' => ['in_progress', TicketStatusOperation::CANCEL, 'cancelled', ProjectRole::APPROVER];
+        yield 'in_progress cancelled admin' => ['in_progress', TicketStatusOperation::CANCEL, 'cancelled', ProjectRole::ADMIN];
+        yield 'in_progress cancelled operator' => ['in_progress', TicketStatusOperation::CANCEL, 'cancelled', ProjectRole::OPERATOR];
     }
 
     #[DataProvider('rejectedBindings')]
@@ -138,5 +143,9 @@ final class TicketStatusTransitionPolicyTest extends TestCase
         yield 'viewer ready return' => [ProjectRole::VIEWER, 'ready', TicketStatusOperation::RETURN_TO_TODO];
         yield 'approver blocked cancel' => [ProjectRole::APPROVER, 'blocked', TicketStatusOperation::CANCEL];
         yield 'operator review complete' => [ProjectRole::OPERATOR, 'review', TicketStatusOperation::COMPLETE_REVIEW];
+        yield 'viewer in_progress cancel' => [ProjectRole::VIEWER, 'in_progress', TicketStatusOperation::CANCEL];
+        yield 'admin in_progress block' => [ProjectRole::ADMIN, 'in_progress', TicketStatusOperation::BLOCK];
+        yield 'operator in_progress block' => [ProjectRole::OPERATOR, 'in_progress', TicketStatusOperation::BLOCK];
+        yield 'approver in_progress return' => [ProjectRole::APPROVER, 'in_progress', TicketStatusOperation::RETURN_TO_TODO];
     }
 }

@@ -4,9 +4,13 @@ namespace App\AI6\HumanLoop;
 
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Projects\Models\ProjectMembership;
+use App\AI6\Projects\ProjectRole;
+use App\AI6\Reviews\Models\Finding;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\TicketApproval;
 use Illuminate\Contracts\View\View;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Locked;
@@ -43,7 +47,36 @@ final class HumanRequestDetailPage extends Component
             'humanRequest' => $request,
             'run' => $run,
             'ticketId' => $approval instanceof TicketApproval ? $approval->ticket_id : '',
+            'cancellationActions' => $this->cancellationActions($run),
+            'disposableFindings' => in_array('finding_disposition', $request->allowed_effects, true)
+                ? Finding::query()->where('run_id', $run->id)
+                    ->whereIn('original_disposition', ['must_fix', 'human_required'])
+                    ->orderBy('round_number')->orderBy('id')->get()
+                : collect(),
         ]);
+    }
+
+    /** @return array<string, string> */
+    private function cancellationActions(Run $run): array
+    {
+        if ($run->confirmed_branch_publication_oid !== null) {
+            return [];
+        }
+        $userId = Auth::id();
+        $membership = is_int($userId) ? ProjectMembership::query()
+            ->where('project_id', $run->project_id)->where('user_id', $userId)->first() : null;
+        if (! $membership instanceof ProjectMembership) {
+            return [];
+        }
+
+        return match ($membership->role) {
+            ProjectRole::ADMIN, ProjectRole::OPERATOR => ['soft_cancel' => 'Soft-Cancel'],
+            ProjectRole::APPROVER => [
+                'block' => 'Fachlich blockieren',
+                'hard_cancel' => 'Hard-Cancel',
+            ],
+            ProjectRole::VIEWER => [],
+        };
     }
 
     private function request(Project $project, string $requestId): HumanRequest

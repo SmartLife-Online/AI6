@@ -9,8 +9,12 @@ use App\AI6\Git\CanonicalJson;
 use App\AI6\HumanLoop\Jobs\SendHumanRequestNotification;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\HumanLoop\Models\Intervention;
+use App\AI6\Projects\Models\ProjectMembership;
 use App\AI6\Projects\Policies\ProjectPolicy;
 use App\AI6\Projects\ProjectAction;
+use App\AI6\Reviews\FindingDispositionType;
+use App\AI6\Reviews\Models\Finding;
+use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\ImportLimit;
 use App\AI6\Runs\ImportLimitResult;
 use App\AI6\Runs\Models\ExecutionJob;
@@ -36,6 +40,14 @@ use Illuminate\Support\Str;
 final readonly class HumanRequestService
 {
     public const CANCEL_EFFECT = 'cancel';
+
+    /**
+     * switch_profile carries the same effect as switch_reviewer — a new slot
+     * revision through switchBoundReviewer — and is authorized identically.
+     *
+     * @var list<string>
+     */
+    private const STEP_UP_EFFECTS = ['increase', 'additional_round', 'switch_reviewer', 'switch_profile', 'finding_disposition'];
 
     public function __construct(
         private HumanRequestClassifier $classifier,
@@ -202,6 +214,138 @@ final readonly class HumanRequestService
         return $request;
     }
 
+    public function openLimitRequest(
+        Run $run,
+        ExecutionJob $job,
+        ImportLimitResult $limit,
+        WaitReason $reason,
+    ): HumanRequest {
+        $reviewLimit = $reason === WaitReason::REVIEW_LIMIT;
+        $options = $reviewLimit
+            ? [
+                new HumanRequestOption('additional_round', 'Genau eine zusätzliche Runde'),
+                new HumanRequestOption('switch_reviewer', 'Reviewer oder Modell wechseln'),
+                new HumanRequestOption('finding_disposition', 'Finding-Disposition erfassen'),
+            ]
+            : [
+                new HumanRequestOption('reduce', 'Verbrauch reduzieren'),
+                new HumanRequestOption('increase', 'Limit bis zum Servermaximum erhöhen'),
+            ];
+
+        return $this->open(
+            $run,
+            new HumanRequestProposal(
+                $reason->value,
+                $reviewLimit ? 'Reviewgrenze erreicht' : 'Ressourcengrenze erreicht',
+                'Der gebundene Schritt wurde vor seiner Wirkung angehalten.',
+                'Die serverseitig freigegebene Grenze '.$limit->limit->value.' wurde erreicht.',
+                'select',
+                $options,
+                $reviewLimit ? 'additional_round' : 'reduce',
+                [],
+                [],
+            ),
+            $reviewLimit ? $this->firstActiveReviewSlot($run) : 'system:'.$job->step_type,
+            $job->idempotency_key,
+            $reason,
+            $limit,
+        );
+    }
+
+    public function openFailureRequest(Run $run, ExecutionJob $job, WaitReason $reason, ?string $agentSlotId = null): HumanRequest
+    {
+        if (! in_array($reason, [WaitReason::PROVIDER_ERROR, WaitReason::INVALID_JSON], true)) {
+            throw new HumanRequestRejected('failure_wait_invalid', 'The failure wait reason is not supported.');
+        }
+        $slotId = $agentSlotId ?? 'system:'.$job->step_type;
+        $reviewSlot = $run->agents()->where('slot_id', $slotId)->where('role', 'quality_review')->exists();
+        $options = $reason === WaitReason::PROVIDER_ERROR
+            ? [new HumanRequestOption('retry', 'Idempotent erneut versuchen')]
+            : [new HumanRequestOption('new_turn', 'Neuen gebundenen Turn starten')];
+        if ($reviewSlot) {
+            $options[] = new HumanRequestOption('switch_profile', 'Freigegebenes Profil wechseln');
+        }
+
+        return $this->open(
+            $run,
+            new HumanRequestProposal(
+                $reason->value,
+                $reason === WaitReason::PROVIDER_ERROR ? 'Providerfehler' : 'Ungültiges Agentenergebnis',
+                'Der gebundene Schritt wurde ohne Teilwirkung angehalten.',
+                'Der vorhandene Attemptvertrag ist ausgeschöpft.',
+                'select',
+                $options,
+                $options[0]->key,
+                [],
+                [],
+            ),
+            $slotId,
+            $job->idempotency_key,
+            $reason,
+        );
+    }
+
+    public function openGitConflictRequest(Run $run, string $agentSlotId, string $boundStepKey): HumanRequest
+    {
+        return $this->open(
+            $run,
+            new HumanRequestProposal(
+                WaitReason::GIT_CONFLICT->value,
+                'Status-Compare-and-Swap in Konflikt',
+                'Der Run und seine Projektsperre bleiben bis zu einer neuen autorisierten Entscheidung bestehen.',
+                'Die erwartete Control-OID hat sich vor der Statusveröffentlichung geändert.',
+                'select',
+                [new HumanRequestOption('refresh_expected_oid', 'OID aktualisieren und Entscheidung erneut autorisieren')],
+                'refresh_expected_oid',
+                [],
+                [],
+            ),
+            $agentSlotId,
+            $boundStepKey,
+            WaitReason::GIT_CONFLICT,
+        );
+    }
+
+    /**
+     * Open the intervention request for a run parked behind git_base_changed.
+     *
+     * The registered resolver of this wait is the controlled abort through the
+     * status-mutation saga; without an open request the panel could never offer
+     * it and only a database intervention could end the run (AC-05, HUM-005).
+     * The request binds the run's current non-terminal step.
+     */
+    public function openBaseDriftRequest(Run $run): HumanRequest
+    {
+        $job = ExecutionJob::query()->where('run_id', $run->getKey())->get()
+            ->sortBy([['step_number', 'desc'], ['id', 'desc']])
+            ->first(static fn (ExecutionJob $candidate): bool => ! in_array(
+                $candidate->state,
+                [ExecutionJobState::SUCCEEDED, ExecutionJobState::FAILED],
+                true,
+            ));
+        if (! $job instanceof ExecutionJob) {
+            throw new HumanRequestRejected('bound_step_not_parkable', 'The drifted run has no bound step the request could park.');
+        }
+
+        return $this->open(
+            $run,
+            new HumanRequestProposal(
+                WaitReason::GIT_BASE_CHANGED->value,
+                'Control-Basis hat sich geändert',
+                'Der Run und seine Projektsperre bleiben bis zu einer autorisierten Abbruchentscheidung bestehen.',
+                'Die Control-Basis des Runs entspricht nicht mehr dem gebundenen Stand.',
+                'select',
+                [new HumanRequestOption('controlled_abort', 'Kontrollierter Abbruch über die Statusmutations-Saga')],
+                'controlled_abort',
+                [],
+                [],
+            ),
+            'system:'.$job->step_type,
+            $job->idempotency_key,
+            WaitReason::GIT_BASE_CHANGED,
+        );
+    }
+
     public function answer(
         HumanRequest $request,
         User $user,
@@ -212,6 +356,10 @@ final readonly class HumanRequestService
         string $agentSlot,
         string $requestedEffect,
         string $chosenEffect,
+        ?InterventionAuthorization $authorization = null,
+        ?string $findingId = null,
+        ?string $findingDisposition = null,
+        ?string $reason = null,
     ): Intervention {
         try {
             return DB::transaction(function () use (
@@ -224,6 +372,10 @@ final readonly class HumanRequestService
                 $agentSlot,
                 $requestedEffect,
                 $chosenEffect,
+                $authorization,
+                $findingId,
+                $findingDisposition,
+                $reason,
             ): Intervention {
                 DB::table('human_requests')->where('id', $request->getKey())->lockForUpdate()->first();
                 $fresh = HumanRequest::query()->findOrFail($request->getKey());
@@ -232,6 +384,11 @@ final readonly class HumanRequestService
 
                 if (! $this->policy->decide(ProjectAction::ANSWER_HUMAN_REQUEST, $user, $project)) {
                     throw new HumanRequestRejected('unauthorized', 'The user is not permitted to answer this human request.');
+                }
+                $membership = ProjectMembership::query()->where('project_id', $project->getKey())
+                    ->where('user_id', $user->getKey())->first();
+                if (! $membership instanceof ProjectMembership) {
+                    throw new HumanRequestRejected('unauthorized', 'The user has no project membership.');
                 }
                 if ($fresh->resolution_state !== HumanRequestResolutionState::OPEN) {
                     throw new HumanRequestRejected('request_already_resolved', 'The human request is already resolved.');
@@ -245,47 +402,100 @@ final readonly class HumanRequestService
                 $this->assertBinding('stale_requested_effect', $requestedEffect, $fresh->bound_requested_effect);
 
                 $allowed = $fresh->allowed_effects;
-                if ($chosenEffect !== self::CANCEL_EFFECT && ! in_array($chosenEffect, $allowed, true)) {
+                // controlled_abort and refresh_expected_oid are marker effects:
+                // both waits resolve exclusively through the re-authorized,
+                // status-operation-bound cancellation saga, never through a
+                // plain answer that would resume the parked step (plan §7.2).
+                if (in_array($chosenEffect, [self::CANCEL_EFFECT, 'controlled_abort', 'refresh_expected_oid'], true)) {
+                    throw new HumanRequestRejected('legacy_cancel_forbidden', 'Cancellation must use the status-operation-bound cancellation saga.');
+                }
+                if (! in_array($chosenEffect, $allowed, true)) {
                     throw new HumanRequestRejected('effect_not_offered', 'The chosen effect is not a classified answer for this request.');
+                }
+                $requiresStepUp = self::requiresStepUp($chosenEffect);
+                if ($requiresStepUp && ! $authorization instanceof InterventionAuthorization) {
+                    throw new HumanRequestRejected('step_up_required', 'The selected intervention requires a fresh step-up proof.');
+                }
+
+                $expectedVersion = $fresh->bound_run_version;
+                $auditReason = 'Gebundene Panelantwort.';
+                if ($chosenEffect === 'finding_disposition') {
+                    $type = is_string($findingDisposition) ? FindingDispositionType::tryFrom($findingDisposition) : null;
+                    $finding = is_string($findingId)
+                        ? Finding::query()->whereKey($findingId)->where('run_id', $run->id)->first()
+                        : null;
+                    if (! $finding instanceof Finding || ! $type instanceof FindingDispositionType
+                        || ! $authorization instanceof InterventionAuthorization || trim((string) $reason) === '') {
+                        throw new HumanRequestRejected('finding_disposition_invalid', 'The finding disposition input is incomplete.');
+                    }
+                    $auditReason = trim($this->redact(
+                        (string) $reason,
+                        new RedactionContext((string) $run->project_id, $run->id, 'finding-disposition'),
+                    ));
+                    $run = $this->orchestrator->recordHumanFindingDisposition(
+                        $run,
+                        $finding,
+                        $expectedVersion,
+                        $type,
+                        $auditReason,
+                        $user,
+                        $authorization->proofHash,
+                    );
+                    $expectedVersion = $run->version;
                 }
 
                 $intervention = Intervention::query()->create([
                     'id' => (string) Str::uuid(),
                     'human_request_id' => $fresh->id,
                     'user_id' => $user->getKey(),
+                    'actor_role' => $membership->role->value,
+                    'step_up_verified' => $requiresStepUp,
+                    'step_up_proof_hash' => $authorization?->proofHash,
                     'chosen_effect' => $chosenEffect,
-                    'chosen_option_key' => $chosenEffect === self::CANCEL_EFFECT ? null : $chosenEffect,
+                    'chosen_option_key' => $chosenEffect,
+                    'expected_run_version' => $fresh->bound_run_version,
+                    'wait_reason' => ($run->wait_reason ?? WaitReason::HUMAN_QUESTION)->value,
+                    'bound_step_key' => $fresh->bound_step_key,
+                    'reason' => $auditReason,
+                    'idempotency_key' => hash('sha256', implode(':', [
+                        $fresh->id, $chosenEffect, $fresh->bound_run_version,
+                    ])),
                 ]);
 
                 $fresh->forceFill([
-                    'resolution_state' => $chosenEffect === self::CANCEL_EFFECT
-                        ? HumanRequestResolutionState::CANCELLED
-                        : HumanRequestResolutionState::ANSWERED,
+                    'resolution_state' => HumanRequestResolutionState::ANSWERED,
                     'resolved_at' => now(),
                 ])->save();
 
-                if ($chosenEffect === self::CANCEL_EFFECT) {
-                    $this->orchestrator->cancelWait($run, $fresh->bound_run_version, $run->wait_reason ?? WaitReason::HUMAN_QUESTION);
-                } else {
-                    $expectedVersion = $fresh->bound_run_version;
-                    if ($run->wait_reason === WaitReason::RESOURCE_LIMIT && $chosenEffect === 'increase') {
-                        $this->applyLimitIncrease($run);
-                    }
-                    if ($run->wait_reason === WaitReason::SCOPE_APPROVAL) {
-                        // A scope decision binds the run's own version (effective
-                        // scope + counter), so both the run instance and the
-                        // expected version handed to the wait resumption below
-                        // must be the ones the scope decision itself produced.
-                        $run = $this->applyScopeDecision($run, $fresh, $chosenEffect);
-                        $expectedVersion = $run->version;
-                    }
-                    $this->orchestrator->resumeWait(
-                        $run,
-                        $expectedVersion,
-                        $fresh->bound_step_key,
-                        $run->wait_reason ?? WaitReason::HUMAN_QUESTION,
-                    );
+                if (($run->wait_reason === WaitReason::RESOURCE_LIMIT && $chosenEffect === 'increase')
+                    || ($run->wait_reason === WaitReason::REVIEW_LIMIT && $chosenEffect === 'additional_round')) {
+                    $this->applyLimitIncrease($run, $chosenEffect);
                 }
+                if (in_array($chosenEffect, ['switch_reviewer', 'switch_profile'], true)) {
+                    $this->switchBoundReviewer($run, $fresh->bound_agent_slot);
+                } elseif ($chosenEffect === 'new_turn') {
+                    $reviewSlot = $run->agents()->where('slot_id', $fresh->bound_agent_slot)
+                        ->where('role', 'quality_review')->exists();
+                    if ($reviewSlot) {
+                        $this->orchestrator->discardReviewSession($run, $fresh->bound_agent_slot);
+                    } else {
+                        $this->orchestrator->discardImplementationSessions($run);
+                    }
+                }
+                if ($run->wait_reason === WaitReason::SCOPE_APPROVAL) {
+                    // A scope decision binds the run's own version (effective
+                    // scope + counter), so both the run instance and the
+                    // expected version handed to the wait resumption below
+                    // must be the ones the scope decision itself produced.
+                    $run = $this->applyScopeDecision($run, $fresh, $chosenEffect);
+                    $expectedVersion = $run->version;
+                }
+                $this->orchestrator->resumeWait(
+                    $run,
+                    $expectedVersion,
+                    $fresh->bound_step_key,
+                    $run->wait_reason ?? WaitReason::HUMAN_QUESTION,
+                );
 
                 return $intervention;
             });
@@ -307,6 +517,11 @@ final readonly class HumanRequestService
                 'A human request requires a bound active attention user who may answer it.',
             );
         }
+    }
+
+    public static function requiresStepUp(string $effect): bool
+    {
+        return in_array($effect, self::STEP_UP_EFFECTS, true);
     }
 
     private function dispatchNotification(HumanRequest $request): void
@@ -363,7 +578,7 @@ final readonly class HumanRequestService
         }
     }
 
-    private function applyLimitIncrease(Run $run): void
+    private function applyLimitIncrease(Run $run, string $chosenEffect): void
     {
         if (! $this->limits instanceof RunLimitPolicy || ! $this->artifacts instanceof RunArtifactStore) {
             throw new HumanRequestRejected('limit_policy_unavailable', 'The resource-limit resolver is unavailable.');
@@ -388,7 +603,9 @@ final readonly class HumanRequestService
             throw new HumanRequestRejected('limit_binding_missing', 'The exceeded limit is not an import limit.');
         }
         $result = new ImportLimitResult($limit, $observed, $maximum);
-        $raised = $this->limits->raiseToObserved($run, $result);
+        $raised = $chosenEffect === 'additional_round'
+            ? $this->limits->raiseOne($run, $limit)
+            : $this->limits->raiseToObserved($run, $result);
         if ($raised === null) {
             throw new HumanRequestRejected('limit_above_server_maximum', 'The requested increase exceeds the immutable server maximum.');
         }
@@ -399,5 +616,43 @@ final readonly class HumanRequestService
             $raised,
             new RedactionContext((string) $run->project_id, $run->id, 'resource-limit'),
         );
+    }
+
+    private function firstActiveReviewSlot(Run $run): string
+    {
+        $slot = $run->agents()->where('role', 'quality_review')->where('is_active', true)
+            ->orderBy('slot_revision')->value('slot_id');
+
+        return is_string($slot) && $slot !== '' ? $slot : 'system:review';
+    }
+
+    private function switchBoundReviewer(Run $run, string $slotId): void
+    {
+        $slot = $run->agents()->where('slot_id', $slotId)->where('role', 'quality_review')
+            ->where('is_active', true)->first();
+        if ($slot === null) {
+            throw new HumanRequestRejected('reviewer_slot_not_active', 'The bound reviewer slot is no longer active.');
+        }
+        foreach (($run->agent_profile_snapshot ?? [])['reviewers'] ?? [] as $candidate) {
+            if (! is_array($candidate)) {
+                continue;
+            }
+            $values = [
+                $candidate['provider_profile'] ?? null,
+                $candidate['model'] ?? null,
+                $candidate['effort'] ?? null,
+                $candidate['prompt_profile_id'] ?? null,
+            ];
+            if (! array_reduce($values, static fn (bool $valid, mixed $value): bool => $valid && is_string($value) && $value !== '', true)
+                || ($values[0] === $slot->provider_profile && $values[1] === $slot->model
+                    && $values[2] === $slot->effort && $values[3] === $slot->prompt_profile)) {
+                continue;
+            }
+            $this->orchestrator->reviseReviewSlot($run, $slotId, ...$values);
+
+            return;
+        }
+
+        throw new HumanRequestRejected('reviewer_alternative_missing', 'No alternative reviewer from the run-bound approval snapshot is available.');
     }
 }

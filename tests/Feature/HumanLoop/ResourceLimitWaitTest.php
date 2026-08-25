@@ -5,9 +5,12 @@ namespace Tests\Feature\HumanLoop;
 use App\AI6\Agents\HumanRequestOption;
 use App\AI6\Agents\HumanRequestProposal;
 use App\AI6\Auth\Models\User;
+use App\AI6\Auth\StepUpGuard;
 use App\AI6\Git\ControlOperationRuntimeIdentity;
+use App\AI6\HumanLoop\Http\HumanRequestAnswerController;
 use App\AI6\HumanLoop\HumanRequestRejected;
 use App\AI6\HumanLoop\HumanRequestService;
+use App\AI6\HumanLoop\InterventionAuthorization;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Runs\ExecutionStepType;
@@ -20,6 +23,9 @@ use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunState;
 use App\AI6\Runs\WaitReason;
 use App\AI6\Shared\Redaction\RedactionContext;
+use Illuminate\Http\Request;
+use Illuminate\Session\ArraySessionHandler;
+use Illuminate\Session\Store;
 use Illuminate\Support\Facades\Mail;
 use Tests\Feature\Runs\BuildsHumanRequestFixture;
 use Tests\Feature\Tickets\TicketUiTestCase;
@@ -82,6 +88,7 @@ final class ResourceLimitWaitTest extends TicketUiTestCase
             $opened['request']->bound_agent_slot,
             $opened['request']->bound_requested_effect,
             'increase',
+            $this->authorization($opened['operator'], $opened['request'], 'increase'),
         );
     }
 
@@ -100,28 +107,34 @@ final class ResourceLimitWaitTest extends TicketUiTestCase
             $opened['request']->bound_agent_slot,
             $opened['request']->bound_requested_effect,
             'increase',
+            $this->authorization($opened['operator'], $opened['request'], 'increase'),
         );
         $effective = $this->app->make(RunLimitPolicy::class)->effective($opened['run']->fresh());
         self::assertSame(41, $effective['max_changed_files']);
     }
 
     /** TC-08 */
-    public function test_cancel_resolves_resource_limit(): void
+    public function test_legacy_cancel_cannot_resolve_resource_limit_outside_the_status_saga(): void
     {
         Mail::fake();
         $opened = $this->openedResourceLimit('AI6-019-TC08-CAN');
-        $this->app->make(HumanRequestService::class)->answer(
-            $opened['request'],
-            $opened['operator'],
-            $opened['request']->bound_run_version,
-            $opened['request']->bound_ticket_contract,
-            $opened['request']->bound_checkpoint,
-            $opened['request']->bound_scope,
-            $opened['request']->bound_agent_slot,
-            $opened['request']->bound_requested_effect,
-            HumanRequestService::CANCEL_EFFECT,
-        );
-        self::assertSame(RunState::FAILED, $opened['run']->fresh()->state);
+        try {
+            $this->app->make(HumanRequestService::class)->answer(
+                $opened['request'],
+                $opened['operator'],
+                $opened['request']->bound_run_version,
+                $opened['request']->bound_ticket_contract,
+                $opened['request']->bound_checkpoint,
+                $opened['request']->bound_scope,
+                $opened['request']->bound_agent_slot,
+                $opened['request']->bound_requested_effect,
+                HumanRequestService::CANCEL_EFFECT,
+            );
+            self::fail('The legacy local cancellation path was accepted.');
+        } catch (HumanRequestRejected $rejected) {
+            self::assertSame('legacy_cancel_forbidden', $rejected->reason);
+        }
+        self::assertSame(RunState::WAITING, $opened['run']->fresh()->state);
     }
 
     /**
@@ -183,5 +196,24 @@ final class ResourceLimitWaitTest extends TicketUiTestCase
             'step' => $step,
             'limit' => $limit,
         ];
+    }
+
+    private function authorization(User $actor, HumanRequest $request, string $effect): InterventionAuthorization
+    {
+        $session = new Store('test', new ArraySessionHandler(120));
+        $session->setId('resource-limit-'.$actor->id.'-'.bin2hex(random_bytes(4)));
+        $session->start();
+        $proof = Request::create('/human-request', 'POST');
+        $proof->setLaravelSession($session);
+        $guard = $this->app->make(StepUpGuard::class);
+        $guard->markSatisfied($proof, $actor, HumanRequestAnswerController::STEP_UP_ACTION);
+
+        return InterventionAuthorization::consumeFresh(
+            $proof,
+            $actor,
+            $guard,
+            HumanRequestAnswerController::STEP_UP_ACTION,
+            [$request->run_id, $request->id, $request->bound_run_version, $effect],
+        );
     }
 }

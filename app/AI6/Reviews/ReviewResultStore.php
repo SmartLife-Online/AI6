@@ -100,6 +100,17 @@ final readonly class ReviewResultStore
         return null;
     }
 
+    public function latestOutcome(Run $run, int $round, string $slotId): ?ReviewInvocationOutcome
+    {
+        $value = ReviewResult::query()->where('run_id', $run->id)
+            ->where('round_number', $round)->where('slot_id', $slotId)
+            ->orderByDesc('attempt')->value('invocation_outcome');
+
+        return $value instanceof ReviewInvocationOutcome
+            ? $value
+            : (is_string($value) ? ReviewInvocationOutcome::tryFrom($value) : null);
+    }
+
     public function expectedWorkspaceHash(Run $run, int $round): ?string
     {
         $value = ReviewResult::query()->where('run_id', $run->id)->where('round_number', $round)

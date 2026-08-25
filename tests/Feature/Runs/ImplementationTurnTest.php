@@ -14,6 +14,7 @@ use App\AI6\Runs\ExecutionStepType;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Runs\Models\RunArtifact;
+use App\AI6\Runs\Models\RunLimitConsumption;
 use App\AI6\Runs\RunImplementation;
 use App\AI6\Runs\RunState;
 use App\AI6\Runs\WaitReason;
@@ -38,8 +39,8 @@ final class ImplementationTurnTest extends TicketUiTestCase
 
         foreach ([
             [AgentScenario::HUMAN_REQUEST, ExecutionJobState::WAITING, RunState::WAITING, WaitReason::HUMAN_QUESTION],
-            [AgentScenario::INVALID_JSON, ExecutionJobState::FAILED, RunState::FAILED, null],
-            [AgentScenario::PROVIDER_ERROR, ExecutionJobState::FAILED, RunState::FAILED, null],
+            [AgentScenario::INVALID_JSON, ExecutionJobState::WAITING, RunState::WAITING, WaitReason::INVALID_JSON],
+            [AgentScenario::PROVIDER_ERROR, ExecutionJobState::WAITING, RunState::WAITING, WaitReason::PROVIDER_ERROR],
         ] as [$scenario, $step, $runState, $wait]) {
             $other = $this->preparedImplementationRun('AI6-019-TC01-'.strtoupper(str_replace('_', '-', $scenario->value)), scenario: $scenario);
             $original = (string) file_get_contents($other['worktree'].'/app/Example.php');
@@ -48,9 +49,12 @@ final class ImplementationTurnTest extends TicketUiTestCase
             self::assertSame($runState, $other['run']->fresh()->state, $scenario->value);
             self::assertSame($wait, $other['run']->fresh()->wait_reason, $scenario->value);
             self::assertSame($original, (string) file_get_contents($other['worktree'].'/app/Example.php'), $scenario->value);
-            if ($scenario === AgentScenario::HUMAN_REQUEST) {
-                self::assertSame(1, HumanRequest::query()->where('run_id', $other['run']->id)->count());
-            }
+            self::assertSame(1, HumanRequest::query()->where('run_id', $other['run']->id)->count());
+            self::assertSame(
+                $scenario === AgentScenario::HUMAN_REQUEST ? 1 : 3,
+                RunLimitConsumption::query()->where('run_id', $other['run']->id)
+                    ->where('limit_name', 'max_agent_invocations')->count(),
+            );
         }
     }
 

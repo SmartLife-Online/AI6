@@ -92,7 +92,7 @@ final class PublicRouteInventoryTest extends TestCase
             'POST /projects/{project}/configuration/refresh [web, auth, can:refreshConfiguration,project]',
             'POST /projects/{project}/control-branch [web, auth, can:changeControlBranch,project]',
             'POST /projects/{project}/deploy-key [web, auth, can:provisionDeployKey,project]',
-            'POST /projects/{project}/human-requests/{requestId} [web, auth, can:answerHumanRequest,project]',
+            'POST /projects/{project}/human-requests/{requestId} [web, auth, can:interveneRun,project]',
             'POST /projects/{project}/managed-clone [web, auth, can:synchronizeManagedClone,project]',
             'POST /projects/{project}/managed-fetch [web, auth, can:synchronizeManagedClone,project]',
             'POST /projects/{project}/operations/{operation}/recovery [web, auth, can:decideRecovery,project]',

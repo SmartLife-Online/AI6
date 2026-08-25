@@ -100,6 +100,45 @@ trait BuildsFixLoopFixture
     }
 
     /**
+     * The unchanged-tree twin of completeCheckRound: a genuine no-change fix
+     * leaves nothing to stage, so the round boundary commits an empty
+     * checkpoint commit over the identical tree — the observable state of a
+     * review stall without diff progress.
+     */
+    protected function completeUnchangedCheckRound(Run $run, string $projectIdentifier, int $round): Run
+    {
+        $orchestrator = $this->app->make(RunOrchestrator::class);
+        $job = $this->stepJob($run, ExecutionStepType::CHECK, $round);
+        $owner = str_repeat('c', 32);
+        $claimed = $orchestrator->claimStep($job, $owner);
+        self::assertNotNull($claimed, 'The check step of round '.$round.' could not be claimed.');
+
+        $fresh = $run->fresh() ?? $run;
+        $this->gitOutput(['add', '--all', '--no-renormalize'], (string) $fresh->worktree_path);
+        $this->gitOutput(['commit', '--allow-empty', '-m', 'AI6 unchanged fix round checkpoint'], (string) $fresh->worktree_path);
+        $context = new RedactionContext((string) $fresh->project_id, $fresh->id, 'stall-checkpoint');
+        $fresh = $this->app->make(RunCheckpointService::class)->create($fresh, $projectIdentifier, $context);
+        $fresh = $orchestrator->recordReviewReadiness($fresh->fresh() ?? $fresh, new ReviewReadinessDecision([], []));
+
+        self::assertTrue($orchestrator->applyPreparedStepEffect($fresh, ExecutionStepType::CHECK, $round));
+        self::assertTrue($orchestrator->finishStep($claimed, $owner, ExecutionJobState::SUCCEEDED, 'Checks und Reviewbereitschaft abgeschlossen.'));
+        DB::table('jobs')->delete();
+
+        return $fresh->fresh() ?? $fresh;
+    }
+
+    /**
+     * Reviewer slots keep reporting per their scenario while the fix turn is a
+     * real no-change turn, so tree and diff stay identical across rounds.
+     *
+     * @param  array<string, AgentScenario>  $scenarios
+     */
+    protected function noChangeFixAdapter(array $scenarios): FakeAgentAdapter
+    {
+        return $this->fixAdapter(AgentScenario::NO_CHANGE_REQUIRED, $scenarios);
+    }
+
+    /**
      * Bind a deterministic adapter whose default scenario also covers the
      * implementation slot of a fix turn.
      *

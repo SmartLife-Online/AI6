@@ -2,16 +2,24 @@
 
 namespace App\AI6\Runs\Jobs;
 
+use App\AI6\HumanLoop\HumanRequestRejected;
+use App\AI6\HumanLoop\HumanRequestService;
+use App\AI6\HumanLoop\Models\Intervention;
 use App\AI6\Reviews\ReviewRound;
+use App\AI6\Reviews\ReviewStallFingerprint;
 use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\ExecutionStepType;
+use App\AI6\Runs\ImportLimit;
+use App\AI6\Runs\ImportLimitResult;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\RunCheckStep;
 use App\AI6\Runs\RunFixTurn;
 use App\AI6\Runs\RunImplementation;
+use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
+use App\AI6\Runs\WaitReason;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -37,6 +45,9 @@ final class ExecuteRunStep implements ShouldQueue
         ?RunCheckStep $checks = null,
         ?ReviewRound $reviews = null,
         ?RunFixTurn $fixes = null,
+        ?RunLimitPolicy $limits = null,
+        ?HumanRequestService $humanRequests = null,
+        ?ReviewStallFingerprint $stallFingerprints = null,
     ): void {
         $job = ExecutionJob::query()->find($this->executionJobId);
         if (! $job instanceof ExecutionJob
@@ -65,6 +76,61 @@ final class ExecuteRunStep implements ShouldQueue
         }
         if (! in_array($run->state, [RunState::QUEUED, RunState::RUNNING], true)) {
             $this->abandon($orchestrator, $claimed, $run->id, $owner);
+
+            return;
+        }
+
+        $limits ??= app(RunLimitPolicy::class);
+        $humanRequests ??= app(HumanRequestService::class);
+        $stallFingerprints ??= app(ReviewStallFingerprint::class);
+        $exceeded = in_array($type, [
+            ExecutionStepType::IMPLEMENT,
+            ExecutionStepType::REVIEW,
+            ExecutionStepType::FIX,
+        ], true) ? $limits->runtimeExceeded($run) : null;
+        $waitReason = WaitReason::RESOURCE_LIMIT;
+        if ($exceeded === null && $type === ExecutionStepType::REVIEW) {
+            $exceeded = $limits->consume(
+                $run,
+                ImportLimit::MAX_REVIEW_ROUNDS,
+                'review-round:'.$claimed->step_number,
+            );
+            $waitReason = WaitReason::REVIEW_LIMIT;
+        }
+        if ($exceeded === null && $type === ExecutionStepType::FIX) {
+            $exceeded = $limits->consume(
+                $run,
+                ImportLimit::MAX_FIX_ROUNDS,
+                'fix-round:'.$claimed->step_number,
+            );
+            $waitReason = WaitReason::REVIEW_LIMIT;
+        }
+        // The stall event fires once per bound fix step: a granted resolution
+        // (additional round, reviewer switch or finding disposition) leaves an
+        // intervention on this step key, and re-evaluating the unchanged
+        // fingerprints after it would park the resumed step forever (AC-04/AC-06).
+        if ($exceeded === null && $type === ExecutionStepType::FIX
+            && $stallFingerprints->stalled($run, $claimed->step_number)
+            && ! Intervention::query()->where('bound_step_key', $claimed->idempotency_key)
+                ->whereIn('chosen_effect', ['additional_round', 'switch_reviewer', 'finding_disposition'])
+                ->exists()) {
+            $effective = $limits->effective($run)[ImportLimit::MAX_REVIEW_ROUNDS->value];
+            $exceeded = new ImportLimitResult(ImportLimit::MAX_REVIEW_ROUNDS, $effective + 1, $effective);
+            $waitReason = WaitReason::REVIEW_LIMIT;
+        }
+        if ($exceeded instanceof ImportLimitResult) {
+            try {
+                $humanRequests->openLimitRequest($run, $claimed, $exceeded, $waitReason);
+            } catch (HumanRequestRejected $rejected) {
+                $orchestrator->finishStep(
+                    $claimed,
+                    $owner,
+                    ExecutionJobState::FAILED,
+                    'Die Limitentscheidung konnte nicht gebunden werden.',
+                    $rejected->reason,
+                );
+                $orchestrator->failRun($run->id);
+            }
 
             return;
         }

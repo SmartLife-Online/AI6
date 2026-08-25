@@ -17,6 +17,7 @@ use App\AI6\Git\RunCheckpointConflict;
 use App\AI6\Git\RunCheckpointService;
 use App\AI6\Git\RunTreeService;
 use App\AI6\HumanLoop\HumanRequestRejected;
+use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\HumanLoop\ScopeApprovalService;
 use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\TicketReadModel;
@@ -52,6 +53,7 @@ final readonly class RunCheckStep
         private ScopeReconciliation $scopeReconciliation,
         private ScopeApprovalService $scopeApprovals,
         private EffectiveProjectConfiguration $projectConfiguration,
+        private HumanRequestService $humanRequests,
     ) {}
 
     public function execute(ExecutionJob $job, Run $run, string $owner): void
@@ -235,8 +237,9 @@ final readonly class RunCheckStep
                     $decision->blockers[0]->message,
                     'review_blocker:ticket_contract_drift:'.$run->version,
                 );
-                $this->orchestrator->parkOnBaseDrift($run, $run->version);
+                $parked = $this->orchestrator->parkOnBaseDrift($run, $run->version);
                 $this->orchestrator->parkStep($job, $owner);
+                $this->openBaseDriftRequest($parked);
 
                 return;
             }
@@ -262,8 +265,9 @@ final readonly class RunCheckStep
                 $blocker->code, ['ticket_contract_drift', 'control_head_drift'], true,
             ));
             if ($drift !== []) {
-                $this->orchestrator->parkOnBaseDrift($run, $run->version);
+                $parked = $this->orchestrator->parkOnBaseDrift($run, $run->version);
                 $this->orchestrator->parkStep($job, $owner);
+                $this->openBaseDriftRequest($parked);
 
                 return;
             }
@@ -507,5 +511,25 @@ final readonly class RunCheckStep
         }
 
         return 'Check '.$profile.': '.$record->state->value.'.';
+    }
+
+    /**
+     * The registered resolver of git_base_changed is the controlled abort; the
+     * park therefore opens the intervention request. A refusal keeps the park
+     * intact and stays visible in the step events instead of failing the step.
+     */
+    private function openBaseDriftRequest(Run $run): void
+    {
+        try {
+            $this->humanRequests->openBaseDriftRequest($run);
+        } catch (HumanRequestRejected $rejected) {
+            $this->orchestrator->recordStepEvent(
+                $run->id,
+                ExecutionStepType::CHECK->value,
+                ExecutionJobState::WAITING,
+                'Der Abbruch-Request für die Basisdrift konnte nicht geöffnet werden: '.$rejected->reason.'.',
+                'base-drift-request:'.$rejected->reason.':'.$run->version,
+            );
+        }
     }
 }

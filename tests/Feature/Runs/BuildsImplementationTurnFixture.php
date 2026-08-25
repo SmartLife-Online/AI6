@@ -97,6 +97,14 @@ trait BuildsImplementationTurnFixture
             'ai6.execution_mailboxes.agent_output_root' => $this->implementationTemp('agent-outputs'),
             'ai6.process.policies.agent.working_roots' => [$this->implementationTemp('isolated')],
         ]);
+        // The console boot of the migrations already constructed every artisan
+        // command; the mailbox command of AI6-045 thereby froze the process
+        // policy registry with the shipped roots. The singletons derived from
+        // the configuration above must therefore rebuild on every platform —
+        // the shipped process-group semantics themselves stay untouched.
+        $this->app->forgetInstance(ProcessPolicyRegistry::class);
+        $this->app->forgetInstance(ControlProcessRunner::class);
+        $this->app->forgetInstance(RunPreflight::class);
         $this->app->forgetInstance(RunArtifactRoot::class);
         $this->app->forgetInstance(RunArtifactStore::class);
         $this->app->forgetInstance(RunImplementation::class);

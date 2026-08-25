@@ -45,17 +45,22 @@ final class ReviewResumeAndFailureTest extends TicketUiTestCase
         );
         $failed = $this->executeReview($prepared['run']->fresh());
 
-        self::assertSame(ExecutionJobState::FAILED, $failed->state);
-        self::assertSame('review_slot_failed', $failed->failure_code);
+        self::assertSame(ExecutionJobState::WAITING, $failed->state);
+        self::assertSame('invalid_json', $prepared['run']->fresh()->wait_reason?->value);
+        self::assertSame('invalid_json', HumanRequest::query()->where('run_id', $prepared['run']->id)
+            ->where('resolution_state', 'open')->sole()->kind);
         self::assertSame(
-            [$this->reviewSlotIds[0], $this->reviewSlotIds[0], $this->reviewSlotIds[1]],
+            [
+                $this->reviewSlotIds[0], $this->reviewSlotIds[0],
+                $this->reviewSlotIds[1], $this->reviewSlotIds[1], $this->reviewSlotIds[1],
+            ],
             array_column($adapter->contextPackages, 'slot_id'),
         );
-        self::assertSame([1, 2, 1], array_column($adapter->contextPackages, 'attempt'));
+        self::assertSame([1, 2, 1, 2, 3], array_column($adapter->contextPackages, 'attempt'));
         self::assertSame(1, ReviewResult::query()->where('run_id', $prepared['run']->id)
             ->where('slot_id', $this->reviewSlotIds[0])
             ->where('invocation_outcome', ReviewInvocationOutcome::VALID_RESULT->value)->count());
-        self::assertSame(1, ReviewResult::query()->where('run_id', $prepared['run']->id)
+        self::assertSame(3, ReviewResult::query()->where('run_id', $prepared['run']->id)
             ->where('slot_id', $this->reviewSlotIds[1])
             ->where('invocation_outcome', ReviewInvocationOutcome::INVALID_JSON->value)
             ->where('failure_code', 'invalid_json')->count());

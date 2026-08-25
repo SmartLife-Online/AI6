@@ -131,7 +131,7 @@ Route::middleware('auth')->group(function (): void {
         ->middleware('can:answerHumanRequest,project')
         ->name('projects.human-requests.show');
     Route::post('/projects/{project}/human-requests/{requestId}', [HumanRequestAnswerController::class, 'store'])
-        ->middleware('can:answerHumanRequest,project')
+        ->middleware('can:interveneRun,project')
         ->name('projects.human-requests.answer');
     Route::post('/projects/{project}/deploy-key', [ControlOperationController::class, 'provision'])
         ->middleware('can:provisionDeployKey,project')

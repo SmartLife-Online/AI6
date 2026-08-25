@@ -10,6 +10,7 @@ use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Runs\Models\RunArtifact;
+use App\AI6\Runs\Models\RunLimitConsumption;
 use App\AI6\Runs\RunImplementation;
 use App\AI6\Runs\RunOrchestrator;
 use Illuminate\Support\Facades\DB;
@@ -129,6 +130,7 @@ final class ImplementationInstructionTest extends TicketUiTestCase
     /** TC-06 */
     public function test_an_instruction_update_uses_the_structured_channel_and_rejects_later_scope(): void
     {
+        Mail::fake();
         $prepared = $this->preparedImplementationRun('AI6-019-TC06', ['AGENTS.md', 'app/Example.php']);
         $originalHash = $prepared['run']->instruction_hash;
         $adapter = new class implements AgentAdapter
@@ -200,7 +202,16 @@ final class ImplementationInstructionTest extends TicketUiTestCase
         $this->app->instance(AgentAdapter::class, $lateAdapter);
         $this->app->forgetInstance(RunImplementation::class);
         $failed = $this->executeImplement($late['run']);
-        self::assertSame(ExecutionJobState::FAILED, $failed->state);
+        self::assertSame(ExecutionJobState::WAITING, $failed->state);
+        self::assertSame(3, RunLimitConsumption::query()->where('run_id', $late['run']->id)->count());
+        self::assertSame(
+            ['waiting', 'invalid_json', 'invalid_json'],
+            [
+                $late['run']->fresh()->state->value,
+                $late['run']->fresh()->wait_reason?->value,
+                HumanRequest::query()->where('run_id', $late['run']->id)->sole()->kind,
+            ],
+        );
         self::assertFileDoesNotExist($late['worktree'].'/AGENTS.md');
     }
 }

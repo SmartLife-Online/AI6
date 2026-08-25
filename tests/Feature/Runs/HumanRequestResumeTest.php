@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Runs;
 
+use App\AI6\HumanLoop\HumanRequestRejected;
 use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\Models\ExecutionJob;
@@ -69,26 +70,31 @@ final class HumanRequestResumeTest extends TicketUiTestCase
     }
 
     /** TC-09 */
-    public function test_cancel_follows_the_existing_abort_path(): void
+    public function test_legacy_cancel_cannot_bypass_the_status_bound_saga(): void
     {
         Mail::fake();
         $opened = $this->openedHumanRequest('AI6-018-CAN');
         $request = $opened['request'];
 
-        $this->app->make(HumanRequestService::class)->answer(
-            $request,
-            $opened['operator'],
-            $request->bound_run_version,
-            $request->bound_ticket_contract,
-            $request->bound_checkpoint,
-            $request->bound_scope,
-            $request->bound_agent_slot,
-            $request->bound_requested_effect,
-            HumanRequestService::CANCEL_EFFECT,
-        );
+        try {
+            $this->app->make(HumanRequestService::class)->answer(
+                $request,
+                $opened['operator'],
+                $request->bound_run_version,
+                $request->bound_ticket_contract,
+                $request->bound_checkpoint,
+                $request->bound_scope,
+                $request->bound_agent_slot,
+                $request->bound_requested_effect,
+                HumanRequestService::CANCEL_EFFECT,
+            );
+            self::fail('The legacy cancel path was accepted.');
+        } catch (HumanRequestRejected $rejected) {
+            self::assertSame('legacy_cancel_forbidden', $rejected->reason);
+        }
 
-        self::assertSame(RunState::FAILED, $opened['run']->fresh()->state);
-        self::assertSame('cancelled', $request->fresh()->resolution_state->value);
+        self::assertSame(RunState::WAITING, $opened['run']->fresh()->state);
+        self::assertSame('open', $request->fresh()->resolution_state->value);
     }
 
     /**
@@ -98,7 +104,10 @@ final class HumanRequestResumeTest extends TicketUiTestCase
     public function test_human_question_and_resource_limit_are_registered_with_resolvers(): void
     {
         $registry = $this->app->make(WaitReasonRegistry::class);
-        self::assertSame(['human_question', 'resource_limit', 'scope_approval', 'contract_change', 'check_failure'], $registry->registeredReasons());
+        self::assertSame([
+            'human_question', 'resource_limit', 'scope_approval', 'contract_change', 'check_failure',
+            'review_limit', 'provider_error', 'invalid_json', 'git_base_changed', 'git_conflict',
+        ], $registry->registeredReasons());
         self::assertSame([
             'producer' => 'needs_human',
             'resolvers' => ['bound_answer'],

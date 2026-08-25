@@ -300,6 +300,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/HumanLoop/HumanRequestRejected.php',
             'app/AI6/HumanLoop/HumanRequestResolutionState.php',
             'app/AI6/HumanLoop/HumanRequestService.php',
+            'app/AI6/HumanLoop/InterventionAuthorization.php',
             'app/AI6/HumanLoop/Jobs/SendHumanRequestNotification.php',
             'app/AI6/HumanLoop/Mail/HumanRequestNotificationMail.php',
             'app/AI6/HumanLoop/Models/HumanRequest.php',
@@ -379,6 +380,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Reviews/ReviewResultParser.php',
             'app/AI6/Reviews/ReviewResultStore.php',
             'app/AI6/Reviews/ReviewRound.php',
+            'app/AI6/Reviews/ReviewStallFingerprint.php',
             'app/AI6/Reviews/ReviewerSlot.php',
             'app/AI6/Reviews/ReviewerSlotFactory.php',
             'app/AI6/Runs/.gitkeep',
@@ -415,6 +417,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Runs/Models/RunCheckpoint.php',
             'app/AI6/Runs/Models/RunEvent.php',
             'app/AI6/Runs/Models/RunGate.php',
+            'app/AI6/Runs/Models/RunLimitConsumption.php',
             'app/AI6/Runs/Models/ScopeDecision.php',
             'app/AI6/Runs/Models/TicketApproval.php',
             'app/AI6/Runs/Models/TicketApprovalEvaluation.php',
@@ -424,6 +427,8 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Runs/RunArtifactKind.php',
             'app/AI6/Runs/RunArtifactRoot.php',
             'app/AI6/Runs/RunArtifactStore.php',
+            'app/AI6/Runs/RunCancellationMode.php',
+            'app/AI6/Runs/RunCancellationService.php',
             'app/AI6/Runs/RunCheckStep.php',
             'app/AI6/Runs/RunFixTurn.php',
             'app/AI6/Runs/RunImplementation.php',
@@ -864,6 +869,7 @@ final class ScaffoldStructureTest extends TestCase
             '2026_08_21_000000_add_review_result_contract.php',
             '2026_08_22_000000_add_finding_contract.php',
             '2026_08_23_000000_add_finding_status_history.php',
+            '2026_08_24_000000_add_run_intervention_contract.php',
         ], $migrations);
     }
 

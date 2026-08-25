@@ -5,6 +5,8 @@ namespace App\AI6\Runs;
 use App\AI6\Git\ControlOperationState;
 use App\AI6\Git\ControlOperationType;
 use App\AI6\Git\Models\ControlOperation;
+use App\AI6\HumanLoop\HumanRequestRejected;
+use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Runs\Models\Run;
 
@@ -20,7 +22,10 @@ use App\AI6\Runs\Models\Run;
  */
 final readonly class ContractChangeService
 {
-    public function __construct(private RunOrchestrator $orchestrator) {}
+    public function __construct(
+        private RunOrchestrator $orchestrator,
+        private HumanRequestService $humanRequests,
+    ) {}
 
     /**
      * Park the run for a requested instruction or runtime profile change.
@@ -38,7 +43,17 @@ final readonly class ContractChangeService
             throw new RunTransitionConflict('contract_change_not_running', 'Only a running run can enter the contract-change wait.');
         }
         if (! hash_equals($run->run_base_sha, (string) $project->control_oid)) {
-            return $this->orchestrator->transition($run, $run->version, RunState::WAITING, $run->phase, WaitReason::GIT_BASE_CHANGED);
+            $parked = $this->orchestrator->transition($run, $run->version, RunState::WAITING, $run->phase, WaitReason::GIT_BASE_CHANGED);
+            try {
+                // The registered resolver of this wait is the controlled abort;
+                // the park opens the intervention request so the panel can offer
+                // it (AC-05). A refusal keeps the park itself intact.
+                $this->humanRequests->openBaseDriftRequest($parked);
+            } catch (HumanRequestRejected) {
+                return $parked;
+            }
+
+            return $parked->refresh();
         }
 
         $parked = $this->orchestrator->transition($run, $run->version, RunState::WAITING, $run->phase, WaitReason::CONTRACT_CHANGE);

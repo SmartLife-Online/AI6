@@ -356,7 +356,10 @@ final class FixLoopTest extends TicketUiTestCase
         $prepared = $this->preparedReviewRun('AI6-025-TC12');
         $run = $prepared['run'];
         $identifier = $this->projectIdentifier($run);
-        $expectedReasons = ['human_question', 'resource_limit', 'scope_approval', 'contract_change', 'check_failure'];
+        $expectedReasons = [
+            'human_question', 'resource_limit', 'scope_approval', 'contract_change', 'check_failure',
+            'review_limit', 'provider_error', 'invalid_json', 'git_base_changed', 'git_conflict',
+        ];
         self::assertSame($expectedReasons, $this->app->make(WaitReasonRegistry::class)->registeredReasons());
 
         $firstRoundAdapter = $this->reviewAdapter([$this->reviewSlotIds[0] => AgentScenario::FINDINGS]);

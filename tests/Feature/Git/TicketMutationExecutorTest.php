@@ -90,6 +90,9 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
         DB::table('jobs')->delete();
         $this->app->make(ControlOperationExecutor::class)->execute($refresh->id);
         $readModel = TicketReadModel::query()->where('relative_path', 'tickets/AI6-909.md')->firstOrFail();
+        // refresh() below re-hydrates this same instance with the published
+        // target state; the reviewed source blob must be bound before that.
+        $reviewedSourceBlob = $readModel->blob_sha;
         $targetContent = match ($kind) {
             'edit' => str_replace('Alter Inhalt.', 'Neuer Inhalt.', $sourceContent),
             'approval' => str_replace('status: todo', 'status: ready', $sourceContent),
@@ -274,7 +277,7 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
             $approval = TicketApproval::query()->findOrFail($operation->id);
             self::assertSame('complete', $approval->saga_phase);
             self::assertSame('queued', $approval->queue_state);
-            self::assertSame($readModel->blob_sha, $approval->reviewed_ticket_blob_sha);
+            self::assertSame($reviewedSourceBlob, $approval->reviewed_ticket_blob_sha);
             self::assertSame($fresh->blob_sha, $approval->approved_ticket_blob_sha);
             self::assertSame($commitOid, $approval->approved_control_sha);
         }

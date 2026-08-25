@@ -8,6 +8,8 @@ use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\ControlOperationRecoveryDecision;
 use App\AI6\Git\Models\ControlOperationResult;
 use App\AI6\Git\Models\TicketMutation;
+use App\AI6\HumanLoop\HumanRequestRejected;
+use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\ProjectMembership;
@@ -28,6 +30,7 @@ use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\ScopeDecision;
 use App\AI6\Runs\Models\TicketApproval;
+use App\AI6\Runs\RunCancellationService;
 use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
@@ -37,6 +40,7 @@ use App\AI6\Shared\Process\EffectLock;
 use App\AI6\Shared\Process\EffectLockHandle;
 use App\AI6\Shared\Process\EffectLockOutcome;
 use App\AI6\Shared\Redaction\RedactionContext;
+use App\AI6\Shared\Redaction\RedactionMatchType;
 use App\AI6\Shared\Redaction\Redactor;
 use App\AI6\Tickets\TicketMutationConflict;
 use App\AI6\Tickets\TicketParseException;
@@ -79,6 +83,8 @@ final readonly class TicketMutationExecutor
         private ApprovalSnapshotVerifier $approvalSnapshotVerifier,
         private RunOrchestrator $runs,
         private RunLimitPolicy $runLimits,
+        private RunCancellationService $runCancellations,
+        private HumanRequestService $humanRequests,
     ) {}
 
     public function advance(ControlOperation $operation, int $attemptToken): bool
@@ -91,10 +97,11 @@ final readonly class TicketMutationExecutor
                 ControlOperationPhase::PREPARED => $this->prepareCommit($operation, $attemptToken),
                 ControlOperationPhase::COMMIT_PREPARED => $this->publish($operation, $attemptToken),
                 ControlOperationPhase::CONTROL_CONFIRMED => $this->finalize($operation, $attemptToken),
-                ControlOperationPhase::DB_FINALIZED => true,
+                ControlOperationPhase::DB_FINALIZED => $this->reconcileRunCancellation($operation),
                 default => throw new RuntimeException('The ticket mutation has an incompatible phase.'),
             };
         } catch (ControlOperationTerminalConflict $exception) {
+            $this->runCancellations->recordConflict($operation);
             if ($this->publishedIntent($operation)) {
                 throw new ControlOperationRecoveryRequired(
                     'A published ticket mutation encountered a terminal preflight deviation.',
@@ -134,20 +141,25 @@ final readonly class TicketMutationExecutor
                 $repository = $this->paths->assertRepository($repositoryPath);
                 $mutation = $operation->ticketMutation()->firstOrFail();
                 $anchorAttemptToken = $mutation->prepared_attempt_token ?? $attemptToken;
-                $attemptRef = ManagedProjectPath::attemptRef($operation->id, $anchorAttemptToken);
                 $context = new RedactionContext((string) $project->getKey(), $operation->id, 'ticket-mutation-cleanup');
-                $resolved = $this->git->resolveAttemptRef($repository, $attemptRef, $context);
-                if ($resolved->succeeded()) {
-                    $oid = trim($resolved->output);
-                    if ($mutation->prepared_commit_oid === null || ! hash_equals($mutation->prepared_commit_oid, $oid)) {
-                        throw new ControlOperationRecoveryRequired('The ticket mutation attempt ref differs from its persisted commit.');
+                // A crashed attempt can leave its ref under the current token
+                // while prepared_attempt_token still names an earlier attempt;
+                // both candidates are inspected under the same commit binding.
+                foreach (array_unique([$anchorAttemptToken, $attemptToken]) as $tokenCandidate) {
+                    $attemptRef = ManagedProjectPath::attemptRef($operation->id, $tokenCandidate);
+                    $resolved = $this->git->resolveAttemptRef($repository, $attemptRef, $context);
+                    if ($resolved->succeeded()) {
+                        $oid = trim($resolved->output);
+                        if ($mutation->prepared_commit_oid === null || ! hash_equals($mutation->prepared_commit_oid, $oid)) {
+                            throw new ControlOperationRecoveryRequired('The ticket mutation attempt ref differs from its persisted commit.');
+                        }
+                        $deleted = $this->git->deleteAttemptRef($repository, $attemptRef, $oid, $context);
+                        if (! $deleted->succeeded()) {
+                            throw new ControlOperationRecoveryRequired('The ticket mutation attempt ref could not be removed safely.');
+                        }
+                    } elseif ($resolved->exitCode !== 1 || $resolved->output !== '' || $resolved->errorOutput !== '') {
+                        throw new ControlOperationRecoveryRequired('The ticket mutation attempt ref could not be inspected safely.');
                     }
-                    $deleted = $this->git->deleteAttemptRef($repository, $attemptRef, $oid, $context);
-                    if (! $deleted->succeeded()) {
-                        throw new ControlOperationRecoveryRequired('The ticket mutation attempt ref could not be removed safely.');
-                    }
-                } elseif ($resolved->exitCode !== 1 || $resolved->output !== '' || $resolved->errorOutput !== '') {
-                    throw new ControlOperationRecoveryRequired('The ticket mutation attempt ref could not be inspected safely.');
                 }
             }
             $mutation = $operation->ticketMutation()->firstOrFail();
@@ -234,7 +246,7 @@ final readonly class TicketMutationExecutor
             $commitOid = $this->preparedCommit($operation, $mutation, $repository, $context);
             $this->assertRecoverablePublishedEffect($operation, $project, $mutation, $repository, $commitOid, $context);
 
-            DB::transaction(function () use ($operation, $decision, $attemptToken): void {
+            DB::transaction(function () use ($operation, $decision, $attemptToken, $commitOid): void {
                 $updated = ControlOperation::query()
                     ->whereKey($operation->id)
                     ->where('current_attempt_token', $attemptToken)
@@ -255,6 +267,26 @@ final readonly class TicketMutationExecutor
                     ]);
                 if ($updated !== 1) {
                     throw new RuntimeException('The ticket mutation recovery decision lost its compare-and-swap binding.');
+                }
+                // The schema lets an adopt decision become applied only with a
+                // bound application attempt and fingerprint; the verified
+                // commit is that adopted state.
+                if ($decision->decision === RecoveryDecisionType::ADOPT_EXTERNAL_STATE) {
+                    $bound = ControlOperationRecoveryDecision::query()
+                        ->whereKey($decision->id)
+                        ->where('state', 'pending')
+                        ->whereNull('application_attempt_token')
+                        ->update([
+                            'application_attempt_token' => $attemptToken,
+                            'application_fingerprint' => $commitOid,
+                            'updated_at' => Date::now(),
+                        ]);
+                    $fresh = $decision->fresh();
+                    if ($bound !== 1 && ! ($fresh instanceof ControlOperationRecoveryDecision
+                        && is_int($fresh->application_attempt_token)
+                        && hash_equals((string) $fresh->application_fingerprint, $commitOid))) {
+                        throw new RuntimeException('The adopted external state could not be bound to the decision.');
+                    }
                 }
                 $this->markDecisionApplied($decision);
             });
@@ -433,8 +465,18 @@ final readonly class TicketMutationExecutor
                 throw new ControlOperationTerminalConflict('run_start_lineage_changed', 'Die freigegebene Runstart-Lineage ist nicht mehr gültig.');
             }
         }
+        // The redactor deliberately leaves already-known markers untouched, so
+        // a forged marker in the write content produces neither a match nor a
+        // text change; the closed server-owned marker set is checked directly.
+        $forgedMarker = false;
+        foreach (RedactionMatchType::cases() as $markerType) {
+            if (str_contains($mutation->target_content, $markerType->marker())) {
+                $forgedMarker = true;
+                break;
+            }
+        }
         $targetRedaction = $this->redactor->redact($mutation->target_content, $context);
-        if ($targetRedaction->matches !== [] || ! hash_equals($targetRedaction->text, $mutation->target_content)) {
+        if ($forgedMarker || $targetRedaction->matches !== [] || ! hash_equals($targetRedaction->text, $mutation->target_content)) {
             throw new ControlOperationTerminalConflict(
                 'target_requires_redaction',
                 'Der Zielstand enthält schützenswerte Inhalte oder Redactionmarker.',
@@ -763,6 +805,13 @@ final readonly class TicketMutationExecutor
             }
         });
         $this->cleanupFailedAttempt($operation, $attemptToken);
+
+        return $this->reconcileRunCancellation($operation->fresh() ?? $operation);
+    }
+
+    private function reconcileRunCancellation(ControlOperation $operation): bool
+    {
+        $this->runCancellations->reconcileOperation($operation);
 
         return true;
     }
@@ -1118,7 +1167,16 @@ final readonly class TicketMutationExecutor
                 return;
             }
             try {
-                $this->runs->parkOnBaseDrift($run, $run->version);
+                $parked = $this->runs->parkOnBaseDrift($run, $run->version);
+                try {
+                    // The registered resolver of git_base_changed is the
+                    // controlled abort; the park opens the intervention request
+                    // so the panel can offer it (AC-05). A refusal — for
+                    // example an already open blocking request — keeps the
+                    // park itself intact.
+                    $this->humanRequests->openBaseDriftRequest($parked);
+                } catch (HumanRequestRejected) {
+                }
 
                 return;
             } catch (RunTransitionConflict $conflict) {

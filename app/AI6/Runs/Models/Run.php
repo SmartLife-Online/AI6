@@ -8,6 +8,7 @@ use App\AI6\Runs\RunState;
 use App\AI6\Runs\WaitReason;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
 /**
@@ -15,6 +16,8 @@ use Illuminate\Support\Carbon;
  * @property int $project_id
  * @property string $ticket_approval_id
  * @property string $status_operation_id
+ * @property string|null $pending_status_operation_id
+ * @property string|null $confirmed_branch_publication_oid
  * @property RunState $state
  * @property RunPhase $phase
  * @property WaitReason|null $wait_reason
@@ -71,6 +74,12 @@ final class Run extends Model
         return $this->belongsTo(Project::class);
     }
 
+    /** @return HasMany<RunAgent, $this> */
+    public function agents(): HasMany
+    {
+        return $this->hasMany(RunAgent::class);
+    }
+
     /** @return array<string, string> */
     protected function casts(): array
     {
@@ -91,6 +100,7 @@ final class Run extends Model
             'review_blockers' => 'array',
             'review_readiness_assessed_at' => 'immutable_datetime',
             'version' => 'integer',
+            'created_at' => 'immutable_datetime',
         ];
     }
 }

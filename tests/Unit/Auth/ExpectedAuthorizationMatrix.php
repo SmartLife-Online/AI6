@@ -80,6 +80,12 @@ final class ExpectedAuthorizationMatrix
                 'operator' => true,
                 'approver' => true,
             ],
+            'intervene_run' => [
+                'admin' => true,
+                'viewer' => false,
+                'operator' => true,
+                'approver' => true,
+            ],
             'dispose_finding' => [
                 'admin' => false,
                 'viewer' => false,

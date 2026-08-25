@@ -35,6 +35,8 @@ use App\AI6\Reviews\Models\ReviewResult;
 use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\ExecutionStepType;
 use App\AI6\Runs\ImplementationImportException;
+use App\AI6\Runs\ImportLimit;
+use App\AI6\Runs\ImportLimitResult;
 use App\AI6\Runs\InstructionBindingVerifier;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
@@ -42,8 +44,11 @@ use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\RunArtifactKind;
 use App\AI6\Runs\RunArtifactStore;
+use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunOrchestrator;
+use App\AI6\Runs\RunState;
 use App\AI6\Runs\RunTransitionConflict;
+use App\AI6\Runs\WaitReason;
 use App\AI6\Shared\Json\JsonDecodingException;
 use App\AI6\Shared\Redaction\InvalidRedactionInputException;
 use App\AI6\Shared\Redaction\RedactionContext;
@@ -69,6 +74,7 @@ final readonly class ReviewRound
         private AgentAdapter $adapter,
         private AgentResultValidator $validator,
         private RunArtifactStore $artifacts,
+        private RunLimitPolicy $limits,
         private HumanRequestService $humanRequests,
         private TicketV1Parser $tickets,
         private WorktreeGitMetadataPaths $gitMetadataPaths,
@@ -121,13 +127,32 @@ final readonly class ReviewRound
             if ($this->results->terminalOutcome($run, $job->step_number, $slot->slot_id) !== null) {
                 continue;
             }
-            $attempt = $this->results->attempt($run, $job->step_number, $slot->slot_id);
-            if ($job->step_number > 1 && $attempt === 1) {
-                $this->orchestrator->discardReviewSession($run, $slot->slot_id);
-            }
-            $slot = $this->orchestrator->bindReviewSession($run, $slot->slot_id, (string) Str::uuid());
-            if ($this->invoke($job, $run, $slot, $common, $criteria, $attempt)) {
-                return;
+            $maxAttempts = (int) config('ai6.run_steps.max_attempts', 3);
+            while ($this->results->terminalOutcome($run, $job->step_number, $slot->slot_id) === null) {
+                $attempt = $this->results->attempt($run, $job->step_number, $slot->slot_id);
+                if ($job->step_number > 1 && $attempt === 1) {
+                    $this->orchestrator->discardReviewSession($run, $slot->slot_id);
+                }
+                $slot = $this->orchestrator->bindReviewSession($run, $slot->slot_id, (string) Str::uuid());
+                if ($this->invoke($job, $run, $slot, $common, $criteria, $attempt)) {
+                    return;
+                }
+                $latest = $this->results->latestOutcome($run, $job->step_number, $slot->slot_id);
+                if (! in_array($latest, [ReviewInvocationOutcome::PROVIDER_ERROR, ReviewInvocationOutcome::INVALID_JSON], true)) {
+                    break;
+                }
+                if ($attempt >= $maxAttempts) {
+                    $reason = $latest === ReviewInvocationOutcome::INVALID_JSON
+                        ? WaitReason::INVALID_JSON
+                        : WaitReason::PROVIDER_ERROR;
+                    try {
+                        $this->humanRequests->openFailureRequest($run, $job, $reason, $slot->slot_id);
+                    } catch (HumanRequestRejected $exception) {
+                        $this->failStep($job, $run, $owner, $exception->reason);
+                    }
+
+                    return;
+                }
             }
         }
 
@@ -263,6 +288,31 @@ final readonly class ReviewRound
             attempt: $attempt,
             expectedFindingIds: $job->step_number > 1 ? $this->priorFindings->priorFindingIds($run, $job->step_number) : [],
         );
+        $invocationLimit = $this->limits->consume(
+            $run,
+            ImportLimit::MAX_AGENT_INVOCATIONS,
+            implode(':', [$job->idempotency_key, $slot->slot_id, $attempt]),
+        );
+        if ($invocationLimit instanceof ImportLimitResult) {
+            $this->destroy($home, $adapterIo, $export, $invocationInput, $invocationOutput);
+            try {
+                $this->humanRequests->openLimitRequest($run, $job, $invocationLimit, WaitReason::RESOURCE_LIMIT);
+
+                return true;
+            } catch (HumanRequestRejected $exception) {
+                $this->results->append(
+                    $run,
+                    $slot,
+                    $job->step_number,
+                    $attempt,
+                    ReviewInvocationOutcome::HUMAN_REQUEST_ERROR,
+                    $bindings,
+                    $exception->reason,
+                );
+
+                return false;
+            }
+        }
         try {
             $bytes = $this->adapter->turn($agentContext, $home->workspace, [
                 ...$this->gitMetadataPaths->resolve($run->worktree_path),
@@ -273,10 +323,24 @@ final readonly class ReviewRound
 
             return false;
         }
+        $afterTurn = Run::query()->find($run->id);
+        if (! $afterTurn instanceof Run || $afterTurn->pending_status_operation_id !== null
+            || ! in_array($afterTurn->state, [RunState::QUEUED, RunState::RUNNING], true)) {
+            $this->destroy($home, $adapterIo, $export, $invocationInput, $invocationOutput);
+
+            return true;
+        }
         if (! $this->destroy($home, $adapterIo, $export, $invocationInput, $invocationOutput)) {
             $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::WORKSPACE_ERROR, $bindings, 'review_home_cleanup_failed');
 
             return false;
+        }
+
+        $publishLimit = $this->limits->evaluate($run, [], [['bytes' => strlen($bytes)]], strlen($bytes));
+        if ($publishLimit instanceof ImportLimitResult) {
+            $this->humanRequests->openLimitRequest($run, $job, $publishLimit, WaitReason::RESOURCE_LIMIT);
+
+            return true;
         }
 
         try {
@@ -408,8 +472,21 @@ final readonly class ReviewRound
     /** @return array<string, mixed> */
     private function reviewerSnapshot(Run $run, RunAgent $slot): array
     {
+        $approvalSlotId = $slot->approval_slot_id ?? $slot->slot_id;
         foreach (($run->agent_profile_snapshot ?? [])['reviewers'] ?? [] as $reviewer) {
-            if (is_array($reviewer) && ($reviewer['id'] ?? null) === $slot->slot_id) {
+            if (is_array($reviewer) && ($reviewer['id'] ?? null) === $approvalSlotId) {
+                if ($slot->slot_revision > 1) {
+                    foreach (($run->agent_profile_snapshot ?? [])['reviewers'] ?? [] as $approved) {
+                        if (is_array($approved)
+                            && ($approved['provider_profile'] ?? null) === $slot->provider_profile
+                            && ($approved['model'] ?? null) === $slot->model
+                            && ($approved['effort'] ?? null) === $slot->effort
+                            && ($approved['prompt_profile_id'] ?? null) === $slot->prompt_profile) {
+                            return [...$approved, 'id' => $slot->slot_id];
+                        }
+                    }
+                    throw new ImplementationImportException('reviewer_revision_not_approved', 'The reviewer revision is absent from the run-bound approval snapshot.');
+                }
                 foreach ([
                     'provider_profile' => $slot->provider_profile,
                     'model' => $slot->model,
