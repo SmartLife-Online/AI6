@@ -56,6 +56,7 @@ enum ControlOperationType: string
         ],
         'run_start' => [
             'approval_id',
+            'run_type',
             'relative_path',
             'expected_binding_version',
         ],

@@ -3,8 +3,10 @@
 namespace App\AI6\Runs\Models;
 
 use App\AI6\Projects\Models\Project;
+use App\AI6\Runs\ReviewOnlyCompletionMode;
 use App\AI6\Runs\RunPhase;
 use App\AI6\Runs\RunState;
+use App\AI6\Runs\RunType;
 use App\AI6\Runs\WaitReason;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -30,7 +32,9 @@ use Illuminate\Support\Carbon;
  * @property string|null $checkpoint_commit_sha
  * @property string|null $checkpoint_tree_sha
  * @property string|null $checkpoint_diff_hash
- * @property string $run_type
+ * @property RunType $run_type
+ * @property string|null $review_subject_reference
+ * @property ReviewOnlyCompletionMode|null $completion_mode
  * @property array<string, mixed>|null $config_snapshot
  * @property string $config_hash
  * @property array<string, mixed>|null $scope_snapshot
@@ -85,6 +89,8 @@ final class Run extends Model
     {
         return [
             'state' => RunState::class,
+            'run_type' => RunType::class,
+            'completion_mode' => ReviewOnlyCompletionMode::class,
             'phase' => RunPhase::class,
             'wait_reason' => WaitReason::class,
             'config_snapshot' => 'array',

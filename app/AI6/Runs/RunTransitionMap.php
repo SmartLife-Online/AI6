@@ -8,7 +8,7 @@ final class RunTransitionMap
     private const STATES = [
         'queued' => [RunState::RUNNING, RunState::FAILED, RunState::CANCELLED],
         'running' => [RunState::WAITING, RunState::FAILED, RunState::COMPLETED, RunState::CANCELLED],
-        'waiting' => [RunState::RUNNING, RunState::FAILED, RunState::CANCELLED],
+        'waiting' => [RunState::RUNNING, RunState::FAILED, RunState::COMPLETED, RunState::CANCELLED],
         'failed' => [RunState::WAITING, RunState::CANCELLED],
         'completed' => [],
         'cancelled' => [],
@@ -50,6 +50,16 @@ final class RunTransitionMap
         if (($state === RunState::WAITING) !== ($reason instanceof WaitReason)) {
             throw new RunTransitionConflict('invalid_wait_binding', 'A wait reason is required exactly while the run is waiting.');
         }
+    }
+
+    /** The report-only status saga may replace only its own two confirmation waits. */
+    public function assertReportStatusSync(RunState $from, ?WaitReason $reason): void
+    {
+        if ($from === RunState::RUNNING || ($from === RunState::WAITING && in_array($reason, [WaitReason::MANUAL_REPORT, WaitReason::GIT_CONFLICT], true))) {
+            return;
+        }
+
+        throw new RunTransitionConflict('report_completion_operation_invalid', 'The report-only status synchronization may only follow its bound confirmation waits.');
     }
 
     public function assertTerminalTicketStatus(RunState $state, string $ticketStatus): void

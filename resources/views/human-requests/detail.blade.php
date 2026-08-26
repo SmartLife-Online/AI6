@@ -60,6 +60,7 @@
 
     @if ($humanRequest->resolution_state->value === 'open')
         @php($stepUpNeeded = $cancellationActions !== []
+            || $reportOnlyEffects !== []
             || collect($humanRequest->allowed_effects)->contains(
                 static fn (string $effect): bool => \App\AI6\HumanLoop\HumanRequestService::requiresStepUp($effect),
             ))
@@ -85,7 +86,7 @@
             <input type="hidden" name="requested_effect" value="{{ $humanRequest->bound_requested_effect }}">
             @php($effectLabels = collect($humanRequest->options)->pluck('label', 'key'))
             @foreach ($humanRequest->allowed_effects as $effect)
-                @if (! in_array($effect, ['refresh_expected_oid', 'finding_disposition', 'controlled_abort'], true))
+                @if (in_array($effect, $reportOnlyEffects, true) || ! in_array($effect, ['refresh_expected_oid', 'finding_disposition', 'controlled_abort'], true))
                     <button type="submit" name="chosen_effect" value="{{ $effect }}">{{ $effectLabels[$effect] ?? $effect }}</button>
                 @endif
             @endforeach
@@ -112,7 +113,7 @@
                     <p>Für diesen Stand ist kein disponierbares Finding vorhanden.</p>
                 @endif
             @endif
-            @if (in_array('refresh_expected_oid', $humanRequest->allowed_effects, true))
+            @if (in_array('refresh_expected_oid', $humanRequest->allowed_effects, true) && ! in_array('refresh_expected_oid', $reportOnlyEffects, true))
                 <p>Nach Aktualisierung der erwarteten OID muss die Statusentscheidung mit einem der folgenden Wege erneut autorisiert werden.</p>
             @endif
             @if ($cancellationActions !== [])

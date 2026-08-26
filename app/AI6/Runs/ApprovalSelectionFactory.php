@@ -43,6 +43,9 @@ final readonly class ApprovalSelectionFactory
             ApprovalLimits::fromConfiguredValues($limits, $this->inputLimits),
             is_int($value['attention_user_id'] ?? null) ? $value['attention_user_id'] : null,
             is_string($value['push_mode'] ?? null) ? $value['push_mode'] : '',
+            RunType::tryFrom(is_string($value['run_type'] ?? null) ? $value['run_type'] : '') ?? RunType::IMPLEMENTATION,
+            is_string($value['review_subject_reference'] ?? null) ? $value['review_subject_reference'] : null,
+            ReviewOnlyCompletionMode::tryFrom(is_string($value['completion_mode'] ?? null) ? $value['completion_mode'] : ''),
         );
     }
 }

@@ -346,6 +346,152 @@ final readonly class HumanRequestService
         );
     }
 
+    /** Open the report confirmation without inventing an execution-job producer. */
+    public function openManualReportRequest(Run $run): HumanRequest
+    {
+        $approval = TicketApproval::query()->findOrFail($run->ticket_approval_id);
+        try {
+            $request = DB::transaction(function () use ($run, $approval): HumanRequest {
+                DB::table('runs')->where('id', $run->id)->lockForUpdate()->first();
+                $fresh = Run::query()->findOrFail($run->id);
+                $this->assertBoundAttentionUser($approval, $fresh->project_id);
+                if ($fresh->state === RunState::RUNNING) {
+                    $fresh = $this->orchestrator->transition(
+                        $fresh,
+                        $fresh->version,
+                        RunState::WAITING,
+                        $fresh->phase,
+                        WaitReason::MANUAL_REPORT,
+                    );
+                } elseif ($fresh->state !== RunState::WAITING || $fresh->wait_reason !== WaitReason::MANUAL_REPORT) {
+                    throw new HumanRequestRejected('manual_report_not_waiting', 'The run cannot open a report confirmation request.');
+                }
+                if ($fresh->checkpoint_tree_sha === null || $fresh->checkpoint_diff_hash === null) {
+                    throw new HumanRequestRejected('checkpoint_not_bound', 'The report confirmation requires a bound review checkpoint.');
+                }
+                $effect = hash('sha256', implode(':', [
+                    $fresh->checkpoint_tree_sha,
+                    $fresh->checkpoint_diff_hash,
+                    $fresh->agent_profile_hash,
+                    $fresh->evidence_epoch,
+                ]));
+                $context = new RedactionContext((string) $fresh->project_id, $fresh->id, 'manual-report');
+                $request = HumanRequest::query()->create([
+                    'id' => (string) Str::uuid(),
+                    'run_id' => $fresh->id,
+                    'project_id' => $fresh->project_id,
+                    'kind' => WaitReason::MANUAL_REPORT->value,
+                    'response_mode' => 'select',
+                    'title' => $this->redact('Reviewbericht abschließen', $context),
+                    'message' => $this->redact('Der gebundene Reviewstand ist vollständig und kann status-only abgeschlossen werden.', $context),
+                    'why_needed' => $this->redact('Der freigegebene Abschlussmodus verlangt eine menschliche Bestätigung.', $context),
+                    'options' => [['key' => 'confirm_report', 'label' => 'Gebundenen Bericht abschließen']],
+                    'recommended_option' => 'confirm_report',
+                    'affected_paths' => [],
+                    'criterion_refs' => [],
+                    'allowed_effects' => ['confirm_report'],
+                    'required_action' => ProjectAction::ANSWER_HUMAN_REQUEST->value,
+                    'bound_run_version' => $fresh->version,
+                    'bound_ticket_contract' => $fresh->ticket_contract_sha256 ?? $approval->ticket_contract_sha256,
+                    'bound_checkpoint' => $fresh->checkpoint_tree_sha,
+                    'bound_scope' => $fresh->scope_hash,
+                    'bound_agent_slot' => ReportOnlyHumanRequestBinding::AGENT_SLOT,
+                    'bound_requested_effect' => $effect,
+                    'bound_step_key' => ReportOnlyHumanRequestBinding::completionStepKey($fresh->id),
+                    'delivery_status' => HumanRequestDeliveryStatus::QUEUED,
+                    'delivery_attempts' => 0,
+                    'delivery_revision' => 1,
+                    'delivery_status_changed_at' => now(),
+                    'resolution_state' => HumanRequestResolutionState::OPEN,
+                    'attention_user_id' => $approval->attention_user_id,
+                ]);
+
+                return $request;
+            });
+        } catch (UniqueConstraintViolationException) {
+            $existing = HumanRequest::query()->where('run_id', $run->id)
+                ->where('resolution_state', HumanRequestResolutionState::OPEN->value)->first();
+            if (! $existing instanceof HumanRequest || $existing->kind !== WaitReason::MANUAL_REPORT->value) {
+                throw new HumanRequestRejected('open_request_exists', 'An open blocking human request already exists for this run.');
+            }
+
+            return $existing;
+        }
+        $this->dispatchNotification($request);
+
+        return $request;
+    }
+
+    /** Open a report-only CAS conflict decision without an execution-job producer. */
+    public function openReportStatusConflictRequest(Run $run): HumanRequest
+    {
+        $approval = TicketApproval::query()->findOrFail($run->ticket_approval_id);
+        try {
+            $request = DB::transaction(function () use ($run, $approval): HumanRequest {
+                DB::table('runs')->where('id', $run->id)->lockForUpdate()->first();
+                $fresh = Run::query()->findOrFail($run->id);
+                $this->assertBoundAttentionUser($approval, $fresh->project_id);
+                if ($fresh->state !== RunState::WAITING || $fresh->wait_reason !== WaitReason::GIT_CONFLICT
+                    || $fresh->pending_status_operation_id !== null
+                    || $fresh->checkpoint_tree_sha === null || $fresh->checkpoint_diff_hash === null) {
+                    throw new HumanRequestRejected(
+                        'report_status_conflict_not_waiting',
+                        'The run cannot open a report status conflict decision.',
+                    );
+                }
+                $effect = hash('sha256', implode(':', [
+                    $fresh->checkpoint_tree_sha,
+                    $fresh->checkpoint_diff_hash,
+                    $fresh->agent_profile_hash,
+                    $fresh->evidence_epoch,
+                ]));
+                $context = new RedactionContext((string) $fresh->project_id, $fresh->id, 'report-status-conflict');
+                $request = HumanRequest::query()->create([
+                    'id' => (string) Str::uuid(),
+                    'run_id' => $fresh->id,
+                    'project_id' => $fresh->project_id,
+                    'kind' => WaitReason::GIT_CONFLICT->value,
+                    'response_mode' => 'select',
+                    'title' => $this->redact('Statusabgleich in Konflikt', $context),
+                    'message' => $this->redact('Der report-only Abschluss benötigt eine neue autorisierte Compare-and-Swap-Entscheidung.', $context),
+                    'why_needed' => $this->redact('Die zuvor gebundene Control-OID ist nicht mehr aktuell.', $context),
+                    'options' => [['key' => 'refresh_expected_oid', 'label' => 'OID aktualisieren und Abschluss erneut autorisieren']],
+                    'recommended_option' => 'refresh_expected_oid',
+                    'affected_paths' => [],
+                    'criterion_refs' => [],
+                    'allowed_effects' => ['refresh_expected_oid'],
+                    'required_action' => ProjectAction::ANSWER_HUMAN_REQUEST->value,
+                    'bound_run_version' => $fresh->version,
+                    'bound_ticket_contract' => $fresh->ticket_contract_sha256 ?? $approval->ticket_contract_sha256,
+                    'bound_checkpoint' => $fresh->checkpoint_tree_sha,
+                    'bound_scope' => $fresh->scope_hash,
+                    'bound_agent_slot' => ReportOnlyHumanRequestBinding::AGENT_SLOT,
+                    'bound_requested_effect' => $effect,
+                    'bound_step_key' => ReportOnlyHumanRequestBinding::statusConflictStepKey($fresh->id),
+                    'delivery_status' => HumanRequestDeliveryStatus::QUEUED,
+                    'delivery_attempts' => 0,
+                    'delivery_revision' => 1,
+                    'delivery_status_changed_at' => now(),
+                    'resolution_state' => HumanRequestResolutionState::OPEN,
+                    'attention_user_id' => $approval->attention_user_id,
+                ]);
+
+                return $request;
+            });
+        } catch (UniqueConstraintViolationException) {
+            $existing = HumanRequest::query()->where('run_id', $run->id)
+                ->where('resolution_state', HumanRequestResolutionState::OPEN->value)->first();
+            if (! $existing instanceof HumanRequest || $existing->kind !== WaitReason::GIT_CONFLICT->value) {
+                throw new HumanRequestRejected('open_request_exists', 'An open blocking human request already exists for this run.');
+            }
+
+            return $existing;
+        }
+        $this->dispatchNotification($request);
+
+        return $request;
+    }
+
     public function answer(
         HumanRequest $request,
         User $user,
@@ -406,7 +552,7 @@ final readonly class HumanRequestService
                 // both waits resolve exclusively through the re-authorized,
                 // status-operation-bound cancellation saga, never through a
                 // plain answer that would resume the parked step (plan §7.2).
-                if (in_array($chosenEffect, [self::CANCEL_EFFECT, 'controlled_abort', 'refresh_expected_oid'], true)) {
+                if (in_array($chosenEffect, [self::CANCEL_EFFECT, 'controlled_abort', 'confirm_report', 'refresh_expected_oid'], true)) {
                     throw new HumanRequestRejected('legacy_cancel_forbidden', 'Cancellation must use the status-operation-bound cancellation saga.');
                 }
                 if (! in_array($chosenEffect, $allowed, true)) {

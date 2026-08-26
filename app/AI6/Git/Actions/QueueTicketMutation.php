@@ -27,7 +27,9 @@ use App\AI6\Projects\TicketReadModelRedactionState;
 use App\AI6\Projects\TicketReadModelUsePolicy;
 use App\AI6\Runs\ApprovalSelection;
 use App\AI6\Runs\ApprovalSnapshot;
+use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\TicketApproval;
+use App\AI6\Runs\RunType;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\RedactionMatchType;
 use App\AI6\Shared\Redaction\Redactor;
@@ -139,6 +141,29 @@ final readonly class QueueTicketMutation
         );
     }
 
+    /** Queue the one status-only edge owned by a bound review-only run. */
+    public function completeReviewOnlyRun(
+        User $actor,
+        Project $project,
+        TicketReadModel $readModel,
+        Run $run,
+        string $operationId,
+        string $reason,
+    ): ControlOperation {
+        if ($run->project_id !== $project->getKey() || $run->run_type !== RunType::REVIEW_ONLY
+            || $project->active_run_id !== $run->id || $run->pending_status_operation_id !== null) {
+            throw new TicketMutationConflict('review_only_run_binding_invalid', 'Der Review-only-Lauf ist nicht statusfähig gebunden.');
+        }
+
+        return $this->queue(
+            $actor, $project, $readModel, $operationId, (string) $project->control_oid, $readModel->blob_sha,
+            $readModel->redacted_content, $readModel->redacted_content, $reason, false,
+            TicketStatusOperation::COMPLETE_REPORT_ONLY, false, null,
+            allowInProgressStatus: true,
+            reportOnlyRunId: $run->id,
+        );
+    }
+
     public function approve(
         User $actor,
         Project $project,
@@ -189,6 +214,7 @@ final readonly class QueueTicketMutation
         ?ApprovalSnapshot $confirmedApprovalSnapshot = null,
         ?string $snapshotContextId = null,
         bool $allowInProgressStatus = false,
+        ?string $reportOnlyRunId = null,
     ): ControlOperation {
         if (! ManagedProjectPath::validOperationIdentifier($operationId)) {
             throw new TicketMutationConflict('operation_id_invalid', 'Die Mutations-ID ist ungültig.');
@@ -222,7 +248,7 @@ final readonly class QueueTicketMutation
             || ! hash_equals($readModel->redacted_content, $baseContent)) {
             throw new TicketMutationConflict('editor_base_binding_changed', 'Die bytegenaue Editorbasis ist veraltet oder maskiert.');
         }
-        if (! $freshStepUp) {
+        if (! $freshStepUp && $reportOnlyRunId === null) {
             throw new TicketMutationConflict('step_up_required', 'Die Ticketmutation verlangt eine frische Step-up-Bestätigung.');
         }
         foreach (RedactionMatchType::cases() as $type) {
@@ -234,7 +260,7 @@ final readonly class QueueTicketMutation
         return DB::transaction(function () use (
             $actor, $project, $readModel, $operationId, $expectedControlOid, $expectedBlob,
             $baseContent, $targetContent, $reason, $statusOperation, $externalCompletionConfirmed,
-            $approvalSelection, $confirmedApprovalSnapshot, $snapshotContextId, $allowInProgressStatus,
+            $approvalSelection, $confirmedApprovalSnapshot, $snapshotContextId, $allowInProgressStatus, $reportOnlyRunId,
         ): ControlOperation {
             $currentProject = Project::query()->findOrFail($project->getKey());
             $currentReadModel = TicketReadModel::query()->findOrFail($readModel->getKey());
@@ -293,17 +319,39 @@ final readonly class QueueTicketMutation
                 }
                 $type = ControlOperationType::TICKET_EDIT;
             } else {
-                $targetStatus = $this->transitions->decide(
-                    $membership->role,
-                    $statusOperation,
-                    $sourceStatus,
-                    true,
-                    $expectedBlob,
-                    $currentReadModel->blob_sha,
-                    $expectedControlOid,
-                    (string) $currentProject->control_oid,
-                    $externalCompletionConfirmed,
-                );
+                if ($reportOnlyRunId !== null) {
+                    $boundRun = Run::query()->whereKey($reportOnlyRunId)->first();
+                    if ($statusOperation !== TicketStatusOperation::COMPLETE_REPORT_ONLY
+                        || ! $boundRun instanceof Run || $boundRun->run_type !== RunType::REVIEW_ONLY
+                        || $boundRun->project_id !== $currentProject->getKey()
+                        || $currentProject->active_run_id !== $boundRun->id
+                        || $boundRun->pending_status_operation_id !== null
+                        || ! TicketApproval::query()->whereKey($boundRun->ticket_approval_id)
+                            ->where('project_id', $currentProject->getKey())
+                            ->where('relative_path', $currentReadModel->relative_path)->exists()) {
+                        throw new TicketMutationConflict('review_only_run_binding_invalid', 'Der Review-only-Lauf ist nicht statusfähig gebunden.');
+                    }
+                    $targetStatus = $this->transitions->decideReportOnly(
+                        $membership->role,
+                        $sourceStatus,
+                        $expectedBlob,
+                        $currentReadModel->blob_sha,
+                        $expectedControlOid,
+                        (string) $currentProject->control_oid,
+                    );
+                } else {
+                    $targetStatus = $this->transitions->decide(
+                        $membership->role,
+                        $statusOperation,
+                        $sourceStatus,
+                        true,
+                        $expectedBlob,
+                        $currentReadModel->blob_sha,
+                        $expectedControlOid,
+                        (string) $currentProject->control_oid,
+                        $externalCompletionConfirmed,
+                    );
+                }
                 $targetContent = $this->statuses->replace($baseContent, $sourceStatus, $targetStatus);
                 $type = $statusOperation === TicketStatusOperation::APPROVE
                     ? ControlOperationType::TICKET_APPROVAL
@@ -456,6 +504,9 @@ final readonly class QueueTicketMutation
                     'queue_state' => 'pending_approval_effect',
                     'attention_user_id' => $approvalSelection->attentionUserId,
                     'push_mode' => $approvalSelection->pushMode,
+                    'run_type' => $approvalSelection->runType,
+                    'review_subject_reference' => $approvalSelection->reviewSubjectReference,
+                    'completion_mode' => $approvalSelection->completionMode,
                     'version' => 1,
                     'approved_by' => $actor->getKey(),
                     'approved_at' => now(),
@@ -498,6 +549,7 @@ final readonly class QueueTicketMutation
                 TicketStatusOperation::RETURN_TO_TODO,
                 TicketStatusOperation::BLOCK,
                 TicketStatusOperation::CANCEL,
+                TicketStatusOperation::COMPLETE_REPORT_ONLY,
             ], true)) {
             return false;
         }

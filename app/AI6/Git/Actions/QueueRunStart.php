@@ -99,6 +99,7 @@ final readonly class QueueRunStart
             $operationId = strtolower($operationId);
             $parameters = ControlOperationType::RUN_START->parameters([
                 'approval_id' => $approval->getKey(),
+                'run_type' => $approval->run_type->value,
                 'relative_path' => $approval->relative_path,
                 'expected_binding_version' => $project->control_binding_version,
             ]);

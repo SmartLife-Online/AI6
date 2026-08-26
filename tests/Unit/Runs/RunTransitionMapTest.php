@@ -21,7 +21,7 @@ final class RunTransitionMapTest extends TestCase
         $allowed = [
             'queued:running', 'queued:failed', 'queued:cancelled',
             'running:waiting', 'running:failed', 'running:completed', 'running:cancelled',
-            'waiting:running', 'waiting:failed', 'waiting:cancelled',
+            'waiting:running', 'waiting:failed', 'waiting:completed', 'waiting:cancelled',
             'failed:waiting', 'failed:cancelled',
         ];
         foreach (RunState::cases() as $from) {

@@ -5,6 +5,8 @@ namespace App\AI6\Runs\Models;
 use App\AI6\Auth\Models\User;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Runs\ReviewOnlyCompletionMode;
+use App\AI6\Runs\RunType;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
@@ -42,6 +44,9 @@ use Illuminate\Support\Carbon;
  * @property string $queue_state
  * @property int|null $attention_user_id
  * @property string $push_mode
+ * @property RunType $run_type
+ * @property string|null $review_subject_reference
+ * @property ReviewOnlyCompletionMode|null $completion_mode
  * @property int $version
  * @property int $approved_by
  * @property Carbon $approved_at
@@ -88,6 +93,8 @@ final class TicketApproval extends Model
             'attention_user_id' => 'integer',
             'version' => 'integer',
             'approved_at' => 'immutable_datetime',
+            'run_type' => RunType::class,
+            'completion_mode' => ReviewOnlyCompletionMode::class,
         ];
     }
 }

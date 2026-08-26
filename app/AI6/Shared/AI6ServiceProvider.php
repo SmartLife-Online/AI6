@@ -84,6 +84,8 @@ use App\AI6\Runs\InstructionBindingVerifier;
 use App\AI6\Runs\InstructionCandidateCollector;
 use App\AI6\Runs\InstructionCandidateSource;
 use App\AI6\Runs\InstructionPathPolicy;
+use App\AI6\Runs\ReportOnlyCompletionService;
+use App\AI6\Runs\ReviewOnlyCompletionPredicate;
 use App\AI6\Runs\RunArtifactRoot;
 use App\AI6\Runs\RunArtifactStore;
 use App\AI6\Runs\RunCancellationService;
@@ -282,6 +284,8 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(InstructionPathPolicy::class);
         $this->app->singleton(ContractChangeService::class);
         $this->app->singleton(RunCancellationService::class);
+        $this->app->singleton(ReviewOnlyCompletionPredicate::class);
+        $this->app->singleton(ReportOnlyCompletionService::class);
         $this->app->singleton(InstructionCandidateCollector::class);
         $this->app->singleton(InstructionCandidateSource::class, InstructionCandidateCollector::class);
         $this->app->singleton(DependencySatisfiedStatusAllowlist::class, static fn (): DependencySatisfiedStatusAllowlist => DependencySatisfiedStatusAllowlist::fromConfiguredValues());
@@ -545,6 +549,18 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->make(WaitReasonRegistry::class)->register(
             WaitReason::GIT_CONFLICT,
             'ControlOperation',
+            ['refresh_expected_oid'],
+            true,
+        );
+        $this->app->make(WaitReasonRegistry::class)->register(
+            WaitReason::MANUAL_REPORT,
+            'ReportOnlyCompletionService',
+            ['confirm_report'],
+            true,
+        );
+        $this->app->make(WaitReasonRegistry::class)->register(
+            WaitReason::STATUS_SYNC,
+            'ReportOnlyCompletionService',
             ['refresh_expected_oid'],
             true,
         );

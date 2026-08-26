@@ -144,6 +144,9 @@ final readonly class RunCancellationService
 
     public function reconcileOperation(ControlOperation $operation): ?Run
     {
+        if ($this->isReportOnlyCompletion($operation)) {
+            return null;
+        }
         $run = Run::query()->where('pending_status_operation_id', $operation->id)->first();
         if (! $run instanceof Run) {
             return null;
@@ -166,6 +169,9 @@ final readonly class RunCancellationService
 
     public function recordConflict(ControlOperation $operation): ?Run
     {
+        if ($this->isReportOnlyCompletion($operation)) {
+            return null;
+        }
         $run = Run::query()->where('pending_status_operation_id', $operation->id)->first();
         if ($run instanceof Run) {
             $parked = $this->orchestrator->parkOnGitConflict($run, $run->version);
@@ -209,5 +215,17 @@ final readonly class RunCancellationService
         }
 
         return $parked;
+    }
+
+    private function isReportOnlyCompletion(ControlOperation $operation): bool
+    {
+        try {
+            $parameters = json_decode($operation->operation_parameters_jcs, true, flags: JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return false;
+        }
+
+        return is_array($parameters)
+            && ($parameters['status_operation'] ?? null) === 'complete_report_only';
     }
 }

@@ -42,12 +42,17 @@ final class HumanRequestDetailPage extends Component
         $request = $this->request($this->project, $this->requestId);
         $run = Run::query()->findOrFail($request->run_id);
         $approval = TicketApproval::query()->find($run->ticket_approval_id);
+        $membership = $this->membership($run);
 
         return view('human-requests.detail', [
             'humanRequest' => $request,
             'run' => $run,
             'ticketId' => $approval instanceof TicketApproval ? $approval->ticket_id : '',
-            'cancellationActions' => $this->cancellationActions($run),
+            'cancellationActions' => $this->cancellationActions($run, $membership),
+            // Only a request that carries the report-only provenance may offer
+            // its own status-saga effects; the identically named cancellation
+            // conflict keeps resolving through a re-issued cancellation mode.
+            'reportOnlyEffects' => $this->reportOnlyEffects($request, $membership),
             'disposableFindings' => in_array('finding_disposition', $request->allowed_effects, true)
                 ? Finding::query()->where('run_id', $run->id)
                     ->whereIn('original_disposition', ['must_fix', 'human_required'])
@@ -56,15 +61,38 @@ final class HumanRequestDetailPage extends Component
         ]);
     }
 
+    /**
+     * The report-only status saga accepts only an approver, so no other role is
+     * offered a control that its own service would reject (§6, AC-14).
+     *
+     * @return list<string>
+     */
+    private function reportOnlyEffects(HumanRequest $request, ?ProjectMembership $membership): array
+    {
+        if ($membership?->role !== ProjectRole::APPROVER) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            $request->allowed_effects,
+            static fn (string $effect): bool => ReportOnlyHumanRequestBinding::matches($request, $effect),
+        ));
+    }
+
+    private function membership(Run $run): ?ProjectMembership
+    {
+        $userId = Auth::id();
+
+        return is_int($userId) ? ProjectMembership::query()
+            ->where('project_id', $run->project_id)->where('user_id', $userId)->first() : null;
+    }
+
     /** @return array<string, string> */
-    private function cancellationActions(Run $run): array
+    private function cancellationActions(Run $run, ?ProjectMembership $membership): array
     {
         if ($run->confirmed_branch_publication_oid !== null) {
             return [];
         }
-        $userId = Auth::id();
-        $membership = is_int($userId) ? ProjectMembership::query()
-            ->where('project_id', $run->project_id)->where('user_id', $userId)->first() : null;
         if (! $membership instanceof ProjectMembership) {
             return [];
         }

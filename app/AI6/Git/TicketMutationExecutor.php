@@ -30,12 +30,15 @@ use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\ScopeDecision;
 use App\AI6\Runs\Models\TicketApproval;
+use App\AI6\Runs\ReportOnlyCompletionService;
 use App\AI6\Runs\RunCancellationService;
 use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
 use App\AI6\Runs\RunTransitionConflict;
+use App\AI6\Runs\RunType;
 use App\AI6\Runs\ScopePathLimitExceeded;
+use App\AI6\Runs\WaitReason;
 use App\AI6\Shared\Process\EffectLock;
 use App\AI6\Shared\Process\EffectLockHandle;
 use App\AI6\Shared\Process\EffectLockOutcome;
@@ -84,6 +87,7 @@ final readonly class TicketMutationExecutor
         private RunOrchestrator $runs,
         private RunLimitPolicy $runLimits,
         private RunCancellationService $runCancellations,
+        private ReportOnlyCompletionService $reportOnlyCompletions,
         private HumanRequestService $humanRequests,
     ) {}
 
@@ -102,6 +106,7 @@ final readonly class TicketMutationExecutor
             };
         } catch (ControlOperationTerminalConflict $exception) {
             $this->runCancellations->recordConflict($operation);
+            $this->reportOnlyCompletions->recordConflict($operation);
             if ($this->publishedIntent($operation)) {
                 throw new ControlOperationRecoveryRequired(
                     'A published ticket mutation encountered a terminal preflight deviation.',
@@ -812,6 +817,7 @@ final readonly class TicketMutationExecutor
     private function reconcileRunCancellation(ControlOperation $operation): bool
     {
         $this->runCancellations->reconcileOperation($operation);
+        $this->reportOnlyCompletions->reconcileOperation($operation);
 
         return true;
     }
@@ -858,7 +864,7 @@ final readonly class TicketMutationExecutor
         ];
     }
 
-    /** @return array{relative_path: string, expected_binding_version: int, status_operation?: string, approval_id?: string, run_id?: string|null, human_request_id?: string|null} */
+    /** @return array{relative_path: string, expected_binding_version: int, status_operation?: string, approval_id?: string, run_type?: string, run_id?: string|null, human_request_id?: string|null} */
     private function parameters(ControlOperation $operation): array
     {
         try {
@@ -887,7 +893,7 @@ final readonly class TicketMutationExecutor
             throw new ControlOperationTerminalConflict('mutation_parameters_not_canonical', 'Die Mutationsparameter sind nicht kanonisch gebunden.');
         }
 
-        /** @var array{relative_path: string, expected_binding_version: int, status_operation?: string, approval_id?: string, run_id?: string|null, human_request_id?: string|null} $parameters */
+        /** @var array{relative_path: string, expected_binding_version: int, status_operation?: string, approval_id?: string, run_type?: string, run_id?: string|null, human_request_id?: string|null} $parameters */
         return $parameters;
     }
 
@@ -956,7 +962,8 @@ final readonly class TicketMutationExecutor
                 || ! hash_equals((string) $approval->approved_ticket_blob_sha, $actualBlobSha)
                 || ! hash_equals($approval->ticket_contract_sha256, $mutation->target_contract_sha256)
                 || $mutation->source_status !== 'ready'
-                || $mutation->target_status !== 'in_progress') {
+                || $mutation->target_status !== 'in_progress'
+                || ($parameters['run_type'] ?? null) !== $approval->run_type->value) {
                 throw new ControlOperationTerminalConflict('run_start_contract_changed', 'Der gebundene Runstart ist nicht mehr zulässig.');
             }
 
@@ -983,16 +990,38 @@ final readonly class TicketMutationExecutor
             throw new ControlOperationTerminalConflict('status_operation_invalid', 'Die gebundene Statusoperation ist ungültig.');
         }
         try {
-            $target = $this->transitions->decidePersisted(
-                $membership->role,
-                $statusOperation,
-                $mutation->source_status,
-                $mutation->expected_ticket_blob_sha,
-                $actualBlobSha,
-                (string) $operation->expected_control_commit,
-                (string) $project->control_oid,
-                $mutation->external_completion_confirmed,
-            );
+            if ($statusOperation === TicketStatusOperation::COMPLETE_REPORT_ONLY) {
+                $run = Run::query()->where('pending_status_operation_id', $operation->id)
+                    ->where('run_type', RunType::REVIEW_ONLY->value)->first();
+                if (! $run instanceof Run
+                    || $run->project_id !== $project->getKey()
+                    || $project->active_run_id !== $run->id
+                    || $run->state !== RunState::WAITING
+                    || $run->wait_reason !== WaitReason::STATUS_SYNC
+                    || $mutation->source_status !== 'in_progress'
+                    || $mutation->target_status !== 'ready') {
+                    throw new TicketMutationConflict('review_only_run_binding_invalid', 'Der report-only Abschluss ist nicht an seinen aktiven Run gebunden.');
+                }
+                $target = $this->transitions->decideReportOnly(
+                    $membership->role,
+                    $mutation->source_status,
+                    $mutation->expected_ticket_blob_sha,
+                    $actualBlobSha,
+                    (string) $operation->expected_control_commit,
+                    (string) $project->control_oid,
+                );
+            } else {
+                $target = $this->transitions->decidePersisted(
+                    $membership->role,
+                    $statusOperation,
+                    $mutation->source_status,
+                    $mutation->expected_ticket_blob_sha,
+                    $actualBlobSha,
+                    (string) $operation->expected_control_commit,
+                    (string) $project->control_oid,
+                    $mutation->external_completion_confirmed,
+                );
+            }
         } catch (TicketMutationConflict) {
             throw new ControlOperationTerminalConflict('status_transition_invalid', 'Der gebundene Statusübergang ist nicht mehr zulässig.');
         }

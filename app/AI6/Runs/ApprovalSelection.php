@@ -15,16 +15,28 @@ final readonly class ApprovalSelection implements JsonSerializable
         public ApprovalLimits $limits,
         public ?int $attentionUserId,
         public string $pushMode,
+        public RunType $runType = RunType::IMPLEMENTATION,
+        public ?string $reviewSubjectReference = null,
+        public ?ReviewOnlyCompletionMode $completionMode = null,
     ) {
         if (! in_array($pushMode, ['manual', 'automatic_after_gates'], true)) {
             throw new \InvalidArgumentException('Der Pushmodus ist ungültig.');
+        }
+        if ($runType === RunType::REVIEW_ONLY && ($reviewSubjectReference === null || ! $completionMode instanceof ReviewOnlyCompletionMode)) {
+            throw new \InvalidArgumentException('Die Review-only-Bindung ist unvollständig.');
+        }
+        if ($runType === RunType::IMPLEMENTATION && ($reviewSubjectReference !== null || $completionMode !== null)) {
+            throw new \InvalidArgumentException('Eine Implementierungs-Approval darf keine Review-only-Bindung enthalten.');
+        }
+        if ($reviewSubjectReference !== null && (! preg_match('/\A[A-Za-z0-9][A-Za-z0-9._:@+\/-]{0,2047}\z/D', $reviewSubjectReference))) {
+            throw new \InvalidArgumentException('Die Reviewgegenstandsreferenz ist ungültig.');
         }
     }
 
     /** @return array<string, mixed> */
     public function jsonSerialize(): array
     {
-        return [
+        $serialized = [
             'implementation' => [
                 'profile_id' => $this->implementation->profile->id,
                 'provider_profile' => $this->implementation->profile->providerProfileAlias,
@@ -37,5 +49,12 @@ final readonly class ApprovalSelection implements JsonSerializable
             'attention_user_id' => $this->attentionUserId,
             'push_mode' => $this->pushMode,
         ];
+        if ($this->runType === RunType::REVIEW_ONLY) {
+            $serialized['run_type'] = $this->runType->value;
+            $serialized['review_subject_reference'] = $this->reviewSubjectReference;
+            $serialized['completion_mode'] = $this->completionMode?->value;
+        }
+
+        return $serialized;
     }
 }

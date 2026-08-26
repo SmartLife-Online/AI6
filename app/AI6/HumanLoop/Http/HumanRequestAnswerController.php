@@ -9,7 +9,9 @@ use App\AI6\HumanLoop\HumanRequestRejected;
 use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\HumanLoop\InterventionAuthorization;
 use App\AI6\HumanLoop\Models\HumanRequest;
+use App\AI6\HumanLoop\ReportOnlyHumanRequestBinding;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Runs\ReportOnlyCompletionService;
 use App\AI6\Runs\RunCancellationMode;
 use App\AI6\Runs\RunCancellationService;
 use Illuminate\Http\RedirectResponse;
@@ -27,6 +29,7 @@ final class HumanRequestAnswerController
         HumanRequestService $service,
         StepUpGuard $stepUp,
         RunCancellationService $cancellations,
+        ReportOnlyCompletionService $reportOnlyCompletions,
     ): RedirectResponse {
         Gate::authorize('interveneRun', $project);
 
@@ -56,7 +59,8 @@ final class HumanRequestAnswerController
 
         try {
             $mode = RunCancellationMode::tryFrom($validated['chosen_effect']);
-            $authorization = (($mode instanceof RunCancellationMode)
+            $reportOnlyEffect = ReportOnlyHumanRequestBinding::matches($humanRequest, $validated['chosen_effect']);
+            $authorization = (($mode instanceof RunCancellationMode) || $reportOnlyEffect
                 || HumanRequestService::requiresStepUp($validated['chosen_effect']))
                 ? InterventionAuthorization::consumeFresh(
                     $request,
@@ -75,6 +79,10 @@ final class HumanRequestAnswerController
                     (string) ($validated['reason'] ?? ''),
                     $authorization,
                 );
+            } elseif ($reportOnlyEffect && $validated['chosen_effect'] === 'confirm_report') {
+                $reportOnlyCompletions->confirm($humanRequest, $user, $authorization);
+            } elseif ($reportOnlyEffect && $validated['chosen_effect'] === 'refresh_expected_oid') {
+                $reportOnlyCompletions->resolveStatusConflict($humanRequest, $user, $authorization);
             } else {
                 $service->answer(
                     $humanRequest,
@@ -124,6 +132,7 @@ final class HumanRequestAnswerController
             'attention_user_unavailable' => 'Es ist kein aktiver Attention-User gebunden.',
             'checkpoint_not_bound' => 'Der Run besitzt keinen gebundenen Checkpoint.',
             'bound_step_not_parkable' => 'Der gebundene Schritt konnte nicht geparkt werden.',
+            'report_status_binding_missing' => 'Für den aktuellen Control-Stand fehlt die gebundene Ticketprojektion. Bitte zuerst den Ticket-Read-Model-Refresh ausführen.',
             default => 'Die Antwort wurde ohne Wirkung abgewiesen.',
         };
     }

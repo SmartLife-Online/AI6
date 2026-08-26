@@ -36,6 +36,7 @@ use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
 use App\AI6\Tickets\TicketDocument;
+use App\AI6\Tickets\TicketStatusOperation;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -694,7 +695,9 @@ final readonly class RunOrchestrator
                 'project_id' => $project->getKey(),
                 'ticket_approval_id' => $approval->getKey(),
                 'status_operation_id' => $operation->id,
-                'run_type' => 'implementation',
+                'run_type' => $approval->run_type,
+                'review_subject_reference' => $approval->review_subject_reference,
+                'completion_mode' => $approval->completion_mode,
                 'state' => RunState::QUEUED,
                 'phase' => RunPhase::PREPARE,
                 'claim_parent_control_sha' => $claimParentControlSha,
@@ -738,7 +741,12 @@ final readonly class RunOrchestrator
                 'queue_state' => 'consumed', 'version' => DB::raw('version + 1'), 'updated_at' => now(),
             ]);
             RunEvent::query()->create(['run_id' => $run->id, 'event_type' => 'claim_finalized', 'redacted_payload' => 'Der Run-Claim wurde bestätigt.']);
-            $this->planNextStep($run);
+            // AI6-040 owns review-source normalization and starts the first
+            // review-only step. Claiming here must not create an implementation
+            // workspace, branch or provider turn for that run type.
+            if ($run->run_type === RunType::IMPLEMENTATION) {
+                $this->planNextStep($run);
+            }
 
             return $run;
         });
@@ -879,6 +887,17 @@ final readonly class RunOrchestrator
                 throw new RunTransitionConflict('terminal_status_not_run_bound', 'The confirmed terminal status operation does not belong to this run ticket.');
             }
             $this->transitions->assertTerminalTicketStatus($state, $terminalMutation->target_status);
+            $parameters = json_decode($confirmedStatusOperation->operation_parameters_jcs, true, flags: JSON_THROW_ON_ERROR);
+            $statusOperation = is_array($parameters) ? ($parameters['status_operation'] ?? null) : null;
+            if ($state === RunState::COMPLETED && $terminalMutation->target_status === 'ready'
+                && ($run->run_type !== RunType::REVIEW_ONLY
+                    || $statusOperation !== TicketStatusOperation::COMPLETE_REPORT_ONLY->value)) {
+                throw new RunTransitionConflict('report_only_terminal_binding_invalid', 'Only the bound report-only saga may complete a run on ticket status ready.');
+            }
+            if ($state === RunState::COMPLETED && $run->run_type === RunType::REVIEW_ONLY
+                && $terminalMutation->target_status !== 'ready') {
+                throw new RunTransitionConflict('review_only_terminal_target_invalid', 'A review-only run can complete only on ticket status ready.');
+            }
         }
         $terminalBase = $confirmedStatusOperation?->target_control_oid;
         $updated = DB::transaction(function () use ($run, $expectedVersion, $state, $phase, $waitReason, $terminal, $terminalBase): int {
@@ -987,6 +1006,30 @@ final readonly class RunOrchestrator
             ]);
         if ($updated !== 1) {
             throw new RunTransitionConflict('stale_run_version', 'The run changed before the cancellation saga was bound.');
+        }
+
+        return Run::query()->findOrFail($run->id);
+    }
+
+    public function bindReportOnlyCompletionOperation(Run $run, int $expectedVersion, ControlOperation $operation): Run
+    {
+        $this->transitions->assertReportStatusSync($run->state, $run->wait_reason);
+        if ($run->run_type !== RunType::REVIEW_ONLY
+            || $operation->operation_type !== ControlOperationType::TICKET_STATUS_CHANGE
+            || $operation->project_id !== $run->project_id
+            || ! in_array($run->state, [RunState::RUNNING, RunState::WAITING], true)) {
+            throw new RunTransitionConflict('report_completion_operation_invalid', 'The report-only completion operation does not match the run.');
+        }
+        $updated = Run::query()->whereKey($run->id)->where('version', $expectedVersion)
+            ->whereNull('pending_status_operation_id')->update([
+                'pending_status_operation_id' => $operation->id,
+                'state' => RunState::WAITING,
+                'wait_reason' => WaitReason::STATUS_SYNC,
+                'version' => $expectedVersion + 1,
+                'updated_at' => now(),
+            ]);
+        if ($updated !== 1) {
+            throw new RunTransitionConflict('stale_run_version', 'The run changed before the report completion saga was bound.');
         }
 
         return Run::query()->findOrFail($run->id);

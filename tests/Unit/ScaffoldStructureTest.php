@@ -305,6 +305,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/HumanLoop/Mail/HumanRequestNotificationMail.php',
             'app/AI6/HumanLoop/Models/HumanRequest.php',
             'app/AI6/HumanLoop/Models/Intervention.php',
+            'app/AI6/HumanLoop/ReportOnlyHumanRequestBinding.php',
             'app/AI6/HumanLoop/ScopeApprovalService.php',
             'app/AI6/Projects/.gitkeep',
             'app/AI6/Projects/Actions/ApproveProjectConfiguration.php',
@@ -422,7 +423,11 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Runs/Models/TicketApproval.php',
             'app/AI6/Runs/Models/TicketApprovalEvaluation.php',
             'app/AI6/Runs/Models/TicketApprovalPreview.php',
+            'app/AI6/Runs/ReportOnlyCompletionService.php',
             'app/AI6/Runs/ReviewBlocker.php',
+            'app/AI6/Runs/ReviewOnlyCompletionDecision.php',
+            'app/AI6/Runs/ReviewOnlyCompletionMode.php',
+            'app/AI6/Runs/ReviewOnlyCompletionPredicate.php',
             'app/AI6/Runs/ReviewReadinessDecision.php',
             'app/AI6/Runs/RunArtifactKind.php',
             'app/AI6/Runs/RunArtifactRoot.php',
@@ -443,6 +448,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Runs/RunTimelinePage.php',
             'app/AI6/Runs/RunTransitionConflict.php',
             'app/AI6/Runs/RunTransitionMap.php',
+            'app/AI6/Runs/RunType.php',
             'app/AI6/Runs/ScopeCategorizer.php',
             'app/AI6/Runs/ScopeCategory.php',
             'app/AI6/Runs/ScopePathLimitExceeded.php',
@@ -870,6 +876,7 @@ final class ScaffoldStructureTest extends TestCase
             '2026_08_22_000000_add_finding_contract.php',
             '2026_08_23_000000_add_finding_status_history.php',
             '2026_08_24_000000_add_run_intervention_contract.php',
+            '2026_08_25_000000_add_review_only_run_contract.php',
         ], $migrations);
     }
 

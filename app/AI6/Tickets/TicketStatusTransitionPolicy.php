@@ -27,6 +27,7 @@ final class TicketStatusTransitionPolicy
         'in_progress:cancel' => [ProjectRole::ADMIN, ProjectRole::OPERATOR, ProjectRole::APPROVER],
         'in_progress:return_to_todo' => [ProjectRole::ADMIN, ProjectRole::OPERATOR],
         'in_progress:block' => [ProjectRole::APPROVER],
+        'in_progress:complete_report_only' => [ProjectRole::APPROVER],
     ];
 
     public function decide(
@@ -40,6 +41,9 @@ final class TicketStatusTransitionPolicy
         string $actualControlOid,
         bool $externalCompletionConfirmed,
     ): string {
+        if ($operation === TicketStatusOperation::COMPLETE_REPORT_ONLY) {
+            throw new TicketMutationConflict('report_only_saga_required', 'Der report-only Statusübergang ist ausschließlich über die gebundene Saga zulässig.');
+        }
         $target = $operation->targetFor($sourceStatus);
         $roles = self::ROLES[$sourceStatus.':'.$operation->value] ?? [];
 
@@ -73,6 +77,9 @@ final class TicketStatusTransitionPolicy
         string $actualControlOid,
         bool $externalCompletionConfirmed,
     ): string {
+        if ($operation === TicketStatusOperation::COMPLETE_REPORT_ONLY) {
+            throw new TicketMutationConflict('report_only_saga_required', 'Der report-only Statusübergang ist ausschließlich über die gebundene Saga zulässig.');
+        }
         $target = $operation->targetFor($sourceStatus);
         $roles = self::ROLES[$sourceStatus.':'.$operation->value] ?? [];
 
@@ -87,6 +94,30 @@ final class TicketStatusTransitionPolicy
         }
         if ($operation === TicketStatusOperation::COMPLETE_REVIEW && ! $externalCompletionConfirmed) {
             throw new TicketMutationConflict('external_completion_unconfirmed', "Die externe Zusammenf\u{00FC}hrung oder Abnahme ist nicht gebunden best\u{00E4}tigt.");
+        }
+
+        return $target;
+    }
+
+    /** Authorize the server-bound report-only edge without inventing a user step-up. */
+    public function decideReportOnly(
+        ProjectRole $role,
+        string $sourceStatus,
+        string $expectedBlob,
+        string $actualBlob,
+        string $expectedControlOid,
+        string $actualControlOid,
+    ): string {
+        $operation = TicketStatusOperation::COMPLETE_REPORT_ONLY;
+        $target = $operation->targetFor($sourceStatus);
+        if ($target === null || ! in_array($role, self::ROLES[$sourceStatus.':'.$operation->value] ?? [], true)) {
+            throw new TicketMutationConflict('transition_not_authorized', 'Der report-only Statusübergang ist nicht freigegeben.');
+        }
+        if (! hash_equals($expectedBlob, $actualBlob)) {
+            throw new TicketMutationConflict('ticket_blob_changed', 'Der erwartete Ticketblob ist veraltet.');
+        }
+        if (! hash_equals($expectedControlOid, $actualControlOid)) {
+            throw new TicketMutationConflict('control_head_changed', 'Der erwartete Control-Head ist veraltet.');
         }
 
         return $target;
