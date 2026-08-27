@@ -5,9 +5,11 @@ namespace App\AI6\Runs;
 enum ExecutionStepType: string
 {
     case PREFLIGHT = 'preflight';
+    case REVIEW_PREPARE = 'review_prepare';
     case IMPLEMENT = 'implement';
     case CHECK = 'check';
     case REVIEW = 'review';
+    case REPORT = 'report';
     case FIX = 'fix';
 
     /**
@@ -19,7 +21,7 @@ enum ExecutionStepType: string
     public function hasRegisteredHandler(): bool
     {
         return match ($this) {
-            self::PREFLIGHT, self::IMPLEMENT, self::CHECK, self::REVIEW, self::FIX => true,
+            self::PREFLIGHT, self::REVIEW_PREPARE, self::IMPLEMENT, self::CHECK, self::REVIEW, self::REPORT, self::FIX => true,
         };
     }
 }

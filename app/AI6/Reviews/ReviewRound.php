@@ -48,6 +48,7 @@ use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
 use App\AI6\Runs\RunTransitionConflict;
+use App\AI6\Runs\RunType;
 use App\AI6\Runs\WaitReason;
 use App\AI6\Shared\Json\JsonDecodingException;
 use App\AI6\Shared\Redaction\InvalidRedactionInputException;
@@ -74,6 +75,7 @@ final readonly class ReviewRound
         private AgentAdapter $adapter,
         private AgentResultValidator $validator,
         private RunArtifactStore $artifacts,
+        private ReviewContextPackageStore $contextPackages,
         private RunLimitPolicy $limits,
         private HumanRequestService $humanRequests,
         private TicketV1Parser $tickets,
@@ -225,6 +227,17 @@ final readonly class ReviewRound
             $this->checkpoints->verify($run, $context);
         } catch (ReviewCheckpointException $exception) {
             $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::CHECKPOINT_ERROR, $bindings, $exception->reason);
+            if ($run->run_type === RunType::REVIEW_ONLY) {
+                try {
+                    $fresh = $run->fresh() ?? $run;
+                    $parked = $this->orchestrator->parkOnBaseDrift($fresh, $fresh->version);
+                    $this->humanRequests->openBaseDriftRequest($parked);
+                } catch (HumanRequestRejected|RunTransitionConflict) {
+                }
+                $this->orchestrator->parkStep($job, (string) $job->lease_owner);
+
+                return true;
+            }
 
             return false;
         }
@@ -314,6 +327,30 @@ final readonly class ReviewRound
             }
         }
         try {
+            $preparedPackage = $this->contextPackages->prepare($run, $slot, $job->step_number, $criteria, $bindings, $context);
+        } catch (ReviewResultParseException $exception) {
+            $this->destroy($home, $adapterIo, $export, $invocationInput, $invocationOutput);
+            $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::BINDING_ERROR, $bindings, $exception->reason);
+
+            return false;
+        }
+        // The stage package is a run artifact like every other one: its size
+        // passes the one approved limit seam before anything is persisted.
+        $packageLimit = $this->limits->evaluate($run, [], [['bytes' => strlen($preparedPackage['bytes'])]], 0);
+        if ($packageLimit instanceof ImportLimitResult) {
+            $this->destroy($home, $adapterIo, $export, $invocationInput, $invocationOutput);
+            try {
+                $this->humanRequests->openLimitRequest($run, $job, $packageLimit, WaitReason::RESOURCE_LIMIT);
+
+                return true;
+            } catch (HumanRequestRejected $exception) {
+                $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::HUMAN_REQUEST_ERROR, $bindings, $exception->reason);
+
+                return false;
+            }
+        }
+        $contextPackage = $this->contextPackages->persist($run, $preparedPackage, $context);
+        try {
             $bytes = $this->adapter->turn($agentContext, $home->workspace, [
                 ...$this->gitMetadataPaths->resolve($run->worktree_path),
             ]);
@@ -327,6 +364,9 @@ final readonly class ReviewRound
         if (! $afterTurn instanceof Run || $afterTurn->pending_status_operation_id !== null
             || ! in_array($afterTurn->state, [RunState::QUEUED, RunState::RUNNING], true)) {
             $this->destroy($home, $adapterIo, $export, $invocationInput, $invocationOutput);
+            if ($preparedPackage['artifact'] === null) {
+                $this->artifacts->discard($run, $contextPackage);
+            }
 
             return true;
         }

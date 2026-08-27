@@ -11,6 +11,25 @@
         <dt>Wartestatus</dt><dd data-run-wait="{{ $run->wait_reason?->value ?? '' }}">{{ $run->wait_reason?->value ?? '–' }}</dd>
     </dl>
 
+    @if ($run->run_type === \App\AI6\Runs\RunType::REVIEW_ONLY)
+        <section aria-labelledby="review-subject-heading">
+            <h2 id="review-subject-heading">Gebundener Reviewgegenstand</h2>
+            <dl>
+                <dt>Quellart</dt><dd>{{ $run->review_subject_kind ?? 'noch nicht materialisiert' }}</dd>
+                <dt>Basis</dt><dd><code>{{ $run->review_subject_base_sha ?? '–' }}</code></dd>
+                <dt>Quelle</dt><dd><code>{{ $run->review_subject_source_sha ?? '–' }}</code></dd>
+                <dt>Checkpoint-Tree</dt><dd><code>{{ $run->checkpoint_tree_sha ?? '–' }}</code></dd>
+                <dt>Diff-Hash</dt><dd><code>{{ $run->checkpoint_diff_hash ?? '–' }}</code></dd>
+            </dl>
+            @if ($completionReport !== null)
+                <p data-completion-report="{{ $completionReport->id }}">Der gebundene Abschlussbericht ist als redigiertes Runartefakt gespeichert (<code>{{ $completionReport->digest }}</code>).</p>
+            @endif
+            @if ($manualReportRequest !== null)
+                <p><a href="{{ route('projects.human-requests.show', [$project, $manualReportRequest]) }}">Abschlussbericht prüfen und bestätigen</a></p>
+            @endif
+        </section>
+    @endif
+
     <h2>Schritte</h2>
     <ul>
         @forelse ($jobs as $job)

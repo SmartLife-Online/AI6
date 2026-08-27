@@ -18,6 +18,9 @@ final readonly class RunStartController
     {
         $actor = $request->user();
         abort_unless($actor instanceof User && $policy->startRun($actor, $project), 403);
+        if ($request->except(['_token']) !== []) {
+            throw ValidationException::withMessages(['run' => ['Der Runstart akzeptiert keine neue oder abweichende Quelle.']]);
+        }
         try {
             $operation = $starts->handle($actor, $project, $approvalId, (string) Str::uuid());
         } catch (ControlOperationConflict $exception) {

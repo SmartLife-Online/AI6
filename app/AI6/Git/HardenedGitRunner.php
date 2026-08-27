@@ -210,6 +210,32 @@ final class HardenedGitRunner
         throw new RuntimeException('The run worktree branch does not resolve to its initial base.');
     }
 
+    /** Create a detached, ref-free staging worktree for a bound review source. */
+    public function createDetachedReviewWorktree(
+        string $repository,
+        string $worktree,
+        string $sourceOid,
+        string $effectLockName,
+        RedactionContext $redactionContext,
+    ): ProcessResult {
+        $this->assertOid($sourceOid);
+
+        return $this->runEffectingRepositoryCommand($repository, [
+            'worktree', 'add', '--detach', '--force', $worktree, $sourceOid,
+        ], $effectLockName, $redactionContext);
+    }
+
+    /** Remove a detached review staging worktree without touching a ref. */
+    public function discardDetachedReviewWorktree(
+        string $repository,
+        string $worktree,
+        string $effectLockName,
+        RedactionContext $redactionContext,
+    ): void {
+        $this->removeRunWorktree($repository, $worktree, $effectLockName, $redactionContext);
+        $this->pruneWorktrees($repository, $effectLockName, $redactionContext);
+    }
+
     /**
      * Remove the worktree registration, prune stale registrations and delete the run branch.
      *

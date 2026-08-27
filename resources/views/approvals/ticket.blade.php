@@ -42,6 +42,24 @@
             <label>Attention-User <select name="attention_user_id" wire:model.live="attentionUserId"><option value="">Keiner</option>@foreach ($attentionUsers as $user)<option value="{{ $user->getKey() }}">{{ $user->name ?? $user->email }}</option>@endforeach</select></label>
             <label>Pushmodus <select name="push_mode" wire:model.live="pushMode" required><option value="manual">manual</option><option value="automatic_after_gates">automatic_after_gates</option></select></label>
         </fieldset>
+        <fieldset class="ai6-approval-grid"><legend>Laufart und Reviewgegenstand</legend>
+            <label>Laufart <select name="run_type" wire:model.live="runType" required><option value="implementation">Implementierung</option><option value="review_only">Nur Review</option></select></label>
+            @if ($runType === 'review_only')
+                <label>Quellart <select name="review_subject_kind" wire:model.live="reviewSubjectKind" required><option value="managed_branch">Verwalteter Branch</option><option value="commit_range">Commit-Range</option><option value="single_commit">Einzelcommit</option><option value="validated_patch">Validierter Patch</option><option value="checkpoint">Vorhandener Checkpoint</option></select></label>
+                <label>Gebundene Basis-OID <input name="review_base_oid" wire:model.live="reviewBaseOid" required pattern="[0-9a-f]{64}" maxlength="64"></label>
+                <label>Quell-OID <input name="review_source_oid" wire:model.live="reviewSourceOid" required pattern="[0-9a-f]{64}" maxlength="64"></label>
+                @if ($reviewSubjectKind === 'managed_branch')
+                    <label>Verwaltete Ref <input name="review_source_ref" wire:model.live="reviewSourceRef" required maxlength="1024"></label>
+                @endif
+                @if (in_array($reviewSubjectKind, ['validated_patch', 'checkpoint'], true))
+                    <label>Quell-Run-ID <input name="review_source_run_id" wire:model.live="reviewSourceRunId" required></label>
+                    <label>Gebundene Tree-OID <input name="review_tree_oid" wire:model.live="reviewTreeOid" required pattern="[0-9a-f]{64}" maxlength="64"></label>
+                    <label>Gebundener Diff-Hash <input name="review_diff_hash" wire:model.live="reviewDiffHash" required pattern="[0-9a-f]{64}" maxlength="64"></label>
+                @endif
+                <label>Abschlussmodus <select name="completion_mode" wire:model.live="completionMode" required><option value="manual">Manuell bestätigen</option><option value="automatic_after_gates">Automatisch nach Gates</option></select></label>
+                <p>Die Quelle wird vor der Snapshot-Freigabe serverseitig gegen den gebundenen Control-Stand verifiziert.</p>
+            @endif
+        </fieldset>
         <section><h2>Gemeinsam bestätigter Snapshot</h2>
             @error('preview')<p role="alert">{{ $message }}</p>@enderror
             <button type="button" wire:click="requestPreview">Snapshot asynchron vorbereiten</button>

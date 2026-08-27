@@ -3,6 +3,8 @@
 namespace App\AI6\Runs;
 
 use App\AI6\Checks\Models\CheckResultRecord;
+use App\AI6\HumanLoop\HumanRequestResolutionState;
+use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Reviews\EffectiveFindingState;
 use App\AI6\Reviews\Models\CriterionCoverage;
@@ -220,6 +222,11 @@ final class RunTimelinePage extends Component
             'instructionRecommendations' => $recommendations,
             'reviewers' => $reviewers,
             'canDisposeFindings' => Gate::allows('disposeFinding', $this->project),
+            'completionReport' => RunArtifact::query()->where('run_id', $run->id)
+                ->where('kind', RunArtifactKind::COMPLETION_REPORT->value)->first(),
+            'manualReportRequest' => HumanRequest::query()->where('run_id', $run->id)
+                ->where('kind', WaitReason::MANUAL_REPORT->value)
+                ->where('resolution_state', HumanRequestResolutionState::OPEN->value)->first(),
         ]);
     }
 

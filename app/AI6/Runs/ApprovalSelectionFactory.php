@@ -5,7 +5,12 @@ namespace App\AI6\Runs;
 use App\AI6\Agents\AgentInputLimits;
 use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentRole;
+use App\AI6\Git\ReviewSubject;
+use App\AI6\Git\ReviewSubjectKind;
+use App\AI6\Git\ReviewSubjectReference;
+use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Reviews\ReviewerSlotFactory;
+use App\AI6\Tickets\TicketV1Parser;
 
 final readonly class ApprovalSelectionFactory
 {
@@ -13,7 +18,57 @@ final readonly class ApprovalSelectionFactory
         private AgentProfileRegistry $profiles,
         private ReviewerSlotFactory $reviewers,
         private AgentInputLimits $inputLimits,
+        private ReviewSubjectReference $reviewSubjects,
+        private TicketV1Parser $tickets,
     ) {}
+
+    public function completionModeForRisk(ReviewOnlyCompletionMode $requested, string $risk): ReviewOnlyCompletionMode
+    {
+        return $requested->narrowedTo($risk === 'high'
+            ? ReviewOnlyCompletionMode::MANUAL
+            : ReviewOnlyCompletionMode::AUTOMATIC_AFTER_GATES);
+    }
+
+    /**
+     * Bind the reviewed source and the completion mode of a review-only approval.
+     *
+     * This is the one place that maps a submitted source to its canonical
+     * reference: the HTTP action and the Livewire preview both call it, so the
+     * base rule, the per-kind field set and the risk narrowing cannot drift
+     * apart between the snapshot a human confirms and the one that is stored.
+     *
+     * @param  array{kind: string, base_oid: string, source_oid: string, ref: string|null, source_run_id: string|null, tree_oid: string|null, diff_hash: string|null, completion_mode: string}  $input
+     * @return array{reference: string, completion_mode: ReviewOnlyCompletionMode}
+     */
+    public function reviewOnlyBinding(TicketReadModel $readModel, array $input): array
+    {
+        if (! hash_equals((string) $readModel->control_commit, $input['base_oid'])) {
+            throw new \InvalidArgumentException('Die Reviewbasis stimmt nicht mit dem geprüften Control-Stand überein.');
+        }
+        $kind = ReviewSubjectKind::tryFrom($input['kind']);
+        if (! $kind instanceof ReviewSubjectKind) {
+            throw new \InvalidArgumentException('Die Reviewquellart ist ungültig.');
+        }
+        $stored = in_array($kind, [ReviewSubjectKind::VALIDATED_PATCH, ReviewSubjectKind::CHECKPOINT], true);
+        $risk = $this->tickets->parse((string) $readModel->redacted_content)->frontmatter['risk'] ?? null;
+
+        return [
+            'reference' => $this->reviewSubjects->encode(new ReviewSubject(
+                $kind,
+                $input['base_oid'],
+                $input['source_oid'],
+                $kind === ReviewSubjectKind::MANAGED_BRANCH ? $input['ref'] : null,
+                $stored ? $input['source_run_id'] : null,
+                $stored ? $input['tree_oid'] : null,
+                $stored ? $input['diff_hash'] : null,
+            )),
+            // An unreadable or absent risk narrows to the strictest mode.
+            'completion_mode' => $this->completionModeForRisk(
+                ReviewOnlyCompletionMode::tryFrom($input['completion_mode']) ?? ReviewOnlyCompletionMode::MANUAL,
+                is_string($risk) ? $risk : 'high',
+            ),
+        ];
+    }
 
     /** @param array<string, mixed> $value */
     public function fromArray(array $value): ApprovalSelection

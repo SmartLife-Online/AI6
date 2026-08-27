@@ -7,6 +7,14 @@ use RuntimeException;
 
 final readonly class ManagedProjectPath
 {
+    /**
+     * Name prefix of the detached staging directory of a review-only run.
+     *
+     * The naming lives here because the worktree root owns it: the normalizer
+     * creates the entry, the lifecycle recognizes and removes it again.
+     */
+    public const REVIEW_STAGE_PREFIX = '.review-stage-';
+
     public function __construct(private ControlOperationConfiguration $configuration) {}
 
     public function prepareAttempt(string $projectIdentifier, string $operationId, int $attempt): string
@@ -53,6 +61,15 @@ final readonly class ManagedProjectPath
         }
 
         return $this->runWorktreeRoot($projectIdentifier).DIRECTORY_SEPARATOR.$runId;
+    }
+
+    public function reviewStageName(string $runId): string
+    {
+        if (! self::validRunIdentifier($runId)) {
+            throw new RuntimeException('The run identifier is invalid.');
+        }
+
+        return self::REVIEW_STAGE_PREFIX.$runId;
     }
 
     public static function validRunIdentifier(string $runId): bool
@@ -304,7 +321,10 @@ final readonly class ManagedProjectPath
             throw new RuntimeException('An owned operation artifact has an unsupported type.');
         }
 
+        @chmod($path, 0700);
+
         foreach (new FilesystemIterator($path, FilesystemIterator::SKIP_DOTS) as $entry) {
+            @chmod($entry->getPathname(), $entry->isDir() ? 0700 : 0600);
             $this->removeTree($entry->getPathname(), $path);
         }
 

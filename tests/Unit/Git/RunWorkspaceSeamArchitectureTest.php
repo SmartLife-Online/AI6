@@ -15,6 +15,7 @@ final class RunWorkspaceSeamArchitectureTest extends TestCase
     /** @var list<string> */
     private const EFFECTING_METHODS = [
         'createRunWorktree',
+        'createDetachedReviewWorktree',
         'removeRunWorktree',
         'pruneWorktrees',
         'deleteRunBranch',

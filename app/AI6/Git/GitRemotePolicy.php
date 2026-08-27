@@ -126,10 +126,7 @@ final class GitRemotePolicy
 
     private function validRef(string $ref): bool
     {
-        if (preg_match('/\Arefs\/(?:heads|tags)\/[A-Za-z0-9._\/-]+\z/D', $ref) !== 1
-            || str_contains($ref, '..')
-            || str_contains($ref, '//')
-            || str_ends_with($ref, '.lock')) {
+        if (! GitRefName::valid($ref)) {
             return false;
         }
 

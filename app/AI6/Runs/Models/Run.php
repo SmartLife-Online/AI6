@@ -34,6 +34,10 @@ use Illuminate\Support\Carbon;
  * @property string|null $checkpoint_diff_hash
  * @property RunType $run_type
  * @property string|null $review_subject_reference
+ * @property string|null $review_subject_kind
+ * @property string|null $review_subject_base_sha
+ * @property string|null $review_subject_source_sha
+ * @property string|null $review_workspace_hash
  * @property ReviewOnlyCompletionMode|null $completion_mode
  * @property array<string, mixed>|null $config_snapshot
  * @property string $config_hash

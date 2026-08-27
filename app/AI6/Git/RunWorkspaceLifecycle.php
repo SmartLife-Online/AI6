@@ -6,6 +6,7 @@ use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
 use App\AI6\Runs\RunTransitionConflict;
+use App\AI6\Runs\RunType;
 use App\AI6\Shared\Redaction\RedactionContext;
 use RuntimeException;
 
@@ -35,6 +36,9 @@ final readonly class RunWorkspaceLifecycle
      */
     public function create(Run $run, string $projectIdentifier, RedactionContext $context): Run
     {
+        if ($run->run_type === RunType::REVIEW_ONLY) {
+            throw new RuntimeException('A review-only run cannot create a branch workspace.');
+        }
         $runId = (string) $run->getKey();
         $branch = RunBranchName::forRun($projectIdentifier, $runId);
         $repository = $this->paths->assertRepository($this->paths->repositoryDirectory($projectIdentifier));
@@ -91,14 +95,25 @@ final readonly class RunWorkspaceLifecycle
         $lockName = $this->lockNames->forProject($projectIdentifier);
         $bound = $this->activeWorktreePaths();
 
+        $inFlight = $this->activeReviewOnlyRunIdentifiers();
+
         $removed = [];
         foreach ($this->paths->runWorktreeEntries($projectIdentifier) as $name) {
             $path = $root.DIRECTORY_SEPARATOR.$name;
             if (ManagedProjectPath::validRunIdentifier($name) && in_array($path, $bound, true)) {
                 continue;
             }
+            // Source normalization creates the detached staging directory and
+            // the export before it binds `worktree_path`, so neither is visible
+            // to the bound-path check above. Sweeping them mid-flight would
+            // destroy the checkpoint of a run that is still executable and
+            // unregister its live staging worktree through the prune below.
+            if (in_array($this->reviewOnlyOwner($name), $inFlight, true)) {
+                continue;
+            }
 
-            if (ManagedProjectPath::validRunIdentifier($name)) {
+            $reviewOnly = Run::query()->whereKey($name)->where('run_type', RunType::REVIEW_ONLY->value)->exists();
+            if (ManagedProjectPath::validRunIdentifier($name) && ! $reviewOnly) {
                 $this->git->discardRunWorkspace(
                     $repository,
                     $path,
@@ -114,6 +129,21 @@ final readonly class RunWorkspaceLifecycle
         $this->git->pruneWorktrees($repository, $lockName, $context);
 
         return $removed;
+    }
+
+    public function cleanupReviewOnly(Run $run, string $projectIdentifier, RedactionContext $context): void
+    {
+        if ($run->run_type !== RunType::REVIEW_ONLY || ! ManagedProjectPath::validRunIdentifier($run->id)) {
+            throw new RuntimeException('The review-only cleanup binding is invalid.');
+        }
+        $repository = $this->paths->assertRepository($this->paths->repositoryDirectory($projectIdentifier));
+        $this->paths->removeRunWorktreeDirectory($projectIdentifier, $run->id);
+        // A hard kill can skip the normalizer's own staging cleanup. While the
+        // run is executable the reconciliation deliberately leaves that entry
+        // alone, so the disposable staging is removed here at the latest and
+        // never outlives its run.
+        $this->paths->removeRunWorktreeDirectory($projectIdentifier, $this->paths->reviewStageName($run->id));
+        $this->git->pruneWorktrees($repository, $this->lockNames->forProject($projectIdentifier), $context);
     }
 
     /**
@@ -143,6 +173,32 @@ final readonly class RunWorkspaceLifecycle
     ): void {
         $this->git->discardRunWorkspace($repository, $worktree, $branch, $lockName, $context);
         $this->paths->removeRunWorktreeDirectory($projectIdentifier, $runId);
+    }
+
+    /**
+     * The run a worktree-root entry belongs to, for both review-only forms.
+     *
+     * Returns the run identifier of `<runId>` and of the detached staging
+     * directory `.review-stage-<runId>`, and null for every other name.
+     */
+    private function reviewOnlyOwner(string $name): ?string
+    {
+        $runId = str_starts_with($name, ManagedProjectPath::REVIEW_STAGE_PREFIX)
+            ? substr($name, strlen(ManagedProjectPath::REVIEW_STAGE_PREFIX))
+            : $name;
+
+        return ManagedProjectPath::validRunIdentifier($runId) ? $runId : null;
+    }
+
+    /** @return list<string> */
+    private function activeReviewOnlyRunIdentifiers(): array
+    {
+        return Run::query()
+            ->whereIn('state', self::ACTIVE_STATES)
+            ->where('run_type', RunType::REVIEW_ONLY->value)
+            ->pluck('id')
+            ->map(static fn (mixed $id): string => (string) $id)
+            ->all();
     }
 
     /** @return list<string> */

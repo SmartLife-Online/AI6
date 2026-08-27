@@ -13,6 +13,8 @@ use App\AI6\Checks\DuplicateCheckExecution;
 use App\AI6\Checks\Models\CheckResultRecord;
 use App\AI6\Checks\OrphanedCheckExecution;
 use App\AI6\Git\CanonicalDiff;
+use App\AI6\Git\ReviewSubjectException;
+use App\AI6\Git\ReviewSubjectNormalizer;
 use App\AI6\Git\RunCheckpointConflict;
 use App\AI6\Git\RunCheckpointService;
 use App\AI6\Git\RunTreeService;
@@ -54,6 +56,7 @@ final readonly class RunCheckStep
         private ScopeApprovalService $scopeApprovals,
         private EffectiveProjectConfiguration $projectConfiguration,
         private HumanRequestService $humanRequests,
+        private ReviewSubjectNormalizer $reviewSubjects,
     ) {}
 
     public function execute(ExecutionJob $job, Run $run, string $owner): void
@@ -205,10 +208,29 @@ final readonly class RunCheckStep
                 throw new \RuntimeException('The run project identifier is unavailable.');
             }
             $context = new RedactionContext((string) $run->project_id, $run->id, 'review-readiness');
-            $run = $this->checkpoints->create($run, $project->project_identifier, $context);
-            $diff = $this->trees->workingTreeDiff($run, $run->initial_run_base_sha, $context);
+            if ($run->run_type === RunType::REVIEW_ONLY) {
+                $verified = $this->reviewSubjects->verify($run, $project->project_identifier, $context);
+                $diff = new CanonicalDiff([], $verified['diff_hash'], '');
+            } else {
+                $run = $this->checkpoints->create($run, $project->project_identifier, $context);
+                $diff = $this->trees->workingTreeDiff($run, $run->initial_run_base_sha, $context);
+            }
             $decision = $this->orchestrator->reviewReadiness($run, $diff->hash, $this->checks->currentTreeBinding($run));
             $run = $this->orchestrator->recordReviewReadiness($run, $decision);
+        } catch (ReviewSubjectException $exception) {
+            $this->orchestrator->recordStepEvent(
+                $run->id,
+                ExecutionStepType::CHECK->value,
+                ExecutionJobState::FAILED,
+                'Die gebundene Reviewquelle ist gedriftet: '.$exception->reason.'.',
+                'review_source_drift:'.$exception->reason.':'.$run->version,
+            );
+            $fresh = $run->fresh() ?? $run;
+            $parked = $this->orchestrator->parkOnBaseDrift($fresh, $fresh->version);
+            $this->orchestrator->parkStep($job, $owner);
+            $this->openBaseDriftRequest($parked);
+
+            return;
         } catch (RunCheckpointConflict $conflict) {
             $decision = new ReviewReadinessDecision([
                 new ReviewBlocker($conflict->reason, 'Ein importierter Pfad fehlt im gebundenen Checkpoint.'),

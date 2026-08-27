@@ -2,6 +2,7 @@
 
 namespace App\AI6\Runs;
 
+use App\AI6\Git\CanonicalJson;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunArtifact;
 use App\AI6\Shared\Redaction\RedactionContext;
@@ -14,7 +15,29 @@ final readonly class RunArtifactStore
     public function __construct(
         private RunArtifactRoot $root,
         private Redactor $redactor,
+        private CanonicalJson $json,
     ) {}
+
+    /**
+     * Redact string values before encoding so a match cannot consume JSON
+     * syntax and turn a structured artifact into invalid JSON.
+     *
+     * Encoding and persisting stay separate calls because every consumer has to
+     * measure the encoded bytes against the approved artifact limit before
+     * anything reaches the store.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public function encodeCanonicalJson(array $payload, RedactionContext $context): string
+    {
+        return $this->json->normalizeAndEncode($this->redactJsonValue($payload, $context));
+    }
+
+    /** @param array<string, mixed> $metadata */
+    public function persistEncoded(Run $run, RunArtifactKind $kind, string $bytes, array $metadata, RedactionContext $context): RunArtifact
+    {
+        return $this->persist($run, $kind, $bytes, $metadata, $context);
+    }
 
     /**
      * @param  array<string, mixed>  $metadata
@@ -23,7 +46,31 @@ final readonly class RunArtifactStore
     {
         $this->redactor->assertValidInput($bytes);
         $redacted = $this->redactor->redact($bytes, $context);
-        $payload = $redacted->text;
+
+        return $this->persist($run, $kind, $redacted->text, $metadata, $context);
+    }
+
+    /** Remove an unpublished transient artifact after a fenced invocation. */
+    public function discard(Run $run, RunArtifact $artifact): void
+    {
+        if ($artifact->run_id !== $run->id) {
+            throw new ImplementationImportException('artifact_run_mismatch', 'The artifact does not belong to the run.');
+        }
+        if ($artifact->kind !== RunArtifactKind::CONTEXT_PACKAGE) {
+            throw new ImplementationImportException('artifact_kind_not_discardable', 'Only a transient run artifact may be discarded.');
+        }
+        $directory = rtrim($this->root->path, '/\\').DIRECTORY_SEPARATOR.$run->id;
+        $filename = basename($artifact->storage_reference);
+        $path = $directory.DIRECTORY_SEPARATOR.$filename;
+        if (is_file($path) && ! @unlink($path)) {
+            throw new ImplementationImportException('artifact_delete_failed', 'The transient run artifact could not be removed.');
+        }
+        $artifact->delete();
+    }
+
+    /** @param array<string, mixed> $metadata */
+    private function persist(Run $run, RunArtifactKind $kind, string $payload, array $metadata, RedactionContext $context): RunArtifact
+    {
         $digest = hash('sha256', $payload);
         $existing = RunArtifact::query()
             ->where('run_id', $run->getKey())
@@ -78,5 +125,21 @@ final readonly class RunArtifactStore
 
             return $created;
         }
+    }
+
+    private function redactJsonValue(mixed $value, RedactionContext $context): mixed
+    {
+        if (is_string($value)) {
+            return $this->redactor->redact($value, $context)->text;
+        }
+        if (! is_array($value)) {
+            return $value;
+        }
+
+        foreach ($value as $key => $nested) {
+            $value[$key] = $this->redactJsonValue($nested, $context);
+        }
+
+        return $value;
     }
 }

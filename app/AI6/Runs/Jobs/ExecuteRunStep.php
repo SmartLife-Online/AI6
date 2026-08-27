@@ -13,6 +13,8 @@ use App\AI6\Runs\ImportLimit;
 use App\AI6\Runs\ImportLimitResult;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\ReviewOnlyPrepareStep;
+use App\AI6\Runs\ReviewOnlyRunCoordinator;
 use App\AI6\Runs\RunCheckStep;
 use App\AI6\Runs\RunFixTurn;
 use App\AI6\Runs\RunImplementation;
@@ -48,6 +50,8 @@ final class ExecuteRunStep implements ShouldQueue
         ?RunLimitPolicy $limits = null,
         ?HumanRequestService $humanRequests = null,
         ?ReviewStallFingerprint $stallFingerprints = null,
+        ?ReviewOnlyPrepareStep $reviewPrepare = null,
+        ?ReviewOnlyRunCoordinator $reviewOnly = null,
     ): void {
         $job = ExecutionJob::query()->find($this->executionJobId);
         if (! $job instanceof ExecutionJob
@@ -141,6 +145,12 @@ final class ExecuteRunStep implements ShouldQueue
             return;
         }
 
+        if ($type === ExecutionStepType::REVIEW_PREPARE) {
+            ($reviewPrepare ?? app(ReviewOnlyPrepareStep::class))->execute($claimed, $run, $owner);
+
+            return;
+        }
+
         if ($type === ExecutionStepType::CHECK) {
             ($checks ?? app(RunCheckStep::class))->execute($claimed, $run, $owner);
 
@@ -149,6 +159,12 @@ final class ExecuteRunStep implements ShouldQueue
 
         if ($type === ExecutionStepType::REVIEW) {
             ($reviews ?? app(ReviewRound::class))->execute($claimed, $run, $owner);
+
+            return;
+        }
+
+        if ($type === ExecutionStepType::REPORT) {
+            ($reviewOnly ?? app(ReviewOnlyRunCoordinator::class))->execute($claimed, $run, $owner);
 
             return;
         }

@@ -19,8 +19,10 @@ final class CheckStepRegistrationTest extends TestCase
     public function test_the_check_step_type_has_a_registered_handler_and_follows_the_implement_step(): void
     {
         self::assertTrue(ExecutionStepType::CHECK->hasRegisteredHandler());
+        self::assertTrue(ExecutionStepType::REVIEW_PREPARE->hasRegisteredHandler());
+        self::assertTrue(ExecutionStepType::REPORT->hasRegisteredHandler());
         self::assertSame(
-            ['preflight', 'implement', 'check', 'review', 'fix'],
+            ['preflight', 'review_prepare', 'implement', 'check', 'review', 'report', 'fix'],
             array_map(static fn (ExecutionStepType $type): string => $type->value, ExecutionStepType::cases()),
         );
 

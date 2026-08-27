@@ -47,7 +47,12 @@ trait BuildsRunWorkspaceGitFixture
         $this->runWorkspaceFixture = null;
     }
 
-    protected function runWorkspaceRunner(string $root): HardenedGitRunner
+    /**
+     * The effecting commands of this runner stay inert unless the caller passes
+     * a provisioned effect-lock directory: the default fixture points at a
+     * missing directory so read-only proofs cannot write by accident.
+     */
+    protected function runWorkspaceRunner(string $root, ?string $lockDirectory = null, int $lockOwnerUid = 0): HardenedGitRunner
     {
         $home = $root.'/git-home';
         $xdg = $home.'/xdg';
@@ -95,10 +100,10 @@ trait BuildsRunWorkspaceGitFixture
             '/bin/sh',
             DIRECTORY_SEPARATOR === '/' ? '/usr/bin/setsid' : null,
             DIRECTORY_SEPARATOR === '/' ? '/usr/bin/kill' : null,
-            $root.'/missing-locks',
-            1,
-            100,
-            0,
+            $lockDirectory ?? $root.'/missing-locks',
+            $lockDirectory === null ? 1 : 64,
+            $lockDirectory === null ? 100 : 2000,
+            $lockOwnerUid,
         );
         $ring = new RedactionKeyring('test-v1', ['test-v1' => ['version' => 1, 'key' => str_repeat('g', 32)]]);
         $redactor = new Redactor(

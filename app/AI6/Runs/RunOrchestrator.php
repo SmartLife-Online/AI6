@@ -12,6 +12,7 @@ use App\AI6\Git\ControlOperationState;
 use App\AI6\Git\ControlOperationType;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\TicketMutation;
+use App\AI6\Git\ReviewSubjectKind;
 use App\AI6\Git\RunBranchName;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\ProjectMembership;
@@ -240,7 +241,30 @@ final readonly class RunOrchestrator
             }
         }
 
+        if ($run->run_type === RunType::REVIEW_ONLY) {
+            return self::decideReviewOnlyNextStep($run->state, $run->wait_reason, array_keys($completed));
+        }
+
         return self::decideNextStepRound($run->state, $run->wait_reason, array_keys($completed), $this->hasEffectiveBlockingFindings($run));
+    }
+
+    /** @param list<string> $completedCoordinates
+     * @return array{type: ExecutionStepType, number: int}|null
+     */
+    public static function decideReviewOnlyNextStep(RunState $state, ?WaitReason $waitReason, array $completedCoordinates): ?array
+    {
+        if (in_array($state, [RunState::FAILED, RunState::COMPLETED, RunState::CANCELLED, RunState::WAITING], true)
+            || $waitReason instanceof WaitReason) {
+            return null;
+        }
+        $completed = array_fill_keys($completedCoordinates, true);
+        foreach ([ExecutionStepType::REVIEW_PREPARE, ExecutionStepType::CHECK, ExecutionStepType::REVIEW, ExecutionStepType::REPORT] as $type) {
+            if (! isset($completed[$type->value.':1'])) {
+                return ['type' => $type, 'number' => 1];
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -340,6 +364,16 @@ final readonly class RunOrchestrator
         if ($completed === ExecutionStepType::PREFLIGHT && $fresh->state === RunState::QUEUED) {
             $fresh = $this->transition($fresh, $fresh->version, RunState::RUNNING, RunPhase::IMPLEMENT);
         }
+        // The state map has no running → running edge, so an already running
+        // run takes the phase-only advance; only a queued run may go through
+        // transition(). Both paths are reachable: the first delivery finds the
+        // run queued, a resumed one finds it running in the unchanged phase.
+        if ($completed === ExecutionStepType::REVIEW_PREPARE && $fresh->run_type === RunType::REVIEW_ONLY
+            && $fresh->phase === RunPhase::PREPARE) {
+            $fresh = $fresh->state === RunState::QUEUED
+                ? $this->transition($fresh, $fresh->version, RunState::RUNNING, RunPhase::CHECK)
+                : $this->advancePhase($fresh, $fresh->version, RunPhase::CHECK);
+        }
         if ($completed === ExecutionStepType::IMPLEMENT && $fresh->phase === RunPhase::IMPLEMENT) {
             $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::CHECK);
         }
@@ -347,7 +381,7 @@ final readonly class RunOrchestrator
             && $fresh->review_readiness_state === 'ready') {
             $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::REVIEW);
         }
-        if ($completed === ExecutionStepType::REVIEW && $fresh->phase === RunPhase::REVIEW
+        if ($completed === ExecutionStepType::REVIEW && $fresh->run_type !== RunType::REVIEW_ONLY && $fresh->phase === RunPhase::REVIEW
             && $this->hasEffectiveBlockingFindings($fresh)) {
             $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::FIX);
         }
@@ -744,9 +778,7 @@ final readonly class RunOrchestrator
             // AI6-040 owns review-source normalization and starts the first
             // review-only step. Claiming here must not create an implementation
             // workspace, branch or provider turn for that run type.
-            if ($run->run_type === RunType::IMPLEMENTATION) {
-                $this->planNextStep($run);
-            }
+            $this->planNextStep($run);
 
             return $run;
         });
@@ -754,6 +786,9 @@ final readonly class RunOrchestrator
 
     public function bindWorkspace(Run $run, int $expectedVersion, string $branch, string $worktreePath): Run
     {
+        if ($run->run_type === RunType::REVIEW_ONLY) {
+            throw new RunTransitionConflict('review_only_branch_forbidden', 'A review-only run cannot bind a branch workspace.');
+        }
         try {
             new RunBranchName($branch);
         } catch (\InvalidArgumentException) {
@@ -774,6 +809,65 @@ final readonly class RunOrchestrator
         }
 
         return Run::query()->findOrFail($run->getKey());
+    }
+
+    public function bindReviewCheckpoint(
+        Run $run,
+        int $expectedVersion,
+        string $worktreePath,
+        ReviewSubjectKind $kind,
+        string $baseOid,
+        string $sourceOid,
+        string $treeOid,
+        string $diffHash,
+        string $workspaceHash,
+    ): Run {
+        foreach ([$baseOid, $sourceOid, $treeOid, $diffHash, $workspaceHash] as $value) {
+            if (preg_match('/\A[0-9a-f]{64}\z/D', $value) !== 1) {
+                throw new RunTransitionConflict('invalid_review_checkpoint_binding', 'The review checkpoint binding is invalid.');
+            }
+        }
+        if ($run->run_type !== RunType::REVIEW_ONLY || $worktreePath === '' || str_contains($worktreePath, "\0")) {
+            throw new RunTransitionConflict('invalid_review_checkpoint_binding', 'The review checkpoint binding is invalid.');
+        }
+
+        return DB::transaction(function () use ($run, $expectedVersion, $worktreePath, $kind, $baseOid, $sourceOid, $treeOid, $diffHash, $workspaceHash): Run {
+            DB::table('runs')->where('id', $run->id)->lockForUpdate()->first();
+            $fresh = Run::query()->findOrFail($run->id);
+            if ($fresh->version !== $expectedVersion || $fresh->run_type !== RunType::REVIEW_ONLY
+                || $fresh->run_branch !== null || $fresh->worktree_path !== null || $fresh->checkpoint_commit_sha !== null) {
+                throw new RunTransitionConflict('stale_run_version', 'The run changed before its review checkpoint could be bound.');
+            }
+            RunCheckpoint::query()->create([
+                'id' => (string) Str::uuid(),
+                'run_id' => $fresh->id,
+                'generation' => 1,
+                'predecessor_commit_sha' => null,
+                'commit_sha' => $sourceOid,
+                'tree_sha' => $treeOid,
+                'diff_hash' => $diffHash,
+                'evidence_epoch' => $fresh->evidence_epoch,
+                'is_current' => true,
+            ]);
+            $updated = Run::query()->whereKey($fresh->id)->where('version', $expectedVersion)->update([
+                'worktree_path' => $worktreePath,
+                'checkpoint_commit_sha' => $sourceOid,
+                'checkpoint_tree_sha' => $treeOid,
+                'checkpoint_diff_hash' => $diffHash,
+                'checkpoint_evidence_epoch' => $fresh->evidence_epoch,
+                'review_subject_kind' => $kind->value,
+                'review_subject_base_sha' => $baseOid,
+                'review_subject_source_sha' => $sourceOid,
+                'review_workspace_hash' => $workspaceHash,
+                'version' => $expectedVersion + 1,
+                'updated_at' => now(),
+            ]);
+            if ($updated !== 1) {
+                throw new RunTransitionConflict('stale_run_version', 'The run changed before its review checkpoint could be bound.');
+            }
+
+            return Run::query()->findOrFail($fresh->id);
+        });
     }
 
     public function bindCheckpoint(

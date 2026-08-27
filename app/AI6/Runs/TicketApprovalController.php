@@ -11,6 +11,8 @@ use App\AI6\Auth\StepUpGuard;
 use App\AI6\Git\Actions\QueueTicketMutation;
 use App\AI6\Git\CanonicalJson;
 use App\AI6\Git\ControlOperationConflict;
+use App\AI6\Git\ReviewSubjectException;
+use App\AI6\Git\ReviewSubjectKind;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\ProjectMembership;
 use App\AI6\Projects\Models\TicketReadModel;
@@ -27,7 +29,7 @@ final readonly class TicketApprovalController
 {
     public const STEP_UP_ACTION = 'ticket.approve';
 
-    public function store(Request $request, Project $project, string $readModel, AgentProfileRegistry $profiles, ReviewerSlotFactory $reviewers, AgentInputLimits $inputLimits, CanonicalJson $canonicalJson, QueueTicketMutation $mutations, StepUpGuard $stepUp): RedirectResponse
+    public function store(Request $request, Project $project, string $readModel, AgentProfileRegistry $profiles, ReviewerSlotFactory $reviewers, AgentInputLimits $inputLimits, CanonicalJson $canonicalJson, QueueTicketMutation $mutations, StepUpGuard $stepUp, ApprovalSelectionFactory $selectionFactory): RedirectResponse
     {
         $actor = $request->user();
         abort_unless($actor instanceof User, 403);
@@ -51,6 +53,15 @@ final readonly class TicketApprovalController
             'reviewers.*.prompt_profile' => ['required', 'string'],
             'attention_user_id' => ['nullable', 'integer'],
             'push_mode' => ['required', Rule::in(['manual', 'automatic_after_gates'])],
+            'run_type' => ['sometimes', Rule::in(['implementation', 'review_only'])],
+            'review_subject_kind' => ['required_if:run_type,review_only', Rule::in(array_column(ReviewSubjectKind::cases(), 'value'))],
+            'review_base_oid' => ['required_if:run_type,review_only', 'regex:/\A[0-9a-f]{64}\z/D'],
+            'review_source_oid' => ['required_if:run_type,review_only', 'regex:/\A[0-9a-f]{64}\z/D'],
+            'review_source_ref' => ['required_if:review_subject_kind,managed_branch', 'nullable', 'string', 'max:1024'],
+            'review_source_run_id' => ['required_if:review_subject_kind,validated_patch,checkpoint', 'nullable', 'uuid'],
+            'review_tree_oid' => ['required_if:review_subject_kind,validated_patch,checkpoint', 'nullable', 'regex:/\A[0-9a-f]{64}\z/D'],
+            'review_diff_hash' => ['required_if:review_subject_kind,validated_patch,checkpoint', 'nullable', 'regex:/\A[0-9a-f]{64}\z/D'],
+            'completion_mode' => ['required_if:run_type,review_only', 'nullable', Rule::in(['manual', 'automatic_after_gates'])],
             'confirm_snapshot' => ['required', 'accepted'],
             'expected_approval_snapshot_hash' => ['required', 'regex:/\A[0-9a-f]{64}\z/D'],
         ];
@@ -66,7 +77,24 @@ final readonly class TicketApprovalController
             if ($attentionUserId !== null && ! ProjectMembership::query()->where('project_id', $project->getKey())->where('user_id', $attentionUserId)->whereHas('user', fn ($query) => $query->where('is_active', true))->exists()) {
                 throw new \InvalidArgumentException('Der Attention-User ist kein aktives Projektmitglied.');
             }
-            $selection = new ApprovalSelection($implementation, $reviewerSlots, $limits, $attentionUserId, $validated['push_mode']);
+            $runType = RunType::tryFrom((string) ($validated['run_type'] ?? 'implementation')) ?? RunType::IMPLEMENTATION;
+            $subjectReference = null;
+            $completionMode = null;
+            if ($runType === RunType::REVIEW_ONLY) {
+                $binding = $selectionFactory->reviewOnlyBinding($model, [
+                    'kind' => (string) $validated['review_subject_kind'],
+                    'base_oid' => (string) $validated['review_base_oid'],
+                    'source_oid' => (string) $validated['review_source_oid'],
+                    'ref' => $validated['review_source_ref'] ?? null,
+                    'source_run_id' => $validated['review_source_run_id'] ?? null,
+                    'tree_oid' => $validated['review_tree_oid'] ?? null,
+                    'diff_hash' => $validated['review_diff_hash'] ?? null,
+                    'completion_mode' => (string) $validated['completion_mode'],
+                ]);
+                $subjectReference = $binding['reference'];
+                $completionMode = $binding['completion_mode'];
+            }
+            $selection = new ApprovalSelection($implementation, $reviewerSlots, $limits, $attentionUserId, $validated['push_mode'], $runType, $subjectReference, $completionMode);
             $previewRecord = TicketApprovalPreview::query()
                 ->whereKey($validated['preview_id'])
                 ->where('project_id', $project->getKey())
@@ -96,6 +124,10 @@ final readonly class TicketApprovalController
         } catch (PromptRenderingException $exception) {
             throw ValidationException::withMessages([
                 'approval' => ['Das Review-Promptprofil wurde abgelehnt: '.$exception->reason->value.'.'],
+            ]);
+        } catch (ReviewSubjectException $exception) {
+            throw ValidationException::withMessages([
+                'approval' => ['Der Reviewgegenstand wurde abgelehnt: '.$exception->reason.'.'],
             ]);
         } catch (TicketMutationConflict|ControlOperationConflict|\InvalidArgumentException $exception) {
             throw ValidationException::withMessages(['approval' => [$exception->getMessage()]]);

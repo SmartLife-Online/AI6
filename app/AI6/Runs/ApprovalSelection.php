@@ -28,7 +28,10 @@ final readonly class ApprovalSelection implements JsonSerializable
         if ($runType === RunType::IMPLEMENTATION && ($reviewSubjectReference !== null || $completionMode !== null)) {
             throw new \InvalidArgumentException('Eine Implementierungs-Approval darf keine Review-only-Bindung enthalten.');
         }
-        if ($reviewSubjectReference !== null && (! preg_match('/\A[A-Za-z0-9][A-Za-z0-9._:@+\/-]{0,2047}\z/D', $reviewSubjectReference))) {
+        if ($reviewSubjectReference !== null && (strlen($reviewSubjectReference) > 2048
+            || $reviewSubjectReference === ''
+            || preg_match('//u', $reviewSubjectReference) !== 1
+            || preg_match('/\A[{},:"0-9A-Za-z._\/-]+\z/D', $reviewSubjectReference) !== 1)) {
             throw new \InvalidArgumentException('Die Reviewgegenstandsreferenz ist ungültig.');
         }
     }

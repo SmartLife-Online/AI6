@@ -42,7 +42,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertArrayNotHasKey('App\\AI6\\', $composer['autoload']['psr-4']);
     }
 
-    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_025(): void
+    public function test_ai6_modules_contain_only_the_approved_files_through_ai6_040(): void
     {
         $files = [];
         $iterator = new RecursiveIteratorIterator(
@@ -240,6 +240,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Git/DeployKeyProvisioner.php',
             'app/AI6/Git/GitConfiguration.php',
             'app/AI6/Git/GitConfigurationFactory.php',
+            'app/AI6/Git/GitRefName.php',
             'app/AI6/Git/GitRemotePolicy.php',
             'app/AI6/Git/GitRemoteRejected.php',
             'app/AI6/Git/GitTreeEntry.php',
@@ -266,6 +267,12 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Git/RefreshPathPolicy.php',
             'app/AI6/Git/ReviewCheckpointException.php',
             'app/AI6/Git/ReviewCheckpointVerifier.php',
+            'app/AI6/Git/ReviewSubject.php',
+            'app/AI6/Git/ReviewSubjectException.php',
+            'app/AI6/Git/ReviewSubjectKind.php',
+            'app/AI6/Git/ReviewSubjectNormalizer.php',
+            'app/AI6/Git/ReviewSubjectReference.php',
+            'app/AI6/Git/ReviewSubjectVerifier.php',
             'app/AI6/Git/RunBranchName.php',
             'app/AI6/Git/RunCheckpointConflict.php',
             'app/AI6/Git/RunCheckpointService.php',
@@ -376,6 +383,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Reviews/Models/FindingStatus.php',
             'app/AI6/Reviews/Models/InstructionRecommendation.php',
             'app/AI6/Reviews/Models/ReviewResult.php',
+            'app/AI6/Reviews/ReviewContextPackageStore.php',
             'app/AI6/Reviews/ReviewInvocationOutcome.php',
             'app/AI6/Reviews/ReviewResultParseException.php',
             'app/AI6/Reviews/ReviewResultParser.php',
@@ -394,6 +402,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Runs/ApprovalSnapshotVerifier.php',
             'app/AI6/Runs/ApprovalStartEligibility.php',
             'app/AI6/Runs/ApprovalStatusPage.php',
+            'app/AI6/Runs/CompletionReportService.php',
             'app/AI6/Runs/ContractChangeService.php',
             'app/AI6/Runs/EffectiveScope.php',
             'app/AI6/Runs/ExecutionJobState.php',
@@ -428,6 +437,8 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Runs/ReviewOnlyCompletionDecision.php',
             'app/AI6/Runs/ReviewOnlyCompletionMode.php',
             'app/AI6/Runs/ReviewOnlyCompletionPredicate.php',
+            'app/AI6/Runs/ReviewOnlyPrepareStep.php',
+            'app/AI6/Runs/ReviewOnlyRunCoordinator.php',
             'app/AI6/Runs/ReviewReadinessDecision.php',
             'app/AI6/Runs/RunArtifactKind.php',
             'app/AI6/Runs/RunArtifactRoot.php',
@@ -830,7 +841,7 @@ final class ScaffoldStructureTest extends TestCase
         }
     }
 
-    public function test_migrations_match_the_approved_state_through_ai6_025(): void
+    public function test_migrations_match_the_approved_state_through_ai6_040(): void
     {
         $migrations = glob($this->path('database/migrations/*.php'));
         self::assertIsArray($migrations);
@@ -877,6 +888,7 @@ final class ScaffoldStructureTest extends TestCase
             '2026_08_23_000000_add_finding_status_history.php',
             '2026_08_24_000000_add_run_intervention_contract.php',
             '2026_08_25_000000_add_review_only_run_contract.php',
+            '2026_08_26_000000_add_review_only_execution_contract.php',
         ], $migrations);
     }
 

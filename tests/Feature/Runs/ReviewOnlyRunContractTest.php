@@ -11,6 +11,7 @@ use App\AI6\Git\ControlOperationRuntimeIdentity;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\TicketMutation;
 use App\AI6\Git\ProjectOperationLease;
+use App\AI6\Git\RunWorkspaceLifecycle;
 use App\AI6\HumanLoop\Http\HumanRequestAnswerController;
 use App\AI6\HumanLoop\HumanRequestRejected;
 use App\AI6\HumanLoop\HumanRequestService;
@@ -24,10 +25,13 @@ use App\AI6\Reviews\FindingSeverity;
 use App\AI6\Reviews\Models\CriterionCoverage;
 use App\AI6\Reviews\Models\Finding;
 use App\AI6\Reviews\Models\ReviewResult;
+use App\AI6\Reviews\ReviewContextPackageStore;
 use App\AI6\Reviews\ReviewerSlotFactory;
 use App\AI6\Reviews\ReviewInvocationOutcome;
+use App\AI6\Reviews\ReviewResultParseException;
 use App\AI6\Runs\ApprovalLimits;
 use App\AI6\Runs\ApprovalSelection;
+use App\AI6\Runs\CompletionReportService;
 use App\AI6\Runs\GateKind;
 use App\AI6\Runs\GateState;
 use App\AI6\Runs\InstructionCandidateSource;
@@ -38,6 +42,8 @@ use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\ReportOnlyCompletionService;
 use App\AI6\Runs\ReviewOnlyCompletionMode;
 use App\AI6\Runs\ReviewOnlyCompletionPredicate;
+use App\AI6\Runs\RunArtifactRoot;
+use App\AI6\Runs\RunArtifactStore;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunPhase;
 use App\AI6\Runs\RunState;
@@ -61,6 +67,9 @@ final class ReviewOnlyRunContractTest extends TicketUiTestCase
     protected function setUp(): void
     {
         parent::setUp();
+        config(['ai6.run_artifacts.root' => sys_get_temp_dir().DIRECTORY_SEPARATOR.'ai6-040-artifacts-'.bin2hex(random_bytes(8))]);
+        $this->app->forgetInstance(RunArtifactRoot::class);
+        $this->app->forgetInstance(RunArtifactStore::class);
         $this->app->instance(ControlOperationRuntimeIdentity::class, new ControlOperationRuntimeIdentity('worker', 'testing'));
         $this->app->instance(InstructionCandidateSource::class, new class implements InstructionCandidateSource
         {
@@ -125,7 +134,33 @@ final class ReviewOnlyRunContractTest extends TicketUiTestCase
         self::assertSame($approvalIndexes, $this->sqliteIndexes('ticket_approvals'));
     }
 
-    public function test_review_only_claim_reuses_run_start_and_creates_no_implementation_step(): void
+    public function test_review_only_execution_migration_round_trips_guards_and_run_indexes(): void
+    {
+        $migration = require database_path('migrations/2026_08_26_000000_add_review_only_execution_contract.php');
+        $guardNames = ['runs_update_guard', 'run_artifacts_insert_guard'];
+        $extendedGuards = [];
+        foreach ($guardNames as $name) {
+            $extendedGuards[$name] = $this->sqliteTrigger($name);
+        }
+        $runIndexes = $this->sqliteIndexes('runs');
+
+        $migration->down();
+        try {
+            self::assertStringContainsString('OR ((NEW.run_branch IS NULL) <> (NEW.worktree_path IS NULL))', $this->sqliteTrigger('runs_update_guard'));
+            self::assertStringContainsString("'quarantined_path'", $this->sqliteTrigger('run_artifacts_insert_guard'));
+            self::assertStringNotContainsString("'context_package'", $this->sqliteTrigger('run_artifacts_insert_guard'));
+            self::assertSame($runIndexes, $this->sqliteIndexes('runs'));
+        } finally {
+            $migration->up();
+        }
+
+        foreach ($extendedGuards as $name => $sql) {
+            self::assertSame($sql, $this->sqliteTrigger($name));
+        }
+        self::assertSame($runIndexes, $this->sqliteIndexes('runs'));
+    }
+
+    public function test_review_only_claim_reuses_run_start_and_creates_only_the_prepare_step(): void
     {
         $fixture = $this->completedApproval('AI6-REVIEW-ONLY-1');
         $operation = $this->queueStart($fixture);
@@ -136,7 +171,8 @@ final class ReviewOnlyRunContractTest extends TicketUiTestCase
         self::assertSame(RunType::REVIEW_ONLY, $run->run_type);
         self::assertSame('checkpoint:server-bound', $run->review_subject_reference);
         self::assertSame(ReviewOnlyCompletionMode::MANUAL, $run->completion_mode);
-        self::assertSame(0, DB::table('execution_jobs')->where('run_id', $run->id)->count());
+        self::assertSame(1, DB::table('execution_jobs')->where('run_id', $run->id)
+            ->where('step_type', 'review_prepare')->count());
         self::assertNull($run->run_branch);
         self::assertNull($run->worktree_path);
     }
@@ -160,6 +196,20 @@ final class ReviewOnlyRunContractTest extends TicketUiTestCase
         }
     }
 
+    public function test_review_only_cannot_enter_the_branch_creating_workspace_path(): void
+    {
+        $fixture = $this->completedApproval('AI6-REVIEW-ONLY-NO-BRANCH');
+        $run = $this->finalizedRun($fixture);
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('A review-only run cannot create a branch workspace.');
+
+        $this->app->make(RunWorkspaceLifecycle::class)->create(
+            $run,
+            (string) $fixture['project']->project_identifier,
+            new RedactionContext((string) $run->project_id, $run->id, 'review-only-no-branch'),
+        );
+    }
+
     public function test_review_subject_reference_rejects_characters_outside_the_server_allowlist(): void
     {
         $profiles = $this->app->make(AgentProfileRegistry::class);
@@ -176,6 +226,26 @@ final class ReviewOnlyRunContractTest extends TicketUiTestCase
             'manual',
             RunType::REVIEW_ONLY,
             "checkpoint:server-bound\nforged",
+            ReviewOnlyCompletionMode::MANUAL,
+        );
+    }
+
+    public function test_review_subject_reference_rejects_a_printable_character_outside_the_server_allowlist(): void
+    {
+        $profiles = $this->app->make(AgentProfileRegistry::class);
+        $this->expectException(\InvalidArgumentException::class);
+
+        new ApprovalSelection(
+            $profiles->resolve('fake', AgentRole::IMPLEMENTATION, 'fake-model', 'medium'),
+            $this->app->make(ReviewerSlotFactory::class)->fromArray([[
+                'id' => (string) Str::uuid(), 'profile' => 'fake', 'model' => 'fake-model',
+                'effort' => 'high', 'prompt_profile' => 'security',
+            ]]),
+            ApprovalLimits::fromConfiguredValues(config('ai6.project_config.server_defaults.limits'), $this->app->make(AgentInputLimits::class)),
+            null,
+            'manual',
+            RunType::REVIEW_ONLY,
+            'checkpoint;server-bound',
             ReviewOnlyCompletionMode::MANUAL,
         );
     }
@@ -318,6 +388,69 @@ final class ReviewOnlyRunContractTest extends TicketUiTestCase
         self::assertTrue($this->app->make(ReviewOnlyCompletionPredicate::class)->decide($run)->ready());
     }
 
+    public function test_completion_report_is_deterministic_redacted_and_keeps_blocking_findings_visible(): void
+    {
+        $fixture = $this->completedApproval('AI6-REVIEW-ONLY-REPORT');
+        $run = $this->completionReadyRun($fixture);
+        $ticketBefore = DB::table('ticket_read_models')->where('project_id', $run->project_id)->value('redacted_content');
+        $result = ReviewResult::query()->where('run_id', $run->id)->sole();
+        $finding = Finding::query()->create([
+            'id' => (string) Str::uuid(), 'run_id' => $run->id, 'review_result_id' => $result->id,
+            'round_number' => 1, 'slot_id' => $result->slot_id, 'provider_profile' => $result->provider_profile,
+            'model' => $result->model, 'effort' => $result->effort, 'prompt_profile' => $result->prompt_profile,
+            'checkpoint_tree_sha' => $run->checkpoint_tree_sha, 'diff_hash' => $run->checkpoint_diff_hash,
+            'local_id' => 'report-finding', 'severity' => FindingSeverity::HIGH,
+            'original_disposition' => FindingOriginalDisposition::MUST_FIX,
+            'category' => FindingCategory::SECURITY, 'file' => 'app/Example.php', 'line' => 7,
+            'title' => 'Sichtbarer Befund', 'evidence' => 'password=report-secret',
+            'expected_result' => 'Der Befund bleibt im Bericht.', 'criterion_refs' => ['AC-01'],
+            'duplicate_group' => hash('sha256', 'report-finding'),
+        ]);
+
+        $first = $this->app->make(CompletionReportService::class)->build($run);
+        $second = $this->app->make(CompletionReportService::class)->build($run);
+        self::assertSame($first->id, $second->id);
+        $path = $this->app->make(RunArtifactRoot::class)->path.DIRECTORY_SEPARATOR.$first->storage_reference;
+        $bytes = file_get_contents($path);
+        self::assertIsString($bytes);
+        self::assertStringNotContainsString('report-secret', $bytes);
+        $report = json_decode($bytes, true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame($run->checkpoint_tree_sha, $report['run']['checkpoint_tree_sha']);
+        self::assertSame($finding->id, $report['findings'][0]['id']);
+        self::assertTrue($report['findings'][0]['blocks']);
+        self::assertNotEmpty($report['artifacts']);
+        self::assertTrue($first->expires_at->greaterThan(now()->addDays(29)));
+        self::assertTrue($this->app->make(ReviewOnlyCompletionPredicate::class)->decide($run)->ready());
+        self::assertSame($ticketBefore, DB::table('ticket_read_models')->where('project_id', $run->project_id)->value('redacted_content'));
+    }
+
+    public function test_review_context_package_is_single_per_stage_and_rejects_changed_bindings(): void
+    {
+        $fixture = $this->completedApproval('AI6-REVIEW-ONLY-CONTEXT');
+        $run = $this->completionReadyRun($fixture);
+        $slot = $run->agents()->where('role', 'quality_review')->sole();
+        $bindings = [
+            'slot_prompt_hash' => str_repeat('1', 64),
+            'slot_instruction_hash' => str_repeat('2', 64),
+            'slot_runtime_profile_hash' => str_repeat('3', 64),
+        ];
+        $context = new RedactionContext((string) $run->project_id, $run->id, 'context-package-test');
+        $store = $this->app->make(ReviewContextPackageStore::class);
+
+        $first = $store->store($run, $slot, 1, ['AC-01'], $bindings, $context);
+        $second = $store->store($run, $slot, 1, ['AC-01'], $bindings, $context);
+        self::assertSame($first->id, $second->id);
+        self::assertSame(1, RunArtifact::query()->where('run_id', $run->id)->where('kind', 'context_package')->count());
+        self::assertTrue($first->expires_at->greaterThan(now()->addDays(29)));
+
+        try {
+            $store->store($run, $slot, 1, ['AC-01'], array_replace($bindings, ['slot_prompt_hash' => str_repeat('4', 64)]), $context);
+            self::fail('A changed context-package binding was accepted.');
+        } catch (ReviewResultParseException $exception) {
+            self::assertSame('context_package_binding_changed', $exception->reason);
+        }
+    }
+
     public function test_completion_predicate_blocks_an_open_human_request(): void
     {
         Queue::fake();
@@ -345,6 +478,25 @@ final class ReviewOnlyRunContractTest extends TicketUiTestCase
             'run_waiting:resource_limit',
             $this->app->make(ReviewOnlyCompletionPredicate::class)->decide($run->fresh())->blockers,
         );
+    }
+
+    public function test_manual_completion_without_a_bound_attention_user_refuses_with_a_named_reason(): void
+    {
+        Queue::fake();
+        // The approval form permits an empty attention user, and a high-risk
+        // ticket is narrowed to `manual`. The confirmation then cannot be opened
+        // at all — a refusal no retry ever resolves, so the report step has to
+        // recognize it instead of running into its attempt budget.
+        $fixture = $this->completedApproval('AI6-REVIEW-ONLY-NO-ATTENTION');
+        self::assertNull($fixture['approval']->attention_user_id);
+        $run = $this->completionReadyRun($fixture);
+
+        try {
+            $this->app->make(ReportOnlyCompletionService::class)->start($run->fresh());
+            self::fail('A manual completion without an attention user was accepted.');
+        } catch (HumanRequestRejected $rejected) {
+            self::assertSame('attention_user_unavailable', $rejected->reason);
+        }
     }
 
     public function test_completion_predicate_blocks_an_open_gate(): void

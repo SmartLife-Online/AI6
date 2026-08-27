@@ -21,7 +21,8 @@ final class ReviewStepRegistrationTest extends TestCase
 
         $job = file_get_contents(dirname(__DIR__, 3).'/app/AI6/Runs/Jobs/ExecuteRunStep.php');
         self::assertIsString($job);
-        self::assertSame(3, substr_count($job, 'ExecutionStepType::REVIEW'));
+        self::assertSame(3, preg_match_all('/ExecutionStepType::REVIEW\b/', $job));
+        self::assertSame(1, preg_match_all('/ExecutionStepType::REPORT\b/', $job));
         self::assertStringContainsString('ReviewRound::class', $job);
     }
 

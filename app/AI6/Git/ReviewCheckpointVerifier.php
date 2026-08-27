@@ -3,6 +3,7 @@
 namespace App\AI6\Git;
 
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\RunType;
 use App\AI6\Shared\Redaction\RedactionContext;
 
 /** Re-prove the clean, immutable checkpoint immediately before every review export. */
@@ -11,10 +12,24 @@ final readonly class ReviewCheckpointVerifier
     public function __construct(
         private HardenedGitRunner $git,
         private CanonicalDiffHasher $diffs,
+        private ReviewSubjectVerifier $reviewSubjects,
     ) {}
 
     public function verify(Run $run, RedactionContext $context): void
     {
+        if ($run->run_type === RunType::REVIEW_ONLY) {
+            $project = $run->project()->first();
+            if ($project === null || ! is_string($project->project_identifier) || $project->project_identifier === '') {
+                throw new ReviewCheckpointException('managed_project_missing');
+            }
+            try {
+                $this->reviewSubjects->verify($run, $project->project_identifier, $context, true);
+            } catch (ReviewSubjectException $exception) {
+                throw new ReviewCheckpointException($exception->reason);
+            }
+
+            return;
+        }
         if (! is_string($run->worktree_path) || ! is_string($run->run_branch)
             || ! is_string($run->checkpoint_commit_sha) || ! is_string($run->checkpoint_tree_sha)
             || ! is_string($run->checkpoint_diff_hash)) {

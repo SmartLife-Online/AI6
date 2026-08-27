@@ -5,12 +5,16 @@ namespace App\AI6\Runs\Jobs;
 use App\AI6\Agents\AgentProfileSelectionException;
 use App\AI6\Agents\InstructionResolutionException;
 use App\AI6\Git\ControlOperationRuntimeIdentity;
+use App\AI6\Git\GitRemoteRejected;
+use App\AI6\Git\ReviewSubjectException;
+use App\AI6\Git\ReviewSubjectVerifier;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Prompts\PromptRenderingException;
 use App\AI6\Runs\ApprovalSelectionFactory;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\Models\TicketApprovalPreview;
+use App\AI6\Shared\Redaction\RedactionContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -37,7 +41,7 @@ final class BuildTicketApprovalPreview implements ShouldQueue
         $this->onQueue('default');
     }
 
-    public function handle(ControlOperationRuntimeIdentity $runtimeIdentity, ApprovalSelectionFactory $selections, ApprovalSnapshotFactory $snapshots): void
+    public function handle(ControlOperationRuntimeIdentity $runtimeIdentity, ApprovalSelectionFactory $selections, ApprovalSnapshotFactory $snapshots, ReviewSubjectVerifier $reviewSubjects): void
     {
         if ($runtimeIdentity->runtimeRole !== 'worker') {
             throw new RuntimeException('Approval previews may execute only in the worker role.');
@@ -58,7 +62,16 @@ final class BuildTicketApprovalPreview implements ShouldQueue
                 || $preview->control_generation !== $readModel->control_generation) {
                 throw new RuntimeException('preview_binding_changed');
             }
-            $snapshot = $snapshots->create($project, $readModel, $selections->fromArray($preview->selection_snapshot), $preview->id);
+            $selection = $selections->fromArray($preview->selection_snapshot);
+            if ($selection->runType->value === 'review_only') {
+                $reviewSubjects->verifyApproval(
+                    $project,
+                    $readModel->control_commit,
+                    (string) $selection->reviewSubjectReference,
+                    new RedactionContext((string) $project->id, $preview->id, 'ticket-approval-preview'),
+                );
+            }
+            $snapshot = $snapshots->create($project, $readModel, $selection, $preview->id);
             DB::transaction(static function () use ($preview, $snapshot): void {
                 $updated = TicketApprovalPreview::query()
                     ->whereKey($preview->id)
@@ -91,6 +104,8 @@ final class BuildTicketApprovalPreview implements ShouldQueue
             $exception instanceof InstructionResolutionException => 'instruction_'.$exception->reason->value,
             $exception instanceof PromptRenderingException => 'prompt_'.$exception->reason->value,
             $exception instanceof AgentProfileSelectionException => 'agent_profile_'.$exception->reason->value,
+            $exception instanceof ReviewSubjectException => 'review_source_drift:'.$exception->reason,
+            $exception instanceof GitRemoteRejected => 'review_source_ref:'.$exception->reason,
             $exception->getMessage() === 'preview_binding_changed' => 'preview_binding_changed',
             default => 'preview_snapshot_failed',
         };

@@ -347,6 +347,13 @@ final class RunStartContractTest extends TicketUiTestCase
             ->assertForbidden();
 
         $this->actingAs($fixture['operator'])
+            ->post(route('projects.approvals.start', [$fixture['project'], $fixture['approval']]), [
+                'review_subject_reference' => 'refs/heads/changed-at-start',
+            ])
+            ->assertSessionHasErrors('run');
+        self::assertSame(0, ControlOperation::query()->where('operation_type', ControlOperationType::RUN_START)->count());
+
+        $this->actingAs($fixture['operator'])
             ->post(route('projects.approvals.start', [$fixture['project'], $fixture['approval']]))
             ->assertRedirect();
         self::assertSame(1, ControlOperation::query()->where('operation_type', ControlOperationType::RUN_START)->count());

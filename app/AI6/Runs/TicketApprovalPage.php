@@ -7,6 +7,7 @@ use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentProfileSelectionException;
 use App\AI6\Agents\AgentRole;
 use App\AI6\Auth\Models\User;
+use App\AI6\Git\ReviewSubjectException;
 use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\ProjectMembership;
@@ -55,6 +56,24 @@ final class TicketApprovalPage extends Component
 
     public string $pushMode = 'manual';
 
+    public string $runType = 'implementation';
+
+    public string $reviewSubjectKind = 'managed_branch';
+
+    public string $reviewSourceRef = 'refs/heads/main';
+
+    public string $reviewBaseOid = '';
+
+    public string $reviewSourceOid = '';
+
+    public string $reviewSourceRunId = '';
+
+    public string $reviewTreeOid = '';
+
+    public string $reviewDiffHash = '';
+
+    public string $completionMode = 'manual';
+
     #[Locked]
     public ?string $previewId = null;
 
@@ -88,6 +107,7 @@ final class TicketApprovalPage extends Component
         }
         $this->limitInputs = $binding->configuration->values['limits'];
         $this->pushMode = $binding->configuration->values['push_mode'];
+        $this->reviewBaseOid = $this->ticketReadModel->control_commit;
     }
 
     public function hydrate(): void
@@ -193,6 +213,10 @@ final class TicketApprovalPage extends Component
             $this->addError('preview', 'Das Review-Promptprofil wurde abgelehnt: '.$exception->reason->value.'.');
 
             return;
+        } catch (ReviewSubjectException $exception) {
+            $this->addError('preview', 'Der Reviewgegenstand wurde abgelehnt: '.$exception->reason.'.');
+
+            return;
         } catch (\InvalidArgumentException $exception) {
             $this->addError('preview', $exception->getMessage());
 
@@ -258,12 +282,33 @@ final class TicketApprovalPage extends Component
     {
         $profiles = app(AgentProfileRegistry::class);
 
+        $runType = RunType::tryFrom($this->runType) ?? RunType::IMPLEMENTATION;
+        $subjectReference = null;
+        $completionMode = null;
+        if ($runType === RunType::REVIEW_ONLY) {
+            $binding = app(ApprovalSelectionFactory::class)->reviewOnlyBinding($this->ticketReadModel, [
+                'kind' => $this->reviewSubjectKind,
+                'base_oid' => $this->reviewBaseOid,
+                'source_oid' => $this->reviewSourceOid,
+                'ref' => $this->reviewSourceRef,
+                'source_run_id' => $this->reviewSourceRunId,
+                'tree_oid' => $this->reviewTreeOid,
+                'diff_hash' => $this->reviewDiffHash,
+                'completion_mode' => $this->completionMode,
+            ]);
+            $subjectReference = $binding['reference'];
+            $completionMode = $binding['completion_mode'];
+        }
+
         return new ApprovalSelection(
             $profiles->resolve($this->implementationProfile, AgentRole::IMPLEMENTATION, $this->implementationModel, $this->implementationEffort),
             app(ReviewerSlotFactory::class)->fromArray($this->reviewerInputs),
             ApprovalLimits::fromConfiguredValues($this->limitInputs, app(AgentInputLimits::class)),
             $this->attentionUserId === '' ? null : (int) $this->attentionUserId,
             $this->pushMode,
+            $runType,
+            $subjectReference,
+            $completionMode,
         );
     }
 

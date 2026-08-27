@@ -9,4 +9,6 @@ enum RunArtifactKind: string
     case LIMIT_PENDING = 'limit_pending';
     case LIMIT_GRANT = 'limit_grant';
     case QUARANTINED_PATH = 'quarantined_path';
+    case CONTEXT_PACKAGE = 'context_package';
+    case COMPLETION_REPORT = 'completion_report';
 }
