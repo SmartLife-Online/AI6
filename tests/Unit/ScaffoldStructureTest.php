@@ -86,6 +86,9 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Agents/ExecutionHomeManager.php',
             'app/AI6/Agents/FakeAgentAdapter.php',
             'app/AI6/Agents/FindingStatusEntry.php',
+            'app/AI6/Agents/FindingVerificationAssessment.php',
+            'app/AI6/Agents/FindingVerificationRecommendation.php',
+            'app/AI6/Agents/FindingVerificationResult.php',
             'app/AI6/Agents/Http/AgentProfileController.php',
             'app/AI6/Agents/HumanRequestOption.php',
             'app/AI6/Agents/HumanRequestProposal.php',
@@ -376,6 +379,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Reviews/FindingOriginalDisposition.php',
             'app/AI6/Reviews/FindingReviewStatus.php',
             'app/AI6/Reviews/FindingSeverity.php',
+            'app/AI6/Reviews/FindingVerificationRound.php',
             'app/AI6/Reviews/FixContextPackage.php',
             'app/AI6/Reviews/Models/CriterionCoverage.php',
             'app/AI6/Reviews/Models/Finding.php',
@@ -392,6 +396,10 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Reviews/ReviewStallFingerprint.php',
             'app/AI6/Reviews/ReviewerSlot.php',
             'app/AI6/Reviews/ReviewerSlotFactory.php',
+            'app/AI6/Reviews/VerificationContextPackageStore.php',
+            'app/AI6/Reviews/VerifierCandidate.php',
+            'app/AI6/Reviews/VerifierCandidatePoolFactory.php',
+            'app/AI6/Reviews/VerifierSlotSelector.php',
             'app/AI6/Runs/.gitkeep',
             'app/AI6/Runs/ApprovalFreshness.php',
             'app/AI6/Runs/ApprovalLimits.php',
@@ -889,6 +897,7 @@ final class ScaffoldStructureTest extends TestCase
             '2026_08_24_000000_add_run_intervention_contract.php',
             '2026_08_25_000000_add_review_only_run_contract.php',
             '2026_08_26_000000_add_review_only_execution_contract.php',
+            '2026_08_27_000000_add_finding_verification_contract.php',
         ], $migrations);
     }
 

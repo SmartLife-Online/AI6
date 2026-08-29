@@ -220,6 +220,8 @@ final class AgentResultBoundaryTest extends TestCase
             [$targetPath],
             [$targetPath => $newInstructionPath ? null : str_repeat('a', 40)],
             slotId: $slotId,
+            expectedFindingIds: $role === AgentRole::FINDING_VERIFICATION ? ['finding-1'] : [],
+            expectedFindingGroups: $role === AgentRole::FINDING_VERIFICATION ? [str_repeat('d', 64)] : [],
         );
     }
 

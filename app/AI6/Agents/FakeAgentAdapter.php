@@ -100,6 +100,30 @@ final class FakeAgentAdapter implements AgentAdapter
             && ! array_key_exists('criterion_coverage', $document)) {
             $document['criterion_coverage'] = $this->coverage($context);
         }
+        if ($context->role === AgentRole::FINDING_VERIFICATION
+            && ($context->expectedFindingIds !== [] || $context->expectedFindingGroups !== [])) {
+            $assessment = match ($scenario) {
+                AgentScenario::REJECTS_FINDING => 'contradicted',
+                AgentScenario::VERIFICATION_INCONCLUSIVE => 'inconclusive',
+                default => 'confirmed',
+            };
+            $document['verification'] = [
+                'finding_id' => $context->expectedFindingIds[0] ?? null,
+                'duplicate_group' => $context->expectedFindingIds === [] ? $context->expectedFindingGroups[0] : null,
+                'assessment' => $assessment,
+                'recommendation' => match ($assessment) {
+                    'contradicted' => 'not_applicable',
+                    'inconclusive' => 'investigate',
+                    default => 'confirm',
+                },
+                'evidence' => 'Deterministische unabhängige Verifierevidenz.',
+            ];
+            if ($scenario === AgentScenario::VERIFICATION_INVALID_SCHEMA) {
+                $document['verification']['duplicate_group'] = $context->expectedFindingGroups[0] ?? 'unknown';
+            }
+
+            return json_encode($document, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        }
         if ($context->expectedFindingIds !== []) {
             $status = match (true) {
                 $scenario === AgentScenario::REJECTS_FINDING => 'not_applicable',
@@ -206,7 +230,11 @@ final class FakeAgentAdapter implements AgentAdapter
     private function baseDocument(AgentResultContext $context, AgentScenario $scenario, AgentResultStatus $status): array
     {
         $document = [
-            'schema_version' => $context->role === AgentRole::IMPLEMENTATION ? 'ai6.agent.v1' : 'ai6.quality-review.v1',
+            'schema_version' => match ($context->role) {
+                AgentRole::IMPLEMENTATION => 'ai6.agent.v1',
+                AgentRole::FINDING_VERIFICATION => 'ai6.finding-verification.v1',
+                default => 'ai6.quality-review.v1',
+            },
             'status' => $status->value,
             'summary' => 'Deterministisches Fake-Ergebnis.',
             'prompt_snapshot_hash' => $context->promptSnapshot->hash,
@@ -268,6 +296,8 @@ final class FakeAgentAdapter implements AgentAdapter
             AgentScenario::SECURITY_FINDINGS => AgentResultStatus::SECURITY_FINDINGS,
             AgentScenario::UNTRUSTED_EVIDENCE, AgentScenario::INVALID_CRITERION_REFERENCE,
             AgentScenario::REGRESSION_AFTER_FIX => AgentResultStatus::FINDINGS_TO_FIX,
+            AgentScenario::VERIFICATION_INCONCLUSIVE => AgentResultStatus::INCONCLUSIVE,
+            AgentScenario::VERIFICATION_INVALID_SCHEMA => AgentResultStatus::CLEAR,
             AgentScenario::INVALID_JSON => throw new \LogicException('Invalid JSON has no typed status.'),
         };
     }

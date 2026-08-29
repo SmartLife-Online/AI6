@@ -16,4 +16,6 @@ enum AgentScenario: string
     case INVALID_CRITERION_REFERENCE = 'invalid_criterion_reference';
     case REGRESSION_AFTER_FIX = 'regression_after_fix';
     case REJECTS_FINDING = 'rejects_finding';
+    case VERIFICATION_INCONCLUSIVE = 'verification_inconclusive';
+    case VERIFICATION_INVALID_SCHEMA = 'verification_invalid_schema';
 }

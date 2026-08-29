@@ -15,6 +15,7 @@ use App\AI6\Prompts\PromptCatalog;
 use App\AI6\Prompts\PromptRenderer;
 use App\AI6\Prompts\PromptRenderRequest;
 use App\AI6\Prompts\PromptVariables;
+use App\AI6\Reviews\VerifierCandidatePoolFactory;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Security\SecurityPolicy;
 use App\AI6\Tickets\TicketV1Parser;
@@ -32,6 +33,7 @@ final readonly class ApprovalSnapshotFactory
         private TicketV1Parser $tickets,
         private CanonicalJson $canonicalJson,
         private PromptCatalog $promptCatalog,
+        private VerifierCandidatePoolFactory $verifierCandidates,
     ) {}
 
     public function create(Project $project, TicketReadModel $readModel, ApprovalSelection $selection, string $operationId): ApprovalSnapshot
@@ -46,6 +48,7 @@ final readonly class ApprovalSnapshotFactory
         ];
         $firstReviewer = $selection->reviewers[0];
         $promptRequests[] = new PromptRenderRequest('quality_review', new PromptVariables(['context' => $promptContext]), $firstReviewer->promptProfileId);
+        $promptRequests[] = new PromptRenderRequest('finding_verification', new PromptVariables(['context' => $promptContext]));
         $prompt = $this->prompts->snapshot($promptRequests, $context);
         $promptSnapshot = $prompt->jsonSerialize();
         $reviewProfileSnapshots = [];
@@ -70,10 +73,25 @@ final readonly class ApprovalSnapshotFactory
             'entry_version' => $fixEntry->version,
             'template_sha256' => hash('sha256', $fixEntry->template),
         ];
+        $verificationEntry = $this->promptCatalog->entry('finding_verification');
+        $promptSnapshot['finding_verification_prompt_binding'] = [
+            'entry_version' => $verificationEntry->version,
+            'template_sha256' => hash('sha256', $verificationEntry->template),
+        ];
+        $promptSnapshot['finding_verification_snapshot'] = $this->prompts->snapshot([
+            new PromptRenderRequest('finding_verification', new PromptVariables(['context' => $promptContext])),
+        ], $context)->jsonSerialize();
+
+        $verifierCandidates = $selection->verifierCandidates !== []
+            ? $selection->verifierCandidates
+            : $this->verifierCandidates->all();
 
         $providers = [$selection->implementation->profile->providerProfileAlias];
         foreach ($selection->reviewers as $reviewer) {
             $providers[] = $reviewer->providerProfile;
+        }
+        foreach ($verifierCandidates as $candidate) {
+            $providers[] = $candidate->providerProfile;
         }
         $providers = array_values(array_unique($providers));
         sort($providers, SORT_STRING);
@@ -94,6 +112,9 @@ final readonly class ApprovalSnapshotFactory
             }
             $runtimeIds[] = $profileId;
         }
+        foreach ($verifierCandidates as $candidate) {
+            $runtimeIds[] = $this->agentProfiles->get($candidate->profileId)->runtimeProfileId;
+        }
         $runtimeIds = array_values(array_unique($runtimeIds));
         sort($runtimeIds, SORT_STRING);
         $runtime = [];
@@ -113,12 +134,19 @@ final readonly class ApprovalSnapshotFactory
             'control_generation' => $binding->controlGeneration,
         ];
         $agents = $selection->jsonSerialize();
+        $agents['verifier_candidates'] = array_map(static fn ($candidate): array => $candidate->jsonSerialize(), $verifierCandidates);
         $implementationProfile = $selection->implementation->profile;
         $agents['implementation'] += $this->profileSnapshot($implementationProfile);
         foreach ($agents['reviewers'] as $index => $reviewer) {
             $profileId = $reviewer['profile_id'] ?? null;
             if (is_string($profileId)) {
                 $agents['reviewers'][$index] += $this->profileSnapshot($this->agentProfiles->get($profileId));
+            }
+        }
+        foreach ($agents['verifier_candidates'] as $index => $candidate) {
+            $profileId = $candidate['profile_id'] ?? null;
+            if (is_string($profileId)) {
+                $agents['verifier_candidates'][$index] += $this->profileSnapshot($this->agentProfiles->get($profileId));
             }
         }
         $scopeHash = $this->hash('AI6-APPROVAL-SCOPE-V1', $scope);

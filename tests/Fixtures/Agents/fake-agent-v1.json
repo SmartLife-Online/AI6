@@ -71,5 +71,17 @@
         "role": "implementation",
         "status": "no_change_required",
         "bytes": "{\"schema_version\":\"ai6.agent.v1\",\"status\":\"no_change_required\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"decisions\":[{\"key\":\"d1\",\"title\":\"Umsetzung\",\"rationale\":\"Deterministische Entscheidung.\"}],\"changed_paths\":[],\"open_manual_gates\":[],\"implementation_summary\":{\"changed_components\":[],\"decisions\":[\"Deterministische Entscheidung.\"],\"assumptions\":[],\"deviations\":[],\"known_limits\":[],\"tests\":[],\"review_focus\":[]}}"
+    },
+    {
+        "scenario": "verification_inconclusive",
+        "role": "finding_verification",
+        "status": "inconclusive",
+        "bytes": "{\"schema_version\":\"ai6.finding-verification.v1\",\"status\":\"inconclusive\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"verification\":{\"finding_id\":\"finding-1\",\"duplicate_group\":null,\"assessment\":\"inconclusive\",\"recommendation\":\"investigate\",\"evidence\":\"Deterministische unabhängige Verifierevidenz.\"}}"
+    },
+    {
+        "scenario": "verification_invalid_schema",
+        "role": "finding_verification",
+        "error": "schema",
+        "bytes": "{\"schema_version\":\"ai6.finding-verification.v1\",\"status\":\"clear\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"verification\":{\"finding_id\":\"finding-1\",\"duplicate_group\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"assessment\":\"confirmed\",\"recommendation\":\"confirm\",\"evidence\":\"Deterministische unabhängige Verifierevidenz.\"}}"
     }
 ]

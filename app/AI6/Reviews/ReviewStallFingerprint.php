@@ -38,6 +38,7 @@ final class ReviewStallFingerprint
         }
         $completed = ReviewResult::query()->where('run_id', $run->id)
             ->where('round_number', $round)
+            ->where('role', 'quality_review')
             ->where('invocation_outcome', ReviewInvocationOutcome::VALID_RESULT)
             ->distinct()->pluck('slot_id')->map(static fn (mixed $id): string => (string) $id)->all();
         // A reviewer switch inside a round leaves valid results of two slot
@@ -53,6 +54,7 @@ final class ReviewStallFingerprint
 
         $diffHash = ReviewResult::query()->where('run_id', $run->id)
             ->where('round_number', $round)
+            ->where('role', 'quality_review')
             ->where('invocation_outcome', ReviewInvocationOutcome::VALID_RESULT)
             ->value('diff_hash');
         if (! is_string($diffHash)) {

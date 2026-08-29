@@ -68,7 +68,10 @@ final readonly class ReviewOnlyCompletionPredicate
         }
 
         $expected = [];
-        foreach (['reviewers' => 'quality_review', 'verifiers' => 'finding_verification'] as $key => $role) {
+        // Verifier candidates are an approval-bound pool, not mandatory slots.
+        // Slots are materialized only for findings, so requiring every candidate
+        // here would make review-only completion permanently impossible.
+        foreach (['reviewers' => 'quality_review'] as $key => $role) {
             $slots = ($approval->agent_profile_snapshot ?? [])[$key] ?? [];
             if (! is_array($slots)) {
                 $blockers[] = $key.'_snapshot_invalid';

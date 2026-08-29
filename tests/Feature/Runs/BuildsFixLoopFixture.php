@@ -7,13 +7,17 @@ use App\AI6\Agents\AgentScenario;
 use App\AI6\Agents\CredentialRevisionRegistry;
 use App\AI6\Agents\ExecutionHomeManager;
 use App\AI6\Agents\FakeAgentAdapter;
+use App\AI6\Auth\Models\User;
 use App\AI6\Auth\StepUpGuard;
 use App\AI6\Git\RunCheckpointService;
+use App\AI6\HumanLoop\Http\HumanRequestAnswerController;
 use App\AI6\HumanLoop\HumanRequestService;
+use App\AI6\HumanLoop\InterventionAuthorization;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Projects\Models\ProjectMembership;
 use App\AI6\Projects\ProjectRole;
 use App\AI6\Reviews\FindingDispositionController;
+use App\AI6\Reviews\FindingVerificationRound;
 use App\AI6\Reviews\Models\Finding;
 use App\AI6\Reviews\ReviewRound;
 use App\AI6\Runs\ExecutionJobState;
@@ -29,6 +33,8 @@ use App\AI6\Runs\RunImplementation;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Shared\Redaction\RedactionContext;
 use Illuminate\Http\Request;
+use Illuminate\Session\ArraySessionHandler;
+use Illuminate\Session\Store;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -42,6 +48,32 @@ use Symfony\Component\HttpFoundation\Response;
  */
 trait BuildsFixLoopFixture
 {
+    protected function approver(Run $run): User
+    {
+        return ProjectMembership::query()->where('project_id', $run->project_id)
+            ->where('role', ProjectRole::APPROVER->value)->firstOrFail()->user()->firstOrFail();
+    }
+
+    protected function authorization(User $actor, HumanRequest $request, string $effect): InterventionAuthorization
+    {
+        $request = $request->fresh() ?? $request;
+        $session = new Store('test', new ArraySessionHandler(120));
+        $session->setId('fix-loop-'.$actor->id.'-'.bin2hex(random_bytes(4)));
+        $session->start();
+        $proof = Request::create('/human-request', 'POST');
+        $proof->setLaravelSession($session);
+        $guard = $this->app->make(StepUpGuard::class);
+        $guard->markSatisfied($proof, $actor, HumanRequestAnswerController::STEP_UP_ACTION);
+
+        return InterventionAuthorization::consumeFresh(
+            $proof,
+            $actor,
+            $guard,
+            HumanRequestAnswerController::STEP_UP_ACTION,
+            [$request->run_id, $request->id, $request->bound_run_version, $effect],
+        );
+    }
+
     protected function executeFix(Run $run, int $round): ExecutionJob
     {
         foreach ([RunImplementation::class, RunFixTurn::class] as $binding) {
@@ -56,8 +88,11 @@ trait BuildsFixLoopFixture
         return $job->fresh() ?? $job;
     }
 
-    protected function executeReviewRound(Run $run, int $round): ExecutionJob
-    {
+    protected function executeReviewRound(
+        Run $run,
+        int $round,
+        ExecutionJobState $expectedVerificationState = ExecutionJobState::SUCCEEDED,
+    ): ExecutionJob {
         $this->app->forgetInstance(ReviewRound::class);
         $job = $this->stepJob($run, ExecutionStepType::REVIEW, $round);
         (new ExecuteRunStep($job->id))->handle(
@@ -65,7 +100,42 @@ trait BuildsFixLoopFixture
             reviews: $this->app->make(ReviewRound::class),
         );
 
-        return $job->fresh() ?? $job;
+        $review = $job->fresh() ?? $job;
+        if ($review->state !== ExecutionJobState::SUCCEEDED
+            || ! $this->plannedStep($run, ExecutionStepType::VERIFY, $round)) {
+            return $review;
+        }
+
+        // AI6-043 inserts an advisory verification round before a blocking
+        // review can enter the existing fix loop. Keep the predecessor tests
+        // focused on their fix/re-review contract by confirming that evidence
+        // through an independent fake provider, then restore their adapter.
+        $originalAdapter = $this->app->make(AgentAdapter::class);
+        $verificationAdapter = new FakeAgentAdapter(AgentScenario::SUCCESS);
+        $this->app->instance(FakeAgentAdapter::class, $verificationAdapter);
+        $this->app->instance(AgentAdapter::class, $verificationAdapter);
+        $this->app->forgetInstance(FindingVerificationRound::class);
+
+        $verification = $this->stepJob($run, ExecutionStepType::VERIFY, $round);
+        (new ExecuteRunStep($verification->id))->handle(
+            $this->app->make(RunOrchestrator::class),
+            verifications: $this->app->make(FindingVerificationRound::class),
+        );
+        self::assertSame(
+            $expectedVerificationState,
+            $verification->fresh()?->state,
+            (string) $verification->fresh()?->failure_code,
+        );
+
+        $this->app->instance(AgentAdapter::class, $originalAdapter);
+        if ($originalAdapter instanceof FakeAgentAdapter) {
+            $this->app->instance(FakeAgentAdapter::class, $originalAdapter);
+        }
+        foreach ([FindingVerificationRound::class, RunImplementation::class, RunFixTurn::class] as $binding) {
+            $this->app->forgetInstance($binding);
+        }
+
+        return $review;
     }
 
     /**
@@ -153,6 +223,7 @@ trait BuildsFixLoopFixture
             CredentialRevisionRegistry::class,
             ExecutionHomeManager::class,
             InstructionBindingVerifier::class,
+            FindingVerificationRound::class,
             ReviewRound::class,
             RunImplementation::class,
             RunFixTurn::class,

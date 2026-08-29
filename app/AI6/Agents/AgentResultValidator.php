@@ -42,6 +42,8 @@ final readonly class AgentResultValidator
                 // itself, so it stays optional and never has to be complete.
                 $allowedKeys[] = 'finding_statuses';
             }
+        } elseif ($context->role === AgentRole::FINDING_VERIFICATION) {
+            $allowedKeys[] = 'verification';
         } else {
             $allowedKeys[] = 'findings';
             $allowedKeys[] = 'criterion_coverage';
@@ -54,7 +56,11 @@ final readonly class AgentResultValidator
         $this->assertKeys($document, $allowedKeys, $requiredKeys);
 
         $schemaVersion = $this->string($document, 'schema_version');
-        $expectedSchema = $context->role === AgentRole::IMPLEMENTATION ? 'ai6.agent.v1' : 'ai6.quality-review.v1';
+        $expectedSchema = match ($context->role) {
+            AgentRole::IMPLEMENTATION => 'ai6.agent.v1',
+            AgentRole::FINDING_VERIFICATION => 'ai6.finding-verification.v1',
+            default => 'ai6.quality-review.v1',
+        };
         if ($schemaVersion !== $expectedSchema) {
             throw new AgentResultValidationException(AgentResultValidationError::SCHEMA);
         }
@@ -74,11 +80,15 @@ final readonly class AgentResultValidator
         $recommendations = $context->role === AgentRole::IMPLEMENTATION
             ? []
             : $this->instructionRecommendations($document['instruction_recommendations'] ?? []);
-        $findingStatuses = $this->findingStatuses(
+        $findingStatuses = $context->role === AgentRole::FINDING_VERIFICATION ? [] : $this->findingStatuses(
             $document['finding_statuses'] ?? [],
             $context,
             $context->role !== AgentRole::IMPLEMENTATION,
         );
+        $verification = $context->role === AgentRole::FINDING_VERIFICATION
+            && in_array($status, [AgentResultStatus::CLEAR, AgentResultStatus::INCONCLUSIVE], true)
+            ? $this->findingVerification($document['verification'] ?? null, $context, $status)
+            : null;
         $patch = array_key_exists('instruction_patch', $document) ? $this->instructionPatch($document['instruction_patch'], $context, $redactionContext) : null;
         $decisions = $context->role === AgentRole::IMPLEMENTATION ? $this->decisions($document['decisions'] ?? null) : [];
         $changedPaths = $context->role === AgentRole::IMPLEMENTATION ? $this->paths($document['changed_paths'] ?? null) : [];
@@ -118,7 +128,40 @@ final readonly class AgentResultValidator
             $summaryDocument,
             $recommendations,
             $findingStatuses,
+            $verification,
         );
+    }
+
+    private function findingVerification(mixed $value, AgentResultContext $context, AgentResultStatus $status): FindingVerificationResult
+    {
+        if (! is_array($value) || array_is_list($value)) {
+            throw new AgentResultValidationException(AgentResultValidationError::SCHEMA);
+        }
+        $this->assertKeys($value, ['finding_id', 'duplicate_group', 'assessment', 'recommendation', 'evidence']);
+        $findingId = $value['finding_id'] ?? null;
+        $duplicateGroup = $value['duplicate_group'] ?? null;
+        if (($findingId === null) === ($duplicateGroup === null)
+            || ($findingId !== null && (! is_string($findingId) || ! in_array($findingId, $context->expectedFindingIds, true)))
+            || ($duplicateGroup !== null && (! is_string($duplicateGroup) || ! in_array($duplicateGroup, $context->expectedFindingGroups, true)))) {
+            throw new AgentResultValidationException(AgentResultValidationError::SCHEMA);
+        }
+        $assessment = FindingVerificationAssessment::tryFrom($this->string($value, 'assessment'));
+        $recommendation = FindingVerificationRecommendation::tryFrom($this->string($value, 'recommendation'));
+        $evidence = $this->nonEmpty($value, 'evidence');
+        if (! $assessment instanceof FindingVerificationAssessment || ! $recommendation instanceof FindingVerificationRecommendation) {
+            throw new AgentResultValidationException(AgentResultValidationError::SCHEMA);
+        }
+        $expectedStatus = $assessment === FindingVerificationAssessment::INCONCLUSIVE
+            ? AgentResultStatus::INCONCLUSIVE
+            : AgentResultStatus::CLEAR;
+        if ($status !== $expectedStatus
+            || ($assessment === FindingVerificationAssessment::CONFIRMED && $recommendation !== FindingVerificationRecommendation::CONFIRM)
+            || ($assessment === FindingVerificationAssessment::CONTRADICTED && $recommendation !== FindingVerificationRecommendation::NOT_APPLICABLE)
+            || ($assessment === FindingVerificationAssessment::INCONCLUSIVE && $recommendation !== FindingVerificationRecommendation::INVESTIGATE)) {
+            throw new AgentResultValidationException(AgentResultValidationError::STATUS);
+        }
+
+        return new FindingVerificationResult($findingId, $duplicateGroup, $assessment, $recommendation, $evidence);
     }
 
     /**

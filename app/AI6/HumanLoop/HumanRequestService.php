@@ -14,11 +14,15 @@ use App\AI6\Projects\Policies\ProjectPolicy;
 use App\AI6\Projects\ProjectAction;
 use App\AI6\Reviews\FindingDispositionType;
 use App\AI6\Reviews\Models\Finding;
+use App\AI6\Reviews\Models\ReviewResult;
+use App\AI6\Reviews\VerifierCandidate;
 use App\AI6\Runs\ExecutionJobState;
+use App\AI6\Runs\ExecutionStepType;
 use App\AI6\Runs\ImportLimit;
 use App\AI6\Runs\ImportLimitResult;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Runs\Models\RunArtifact;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\RunArtifactKind;
@@ -32,6 +36,7 @@ use App\AI6\Runs\WaitReason;
 use App\AI6\Shared\Redaction\InvalidRedactionInputException;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -245,7 +250,7 @@ final readonly class HumanRequestService
                 [],
                 [],
             ),
-            $reviewLimit ? $this->firstActiveReviewSlot($run) : 'system:'.$job->step_type,
+            $reviewLimit ? $this->activeSlotForStep($run, $job) : 'system:'.$job->step_type,
             $job->idempotency_key,
             $reason,
             $limit,
@@ -258,7 +263,7 @@ final readonly class HumanRequestService
             throw new HumanRequestRejected('failure_wait_invalid', 'The failure wait reason is not supported.');
         }
         $slotId = $agentSlotId ?? 'system:'.$job->step_type;
-        $reviewSlot = $run->agents()->where('slot_id', $slotId)->where('role', 'quality_review')->exists();
+        $reviewSlot = $run->agents()->where('slot_id', $slotId)->whereIn('role', ['quality_review', 'finding_verification'])->exists();
         $options = $reason === WaitReason::PROVIDER_ERROR
             ? [new HumanRequestOption('retry', 'Idempotent erneut versuchen')]
             : [new HumanRequestOption('new_turn', 'Neuen gebundenen Turn starten')];
@@ -620,10 +625,11 @@ final readonly class HumanRequestService
                 if (in_array($chosenEffect, ['switch_reviewer', 'switch_profile'], true)) {
                     $this->switchBoundReviewer($run, $fresh->bound_agent_slot);
                 } elseif ($chosenEffect === 'new_turn') {
-                    $reviewSlot = $run->agents()->where('slot_id', $fresh->bound_agent_slot)
-                        ->where('role', 'quality_review')->exists();
-                    if ($reviewSlot) {
+                    $role = $run->agents()->where('slot_id', $fresh->bound_agent_slot)->value('role');
+                    if ($role === 'quality_review') {
                         $this->orchestrator->discardReviewSession($run, $fresh->bound_agent_slot);
+                    } elseif ($role === 'finding_verification') {
+                        $this->orchestrator->discardVerifierSession($run, $fresh->bound_agent_slot);
                     } else {
                         $this->orchestrator->discardImplementationSessions($run);
                     }
@@ -764,22 +770,47 @@ final readonly class HumanRequestService
         );
     }
 
-    private function firstActiveReviewSlot(Run $run): string
+    private function activeSlotForStep(Run $run, ExecutionJob $job): string
     {
-        $slot = $run->agents()->where('role', 'quality_review')->where('is_active', true)
+        $role = ExecutionStepType::tryFrom($job->step_type) === ExecutionStepType::VERIFY
+            ? 'finding_verification'
+            : 'quality_review';
+        $slot = $run->agents()->where('role', $role)->where('is_active', true)
             ->orderBy('slot_revision')->value('slot_id');
 
-        return is_string($slot) && $slot !== '' ? $slot : 'system:review';
+        return is_string($slot) && $slot !== '' ? $slot : 'system:'.$job->step_type;
     }
 
     private function switchBoundReviewer(Run $run, string $slotId): void
     {
-        $slot = $run->agents()->where('slot_id', $slotId)->where('role', 'quality_review')
-            ->where('is_active', true)->first();
-        if ($slot === null) {
+        $activeSlotId = DB::table('run_agents')->where('run_id', $run->id)->where('slot_id', $slotId)
+            ->whereIn('role', ['quality_review', 'finding_verification'])
+            ->where('is_active', true)->value('id');
+        $slot = is_int($activeSlotId) ? RunAgent::query()->find($activeSlotId) : null;
+        if (! $slot instanceof RunAgent) {
             throw new HumanRequestRejected('reviewer_slot_not_active', 'The bound reviewer slot is no longer active.');
         }
-        foreach (($run->agent_profile_snapshot ?? [])['reviewers'] ?? [] as $candidate) {
+        $candidateKey = $slot->role === 'finding_verification' ? 'verifier_candidates' : 'reviewers';
+        $sourceProviders = [];
+        $implementationProfile = null;
+        if ($slot->role === 'finding_verification') {
+            $logicalSlot = $slot->approval_slot_id ?? $slot->slot_id;
+            $slotIds = RunAgent::query()->where('run_id', $run->id)
+                ->where('approval_slot_id', $logicalSlot)->pluck('slot_id');
+            $verificationQuery = ReviewResult::query()->where('run_id', $run->id)->whereIn('slot_id', $slotIds)
+                ->where(static function (Builder $query): void {
+                    $query->whereNotNull('original_finding_id')->orWhereNotNull('original_duplicate_group');
+                })->orderByDesc('attempt');
+            $findingId = $verificationQuery->value('original_finding_id');
+            $duplicateGroup = is_string($findingId) ? null : $verificationQuery->value('original_duplicate_group');
+            $sourceProviders = is_string($findingId)
+                ? Finding::query()->whereKey($findingId)->pluck('provider_profile')->filter(static fn (mixed $value): bool => is_string($value))->all()
+                : (is_string($duplicateGroup)
+                    ? Finding::query()->where('run_id', $run->id)->where('duplicate_group', $duplicateGroup)->pluck('provider_profile')->filter(static fn (mixed $value): bool => is_string($value))->unique()->values()->all()
+                    : []);
+            $implementationProfile = ($run->agent_profile_snapshot ?? [])['implementation']['profile_id'] ?? null;
+        }
+        foreach (($run->agent_profile_snapshot ?? [])[$candidateKey] ?? [] as $candidate) {
             if (! is_array($candidate)) {
                 continue;
             }
@@ -787,14 +818,33 @@ final readonly class HumanRequestService
                 $candidate['provider_profile'] ?? null,
                 $candidate['model'] ?? null,
                 $candidate['effort'] ?? null,
-                $candidate['prompt_profile_id'] ?? null,
+                $candidate['prompt_profile_id'] ?? ($slot->role === 'finding_verification' ? 'finding_verification' : null),
             ];
             if (! array_reduce($values, static fn (bool $valid, mixed $value): bool => $valid && is_string($value) && $value !== '', true)
                 || ($values[0] === $slot->provider_profile && $values[1] === $slot->model
-                    && $values[2] === $slot->effort && $values[3] === $slot->prompt_profile)) {
+                    && $values[2] === $slot->effort && $values[3] === $slot->prompt_profile)
+                || ($slot->role === 'finding_verification'
+                    && ($values[0] === $slot->provider_profile || in_array($values[0], $sourceProviders, true)
+                        || ($candidate['profile_id'] ?? null) === $implementationProfile))) {
                 continue;
             }
-            $this->orchestrator->reviseReviewSlot($run, $slotId, ...$values);
+            if ($slot->role === 'quality_review') {
+                $this->orchestrator->reviseReviewSlot($run, $slotId, ...$values);
+            } else {
+                $profileId = $candidate['profile_id'] ?? null;
+                $candidateId = $candidate['id'] ?? null;
+                if (! is_string($profileId) || ! is_string($candidateId)) {
+                    continue;
+                }
+                $this->orchestrator->reviseVerifierSlot($run, $slotId, new VerifierCandidate(
+                    $candidateId,
+                    $profileId,
+                    $values[0],
+                    $values[1],
+                    $values[2],
+                    ['selected_from_approval_snapshot', 'human_authorized_slot_revision'],
+                ));
+            }
 
             return;
         }

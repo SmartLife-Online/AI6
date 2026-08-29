@@ -10,6 +10,7 @@ use App\AI6\Git\ReviewSubjectKind;
 use App\AI6\Git\ReviewSubjectReference;
 use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Reviews\ReviewerSlotFactory;
+use App\AI6\Reviews\VerifierCandidatePoolFactory;
 use App\AI6\Tickets\TicketV1Parser;
 
 final readonly class ApprovalSelectionFactory
@@ -20,6 +21,7 @@ final readonly class ApprovalSelectionFactory
         private AgentInputLimits $inputLimits,
         private ReviewSubjectReference $reviewSubjects,
         private TicketV1Parser $tickets,
+        private VerifierCandidatePoolFactory $verifiers,
     ) {}
 
     public function completionModeForRisk(ReviewOnlyCompletionMode $requested, string $risk): ReviewOnlyCompletionMode
@@ -86,6 +88,10 @@ final readonly class ApprovalSelectionFactory
             'effort' => $slot['effort'] ?? null,
             'prompt_profile' => $slot['prompt_profile_id'] ?? null,
         ], $reviewers);
+        $verifierValues = $value['verifier_candidates'] ?? null;
+        $verifiers = is_array($verifierValues) && array_is_list($verifierValues)
+            ? $this->verifiers->fromArray($verifierValues)
+            : $this->verifiers->all();
 
         return new ApprovalSelection(
             $this->profiles->resolve(
@@ -101,6 +107,7 @@ final readonly class ApprovalSelectionFactory
             RunType::tryFrom(is_string($value['run_type'] ?? null) ? $value['run_type'] : '') ?? RunType::IMPLEMENTATION,
             is_string($value['review_subject_reference'] ?? null) ? $value['review_subject_reference'] : null,
             ReviewOnlyCompletionMode::tryFrom(is_string($value['completion_mode'] ?? null) ? $value['completion_mode'] : ''),
+            $verifiers,
         );
     }
 }

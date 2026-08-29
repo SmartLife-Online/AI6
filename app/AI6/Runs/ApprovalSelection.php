@@ -4,11 +4,15 @@ namespace App\AI6\Runs;
 
 use App\AI6\Agents\AgentSelection;
 use App\AI6\Reviews\ReviewerSlot;
+use App\AI6\Reviews\VerifierCandidate;
 use JsonSerializable;
 
 final readonly class ApprovalSelection implements JsonSerializable
 {
-    /** @param non-empty-list<ReviewerSlot> $reviewers */
+    /**
+     * @param  non-empty-list<ReviewerSlot>  $reviewers
+     * @param  list<VerifierCandidate>  $verifierCandidates
+     */
     public function __construct(
         public AgentSelection $implementation,
         public array $reviewers,
@@ -18,6 +22,7 @@ final readonly class ApprovalSelection implements JsonSerializable
         public RunType $runType = RunType::IMPLEMENTATION,
         public ?string $reviewSubjectReference = null,
         public ?ReviewOnlyCompletionMode $completionMode = null,
+        public array $verifierCandidates = [],
     ) {
         if (! in_array($pushMode, ['manual', 'automatic_after_gates'], true)) {
             throw new \InvalidArgumentException('Der Pushmodus ist ungültig.');
@@ -48,6 +53,7 @@ final readonly class ApprovalSelection implements JsonSerializable
                 'runtime_profile_id' => $this->implementation->profile->runtimeProfileId,
             ],
             'reviewers' => array_map(static fn (ReviewerSlot $slot): array => $slot->jsonSerialize(), $this->reviewers),
+            'verifier_candidates' => array_map(static fn (VerifierCandidate $candidate): array => $candidate->jsonSerialize(), $this->verifierCandidates),
             'limits' => $this->limits->jsonSerialize(),
             'attention_user_id' => $this->attentionUserId,
             'push_mode' => $this->pushMode,

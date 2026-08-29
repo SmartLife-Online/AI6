@@ -201,6 +201,20 @@
                             @endforeach
                         </ol>
                     @endif
+                    @if ($finding['verifications'] !== [])
+                        <h5>Advisory Verifierevidenz</h5>
+                        <p>Diese Evidenz ändert weder das Originalfinding noch seine wirksame Disposition.</p>
+                        <ol data-verification-evidence>
+                            @foreach ($finding['verifications'] as $entry)
+                                <li data-verification-assessment="{{ $entry['assessment'] }}">
+                                    Runde {{ $entry['round'] }} · {{ $entry['source'] }}:
+                                    {{ $entry['assessment'] }} / Empfehlung {{ $entry['recommendation'] }} — {{ $entry['evidence'] }}
+                                    · Checkpoint <code>{{ $entry['checkpoint_tree'] }}</code>
+                                    · Diff <code>{{ $entry['diff_hash'] }}</code>
+                                </li>
+                            @endforeach
+                        </ol>
+                    @endif
                     @if ($canDisposeFindings)
                         <input type="hidden" name="expected_version" value="{{ $run->version }}"
                             form="finding-disposition-{{ $finding['id'] }}">

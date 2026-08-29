@@ -36,6 +36,7 @@ use Illuminate\Support\Collection;
  * @property string $duplicate_group
  * @property-read Collection<int, FindingDisposition> $dispositions
  * @property-read Collection<int, FindingStatus> $statuses
+ * @property-read Collection<int, ReviewResult> $verifications
  */
 final class Finding extends Model
 {
@@ -68,6 +69,12 @@ final class Finding extends Model
     public function statuses(): HasMany
     {
         return $this->hasMany(FindingStatus::class);
+    }
+
+    /** @return HasMany<ReviewResult, $this> */
+    public function verifications(): HasMany
+    {
+        return $this->hasMany(ReviewResult::class, 'original_finding_id');
     }
 
     /** @return array<string, string> */

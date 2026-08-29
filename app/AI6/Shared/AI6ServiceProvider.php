@@ -72,6 +72,7 @@ use App\AI6\Projects\Policies\ProjectPolicy;
 use App\AI6\Prompts\PromptCatalog;
 use App\AI6\Prompts\PromptRenderer;
 use App\AI6\Reviews\EffectiveFindingState;
+use App\AI6\Reviews\FindingVerificationRound;
 use App\AI6\Reviews\FixContextPackage;
 use App\AI6\Reviews\ReviewContextPackageStore;
 use App\AI6\Reviews\ReviewerSlotFactory;
@@ -79,6 +80,9 @@ use App\AI6\Reviews\ReviewResultParser;
 use App\AI6\Reviews\ReviewResultStore;
 use App\AI6\Reviews\ReviewRound;
 use App\AI6\Reviews\ReviewStallFingerprint;
+use App\AI6\Reviews\VerificationContextPackageStore;
+use App\AI6\Reviews\VerifierCandidatePoolFactory;
+use App\AI6\Reviews\VerifierSlotSelector;
 use App\AI6\Runs\ApprovalSelectionFactory;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ApprovalStatusPage;
@@ -237,6 +241,10 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(ReviewResultStore::class);
         $this->app->singleton(ReviewContextPackageStore::class);
         $this->app->singleton(ReviewRound::class);
+        $this->app->singleton(VerifierCandidatePoolFactory::class);
+        $this->app->singleton(VerifierSlotSelector::class);
+        $this->app->singleton(VerificationContextPackageStore::class);
+        $this->app->singleton(FindingVerificationRound::class);
         $this->app->singleton(ReviewStallFingerprint::class);
         $this->app->singleton(CredentialRevisionRegistry::class, static fn (): CredentialRevisionRegistry => CredentialRevisionRegistry::fromConfiguredValues());
         $this->app->singleton(

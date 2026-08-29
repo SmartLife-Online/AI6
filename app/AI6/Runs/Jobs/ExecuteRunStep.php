@@ -5,6 +5,7 @@ namespace App\AI6\Runs\Jobs;
 use App\AI6\HumanLoop\HumanRequestRejected;
 use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\HumanLoop\Models\Intervention;
+use App\AI6\Reviews\FindingVerificationRound;
 use App\AI6\Reviews\ReviewRound;
 use App\AI6\Reviews\ReviewStallFingerprint;
 use App\AI6\Runs\ExecutionJobState;
@@ -52,6 +53,7 @@ final class ExecuteRunStep implements ShouldQueue
         ?ReviewStallFingerprint $stallFingerprints = null,
         ?ReviewOnlyPrepareStep $reviewPrepare = null,
         ?ReviewOnlyRunCoordinator $reviewOnly = null,
+        ?FindingVerificationRound $verifications = null,
     ): void {
         $job = ExecutionJob::query()->find($this->executionJobId);
         if (! $job instanceof ExecutionJob
@@ -91,6 +93,7 @@ final class ExecuteRunStep implements ShouldQueue
             ExecutionStepType::IMPLEMENT,
             ExecutionStepType::REVIEW,
             ExecutionStepType::FIX,
+            ExecutionStepType::VERIFY,
         ], true) ? $limits->runtimeExceeded($run) : null;
         $waitReason = WaitReason::RESOURCE_LIMIT;
         if ($exceeded === null && $type === ExecutionStepType::REVIEW) {
@@ -106,6 +109,14 @@ final class ExecuteRunStep implements ShouldQueue
                 $run,
                 ImportLimit::MAX_FIX_ROUNDS,
                 'fix-round:'.$claimed->step_number,
+            );
+            $waitReason = WaitReason::REVIEW_LIMIT;
+        }
+        if ($exceeded === null && $type === ExecutionStepType::VERIFY) {
+            $exceeded = $limits->consume(
+                $run,
+                ImportLimit::MAX_VERIFICATION_ROUNDS,
+                'verification-round:'.$claimed->step_number,
             );
             $waitReason = WaitReason::REVIEW_LIMIT;
         }
@@ -159,6 +170,12 @@ final class ExecuteRunStep implements ShouldQueue
 
         if ($type === ExecutionStepType::REVIEW) {
             ($reviews ?? app(ReviewRound::class))->execute($claimed, $run, $owner);
+
+            return;
+        }
+
+        if ($type === ExecutionStepType::VERIFY) {
+            ($verifications ?? app(FindingVerificationRound::class))->execute($claimed, $run, $owner);
 
             return;
         }

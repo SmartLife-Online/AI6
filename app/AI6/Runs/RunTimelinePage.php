@@ -10,6 +10,7 @@ use App\AI6\Reviews\EffectiveFindingState;
 use App\AI6\Reviews\Models\CriterionCoverage;
 use App\AI6\Reviews\Models\Finding;
 use App\AI6\Reviews\Models\InstructionRecommendation;
+use App\AI6\Reviews\Models\ReviewResult;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunAgent;
@@ -116,8 +117,11 @@ final class RunTimelinePage extends Component
             $reviewers[$reviewer->slot_id] = $reviewer->provider_profile.' · '.$reviewer->model.' · '.$reviewer->effort;
         }
         /** @var Collection<int, Finding> $findings */
-        $findings = Finding::query()->with(['dispositions', 'statuses'])->where('run_id', $run->id)
+        $findings = Finding::query()->with(['dispositions', 'statuses', 'verifications'])->where('run_id', $run->id)
             ->orderBy('round_number')->orderBy('slot_id')->orderBy('created_at')->get();
+        $verificationResults = ReviewResult::query()->where('run_id', $run->id)
+            ->where('role', 'finding_verification')->where('invocation_outcome', 'valid_result')
+            ->orderBy('round_number')->orderBy('created_at')->get();
         foreach ($findings as $finding) {
             $effective = $findingState->currentDisposition($finding, $run);
             $effectiveValue = $effective?->type->value ?? $finding->original_disposition->value;
@@ -174,6 +178,19 @@ final class RunTimelinePage extends Component
                 'duplicate_group' => $finding->duplicate_group,
                 'history' => $history,
                 'status_history' => $statusHistory,
+                'verifications' => array_values(array_map(fn (ReviewResult $result): array => [
+                    'round' => $result->round_number,
+                    'source' => $redact($result->provider_profile.' · '.$result->model.' · '.$result->effort),
+                    'assessment' => $result->verification_assessment,
+                    'recommendation' => $result->verification_recommendation,
+                    'evidence' => $redact((string) $result->verification_evidence),
+                    'checkpoint_tree' => $result->checkpoint_tree_sha,
+                    'diff_hash' => $result->diff_hash,
+                ], $finding->verifications
+                    ->where('role', 'finding_verification')
+                    ->where('invocation_outcome', 'valid_result')
+                    ->concat($verificationResults->where('original_duplicate_group', $finding->duplicate_group))
+                    ->unique('id')->values()->all())),
             ];
         }
         /** @var Collection<int, CriterionCoverage> $coverage */

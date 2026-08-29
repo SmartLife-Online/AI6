@@ -8,6 +8,7 @@ use App\AI6\Reviews\Models\ReviewResult;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Shared\Redaction\RedactionContext;
+use App\AI6\Shared\Redaction\Redactor;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -15,7 +16,10 @@ use Illuminate\Support\Str;
 /** Append-only persistence for one review invocation. */
 final readonly class ReviewResultStore
 {
-    public function __construct(private ReviewResultParser $parser) {}
+    public function __construct(
+        private ReviewResultParser $parser,
+        private Redactor $redactor,
+    ) {}
 
     /** @param array<string, mixed> $bindings */
     public function append(
@@ -61,16 +65,29 @@ final readonly class ReviewResultStore
         RedactionContext $context,
     ): ReviewResult {
         return DB::transaction(function () use ($run, $slot, $round, $attempt, $bindings, $result, $artifactId, $context): ReviewResult {
-            $review = $this->append(
-                $run,
-                $slot,
-                $round,
-                $attempt,
-                ReviewInvocationOutcome::VALID_RESULT,
-                $bindings,
-                resultStatus: $result->status->value,
-                artifactId: $artifactId,
-            );
+            $verification = $result->findingVerification;
+            $review = ReviewResult::query()->create([
+                'id' => (string) Str::uuid(),
+                'run_id' => $run->id,
+                'round_number' => $round,
+                'slot_id' => $slot->slot_id,
+                'attempt' => $attempt,
+                'role' => $slot->role,
+                'provider_profile' => $slot->provider_profile,
+                'model' => $slot->model,
+                'effort' => $slot->effort,
+                'prompt_profile' => $slot->prompt_profile,
+                'session_id' => $slot->session_id,
+                ...$bindings,
+                'invocation_outcome' => ReviewInvocationOutcome::VALID_RESULT,
+                'result_status' => $result->status->value,
+                'raw_artifact_id' => $artifactId,
+                'original_finding_id' => $verification?->findingId,
+                'original_duplicate_group' => $verification?->duplicateGroup,
+                'verification_assessment' => $verification?->assessment->value,
+                'verification_recommendation' => $verification?->recommendation->value,
+                'verification_evidence' => $verification === null ? null : $this->redactor->redact($verification->evidence, $context)->text,
+            ]);
             $this->parser->persist($review, $run, $result, $context);
 
             return $review;

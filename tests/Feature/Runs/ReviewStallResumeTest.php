@@ -3,15 +3,9 @@
 namespace Tests\Feature\Runs;
 
 use App\AI6\Agents\AgentScenario;
-use App\AI6\Auth\Models\User;
-use App\AI6\Auth\StepUpGuard;
-use App\AI6\HumanLoop\Http\HumanRequestAnswerController;
 use App\AI6\HumanLoop\HumanRequestService;
-use App\AI6\HumanLoop\InterventionAuthorization;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Projects\Models\Project;
-use App\AI6\Projects\Models\ProjectMembership;
-use App\AI6\Projects\ProjectRole;
 use App\AI6\Reviews\Models\ReviewResult;
 use App\AI6\Reviews\ReviewStallFingerprint;
 use App\AI6\Runs\ExecutionJobState;
@@ -22,9 +16,6 @@ use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunState;
 use App\AI6\Runs\WaitReason;
-use Illuminate\Http\Request;
-use Illuminate\Session\ArraySessionHandler;
-use Illuminate\Session\Store;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Tests\Feature\Reviews\BuildsReviewRoundFixture;
@@ -200,6 +191,13 @@ final class ReviewStallResumeTest extends TicketUiTestCase
             ->where('invocation_outcome', 'valid_result')
             ->pluck('diff_hash')->unique()->all();
         self::assertCount(1, $hashes, 'The stall fixture requires an unchanged diff across both rounds.');
+        $fingerprints = $this->app->make(ReviewStallFingerprint::class);
+        self::assertSame(
+            $fingerprints->completedRound($run, 1),
+            $fingerprints->completedRound($run, 2),
+            'The stall fixture requires identical completed-round fingerprints.',
+        );
+        self::assertTrue($fingerprints->stalled($run, 2));
         self::assertTrue($this->plannedStep($run, ExecutionStepType::FIX, 2));
 
         // The first repetition parks before the next agent call.
@@ -222,30 +220,5 @@ final class ReviewStallResumeTest extends TicketUiTestCase
     private function projectIdentifier(Run $run): string
     {
         return (string) Project::query()->findOrFail($run->project_id)->project_identifier;
-    }
-
-    private function approver(Run $run): User
-    {
-        return ProjectMembership::query()->where('project_id', $run->project_id)
-            ->where('role', ProjectRole::APPROVER->value)->firstOrFail()->user()->firstOrFail();
-    }
-
-    private function authorization(User $actor, HumanRequest $request, string $effect): InterventionAuthorization
-    {
-        $session = new Store('test', new ArraySessionHandler(120));
-        $session->setId('stall-resume-'.$actor->id.'-'.bin2hex(random_bytes(4)));
-        $session->start();
-        $proof = Request::create('/human-request', 'POST');
-        $proof->setLaravelSession($session);
-        $guard = $this->app->make(StepUpGuard::class);
-        $guard->markSatisfied($proof, $actor, HumanRequestAnswerController::STEP_UP_ACTION);
-
-        return InterventionAuthorization::consumeFresh(
-            $proof,
-            $actor,
-            $guard,
-            HumanRequestAnswerController::STEP_UP_ACTION,
-            [$request->run_id, $request->id, $request->bound_run_version, $effect],
-        );
     }
 }

@@ -84,13 +84,18 @@ trait BuildsReviewRoundFixture
      * @param  list<InstructionCandidate>  $instructionCandidates
      * @return array{run: Run, worktree: string}
      */
-    protected function preparedReviewRun(string $ticketId, array $instructionCandidates = []): array
-    {
+    protected function preparedReviewRun(
+        string $ticketId,
+        array $instructionCandidates = [],
+        bool $enableIndependentFallback = true,
+    ): array {
         $agentProfiles = config('ai6.agent_profiles');
         $agentProfiles['codex-gpt-5.6-terra']['capability_status'] = 'available';
+        $agentProfiles['grok-cli-review']['capability_status'] = $enableIndependentFallback ? 'available' : 'unchecked';
         config([
             'ai6.agent_profiles' => $agentProfiles,
             'ai6.credential_revisions.codex_cli' => 'test-v1',
+            'ai6.credential_revisions.grok_cli' => 'test-v1',
         ]);
         foreach ([
             AgentProfileRegistry::class,

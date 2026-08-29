@@ -27,5 +27,6 @@ final readonly class AgentResult
         public ?ImplementationSummary $implementationSummary = null,
         public array $instructionRecommendations = [],
         public array $findingStatuses = [],
+        public ?FindingVerificationResult $findingVerification = null,
     ) {}
 }

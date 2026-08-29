@@ -26,6 +26,7 @@ use App\AI6\Reviews\Models\Finding;
 use App\AI6\Reviews\Models\FindingDisposition;
 use App\AI6\Reviews\Models\ReviewResult;
 use App\AI6\Reviews\ReviewInvocationOutcome;
+use App\AI6\Reviews\VerifierCandidate;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunAgent;
@@ -38,6 +39,7 @@ use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
 use App\AI6\Tickets\TicketDocument;
 use App\AI6\Tickets\TicketStatusOperation;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -242,26 +244,32 @@ final readonly class RunOrchestrator
         }
 
         if ($run->run_type === RunType::REVIEW_ONLY) {
-            return self::decideReviewOnlyNextStep($run->state, $run->wait_reason, array_keys($completed));
+            return self::decideReviewOnlyNextStep($run->state, $run->wait_reason, array_keys($completed), $this->hasFindingsForRound($run, 1));
         }
 
-        return self::decideNextStepRound($run->state, $run->wait_reason, array_keys($completed), $this->hasEffectiveBlockingFindings($run));
+        return self::decideNextStepRound($run->state, $run->wait_reason, array_keys($completed), $this->hasEffectiveBlockingFindings($run), $this->hasFindingsForCurrentRound($run, array_keys($completed)));
     }
 
     /** @param list<string> $completedCoordinates
      * @return array{type: ExecutionStepType, number: int}|null
      */
-    public static function decideReviewOnlyNextStep(RunState $state, ?WaitReason $waitReason, array $completedCoordinates): ?array
+    public static function decideReviewOnlyNextStep(RunState $state, ?WaitReason $waitReason, array $completedCoordinates, bool $hasFindings = false): ?array
     {
         if (in_array($state, [RunState::FAILED, RunState::COMPLETED, RunState::CANCELLED, RunState::WAITING], true)
             || $waitReason instanceof WaitReason) {
             return null;
         }
         $completed = array_fill_keys($completedCoordinates, true);
-        foreach ([ExecutionStepType::REVIEW_PREPARE, ExecutionStepType::CHECK, ExecutionStepType::REVIEW, ExecutionStepType::REPORT] as $type) {
+        foreach ([ExecutionStepType::REVIEW_PREPARE, ExecutionStepType::CHECK, ExecutionStepType::REVIEW] as $type) {
             if (! isset($completed[$type->value.':1'])) {
                 return ['type' => $type, 'number' => 1];
             }
+        }
+        if ($hasFindings && ! isset($completed[ExecutionStepType::VERIFY->value.':1'])) {
+            return ['type' => ExecutionStepType::VERIFY, 'number' => 1];
+        }
+        if (! isset($completed[ExecutionStepType::REPORT->value.':1'])) {
+            return ['type' => ExecutionStepType::REPORT, 'number' => 1];
         }
 
         return null;
@@ -278,6 +286,7 @@ final readonly class RunOrchestrator
         ?WaitReason $waitReason,
         array $completedCoordinates,
         bool $hasEffectiveBlocker,
+        bool $hasFindings = false,
     ): ?array {
         if (in_array($state, [RunState::FAILED, RunState::COMPLETED, RunState::CANCELLED, RunState::WAITING], true)
             || $waitReason instanceof WaitReason) {
@@ -289,9 +298,15 @@ final readonly class RunOrchestrator
                 return ['type' => $type, 'number' => 1];
             }
         }
+        if ($hasFindings && ! isset($completed[ExecutionStepType::VERIFY->value.':1'])) {
+            return ['type' => ExecutionStepType::VERIFY, 'number' => 1];
+        }
         $reviewRound = 1;
         while (isset($completed[ExecutionStepType::REVIEW->value.':'.($reviewRound + 1)])) {
             $reviewRound++;
+        }
+        if ($hasFindings && ! isset($completed[ExecutionStepType::VERIFY->value.':'.$reviewRound])) {
+            return ['type' => ExecutionStepType::VERIFY, 'number' => $reviewRound];
         }
         if (! isset($completed[ExecutionStepType::FIX->value.':'.$reviewRound])) {
             return $hasEffectiveBlocker
@@ -381,7 +396,13 @@ final readonly class RunOrchestrator
             && $fresh->review_readiness_state === 'ready') {
             $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::REVIEW);
         }
-        if ($completed === ExecutionStepType::REVIEW && $fresh->run_type !== RunType::REVIEW_ONLY && $fresh->phase === RunPhase::REVIEW
+        if ($completed === ExecutionStepType::REVIEW && $fresh->run_type !== RunType::REVIEW_ONLY
+            && $fresh->phase === RunPhase::REVIEW
+            && ! $this->hasFindingsForRound($fresh, $completedNumber ?? 1)
+            && $this->hasEffectiveBlockingFindings($fresh)) {
+            $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::FIX);
+        }
+        if ($completed === ExecutionStepType::VERIFY && $fresh->run_type !== RunType::REVIEW_ONLY && $fresh->phase === RunPhase::REVIEW
             && $this->hasEffectiveBlockingFindings($fresh)) {
             $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::FIX);
         }
@@ -392,6 +413,23 @@ final readonly class RunOrchestrator
         $this->planNextStep($fresh, $completed, $completedNumber);
 
         return true;
+    }
+
+    /** @param list<string> $completed */
+    private function hasFindingsForCurrentRound(Run $run, array $completed): bool
+    {
+        $round = 1;
+        while (in_array(ExecutionStepType::REVIEW->value.':'.($round + 1), $completed, true)) {
+            $round++;
+        }
+
+        return $this->hasFindingsForRound($run, $round);
+    }
+
+    private function hasFindingsForRound(Run $run, int $round): bool
+    {
+        return Finding::query()->where('run_id', $run->id)->where('round_number', $round)
+            ->where('checkpoint_tree_sha', $run->checkpoint_tree_sha)->exists();
     }
 
     /**
@@ -1433,6 +1471,108 @@ final readonly class RunOrchestrator
     {
         RunAgent::query()->where('run_id', $run->id)->where('slot_id', $slotId)
             ->where('role', 'quality_review')->update(['session_id' => null]);
+    }
+
+    public function discardVerifierSession(Run $run, string $slotId): void
+    {
+        RunAgent::query()->where('run_id', $run->id)->where('slot_id', $slotId)
+            ->where('role', 'finding_verification')->update(['session_id' => null]);
+    }
+
+    public function materializeVerifierSlot(Run $run, VerifierCandidate $candidate, Finding $finding, int $round): RunAgent
+    {
+        $hash = hash('sha256', implode(':', [$run->id, $round, $candidate->id, $finding->duplicate_group]));
+        $slotId = substr($hash, 0, 8).'-'.substr($hash, 8, 4).'-4'.substr($hash, 13, 3).'-b'.substr($hash, 17, 3).'-'.substr($hash, 20, 12);
+
+        $slot = RunAgent::query()->firstOrCreate([
+            'run_id' => $run->id,
+            'slot_id' => $slotId,
+        ], [
+            'approval_slot_id' => $slotId,
+            'slot_revision' => 1,
+            'is_active' => true,
+            'role' => 'finding_verification',
+            'provider_profile' => $candidate->providerProfile,
+            'model' => $candidate->model,
+            'effort' => $candidate->effort,
+            'prompt_profile' => 'finding_verification',
+            'session_id' => (string) Str::uuid(),
+        ]);
+        if ($slot->is_active) {
+            $slot->forceFill(['session_id' => (string) Str::uuid()])->save();
+
+            return $slot->fresh() ?? $slot;
+        }
+
+        return RunAgent::query()->where('run_id', $run->id)
+            ->where('approval_slot_id', $slot->approval_slot_id ?? $slot->slot_id)
+            ->where('role', 'finding_verification')->where('is_active', true)->sole();
+    }
+
+    public function reviseVerifierSlot(Run $run, string $slotId, VerifierCandidate $candidate): RunAgent
+    {
+        return DB::transaction(function () use ($run, $slotId, $candidate): RunAgent {
+            DB::table('runs')->where('id', $run->id)->lockForUpdate()->first();
+            $old = RunAgent::query()->where('run_id', $run->id)->where('slot_id', $slotId)
+                ->where('role', 'finding_verification')->where('is_active', true)->first();
+            if (! $old instanceof RunAgent) {
+                throw new RunTransitionConflict('verifier_slot_not_active', 'The verifier slot is no longer active.');
+            }
+            $logicalSlot = $old->approval_slot_id ?? $old->slot_id;
+            $slotIds = RunAgent::query()->where('run_id', $run->id)
+                ->where('approval_slot_id', $logicalSlot)->pluck('slot_id');
+            $verificationQuery = ReviewResult::query()->where('run_id', $run->id)->whereIn('slot_id', $slotIds)
+                ->where(static function (Builder $query): void {
+                    $query->whereNotNull('original_finding_id')->orWhereNotNull('original_duplicate_group');
+                })->orderByDesc('attempt');
+            $findingId = $verificationQuery->value('original_finding_id');
+            $duplicateGroup = is_string($findingId) ? null : $verificationQuery->value('original_duplicate_group');
+            $finding = is_string($findingId)
+                ? Finding::query()->find($findingId)
+                : (is_string($duplicateGroup)
+                    ? Finding::query()->where('run_id', $run->id)->where('duplicate_group', $duplicateGroup)->first()
+                    : null);
+            $implementationProfile = ($run->agent_profile_snapshot ?? [])['implementation']['profile_id'] ?? null;
+            $sourceProviders = is_string($findingId)
+                ? Finding::query()->whereKey($findingId)->pluck('provider_profile')->filter(static fn (mixed $value): bool => is_string($value))->all()
+                : (is_string($duplicateGroup)
+                    ? Finding::query()->where('run_id', $run->id)->where('duplicate_group', $duplicateGroup)->pluck('provider_profile')->filter(static fn (mixed $value): bool => is_string($value))->unique()->values()->all()
+                    : []);
+            if (! $finding instanceof Finding || in_array($candidate->providerProfile, $sourceProviders, true)
+                || $candidate->profileId === $implementationProfile) {
+                throw new RunTransitionConflict('verifier_alternative_not_independent', 'The verifier alternative is not independent.');
+            }
+            $bound = false;
+            foreach (($run->agent_profile_snapshot ?? [])['verifier_candidates'] ?? [] as $value) {
+                if (is_array($value)
+                    && ($value['id'] ?? null) === $candidate->id
+                    && ($value['profile_id'] ?? null) === $candidate->profileId
+                    && ($value['provider_profile'] ?? null) === $candidate->providerProfile
+                    && ($value['model'] ?? null) === $candidate->model
+                    && ($value['effort'] ?? null) === $candidate->effort) {
+                    $bound = true;
+                    break;
+                }
+            }
+            if (! $bound) {
+                throw new RunTransitionConflict('verifier_alternative_not_bound', 'The verifier alternative is not approval-bound.');
+            }
+            $old->forceFill(['is_active' => false])->save();
+
+            return RunAgent::query()->create([
+                'run_id' => $run->id,
+                'slot_id' => (string) Str::uuid(),
+                'approval_slot_id' => $logicalSlot,
+                'slot_revision' => $old->slot_revision + 1,
+                'is_active' => true,
+                'role' => 'finding_verification',
+                'provider_profile' => $candidate->providerProfile,
+                'model' => $candidate->model,
+                'effort' => $candidate->effort,
+                'prompt_profile' => 'finding_verification',
+                'session_id' => (string) Str::uuid(),
+            ]);
+        });
     }
 
     public function resumeScopeApproval(Run $run, int $expectedVersion, string $boundStepKey): Run

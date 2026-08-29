@@ -26,6 +26,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string $checkpoint_tree_sha
  * @property string $diff_hash
  * @property string|null $raw_artifact_id
+ * @property string|null $original_finding_id
+ * @property string|null $original_duplicate_group
+ * @property string|null $verification_assessment
+ * @property string|null $verification_recommendation
+ * @property string|null $verification_evidence
  */
 final class ReviewResult extends Model
 {

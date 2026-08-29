@@ -68,6 +68,36 @@ final class AgentResultValidatorTest extends TestCase
         $this->assertValidation($document, $implementation, AgentResultValidationError::SCHEMA);
     }
 
+    public function test_verifier_result_requires_one_known_reference_and_consistent_closed_assessment(): void
+    {
+        $validator = $this->app->make(AgentResultValidator::class);
+        $context = $this->context(AgentRole::FINDING_VERIFICATION);
+        foreach ([
+            [AgentScenario::SUCCESS, 'clear', 'confirmed', 'confirm'],
+            [AgentScenario::REJECTS_FINDING, 'clear', 'contradicted', 'not_applicable'],
+            [AgentScenario::VERIFICATION_INCONCLUSIVE, 'inconclusive', 'inconclusive', 'investigate'],
+        ] as [$scenario, $status, $assessment, $recommendation]) {
+            $result = $validator->validate((new FakeAgentAdapter($scenario))->result($context), $context, $this->redactionContext());
+            self::assertSame($status, $result->status->value);
+            self::assertSame($assessment, $result->findingVerification->assessment->value);
+            self::assertSame($recommendation, $result->findingVerification->recommendation->value);
+        }
+
+        $valid = json_decode((new FakeAgentAdapter(AgentScenario::SUCCESS))->result($context), true, 16, JSON_THROW_ON_ERROR);
+        foreach (['missing_reference', 'multiple_references', 'unknown_reference', 'unknown_assessment', 'inconsistent_status'] as $case) {
+            $document = $valid;
+            match ($case) {
+                'missing_reference' => $document['verification']['finding_id'] = null,
+                'multiple_references' => $document['verification']['duplicate_group'] = str_repeat('d', 64),
+                'unknown_reference' => $document['verification']['finding_id'] = 'unknown',
+                'unknown_assessment' => $document['verification']['assessment'] = 'provider_decides',
+                'inconsistent_status' => $document['status'] = 'inconclusive',
+            };
+            $this->assertValidation($document, $context, $case === 'inconsistent_status'
+                ? AgentResultValidationError::STATUS : AgentResultValidationError::SCHEMA);
+        }
+    }
+
     public function test_it_rejects_schema_binding_and_criterion_failures_before_a_result_exists(): void
     {
         $context = $this->context(AgentRole::QUALITY_REVIEW);
@@ -343,6 +373,8 @@ final class AgentResultValidatorTest extends TestCase
             $instructionUpdate,
             [$scopedPath],
             [$scopedPath => $scopedPath === 'instructions/agent.md' ? str_repeat('a', 40) : $expectedBlobSha],
+            expectedFindingIds: $role === AgentRole::FINDING_VERIFICATION ? ['finding-1'] : [],
+            expectedFindingGroups: $role === AgentRole::FINDING_VERIFICATION ? [str_repeat('d', 64)] : [],
         );
     }
 
