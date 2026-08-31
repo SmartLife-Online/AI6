@@ -32,6 +32,19 @@ use Illuminate\Support\Carbon;
  * @property string|null $checkpoint_commit_sha
  * @property string|null $checkpoint_tree_sha
  * @property string|null $checkpoint_diff_hash
+ * @property string|null $candidate_tree_sha
+ * @property string|null $candidate_diff_hash
+ * @property string|null $candidate_base_sha
+ * @property string|null $candidate_checkpoint_commit_sha
+ * @property string|null $candidate_ticket_contract_sha256
+ * @property string|null $candidate_approval_snapshot_hash
+ * @property int|null $candidate_evidence_epoch
+ * @property string|null $candidate_scope_hash
+ * @property string|null $candidate_config_hash
+ * @property string|null $candidate_prompt_hash
+ * @property string|null $candidate_security_policy_hash
+ * @property Carbon|null $candidate_bound_at
+ * @property Carbon|null $candidate_invalidated_at
  * @property RunType $run_type
  * @property string|null $review_subject_reference
  * @property string|null $review_subject_kind
@@ -107,6 +120,9 @@ final class Run extends Model
             'actual_changed_paths_snapshot' => 'array',
             'evidence_epoch' => 'integer',
             'checkpoint_evidence_epoch' => 'integer',
+            'candidate_evidence_epoch' => 'integer',
+            'candidate_bound_at' => 'immutable_datetime',
+            'candidate_invalidated_at' => 'immutable_datetime',
             'review_blockers' => 'array',
             'review_readiness_assessed_at' => 'immutable_datetime',
             'version' => 'integer',

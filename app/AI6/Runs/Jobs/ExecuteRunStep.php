@@ -17,6 +17,7 @@ use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\ReviewOnlyPrepareStep;
 use App\AI6\Runs\ReviewOnlyRunCoordinator;
 use App\AI6\Runs\RunCheckStep;
+use App\AI6\Runs\RunFinalizationStep;
 use App\AI6\Runs\RunFixTurn;
 use App\AI6\Runs\RunImplementation;
 use App\AI6\Runs\RunLimitPolicy;
@@ -54,6 +55,7 @@ final class ExecuteRunStep implements ShouldQueue
         ?ReviewOnlyPrepareStep $reviewPrepare = null,
         ?ReviewOnlyRunCoordinator $reviewOnly = null,
         ?FindingVerificationRound $verifications = null,
+        ?RunFinalizationStep $finalization = null,
     ): void {
         $job = ExecutionJob::query()->find($this->executionJobId);
         if (! $job instanceof ExecutionJob
@@ -94,6 +96,7 @@ final class ExecuteRunStep implements ShouldQueue
             ExecutionStepType::REVIEW,
             ExecutionStepType::FIX,
             ExecutionStepType::VERIFY,
+            ExecutionStepType::FINALIZE,
         ], true) ? $limits->runtimeExceeded($run) : null;
         $waitReason = WaitReason::RESOURCE_LIMIT;
         if ($exceeded === null && $type === ExecutionStepType::REVIEW) {
@@ -188,6 +191,12 @@ final class ExecuteRunStep implements ShouldQueue
 
         if ($type === ExecutionStepType::FIX) {
             ($fixes ?? app(RunFixTurn::class))->execute($claimed, $run, $owner);
+
+            return;
+        }
+
+        if ($type === ExecutionStepType::FINALIZE) {
+            ($finalization ?? app(RunFinalizationStep::class))->execute($claimed, $run, $owner);
 
             return;
         }

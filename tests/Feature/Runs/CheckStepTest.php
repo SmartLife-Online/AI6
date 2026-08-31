@@ -260,7 +260,7 @@ final class CheckStepTest extends TicketUiTestCase
 
         $this->deliver($job);
 
-        self::assertSame(ExecutionJobState::FAILED, $job->fresh()?->state);
+        self::assertSame(ExecutionJobState::FAILED, $job->fresh()->state);
         self::assertSame('check_execution_orphaned', $job->fresh()->failure_code);
         self::assertSame(RunState::FAILED, $prepared['run']->fresh()?->state);
         self::assertSame(0, CheckResultRecord::query()->where('run_id', $prepared['run']->id)->count());
@@ -671,6 +671,91 @@ final class CheckStepTest extends TicketUiTestCase
         self::assertSame(RunPhase::REVIEW, $ready->phase);
     }
 
+    public function test_final_checks_use_the_bound_final_profile_snapshot_and_succeed_without_mutation(): void
+    {
+        $this->bindCheckRuntime([
+            'probe-ok' => $this->probeProfile(['ai6-check-ok.php']),
+            'probe-final-alternate' => $this->probeProfile(['--version'], phases: ['final']),
+        ]);
+        $prepared = $this->preparedCheckRun('AI6-027-FINAL-CHECK', ['probe-ok']);
+        self::assertSame(['probe-final'], $prepared['run']->config_snapshot['values']['checks']['final'] ?? null);
+        config(['ai6.project_config.server_defaults.checks.final' => ['probe-final-alternate']]);
+        $this->app->forgetInstance(EffectiveProjectConfiguration::class);
+        $job = $this->finalizationJob($prepared['run']);
+        $owner = 'worker:final-check';
+        $claimed = $this->app->make(RunOrchestrator::class)->claimStep($job, $owner);
+        self::assertInstanceOf(ExecutionJob::class, $claimed);
+
+        self::assertTrue($this->app->make(RunCheckStep::class)->executeFinalChecks($claimed, $prepared['run'], $owner));
+        $result = CheckResultRecord::query()->where('run_id', $prepared['run']->id)
+            ->where('phase', CheckPhase::FINAL->value)->sole();
+        self::assertSame('probe-final', $result->profile);
+        self::assertSame($result->tree_sha, $result->result_tree_sha);
+        self::assertSame(CheckResultState::SUCCEEDED, $result->state);
+    }
+
+    public function test_a_mutating_final_check_is_a_named_terminal_failure_even_when_the_profile_declares_mutation(): void
+    {
+        $this->bindCheckRuntime([
+            'probe-ok' => $this->probeProfile(['ai6-check-ok.php']),
+            'probe-mutating' => $this->probeProfile(['ai6-check-mutate.php'], phases: ['final'], mutates: true),
+        ]);
+        config(['ai6.project_config.server_defaults.checks.final' => ['probe-mutating']]);
+        $this->app->forgetInstance(EffectiveProjectConfiguration::class);
+        $prepared = $this->preparedCheckRun('AI6-027-FINAL-MUTATION', ['probe-ok']);
+        $job = $this->finalizationJob($prepared['run']);
+        $checkpointBefore = $prepared['run']->only([
+            'checkpoint_commit_sha', 'checkpoint_tree_sha', 'checkpoint_diff_hash',
+        ]);
+        $reviewCountsBefore = [
+            'results' => DB::table('review_results')->where('run_id', $prepared['run']->id)->count(),
+            'findings' => DB::table('findings')->where('run_id', $prepared['run']->id)->count(),
+            'dispositions' => DB::table('finding_dispositions')->whereIn(
+                'finding_id',
+                DB::table('findings')->where('run_id', $prepared['run']->id)->select('id'),
+            )->count(),
+        ];
+        $owner = 'worker:final-mutation';
+        $claimed = $this->app->make(RunOrchestrator::class)->claimStep($job, $owner);
+        self::assertInstanceOf(ExecutionJob::class, $claimed);
+
+        self::assertFalse($this->app->make(RunCheckStep::class)->executeFinalChecks($claimed, $prepared['run'], $owner));
+        self::assertSame(ExecutionJobState::FAILED, $job->fresh()->state);
+        self::assertSame('final_check_mutated_tree', $job->fresh()->failure_code);
+        self::assertSame(RunState::FAILED, $prepared['run']->fresh()->state);
+        self::assertSame($checkpointBefore, $prepared['run']->fresh()->only(array_keys($checkpointBefore)));
+        self::assertSame($reviewCountsBefore, [
+            'results' => DB::table('review_results')->where('run_id', $prepared['run']->id)->count(),
+            'findings' => DB::table('findings')->where('run_id', $prepared['run']->id)->count(),
+            'dispositions' => DB::table('finding_dispositions')->whereIn(
+                'finding_id',
+                DB::table('findings')->where('run_id', $prepared['run']->id)->select('id'),
+            )->count(),
+        ]);
+    }
+
+    public function test_a_missing_bound_final_profile_block_fails_closed(): void
+    {
+        $this->bindCheckRuntime([
+            'probe-ok' => $this->probeProfile(['ai6-check-ok.php']),
+        ]);
+
+        $prepared = $this->preparedCheckRun('AI6-027-FINAL-SNAPSHOT', ['probe-ok']);
+        $job = $this->finalizationJob($prepared['run']);
+        $owner = 'worker:final-snapshot';
+        $claimed = $this->app->make(RunOrchestrator::class)->claimStep($job, $owner);
+        self::assertInstanceOf(ExecutionJob::class, $claimed);
+        $snapshot = $prepared['run']->config_snapshot;
+        self::assertIsArray($snapshot);
+        unset($snapshot['values']['checks']['final']);
+        $prepared['run']->config_snapshot = $snapshot;
+
+        self::assertFalse($this->app->make(RunCheckStep::class)->executeFinalChecks($claimed, $prepared['run'], $owner));
+        self::assertSame(ExecutionJobState::FAILED, $job->fresh()->state);
+        self::assertSame('final_check_snapshot_invalid', $job->fresh()->failure_code);
+        self::assertSame(RunState::FAILED, $prepared['run']->fresh()->state);
+    }
+
     /**
      * A run whose bound snapshot names the check profiles under test.
      *
@@ -692,6 +777,17 @@ final class CheckStepTest extends TicketUiTestCase
         self::assertSame($profiles, $snapshot['values']['checks']['before_review'] ?? null, 'The run snapshot must carry the profiles under test.');
 
         return $prepared;
+    }
+
+    private function finalizationJob(Run $run): ExecutionJob
+    {
+        return ExecutionJob::query()->create([
+            'run_id' => $run->id,
+            'step_type' => ExecutionStepType::FINALIZE->value,
+            'step_number' => 1,
+            'idempotency_key' => RunOrchestrator::stepKey($run->id, ExecutionStepType::FINALIZE, 1),
+            'state' => ExecutionJobState::PLANNED,
+        ]);
     }
 
     /** Place the mailbox order of one delivery attempt without any result behind it. */

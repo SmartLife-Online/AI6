@@ -2,6 +2,7 @@
 
 namespace App\AI6\Runs;
 
+use App\AI6\Checks\BoundCheckProfiles;
 use App\AI6\Checks\CheckerRuntimeConfiguration;
 use App\AI6\Checks\CheckExecutionBoundaryReached;
 use App\AI6\Checks\CheckExecutionRoleRequired;
@@ -42,9 +43,6 @@ use Throwable;
  */
 final readonly class RunCheckStep
 {
-    /** The phase this step runs. The final phase belongs to the finalisation flow (AI6-027). */
-    private const PHASE = CheckPhase::BEFORE_REVIEW;
-
     public function __construct(
         private RunOrchestrator $orchestrator,
         private CheckRunner $checks,
@@ -57,34 +55,52 @@ final readonly class RunCheckStep
         private EffectiveProjectConfiguration $projectConfiguration,
         private HumanRequestService $humanRequests,
         private ReviewSubjectNormalizer $reviewSubjects,
+        private BoundCheckProfiles $boundCheckProfiles,
     ) {}
 
     public function execute(ExecutionJob $job, Run $run, string $owner): void
     {
-        $profiles = $this->boundProfiles($run);
-        if ($profiles === null) {
-            // A snapshot whose checks block is absent or malformed is never
-            // read as "no checks required": the step fails closed (AC-09).
-            $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Der gebundene Konfigurations-Snapshot trägt keine gültige Checkliste.', 'check_snapshot_invalid');
-            $this->orchestrator->failRun($run->id);
-
+        if (! $this->executeBoundPhase($job, $run, $owner, CheckPhase::BEFORE_REVIEW, ExecutionStepType::CHECK)) {
             return;
         }
 
-        $intent = $this->boundIntent($run, $profiles, $job->step_number, $job->intent === null ? $this->newExecutions($profiles) : null);
+        $this->finalizeReviewBoundary($job, $run->fresh() ?? $run, $owner);
+    }
+
+    public function executeFinalChecks(ExecutionJob $job, Run $run, string $owner): bool
+    {
+        return $this->executeBoundPhase($job, $run, $owner, CheckPhase::FINAL, ExecutionStepType::FINALIZE);
+    }
+
+    private function executeBoundPhase(
+        ExecutionJob $job,
+        Run $run,
+        string $owner,
+        CheckPhase $phase,
+        ExecutionStepType $stepType,
+    ): bool {
+        $profiles = $this->boundCheckProfiles->forPhase($run, $phase);
+        if ($profiles === null) {
+            $code = $phase === CheckPhase::FINAL ? 'final_check_snapshot_invalid' : 'check_snapshot_invalid';
+            $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Der gebundene Konfigurations-Snapshot trägt keine gültige Checkliste.', $code);
+            $this->orchestrator->failRun($run->id);
+
+            return false;
+        }
+
+        $intent = $this->boundIntent($run, $profiles, $job->step_number, $phase, $stepType, $job->intent === null ? $this->newExecutions($profiles) : null);
         if ($job->intent === null) {
             if (! $this->orchestrator->persistIntent($job, $owner, $intent)) {
-                // The lease was taken over; the reconciler redelivers the step.
-                return;
+                return false;
             }
             $job->intent = json_encode($intent, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
         } else {
             $stored = $this->decodedIntent($job->intent);
-            if ($stored === null || ! $this->intentMatches($stored, $this->boundIntent($run, $profiles, $job->step_number))) {
+            if ($stored === null || ! $this->intentMatches($stored, $this->boundIntent($run, $profiles, $job->step_number, $phase, $stepType))) {
                 $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Schritt-Intent ist nicht gebunden.', 'invalid_step_intent');
                 $this->orchestrator->failRun($run->id);
 
-                return;
+                return false;
             }
             $intent = $stored;
         }
@@ -93,22 +109,22 @@ final readonly class RunCheckStep
         foreach ($profiles as $profile) {
             try {
                 if ($this->checks->mayExecuteHere()) {
-                    $record = $this->checks->run($run, self::PHASE, $profile, $job->attempts);
+                    $record = $this->checks->run($run, $phase, $profile, $job->attempts);
                 } else {
                     $executions = json_decode((string) ($intent['executions'] ?? ''), true, 8, JSON_THROW_ON_ERROR);
                     $execution = is_array($executions) ? ($executions[$profile] ?? null) : null;
                     if (! is_array($execution) || ! is_string($execution['id'] ?? null) || ! is_int($execution['deadline_at'] ?? null)) {
                         throw new JsonException('The check execution intent is invalid.');
                     }
-                    $record = $this->checks->dispatchOrCollect($run, self::PHASE, $profile, $execution['id'], $execution['deadline_at']);
+                    $record = $this->checks->dispatchOrCollect($run, $phase, $profile, $execution['id'], $execution['deadline_at']);
                     if (! $record instanceof CheckResultRecord) {
                         $this->orchestrator->recordStepEvent(
-                            $run->id, ExecutionStepType::CHECK->value, ExecutionJobState::WAITING,
+                            $run->id, $stepType->value, ExecutionJobState::WAITING,
                             'Checkergebnis ausstehend.', 'check_pending:'.$execution['id'],
                         );
                         $this->orchestrator->parkPollingStep($job, $owner);
 
-                        return;
+                        return false;
                     }
                 }
             } catch (DuplicateCheckExecution $exception) {
@@ -123,7 +139,7 @@ final readonly class RunCheckStep
                     $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Das gebundene Checkergebnis ist nicht mehr auffindbar.', 'check_result_missing');
                     $this->orchestrator->failRun($run->id);
 
-                    return;
+                    return false;
                 }
             } catch (CheckExecutionRoleRequired) {
                 // The isolated checker role is the only place the check
@@ -132,12 +148,12 @@ final readonly class RunCheckStep
                 $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Checks laufen ausschließlich in der isolierten Checkerrolle.', 'check_execution_role_required');
                 $this->orchestrator->failRun($run->id);
 
-                return;
+                return false;
             } catch (CheckExecutionBoundaryReached $exception) {
                 $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Die Checker-Ausführung erreichte eine terminale Grenze.', $exception->reason);
                 $this->orchestrator->failRun($run->id);
 
-                return;
+                return false;
             } catch (OrphanedCheckExecution $exception) {
                 // A previous delivery of this very attempt ordered the check and
                 // died before its result. Nothing ran, so the step must not
@@ -145,22 +161,29 @@ final readonly class RunCheckStep
                 $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Eine frühere Zustellung dieses Checkversuchs hinterließ kein Ergebnis.', 'check_execution_orphaned');
                 $this->orchestrator->failRun($run->id);
 
-                return;
+                return false;
             } catch (CheckProfileConfigurationException $exception) {
                 $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Checkprofil ist ungültig: '.$exception->reason.'.', $exception->reason);
                 $this->orchestrator->failRun($run->id);
 
-                return;
+                return false;
             } catch (Throwable) {
                 $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Die Checkausführung ist fehlgeschlagen.', 'check_execution_failed');
                 $this->orchestrator->failRun($run->id);
 
-                return;
+                return false;
+            }
+
+            if ($phase === CheckPhase::FINAL && ! hash_equals($record->tree_sha, $record->result_tree_sha)) {
+                $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, 'Ein Finalcheck hat den geprüften Baum verändert.', 'final_check_mutated_tree');
+                $this->orchestrator->failRun($run->id);
+
+                return false;
             }
 
             $this->orchestrator->recordStepEvent(
                 $run->id,
-                ExecutionStepType::CHECK->value,
+                $stepType->value,
                 $record->state === CheckResultState::SUCCEEDED ? ExecutionJobState::SUCCEEDED : ExecutionJobState::FAILED,
                 $this->resultEventMessage($profile, $record),
                 'check:'.$record->result_key,
@@ -172,12 +195,12 @@ final readonly class RunCheckStep
         }
 
         if ($failed !== []) {
-            $this->parkOnFailure($job, $run, $owner, $failed);
+            $this->parkOnFailure($job, $run, $owner, $failed, $phase, $stepType);
 
-            return;
+            return false;
         }
 
-        $this->finalizeReviewBoundary($job, $run->fresh() ?? $run, $owner);
+        return true;
     }
 
     private function finalizeReviewBoundary(ExecutionJob $job, Run $run, string $owner): void
@@ -406,11 +429,18 @@ final readonly class RunCheckStep
      *
      * @param  list<string>  $failed
      */
-    private function parkOnFailure(ExecutionJob $job, Run $run, string $owner, array $failed): void
-    {
+    private function parkOnFailure(
+        ExecutionJob $job,
+        Run $run,
+        string $owner,
+        array $failed,
+        CheckPhase $phase,
+        ExecutionStepType $stepType,
+    ): void {
         $fresh = Run::query()->findOrFail($run->getKey());
         try {
-            $this->orchestrator->transition($fresh, $fresh->version, RunState::WAITING, RunPhase::CHECK, WaitReason::CHECK_FAILURE);
+            $runPhase = $phase === CheckPhase::FINAL ? RunPhase::FINALIZE : RunPhase::CHECK;
+            $this->orchestrator->transition($fresh, $fresh->version, RunState::WAITING, $runPhase, WaitReason::CHECK_FAILURE);
         } catch (RunTransitionConflict) {
             // Another writer already moved the run; the step stays parked and
             // the reconciler redelivers it once the run is executable again.
@@ -418,7 +448,7 @@ final readonly class RunCheckStep
 
         $this->orchestrator->recordStepEvent(
             $run->id,
-            ExecutionStepType::CHECK->value,
+            $stepType->value,
             ExecutionJobState::PLANNED,
             'Check fehlgeschlagen: '.implode(', ', $failed).'.',
             'check_failure:'.$job->idempotency_key.':'.$job->attempts,
@@ -427,54 +457,25 @@ final readonly class RunCheckStep
     }
 
     /**
-     * The profile set of this run, taken from its bound configuration snapshot.
-     *
-     * Only a validly bound list is accepted — an empty one included, because a
-     * project may legitimately require no check in this phase. An absent or
-     * malformed checks block returns null and fails the step closed instead of
-     * silently passing a run that was never checked.
-     *
-     * @return list<string>|null
-     */
-    private function boundProfiles(Run $run): ?array
-    {
-        // The approval snapshot nests the frozen project configuration under
-        // `values` (ApprovalSnapshotFactory); the current worktree is never read.
-        $snapshot = $run->config_snapshot;
-        if (! is_array($snapshot) || ! is_array($snapshot['values']['checks'] ?? null)) {
-            return null;
-        }
-
-        $configured = $snapshot['values']['checks'][self::PHASE->value] ?? null;
-        if (! is_array($configured) || ! array_is_list($configured)) {
-            return null;
-        }
-
-        $profiles = [];
-        foreach ($configured as $profile) {
-            if (! is_string($profile) || $profile === '') {
-                return null;
-            }
-            $profiles[] = $profile;
-        }
-
-        return array_values(array_unique($profiles));
-    }
-
-    /**
      * @param  list<string>  $profiles
      * @param  null|array<string, array{id: string, deadline_at: int}>  $executions
      * @return array<string, scalar>
      */
-    private function boundIntent(Run $run, array $profiles, int $stepNumber, ?array $executions = null): array
-    {
+    private function boundIntent(
+        Run $run,
+        array $profiles,
+        int $stepNumber,
+        CheckPhase $phase,
+        ExecutionStepType $stepType,
+        ?array $executions = null,
+    ): array {
         $intent = [
             'effect' => 'run_check_phase',
             'run_id' => $run->id,
-            'phase' => self::PHASE->value,
+            'phase' => $phase->value,
             'profiles' => implode(',', $profiles),
             'step_number' => $stepNumber,
-            'idempotency_key' => RunOrchestrator::stepKey($run->id, ExecutionStepType::CHECK, $stepNumber),
+            'idempotency_key' => RunOrchestrator::stepKey($run->id, $stepType, $stepNumber),
         ];
         if ($executions !== null) {
             $intent['executions'] = json_encode($executions, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);

@@ -12,6 +12,7 @@ enum ExecutionStepType: string
     case VERIFY = 'verify';
     case REPORT = 'report';
     case FIX = 'fix';
+    case FINALIZE = 'finalize';
 
     /**
      * Whether a worker handler for this step exists yet.
@@ -22,7 +23,7 @@ enum ExecutionStepType: string
     public function hasRegisteredHandler(): bool
     {
         return match ($this) {
-            self::PREFLIGHT, self::REVIEW_PREPARE, self::IMPLEMENT, self::CHECK, self::REVIEW, self::VERIFY, self::REPORT, self::FIX => true,
+            self::PREFLIGHT, self::REVIEW_PREPARE, self::IMPLEMENT, self::CHECK, self::REVIEW, self::VERIFY, self::REPORT, self::FIX, self::FINALIZE => true,
         };
     }
 }

@@ -119,6 +119,11 @@ trait BuildsImplementationTurnFixture
         if ($coherentGitBinding) {
             $repository = $this->implementationTemp('repository-coherent');
             $this->writeInitialWorktree($repository, $files);
+            self::assertTrue(mkdir($repository.'/tickets', 0700));
+            self::assertNotFalse(file_put_contents(
+                $repository.'/tickets/'.$ticketId.'.md',
+                str_replace('status: todo', 'status: in_progress', $this->implementationTicketMarkdown($ticketId, $files)),
+            ));
             $this->initWorktreeGit($repository, true);
             $controlOid = $this->gitOutput(['rev-parse', 'HEAD'], $repository);
             $worktree = $this->linkedWorktree($repository, $controlOid);

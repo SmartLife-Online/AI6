@@ -61,6 +61,7 @@
     @if ($humanRequest->resolution_state->value === 'open')
         @php($stepUpNeeded = $cancellationActions !== []
             || $reportOnlyEffects !== []
+            || $gateEvidenceEffects !== []
             || collect($humanRequest->allowed_effects)->contains(
                 static fn (string $effect): bool => \App\AI6\HumanLoop\HumanRequestService::requiresStepUp($effect),
             ))
@@ -85,8 +86,18 @@
             <input type="hidden" name="agent_slot" value="{{ $humanRequest->bound_agent_slot }}">
             <input type="hidden" name="requested_effect" value="{{ $humanRequest->bound_requested_effect }}">
             @php($effectLabels = collect($humanRequest->options)->pluck('label', 'key'))
+            @if ($externalGateEvidenceRequired && $gateEvidenceEffects !== [])
+                <label for="evidence-source">Quelle der externen Evidenz</label>
+                <input id="evidence-source" name="evidence_source" required maxlength="255">
+                <label for="evidence-observed-at">Beobachtungszeitpunkt</label>
+                <input id="evidence-observed-at" name="evidence_observed_at" type="datetime-local" required>
+                <label for="evidence-digest">SHA-256-Digest (optional)</label>
+                <input id="evidence-digest" name="evidence_digest" pattern="(?:sha256:)?[0-9a-fA-F]{64}">
+            @endif
             @foreach ($humanRequest->allowed_effects as $effect)
-                @if (in_array($effect, $reportOnlyEffects, true) || ! in_array($effect, ['refresh_expected_oid', 'finding_disposition', 'controlled_abort'], true))
+                @if (in_array($effect, $reportOnlyEffects, true)
+                    || in_array($effect, $gateEvidenceEffects, true)
+                    || ! in_array($effect, ['refresh_expected_oid', 'finding_disposition', 'controlled_abort', 'authorize_gate_evidence'], true))
                     <button type="submit" name="chosen_effect" value="{{ $effect }}">{{ $effectLabels[$effect] ?? $effect }}</button>
                 @endif
             @endforeach

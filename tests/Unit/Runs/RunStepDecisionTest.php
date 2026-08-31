@@ -24,7 +24,7 @@ final class RunStepDecisionTest extends TestCase
             [RunState::RUNNING, null, ['preflight'], ExecutionStepType::IMPLEMENT],
             [RunState::RUNNING, null, ['preflight', 'implement'], ExecutionStepType::CHECK],
             [RunState::RUNNING, null, ['preflight', 'implement', 'check'], ExecutionStepType::REVIEW],
-            [RunState::RUNNING, null, ['preflight', 'implement', 'check', 'review'], null],
+            [RunState::RUNNING, null, ['preflight', 'implement', 'check', 'review'], ExecutionStepType::FINALIZE],
             [RunState::WAITING, WaitReason::HUMAN_QUESTION, ['preflight'], null],
             [RunState::FAILED, null, [], null],
             [RunState::COMPLETED, null, ['preflight'], null],
@@ -80,6 +80,7 @@ final class RunStepDecisionTest extends TestCase
         self::assertTrue(ExecutionStepType::CHECK->hasRegisteredHandler());
         self::assertTrue(ExecutionStepType::REVIEW->hasRegisteredHandler());
         self::assertTrue(ExecutionStepType::FIX->hasRegisteredHandler());
+        self::assertTrue(ExecutionStepType::FINALIZE->hasRegisteredHandler());
     }
 
     public function test_a_fix_repeats_checks_checkpoint_readiness_and_the_complete_review_sequence(): void
@@ -97,12 +98,15 @@ final class RunStepDecisionTest extends TestCase
             ['type' => ExecutionStepType::REVIEW, 'number' => 2],
             RunOrchestrator::decideNextStepRound(RunState::RUNNING, null, [...$initial, 'fix:1', 'check:2'], true),
         );
-        self::assertNull(RunOrchestrator::decideNextStepRound(
-            RunState::RUNNING,
-            null,
-            [...$initial, 'fix:1', 'check:2', 'review:2'],
-            false,
-        ));
+        self::assertSame(
+            ['type' => ExecutionStepType::FINALIZE, 'number' => 1],
+            RunOrchestrator::decideNextStepRound(
+                RunState::RUNNING,
+                null,
+                [...$initial, 'fix:1', 'check:2', 'review:2'],
+                false,
+            ),
+        );
         self::assertSame(
             ['type' => ExecutionStepType::FIX, 'number' => 2],
             RunOrchestrator::decideNextStepRound(

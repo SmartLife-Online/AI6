@@ -21,6 +21,12 @@ use Illuminate\Support\Carbon;
  * @property string|null $evidence_reference
  * @property string|null $evidence_ticket_contract_sha256
  * @property string|null $checkpoint_commit_sha
+ * @property string|null $evidence_candidate_tree_sha
+ * @property string|null $evidence_candidate_diff_hash
+ * @property int|null $evidence_expected_run_version
+ * @property string|null $evidence_source
+ * @property Carbon|null $evidence_observed_at
+ * @property string|null $evidence_digest
  * @property int|null $authorized_by
  * @property Carbon|null $authorized_at
  * @property Carbon|null $invalidated_at
@@ -53,6 +59,8 @@ final class RunGate extends Model
             'blocks_candidate' => 'boolean',
             'blocks_final_commit' => 'boolean',
             'blocks_push' => 'boolean',
+            'evidence_expected_run_version' => 'integer',
+            'evidence_observed_at' => 'immutable_datetime',
         ];
     }
 }

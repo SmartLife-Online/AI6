@@ -6,6 +6,7 @@ use App\AI6\Agents\HumanRequestOption;
 use App\AI6\Agents\HumanRequestProposal;
 use App\AI6\Auth\Models\User;
 use App\AI6\Git\CanonicalJson;
+use App\AI6\Git\PublishCandidate;
 use App\AI6\HumanLoop\Jobs\SendHumanRequestNotification;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\HumanLoop\Models\Intervention;
@@ -24,6 +25,7 @@ use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Runs\Models\RunArtifact;
+use App\AI6\Runs\Models\RunGate;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\RunArtifactKind;
 use App\AI6\Runs\RunArtifactStore;
@@ -52,7 +54,7 @@ final readonly class HumanRequestService
      *
      * @var list<string>
      */
-    private const STEP_UP_EFFECTS = ['increase', 'additional_round', 'switch_reviewer', 'switch_profile', 'finding_disposition'];
+    private const STEP_UP_EFFECTS = ['increase', 'additional_round', 'switch_reviewer', 'switch_profile', 'finding_disposition', GateEvidenceHumanRequestBinding::EFFECT];
 
     public function __construct(
         private HumanRequestClassifier $classifier,
@@ -351,6 +353,85 @@ final readonly class HumanRequestService
         );
     }
 
+    public function openManualGateRequest(
+        Run $run,
+        ExecutionJob $job,
+        RunGate $gate,
+        PublishCandidate $candidate,
+    ): HumanRequest {
+        $approval = TicketApproval::query()->findOrFail($run->ticket_approval_id);
+        try {
+            $request = DB::transaction(function () use ($run, $job, $gate, $candidate, $approval): HumanRequest {
+                DB::table('runs')->where('id', $run->id)->lockForUpdate()->first();
+                $fresh = Run::query()->findOrFail($run->id);
+                $this->assertBoundAttentionUser($approval, $fresh->project_id);
+                if ($fresh->state === RunState::RUNNING) {
+                    $fresh = $this->orchestrator->transition(
+                        $fresh, $fresh->version, RunState::WAITING, $fresh->phase, WaitReason::MANUAL_GATE,
+                    );
+                } elseif ($fresh->state !== RunState::WAITING || $fresh->wait_reason !== WaitReason::MANUAL_GATE) {
+                    throw new HumanRequestRejected('manual_gate_not_waiting', 'The run cannot open a manual gate request.');
+                }
+                $freshGate = RunGate::query()->whereKey($gate->id)->where('run_id', $fresh->id)
+                    ->where('state', 'open')->first();
+                if (! $freshGate instanceof RunGate || $fresh->checkpoint_commit_sha === null) {
+                    throw new HumanRequestRejected('gate_evidence_binding_invalid', 'The manual gate is not open on the current checkpoint.');
+                }
+                $context = new RedactionContext((string) $fresh->project_id, $fresh->id, 'manual-gate');
+                $request = HumanRequest::query()->create([
+                    'id' => (string) Str::uuid(),
+                    'run_id' => $fresh->id,
+                    'project_id' => $fresh->project_id,
+                    'kind' => WaitReason::MANUAL_GATE->value,
+                    'response_mode' => 'select',
+                    'title' => $this->redact('Gate-Evidenz autorisieren: '.$freshGate->gate_id, $context),
+                    'message' => $this->redact('Die Evidenz wird an den prospektiven Publish-Kandidaten und den unveränderten Finalisierungsschritt gebunden.', $context),
+                    'why_needed' => $this->redact('Das deklarierte Gate blockiert den Publish-Kandidaten bis zur autorisierten Bestätigung.', $context),
+                    'options' => [[
+                        'key' => GateEvidenceHumanRequestBinding::EFFECT,
+                        'label' => 'Gebundene Gate-Evidenz autorisieren',
+                    ]],
+                    'recommended_option' => GateEvidenceHumanRequestBinding::EFFECT,
+                    'affected_paths' => [],
+                    'criterion_refs' => [],
+                    'allowed_effects' => [GateEvidenceHumanRequestBinding::EFFECT],
+                    'required_action' => ProjectAction::AUTHORIZE_GATE_EVIDENCE->value,
+                    'bound_run_version' => $fresh->version,
+                    'bound_ticket_contract' => (string) ($fresh->ticket_contract_sha256 ?? $approval->ticket_contract_sha256),
+                    'bound_checkpoint' => $fresh->checkpoint_commit_sha,
+                    'bound_scope' => (string) ($fresh->effective_scope_hash ?? $fresh->scope_hash),
+                    'bound_agent_slot' => GateEvidenceHumanRequestBinding::agentSlot($freshGate->gate_id),
+                    'bound_requested_effect' => GateEvidenceHumanRequestBinding::requestedEffect($candidate->treeOid, $candidate->diffHash),
+                    'bound_step_key' => $job->idempotency_key,
+                    'delivery_status' => HumanRequestDeliveryStatus::QUEUED,
+                    'delivery_attempts' => 0,
+                    'delivery_revision' => 1,
+                    'delivery_status_changed_at' => now(),
+                    'resolution_state' => HumanRequestResolutionState::OPEN,
+                    'attention_user_id' => $approval->attention_user_id,
+                ]);
+                if (! $this->orchestrator->parkBoundStep($job)) {
+                    throw new HumanRequestRejected('bound_step_not_parkable', 'The finalization step could not be parked.');
+                }
+
+                return $request;
+            });
+        } catch (UniqueConstraintViolationException) {
+            $existing = HumanRequest::query()->where('run_id', $run->id)
+                ->where('resolution_state', HumanRequestResolutionState::OPEN->value)->first();
+            if (! $existing instanceof HumanRequest || $existing->kind !== WaitReason::MANUAL_GATE->value) {
+                throw new HumanRequestRejected('open_request_exists', 'An open blocking human request already exists for this run.');
+            }
+
+            return $existing;
+        } catch (RunTransitionConflict $conflict) {
+            throw new HumanRequestRejected($conflict->reason, $conflict->getMessage());
+        }
+        $this->dispatchNotification($request);
+
+        return $request;
+    }
+
     /** Open the report confirmation without inventing an execution-job producer. */
     public function openManualReportRequest(Run $run): HumanRequest
     {
@@ -557,6 +638,9 @@ final readonly class HumanRequestService
                 // both waits resolve exclusively through the re-authorized,
                 // status-operation-bound cancellation saga, never through a
                 // plain answer that would resume the parked step (plan §7.2).
+                if ($chosenEffect === GateEvidenceHumanRequestBinding::EFFECT) {
+                    throw new HumanRequestRejected('specialized_effect_required', 'Gate evidence must use its candidate-bound resolver.');
+                }
                 if (in_array($chosenEffect, [self::CANCEL_EFFECT, 'controlled_abort', 'confirm_report', 'refresh_expected_oid'], true)) {
                     throw new HumanRequestRejected('legacy_cancel_forbidden', 'Cancellation must use the status-operation-bound cancellation saga.');
                 }

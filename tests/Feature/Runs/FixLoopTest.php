@@ -359,7 +359,7 @@ final class FixLoopTest extends TicketUiTestCase
         $expectedReasons = [
             'human_question', 'resource_limit', 'scope_approval', 'contract_change', 'check_failure',
             'review_limit', 'provider_error', 'invalid_json', 'git_base_changed', 'git_conflict',
-            'manual_report', 'status_sync',
+            'manual_gate', 'manual_report', 'status_sync',
         ];
         self::assertSame($expectedReasons, $this->app->make(WaitReasonRegistry::class)->registeredReasons());
 
@@ -385,6 +385,7 @@ final class FixLoopTest extends TicketUiTestCase
         $viewer = ProjectMembership::query()->where('project_id', $run->project_id)
             ->where('role', ProjectRole::OPERATOR->value)->firstOrFail()->user()->firstOrFail();
         $versionBefore = $run->fresh()?->version;
+        $queuedBefore = DB::table('jobs')->count();
         $response = $this->actingAs($viewer)->get(route('projects.runs.show', [$project, $run->id]));
 
         $response->assertOk();
@@ -393,7 +394,7 @@ final class FixLoopTest extends TicketUiTestCase
         $response->assertSee('data-review-round="2"', false);
         // Reading the page changed no run state and queued no execution step.
         self::assertSame($versionBefore, $run->fresh()?->version);
-        self::assertSame(0, DB::table('jobs')->count());
+        self::assertSame($queuedBefore, DB::table('jobs')->count());
     }
 
     /** TC-05: the fix routes every additional path through the one scope policy. */

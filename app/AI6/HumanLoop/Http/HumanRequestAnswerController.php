@@ -5,6 +5,8 @@ namespace App\AI6\HumanLoop\Http;
 use App\AI6\Auth\Models\User;
 use App\AI6\Auth\StepUpGuard;
 use App\AI6\Auth\StepUpRequiredException;
+use App\AI6\HumanLoop\GateEvidenceHumanRequestBinding;
+use App\AI6\HumanLoop\GateEvidenceService;
 use App\AI6\HumanLoop\HumanRequestRejected;
 use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\HumanLoop\InterventionAuthorization;
@@ -30,6 +32,7 @@ final class HumanRequestAnswerController
         StepUpGuard $stepUp,
         RunCancellationService $cancellations,
         ReportOnlyCompletionService $reportOnlyCompletions,
+        GateEvidenceService $gateEvidence,
     ): RedirectResponse {
         Gate::authorize('interveneRun', $project);
 
@@ -55,12 +58,16 @@ final class HumanRequestAnswerController
             'finding_id' => ['nullable', 'uuid'],
             'finding_disposition' => ['nullable', 'string'],
             'disposition_reason' => ['nullable', 'string', 'max:2000'],
+            'evidence_source' => ['nullable', 'string', 'max:255'],
+            'evidence_observed_at' => ['nullable', 'date'],
+            'evidence_digest' => ['nullable', 'string', 'regex:/\A(?:sha256:)?[0-9a-fA-F]{64}\z/D'],
         ]);
 
         try {
             $mode = RunCancellationMode::tryFrom($validated['chosen_effect']);
             $reportOnlyEffect = ReportOnlyHumanRequestBinding::matches($humanRequest, $validated['chosen_effect']);
-            $authorization = (($mode instanceof RunCancellationMode) || $reportOnlyEffect
+            $gateEffect = GateEvidenceHumanRequestBinding::matches($humanRequest, $validated['chosen_effect']);
+            $authorization = (($mode instanceof RunCancellationMode) || $reportOnlyEffect || $gateEffect
                 || HumanRequestService::requiresStepUp($validated['chosen_effect']))
                 ? InterventionAuthorization::consumeFresh(
                     $request,
@@ -83,6 +90,21 @@ final class HumanRequestAnswerController
                 $reportOnlyCompletions->confirm($humanRequest, $user, $authorization);
             } elseif ($reportOnlyEffect && $validated['chosen_effect'] === 'refresh_expected_oid') {
                 $reportOnlyCompletions->resolveStatusConflict($humanRequest, $user, $authorization);
+            } elseif ($gateEffect && $authorization instanceof InterventionAuthorization) {
+                $gateEvidence->authorize(
+                    $humanRequest,
+                    $user,
+                    (int) $validated['run_version'],
+                    $validated['ticket_contract'],
+                    $validated['checkpoint'],
+                    $validated['scope'],
+                    $validated['agent_slot'],
+                    $validated['requested_effect'],
+                    $authorization,
+                    $validated['evidence_source'] ?? null,
+                    $validated['evidence_observed_at'] ?? null,
+                    $validated['evidence_digest'] ?? null,
+                );
             } else {
                 $service->answer(
                     $humanRequest,
@@ -133,6 +155,7 @@ final class HumanRequestAnswerController
             'checkpoint_not_bound' => 'Der Run besitzt keinen gebundenen Checkpoint.',
             'bound_step_not_parkable' => 'Der gebundene Schritt konnte nicht geparkt werden.',
             'report_status_binding_missing' => 'Für den aktuellen Control-Stand fehlt die gebundene Ticketprojektion. Bitte zuerst den Ticket-Read-Model-Refresh ausführen.',
+            'external_evidence_incomplete' => 'Externe Evidenz benötigt Quelle, Beobachtungszeitpunkt und optional einen SHA-256-Digest.',
             default => 'Die Antwort wurde ohne Wirkung abgewiesen.',
         };
     }

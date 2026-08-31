@@ -4,6 +4,7 @@ namespace App\AI6\Git;
 
 use App\AI6\Runs\Models\Run;
 use App\AI6\Shared\Redaction\RedactionContext;
+use App\AI6\Shared\Redaction\RedactionResult;
 use App\AI6\Shared\Redaction\Redactor;
 use RuntimeException;
 
@@ -76,9 +77,15 @@ final readonly class RunTreeService
      */
     public function blob(Run $run, string $blobOid, RedactionContext $context): string
     {
+        return $this->inspectBlob($run, $blobOid, $context)->text;
+    }
+
+    /** Inspect the real blob bytes through the central UTF-8/redaction boundary. */
+    public function inspectBlob(Run $run, string $blobOid, RedactionContext $context): RedactionResult
+    {
         $bytes = $this->git->readRunBlob($this->repository($run), $blobOid, self::MAXIMUM_BLOB_BYTES, $context);
 
-        return $this->redactor->redact($bytes, $context)->text;
+        return $this->redactor->redact($bytes, $context);
     }
 
     private function repository(Run $run): string

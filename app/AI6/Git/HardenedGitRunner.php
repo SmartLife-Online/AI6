@@ -490,7 +490,7 @@ final class HardenedGitRunner
             throw new RuntimeException('The bound run blob size could not be resolved.');
         }
         if ((int) trim($size->output) > $maximumBytes) {
-            throw new RuntimeException('The bound run blob exceeds the configured size limit.');
+            throw new RunBlobSizeLimitExceeded('The bound run blob exceeds the configured size limit.');
         }
 
         $blob = $this->runRepositoryCommand($repository, ['cat-file', 'blob', $blobOid], $redactionContext);
@@ -888,6 +888,74 @@ final class HardenedGitRunner
         if (! $tree->succeeded() || ! hash_equals($expectedTreeOid, trim($tree->output))) {
             throw new TicketMutationGitConflict('target_tree_mismatch', 'Der erzeugte Zielbaum stimmt nicht mit dem vorbereiteten Intent überein.');
         }
+    }
+
+    /**
+     * Build a tree from a bound base and canonical diff entries through an isolated index.
+     *
+     * No commit or ref is created, and the worktree index is unreachable because every
+     * command carries the caller-owned GIT_INDEX_FILE.
+     *
+     * @param  list<array{old_mode: string, new_mode: string, old_oid: string, new_oid: string, status: string, path: string}>  $entries
+     */
+    public function writeCandidateTree(
+        string $repository,
+        string $baseOid,
+        array $entries,
+        string $indexPath,
+        RedactionContext $redactionContext,
+    ): string {
+        $this->assertOid($baseOid);
+        if ($indexPath === '' || str_contains($indexPath, "\0") || file_exists($indexPath) || is_link($indexPath)) {
+            throw new InvalidArgumentException('The candidate index path is not a fresh private path.');
+        }
+        $parent = realpath(dirname($indexPath));
+        if (! is_string($parent) || ! is_dir($parent) || is_link(dirname($indexPath))) {
+            throw new InvalidArgumentException('The candidate index parent is unavailable.');
+        }
+
+        $variables = [...$this->environment->variables(), 'GIT_INDEX_FILE' => $indexPath];
+        $preflight = $this->repositoryConfiguration($repository, $variables, $redactionContext);
+        if ($preflight instanceof ProcessResult) {
+            throw new RuntimeException('The managed repository configuration was rejected.');
+        }
+        $run = function (array $arguments) use ($repository, $variables, $preflight, $redactionContext): ProcessResult {
+            return $this->processes->run($this->request([
+                ...$this->environment->commandPrefix(), ...$preflight, ...$arguments,
+            ], $repository, $variables, $redactionContext));
+        };
+        if (! $run(['read-tree', $baseOid])->succeeded()) {
+            throw new RuntimeException('The candidate base could not be loaded into its isolated index.');
+        }
+
+        foreach ($entries as $entry) {
+            $path = $entry['path'];
+            $status = $entry['status'];
+            $mode = $entry['new_mode'];
+            $oid = $entry['new_oid'];
+            if (RefreshPathPolicy::canonicalBasePath($path) !== $path) {
+                throw new RuntimeException('The candidate diff contains an invalid entry.');
+            }
+            $arguments = str_starts_with($status, 'D')
+                ? ['update-index', '--force-remove', '--', $path]
+                : ['update-index', '--add', '--cacheinfo', $mode.','.$oid.','.$path];
+            if (! str_starts_with($status, 'D')
+                && (! in_array($mode, ['100644', '100755', '120000', '160000'], true)
+                    || preg_match('/\A[0-9a-f]{64}\z/D', $oid) !== 1)) {
+                throw new RuntimeException('The candidate diff contains an unsupported object binding.');
+            }
+            if (! $run($arguments)->succeeded()) {
+                throw new RuntimeException('The candidate diff could not be staged in its isolated index.');
+            }
+        }
+
+        $tree = $run(['write-tree']);
+        $oid = trim($tree->output);
+        if (! $tree->succeeded() || preg_match('/\A[0-9a-f]{64}\z/D', $oid) !== 1) {
+            throw new RuntimeException('The candidate tree could not be written.');
+        }
+
+        return $oid;
     }
 
     public function createSingleParentCommit(

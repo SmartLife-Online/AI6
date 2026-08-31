@@ -25,6 +25,7 @@ use App\AI6\Auth\PasskeyCeremony;
 use App\AI6\Auth\PasskeyRelyingParty;
 use App\AI6\Auth\PasskeyRelyingPartyFactory;
 use App\AI6\Auth\Policies\UserPolicy;
+use App\AI6\Checks\BoundCheckProfiles;
 use App\AI6\Checks\CheckerRuntimeConfiguration;
 use App\AI6\Checks\CheckFailureResolver;
 use App\AI6\Checks\CheckProcessResultInterpreter;
@@ -32,6 +33,7 @@ use App\AI6\Checks\CheckProfileAllowlist;
 use App\AI6\Checks\CheckProfileRegistry;
 use App\AI6\Checks\CheckRunner;
 use App\AI6\Checks\CheckTreeBinding;
+use App\AI6\Git\CandidateProvenancePreflight;
 use App\AI6\Git\CanonicalDiffHasher;
 use App\AI6\Git\CanonicalJson;
 use App\AI6\Git\ControlOperationConfiguration;
@@ -48,6 +50,7 @@ use App\AI6\Git\HardenedGitRunner;
 use App\AI6\Git\IsolatedTreeExport;
 use App\AI6\Git\IsolatedTreeExporter;
 use App\AI6\Git\KnownHostsVerifier;
+use App\AI6\Git\PublishCandidateService;
 use App\AI6\Git\ReviewCheckpointVerifier;
 use App\AI6\Git\ReviewSubjectNormalizer;
 use App\AI6\Git\ReviewSubjectReference;
@@ -60,6 +63,7 @@ use App\AI6\Git\RunWorkspaceLifecycle;
 use App\AI6\Git\TicketMutationConfiguration;
 use App\AI6\Git\TicketMutationConfigurationFactory;
 use App\AI6\HumanLoop\AttentionInboxPage;
+use App\AI6\HumanLoop\GateEvidenceService;
 use App\AI6\HumanLoop\HumanRequestClassifier;
 use App\AI6\HumanLoop\HumanRequestDetailPage;
 use App\AI6\HumanLoop\HumanRequestNotificationConfiguration;
@@ -86,6 +90,7 @@ use App\AI6\Reviews\VerifierSlotSelector;
 use App\AI6\Runs\ApprovalSelectionFactory;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ApprovalStatusPage;
+use App\AI6\Runs\CandidateGate;
 use App\AI6\Runs\CompletionReportService;
 use App\AI6\Runs\ContractChangeService;
 use App\AI6\Runs\ExecutionStepDispatcher;
@@ -94,12 +99,14 @@ use App\AI6\Runs\InstructionCandidateCollector;
 use App\AI6\Runs\InstructionCandidateSource;
 use App\AI6\Runs\InstructionPathPolicy;
 use App\AI6\Runs\ReportOnlyCompletionService;
+use App\AI6\Runs\RequiredReviewEvidence;
 use App\AI6\Runs\ReviewOnlyCompletionPredicate;
 use App\AI6\Runs\ReviewOnlyPrepareStep;
 use App\AI6\Runs\ReviewOnlyRunCoordinator;
 use App\AI6\Runs\RunArtifactRoot;
 use App\AI6\Runs\RunArtifactStore;
 use App\AI6\Runs\RunCancellationService;
+use App\AI6\Runs\RunFinalizationStep;
 use App\AI6\Runs\RunFixTurn;
 use App\AI6\Runs\RunImplementation;
 use App\AI6\Runs\RunLimitPolicy;
@@ -261,6 +268,7 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(PromptCatalog::class, static fn (): PromptCatalog => PromptCatalog::defaults());
         $this->app->singleton(PromptRenderer::class);
         $this->app->singleton(CanonicalDiffHasher::class);
+        $this->app->singleton(BoundCheckProfiles::class);
         $this->app->singleton(IsolatedTreeExporter::class);
         $this->app->singleton(
             IsolatedTreeExport::class,
@@ -273,6 +281,8 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(ReviewSubjectVerifier::class);
         $this->app->singleton(ReviewSubjectNormalizer::class);
         $this->app->singleton(RunTreeService::class);
+        $this->app->singleton(CandidateProvenancePreflight::class);
+        $this->app->singleton(PublishCandidateService::class);
         $this->app->singleton(RunHistoryContext::class);
         $this->app->singleton(RunPatchImporter::class);
         $this->app->singleton(ReviewerSlotFactory::class);
@@ -299,10 +309,14 @@ final class AI6ServiceProvider extends ServiceProvider
         );
         $this->app->singleton(HumanRequestRecipient::class);
         $this->app->singleton(HumanRequestService::class);
+        $this->app->singleton(GateEvidenceService::class);
         $this->app->singleton(ScopeApprovalService::class);
         $this->app->singleton(InstructionPathPolicy::class);
         $this->app->singleton(ContractChangeService::class);
         $this->app->singleton(RunCancellationService::class);
+        $this->app->singleton(RequiredReviewEvidence::class);
+        $this->app->singleton(CandidateGate::class);
+        $this->app->singleton(RunFinalizationStep::class);
         $this->app->singleton(ReviewOnlyCompletionPredicate::class);
         $this->app->singleton(ReportOnlyCompletionService::class);
         $this->app->singleton(CompletionReportService::class);
@@ -572,6 +586,12 @@ final class AI6ServiceProvider extends ServiceProvider
             WaitReason::GIT_CONFLICT,
             'ControlOperation',
             ['refresh_expected_oid'],
+            true,
+        );
+        $this->app->make(WaitReasonRegistry::class)->register(
+            WaitReason::MANUAL_GATE,
+            'RunFinalizationStep',
+            ['authorize_gate_evidence'],
             true,
         );
         $this->app->make(WaitReasonRegistry::class)->register(

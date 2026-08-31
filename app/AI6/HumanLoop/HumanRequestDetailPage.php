@@ -5,9 +5,13 @@ namespace App\AI6\HumanLoop;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\ProjectMembership;
+use App\AI6\Projects\Policies\ProjectPolicy;
+use App\AI6\Projects\ProjectAction;
 use App\AI6\Projects\ProjectRole;
 use App\AI6\Reviews\Models\Finding;
+use App\AI6\Runs\GateKind;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\Models\RunGate;
 use App\AI6\Runs\Models\TicketApproval;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\Auth;
@@ -43,6 +47,8 @@ final class HumanRequestDetailPage extends Component
         $run = Run::query()->findOrFail($request->run_id);
         $approval = TicketApproval::query()->find($run->ticket_approval_id);
         $membership = $this->membership($run);
+        $gateEvidenceEffects = $this->gateEvidenceEffects($request, $membership);
+        $gateBinding = GateEvidenceHumanRequestBinding::binding($request);
 
         return view('human-requests.detail', [
             'humanRequest' => $request,
@@ -53,6 +59,10 @@ final class HumanRequestDetailPage extends Component
             // its own status-saga effects; the identically named cancellation
             // conflict keeps resolving through a re-issued cancellation mode.
             'reportOnlyEffects' => $this->reportOnlyEffects($request, $membership),
+            'gateEvidenceEffects' => $gateEvidenceEffects,
+            'externalGateEvidenceRequired' => $gateBinding !== null
+                && RunGate::query()->where('run_id', $run->id)->where('gate_id', $gateBinding['gate_id'])
+                    ->where('kind', GateKind::EXTERNAL->value)->exists(),
             'disposableFindings' => in_array('finding_disposition', $request->allowed_effects, true)
                 ? Finding::query()->where('run_id', $run->id)
                     ->whereIn('original_disposition', ['must_fix', 'human_required'])
@@ -76,6 +86,20 @@ final class HumanRequestDetailPage extends Component
         return array_values(array_filter(
             $request->allowed_effects,
             static fn (string $effect): bool => ReportOnlyHumanRequestBinding::matches($request, $effect),
+        ));
+    }
+
+    /** @return list<string> */
+    private function gateEvidenceEffects(HumanRequest $request, ?ProjectMembership $membership): array
+    {
+        if (! $membership instanceof ProjectMembership
+            || ! app(ProjectPolicy::class)->decisionFor(ProjectAction::AUTHORIZE_GATE_EVIDENCE, $membership->role)) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            $request->allowed_effects,
+            static fn (string $effect): bool => GateEvidenceHumanRequestBinding::matches($request, $effect),
         ));
     }
 

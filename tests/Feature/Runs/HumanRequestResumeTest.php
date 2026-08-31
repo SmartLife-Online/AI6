@@ -107,7 +107,7 @@ final class HumanRequestResumeTest extends TicketUiTestCase
         self::assertSame([
             'human_question', 'resource_limit', 'scope_approval', 'contract_change', 'check_failure',
             'review_limit', 'provider_error', 'invalid_json', 'git_base_changed', 'git_conflict',
-            'manual_report', 'status_sync',
+            'manual_gate', 'manual_report', 'status_sync',
         ], $registry->registeredReasons());
         self::assertSame([
             'producer' => 'needs_human',
@@ -129,13 +129,18 @@ final class HumanRequestResumeTest extends TicketUiTestCase
             'resolvers' => ['amendment_cas', 'return_to_todo'],
             'cancellable' => true,
         ], $registry->registration(WaitReason::CONTRACT_CHANGE));
+        self::assertSame([
+            'producer' => 'RunFinalizationStep',
+            'resolvers' => ['authorize_gate_evidence'],
+            'cancellable' => true,
+        ], $registry->registration(WaitReason::MANUAL_GATE));
 
         try {
-            $registry->register(WaitReason::MANUAL_GATE, 'gate');
+            $registry->register(WaitReason::SECURITY_GATE, 'gate');
             self::fail('An unpaired producer must fail.');
         } catch (RunTransitionConflict $conflict) {
             self::assertSame('unpaired_wait_reason_producer', $conflict->reason);
         }
-        self::assertFalse($registry->isRegistered(WaitReason::MANUAL_GATE));
+        self::assertFalse($registry->isRegistered(WaitReason::SECURITY_GATE));
     }
 }

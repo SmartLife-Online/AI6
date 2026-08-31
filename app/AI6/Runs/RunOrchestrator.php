@@ -12,6 +12,7 @@ use App\AI6\Git\ControlOperationState;
 use App\AI6\Git\ControlOperationType;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\TicketMutation;
+use App\AI6\Git\PublishCandidate;
 use App\AI6\Git\ReviewSubjectKind;
 use App\AI6\Git\RunBranchName;
 use App\AI6\Projects\Models\Project;
@@ -39,6 +40,7 @@ use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
 use App\AI6\Tickets\TicketDocument;
 use App\AI6\Tickets\TicketStatusOperation;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -311,7 +313,9 @@ final readonly class RunOrchestrator
         if (! isset($completed[ExecutionStepType::FIX->value.':'.$reviewRound])) {
             return $hasEffectiveBlocker
                 ? ['type' => ExecutionStepType::FIX, 'number' => $reviewRound]
-                : null;
+                : (! isset($completed[ExecutionStepType::FINALIZE->value.':1'])
+                    ? ['type' => ExecutionStepType::FINALIZE, 'number' => 1]
+                    : null);
         }
         $nextRound = $reviewRound + 1;
         if (! isset($completed[ExecutionStepType::CHECK->value.':'.$nextRound])) {
@@ -405,6 +409,17 @@ final readonly class RunOrchestrator
         if ($completed === ExecutionStepType::VERIFY && $fresh->run_type !== RunType::REVIEW_ONLY && $fresh->phase === RunPhase::REVIEW
             && $this->hasEffectiveBlockingFindings($fresh)) {
             $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::FIX);
+        }
+        if ($completed === ExecutionStepType::REVIEW && $fresh->run_type !== RunType::REVIEW_ONLY
+            && $fresh->phase === RunPhase::REVIEW
+            && ! $this->hasFindingsForRound($fresh, $completedNumber ?? 1)
+            && ! $this->hasEffectiveBlockingFindings($fresh)) {
+            $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::FINALIZE);
+        }
+        if ($completed === ExecutionStepType::VERIFY && $fresh->run_type !== RunType::REVIEW_ONLY
+            && $fresh->phase === RunPhase::REVIEW
+            && ! $this->hasEffectiveBlockingFindings($fresh)) {
+            $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::FINALIZE);
         }
         if ($completed === ExecutionStepType::FIX && $fresh->phase === RunPhase::FIX) {
             $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::CHECK);
@@ -957,6 +972,7 @@ final readonly class RunOrchestrator
                 'review_readiness_state' => null,
                 'review_blockers' => null,
                 'review_readiness_assessed_at' => null,
+                'candidate_invalidated_at' => $fresh->candidate_tree_sha !== null ? now() : null,
                 'version' => $expectedVersion + 1,
                 'updated_at' => now(),
             ]);
@@ -969,6 +985,58 @@ final readonly class RunOrchestrator
 
             return Run::query()->findOrFail($fresh->getKey());
         });
+    }
+
+    public function bindCandidate(Run $run, int $expectedVersion, PublishCandidate $candidate): Run
+    {
+        foreach ([$candidate->treeOid, $candidate->diffHash, $candidate->baseSha] as $value) {
+            if (preg_match('/\A[0-9a-f]{64}\z/D', $value) !== 1) {
+                throw new RunTransitionConflict('invalid_candidate_binding', 'The publish candidate binding is invalid.');
+            }
+        }
+        $scopeHash = $run->effective_scope_hash ?? $run->scope_hash;
+        if ($run->checkpoint_commit_sha === null
+            || ! hash_equals($run->run_base_sha, $candidate->baseSha)
+            || ! $this->hasEffectiveCheckpoint($run)) {
+            throw new RunTransitionConflict('stale_candidate_binding', 'The publish candidate no longer matches the run.');
+        }
+        $approval = TicketApproval::query()->find($run->ticket_approval_id);
+        $ticketContract = $run->ticket_contract_sha256 ?? $approval?->ticket_contract_sha256;
+        $approvalHash = $approval?->approval_snapshot_hash;
+        if (! is_string($ticketContract) || ! is_string($approvalHash)) {
+            throw new RunTransitionConflict('stale_candidate_binding', 'The candidate approval binding is unavailable.');
+        }
+        $bindings = [
+            'candidate_tree_sha' => $candidate->treeOid,
+            'candidate_diff_hash' => $candidate->diffHash,
+            'candidate_base_sha' => $candidate->baseSha,
+            'candidate_checkpoint_commit_sha' => $run->checkpoint_commit_sha,
+            'candidate_ticket_contract_sha256' => $ticketContract,
+            'candidate_approval_snapshot_hash' => $approvalHash,
+            'candidate_evidence_epoch' => $run->evidence_epoch,
+            'candidate_scope_hash' => $scopeHash,
+            'candidate_config_hash' => $run->config_hash,
+            'candidate_prompt_hash' => $run->prompt_hash,
+            'candidate_security_policy_hash' => $run->security_policy_hash,
+        ];
+        foreach ($bindings as $field => $value) {
+            if ($run->getAttribute($field) !== $value || $run->candidate_invalidated_at !== null) {
+                $updated = Run::query()->whereKey($run->id)->where('version', $expectedVersion)->update([
+                    ...$bindings,
+                    'candidate_bound_at' => now(),
+                    'candidate_invalidated_at' => null,
+                    'version' => $expectedVersion + 1,
+                    'updated_at' => now(),
+                ]);
+                if ($updated !== 1) {
+                    throw new RunTransitionConflict('stale_run_version', 'The run changed before the candidate could be bound.');
+                }
+
+                return Run::query()->findOrFail($run->id);
+            }
+        }
+
+        return $run;
     }
 
     public function transition(
@@ -1664,6 +1732,7 @@ final readonly class RunOrchestrator
                 'review_readiness_state' => null,
                 'review_blockers' => null,
                 'review_readiness_assessed_at' => null,
+                'candidate_invalidated_at' => $fresh->candidate_tree_sha !== null ? now() : null,
                 'version' => DB::raw('version + 1'),
                 'updated_at' => now(),
             ]);
@@ -1710,6 +1779,7 @@ final readonly class RunOrchestrator
             'review_readiness_state' => null,
             'review_blockers' => null,
             'review_readiness_assessed_at' => null,
+            'candidate_invalidated_at' => $run->candidate_tree_sha !== null ? now() : null,
             'version' => $expectedVersion + 1,
             'updated_at' => now(),
         ]);
@@ -1837,6 +1907,7 @@ final readonly class RunOrchestrator
                 'review_readiness_state' => null,
                 'review_blockers' => null,
                 'review_readiness_assessed_at' => null,
+                'candidate_invalidated_at' => $fresh->candidate_tree_sha !== null ? now() : null,
                 'version' => DB::raw('version + 1'),
                 'updated_at' => now(),
             ]);
@@ -1883,7 +1954,164 @@ final readonly class RunOrchestrator
         }
     }
 
-    public function authorizeGateEvidence(Run $run, string $gateId, int $actorId, string $reference): RunGate
+    public function authorizeGateEvidence(
+        Run $run,
+        string $gateId,
+        int $actorId,
+        string $reference,
+        ?string $source = null,
+        ?CarbonImmutable $observedAt = null,
+        ?string $digest = null,
+    ): RunGate {
+        $this->assertGateEvidenceAuthority($run, $gateId, $actorId, $reference);
+        $gate = RunGate::query()->where('run_id', $run->id)->where('gate_id', $gateId)->firstOrFail();
+        [$source, $observedAt, $digest] = $this->gateEvidenceDetails($gate, $source, $observedAt, $digest);
+        $contract = $this->assertCurrentGateContract($run, $gate);
+        $gate->forceFill([
+            'state' => GateState::CLOSED,
+            'evidence_reference' => $reference,
+            'evidence_ticket_contract_sha256' => $contract,
+            'checkpoint_commit_sha' => $run->checkpoint_commit_sha,
+            'evidence_source' => $source,
+            'evidence_observed_at' => $observedAt,
+            'evidence_digest' => $digest,
+            'authorized_by' => $actorId,
+            'authorized_at' => now(),
+            'invalidated_at' => null,
+        ])->save();
+
+        return $gate->fresh() ?? $gate;
+    }
+
+    public function authorizeCandidateGateEvidence(
+        Run $run,
+        string $gateId,
+        int $actorId,
+        string $reference,
+        PublishCandidate $candidate,
+        int $expectedCandidateRunVersion,
+        ?string $source = null,
+        ?CarbonImmutable $observedAt = null,
+        ?string $digest = null,
+    ): RunGate {
+        $this->assertGateEvidenceAuthority($run, $gateId, $actorId, $reference);
+        if ($expectedCandidateRunVersion !== $run->version + 1
+            || ! hash_equals($candidate->baseSha, $run->run_base_sha)) {
+            throw new RunTransitionConflict('gate_evidence_binding_invalid', 'Gate evidence is not bound to the prospective candidate run version.');
+        }
+        $gate = RunGate::query()->where('run_id', $run->id)->where('gate_id', $gateId)->firstOrFail();
+        [$source, $observedAt, $digest] = $this->gateEvidenceDetails($gate, $source, $observedAt, $digest);
+        $contract = $this->assertCurrentGateContract($run, $gate);
+        $gate->forceFill([
+            'state' => GateState::CLOSED,
+            'evidence_reference' => $reference,
+            'evidence_ticket_contract_sha256' => $contract,
+            'checkpoint_commit_sha' => $run->checkpoint_commit_sha,
+            'evidence_candidate_tree_sha' => $candidate->treeOid,
+            'evidence_candidate_diff_hash' => $candidate->diffHash,
+            'evidence_expected_run_version' => $expectedCandidateRunVersion,
+            'evidence_source' => $source,
+            'evidence_observed_at' => $observedAt,
+            'evidence_digest' => $digest,
+            'authorized_by' => $actorId,
+            'authorized_at' => now(),
+            'invalidated_at' => null,
+        ])->save();
+
+        return $gate->fresh() ?? $gate;
+    }
+
+    /** @return list<string> */
+    public function invalidateStaleCandidateGateEvidence(Run $run, PublishCandidate $candidate): array
+    {
+        $open = [];
+        $candidateBindingCurrent = $this->candidateBindingIsCurrent($run)
+            || $run->candidate_invalidated_at !== null;
+        if (! $candidateBindingCurrent && $run->candidate_tree_sha !== null) {
+            $invalidatedAt = now();
+            $updated = Run::query()->whereKey($run->id)
+                ->where('version', $run->version)
+                ->whereNull('candidate_invalidated_at')
+                ->update([
+                    'candidate_invalidated_at' => now(),
+                    'version' => DB::raw('version + 1'),
+                    'updated_at' => now(),
+                ]);
+            if ($updated !== 1) {
+                throw new RunTransitionConflict('stale_version', 'The run version changed concurrently.');
+            }
+            $run->setAttribute('candidate_invalidated_at', $invalidatedAt);
+            $run->setAttribute('version', $run->version + 1);
+        }
+        $contract = $run->ticket_contract_sha256
+            ?? TicketApproval::query()->whereKey($run->ticket_approval_id)->value('ticket_contract_sha256');
+        $gateIds = RunGate::query()->where('run_id', $run->id)->where('blocks_candidate', true)
+            ->orderBy('gate_id')->pluck('id')->all();
+        foreach ($gateIds as $gateId) {
+            if (! is_string($gateId)) {
+                continue;
+            }
+            $gate = RunGate::query()->findOrFail($gateId);
+            $candidateIsBound = $run->candidate_invalidated_at === null
+                && $run->candidate_tree_sha === $candidate->treeOid
+                && $run->candidate_diff_hash === $candidate->diffHash;
+            $expectedVersion = $candidateIsBound ? $run->version : $run->version + 1;
+            $valid = $gate->state === GateState::CLOSED
+                && $candidateBindingCurrent
+                && $gate->invalidated_at === null
+                && is_string($contract)
+                && $gate->evidence_ticket_contract_sha256 === $contract
+                && $gate->checkpoint_commit_sha === $run->checkpoint_commit_sha
+                && $gate->evidence_candidate_tree_sha === $candidate->treeOid
+                && $gate->evidence_candidate_diff_hash === $candidate->diffHash
+                && $gate->evidence_expected_run_version === $expectedVersion;
+            if (! $valid) {
+                if ($gate->state === GateState::CLOSED) {
+                    $gate->forceFill(['state' => GateState::OPEN, 'invalidated_at' => now()])->save();
+                }
+                $open[] = $gate->gate_id;
+            }
+        }
+
+        return $open;
+    }
+
+    private function candidateBindingIsCurrent(Run $run): bool
+    {
+        if ($run->candidate_tree_sha === null) {
+            return true;
+        }
+        $approval = TicketApproval::query()->find($run->ticket_approval_id);
+        $ticketContract = $run->ticket_contract_sha256 ?? $approval?->ticket_contract_sha256;
+        $scopeHash = $run->effective_scope_hash ?? $run->scope_hash;
+        foreach ([
+            'candidate_base_sha' => $run->run_base_sha,
+            'candidate_checkpoint_commit_sha' => $run->checkpoint_commit_sha,
+            'candidate_ticket_contract_sha256' => $ticketContract,
+            'candidate_approval_snapshot_hash' => $approval?->approval_snapshot_hash,
+            'candidate_evidence_epoch' => $run->evidence_epoch,
+            'candidate_scope_hash' => $scopeHash,
+            'candidate_config_hash' => $run->config_hash,
+            'candidate_prompt_hash' => $run->prompt_hash,
+            'candidate_security_policy_hash' => $run->security_policy_hash,
+        ] as $field => $current) {
+            $bound = $run->getAttribute($field);
+            if (is_int($current)) {
+                if ((int) $bound !== $current) {
+                    return false;
+                }
+
+                continue;
+            }
+            if (! is_string($bound) || ! is_string($current) || ! hash_equals($bound, $current)) {
+                return false;
+            }
+        }
+
+        return $run->candidate_invalidated_at === null;
+    }
+
+    private function assertGateEvidenceAuthority(Run $run, string $gateId, int $actorId, string $reference): void
     {
         $actor = User::query()->find($actorId);
         $project = Project::query()->find($run->project_id);
@@ -1896,18 +2124,39 @@ final readonly class RunOrchestrator
             || ! $this->hasEffectiveCheckpoint($run) || $run->checkpoint_commit_sha === null) {
             throw new RunTransitionConflict('gate_evidence_binding_invalid', 'Gate evidence requires the current ticket contract and checkpoint.');
         }
-        $gate = RunGate::query()->where('run_id', $run->id)->where('gate_id', $gateId)->firstOrFail();
-        $gate->forceFill([
-            'state' => GateState::CLOSED,
-            'evidence_reference' => $reference,
-            'evidence_ticket_contract_sha256' => $gate->ticket_contract_sha256,
-            'checkpoint_commit_sha' => $run->checkpoint_commit_sha,
-            'authorized_by' => $actorId,
-            'authorized_at' => now(),
-            'invalidated_at' => null,
-        ])->save();
+    }
 
-        return $gate->fresh() ?? $gate;
+    /** @return array{string, CarbonImmutable, string|null} */
+    private function gateEvidenceDetails(
+        RunGate $gate,
+        ?string $source,
+        ?CarbonImmutable $observedAt,
+        ?string $digest,
+    ): array {
+        if ($gate->kind === GateKind::MANUAL) {
+            $source ??= 'panel_manual_confirmation';
+            $observedAt ??= CarbonImmutable::now();
+        }
+        if (! is_string($source) || preg_match('/\A[A-Za-z0-9][A-Za-z0-9 ._:\/@+-]{0,254}\z/D', $source) !== 1
+            || ! $observedAt instanceof CarbonImmutable
+            || $observedAt->isFuture()
+            || ($digest !== null && preg_match('/\A[0-9a-f]{64}\z/D', $digest) !== 1)) {
+            throw new RunTransitionConflict('gate_external_evidence_incomplete', 'External gate evidence requires a valid source, observation time, and optional SHA-256 digest.');
+        }
+
+        return [$source, $observedAt, $digest];
+    }
+
+    private function assertCurrentGateContract(Run $run, RunGate $gate): string
+    {
+        $contract = $run->ticket_contract_sha256
+            ?? TicketApproval::query()->whereKey($run->ticket_approval_id)->value('ticket_contract_sha256');
+        $gateContract = $gate->getRawOriginal('ticket_contract_sha256');
+        if (! is_string($contract) || ! is_string($gateContract) || ! hash_equals($contract, $gateContract)) {
+            throw new RunTransitionConflict('gate_evidence_binding_invalid', 'Gate evidence does not match the current ticket contract.');
+        }
+
+        return $contract;
     }
 
     /** The one application-wide review-readiness decision. */
