@@ -46,7 +46,13 @@
         "scenario": "security_findings",
         "role": "security_review",
         "status": "security_findings",
-        "bytes": "{\"schema_version\":\"ai6.quality-review.v1\",\"status\":\"security_findings\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"findings\":[{\"local_id\":\"finding-1\",\"severity\":\"high\",\"disposition\":\"must_fix\",\"category\":\"contract\",\"file\":\"app/Example.php\",\"line\":1,\"title\":\"Deterministischer Befund\",\"evidence\":\"Das erwartete Ergebnis fehlt.\",\"expected_result\":\"Der Vertrag ist erfüllt.\",\"criterion_refs\":[\"AC-01\",\"AC-02\"]}],\"criterion_coverage\":[{\"criterion_id\":\"AC-01\",\"status\":\"satisfied\",\"evidence\":\"Deterministischer Nachweis.\"},{\"criterion_id\":\"AC-02\",\"status\":\"satisfied\",\"evidence\":\"Deterministischer Nachweis.\"}]}"
+        "bytes": "{\"schema_version\":\"ai6.quality-review.v1\",\"status\":\"security_findings\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"findings\":[{\"local_id\":\"finding-1\",\"severity\":\"critical\",\"disposition\":\"must_fix\",\"category\":\"security\",\"file\":\"app/Example.php\",\"line\":1,\"title\":\"Deterministischer Befund\",\"evidence\":\"Das erwartete Ergebnis fehlt.\",\"expected_result\":\"Der Vertrag ist erfüllt.\",\"criterion_refs\":[\"AC-01\",\"AC-02\"]}],\"criterion_coverage\":[{\"criterion_id\":\"AC-01\",\"status\":\"satisfied\",\"evidence\":\"Deterministischer Nachweis.\"},{\"criterion_id\":\"AC-02\",\"status\":\"satisfied\",\"evidence\":\"Deterministischer Nachweis.\"}]}"
+    },
+    {
+        "scenario": "security_inconclusive",
+        "role": "security_review",
+        "status": "inconclusive",
+        "bytes": "{\"schema_version\":\"ai6.quality-review.v1\",\"status\":\"inconclusive\",\"summary\":\"Deterministisches Fake-Ergebnis.\",\"prompt_snapshot_hash\":\"%PROMPT_SNAPSHOT_HASH%\",\"instruction_snapshot_hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provider_runtime_profile_hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"criterion_coverage\":[{\"criterion_id\":\"AC-01\",\"status\":\"satisfied\",\"evidence\":\"Deterministischer Nachweis.\"},{\"criterion_id\":\"AC-02\",\"status\":\"satisfied\",\"evidence\":\"Deterministischer Nachweis.\"}]}"
     },
     {
         "scenario": "untrusted_evidence",

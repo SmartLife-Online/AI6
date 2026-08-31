@@ -33,6 +33,8 @@ return [
             'frame-ancestors' => "'none'",
         ],
     ],
+    'agent_security_review_profile' => env('AI6_AGENT_SECURITY_REVIEW_PROFILE', 'fake'),
+
     'security' => [
         'profile' => env('AI6_SECURITY_PROFILE', 'strict'),
         'acknowledge_reduced_mode' => env('AI6_SECURITY_ACKNOWLEDGE_REDUCED_MODE', 'false'),

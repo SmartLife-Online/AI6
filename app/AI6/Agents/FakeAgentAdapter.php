@@ -177,7 +177,7 @@ final class FakeAgentAdapter implements AgentAdapter
         $request = json_encode([
             'write_example' => $context->role === AgentRole::IMPLEMENTATION
                 && in_array($scenario, [AgentScenario::SUCCESS, AgentScenario::NO_CHANGE_WITH_DIFF], true),
-            'probe_read_only' => $context->role === AgentRole::QUALITY_REVIEW,
+            'probe_read_only' => in_array($context->role, [AgentRole::QUALITY_REVIEW, AgentRole::SECURITY_REVIEW], true),
             // A fix turn binds its own finding package, so the deterministic
             // content differs per round and a second fix produces a real diff.
             'example_contents' => $context->expectedFindingIds !== []
@@ -215,7 +215,8 @@ final class FakeAgentAdapter implements AgentAdapter
         $this->lastAccessProbes = is_array($payload['probes'] ?? null) ? $payload['probes'] : [];
         $this->accessProbeHistory[] = $this->lastAccessProbes;
         foreach ($this->lastAccessProbes as $key => $status) {
-            if (str_starts_with((string) $key, 'path:') && $status === 'readable') {
+            if ((str_starts_with((string) $key, 'path:') && $status === 'readable')
+                || (str_starts_with((string) $key, 'path-write:') && $status === 'writable')) {
                 throw new RuntimeException('The isolated turn reached a forbidden path.');
             }
         }
@@ -294,6 +295,7 @@ final class FakeAgentAdapter implements AgentAdapter
             AgentScenario::FINDINGS => AgentResultStatus::FINDINGS_TO_FIX,
             AgentScenario::PROVIDER_ERROR => AgentResultStatus::FAILED,
             AgentScenario::SECURITY_FINDINGS => AgentResultStatus::SECURITY_FINDINGS,
+            AgentScenario::SECURITY_INCONCLUSIVE => AgentResultStatus::INCONCLUSIVE,
             AgentScenario::UNTRUSTED_EVIDENCE, AgentScenario::INVALID_CRITERION_REFERENCE,
             AgentScenario::REGRESSION_AFTER_FIX => AgentResultStatus::FINDINGS_TO_FIX,
             AgentScenario::VERIFICATION_INCONCLUSIVE => AgentResultStatus::INCONCLUSIVE,
@@ -307,9 +309,9 @@ final class FakeAgentAdapter implements AgentAdapter
     {
         return [
             'local_id' => 'finding-1',
-            'severity' => 'high',
+            'severity' => $context->role === AgentRole::SECURITY_REVIEW ? 'critical' : 'high',
             'disposition' => 'must_fix',
-            'category' => 'contract',
+            'category' => $context->role === AgentRole::SECURITY_REVIEW ? 'security' : 'contract',
             'file' => 'app/Example.php',
             'line' => 1,
             'title' => 'Deterministischer Befund',
@@ -357,6 +359,17 @@ foreach ($request['path_probes'] ?? [] as $path) {
         $readable = $bytes !== false || @is_dir($path);
     }
     $probes['path:'.$path] = $readable ? 'readable' : 'denied';
+    $writeTarget = @is_dir($path) ? rtrim(str_replace('\\', '/', $path), '/').'/.ai6-write-probe' : $path;
+    $handle = @fopen($writeTarget, 'ab');
+    if (is_resource($handle)) {
+        fclose($handle);
+        if ($writeTarget !== $path) {
+            @unlink($writeTarget);
+        }
+        $probes['path-write:'.$path] = 'writable';
+    } else {
+        $probes['path-write:'.$path] = 'denied';
+    }
 }
 if (($request['probe_read_only'] ?? false) === true) {
     foreach (['.git', '.git/refs', '.git/hooks', '.git/commondir', '../.git'] as $path) {
@@ -366,6 +379,11 @@ if (($request['probe_read_only'] ?? false) === true) {
     $new = rtrim(str_replace('\\', '/', $tree), '/').'/review-write-probe';
     $probes['write:existing'] = @file_put_contents($existing, "review mutation\n", LOCK_EX) === false ? 'denied' : 'writable';
     $probes['write:new'] = @file_put_contents($new, "review mutation\n", LOCK_EX) === false ? 'denied' : 'writable';
+    $candidateEvidence = rtrim(str_replace('\\', '/', $tree), '/').'/app/Example.php';
+    $candidateBytes = @file_get_contents($candidateEvidence);
+    $probes['candidate-evidence:app/Example.php'] = $candidateBytes === false
+        ? 'missing'
+        : 'sha256:'.hash('sha256', $candidateBytes);
     $cursor = $tree;
     for ($level = 0; $level < 4; $level++) {
         $candidate = rtrim(str_replace('\\', '/', $cursor), '/').'/AGENTS.md';

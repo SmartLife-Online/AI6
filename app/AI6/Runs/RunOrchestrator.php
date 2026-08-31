@@ -2,6 +2,8 @@
 
 namespace App\AI6\Runs;
 
+use App\AI6\Agents\AgentRole;
+use App\AI6\Agents\AgentSelection;
 use App\AI6\Auth\Models\User;
 use App\AI6\Checks\CheckPhase;
 use App\AI6\Checks\CheckResultState;
@@ -20,6 +22,7 @@ use App\AI6\Projects\Models\ProjectMembership;
 use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Projects\Policies\ProjectPolicy;
 use App\AI6\Projects\ProjectAction;
+use App\AI6\Projects\ProjectRole;
 use App\AI6\Reviews\EffectiveFindingState;
 use App\AI6\Reviews\FindingDispositionSource;
 use App\AI6\Reviews\FindingDispositionType;
@@ -67,20 +70,24 @@ final readonly class RunOrchestrator
         string $reason,
         User $actor,
         string $stepUpProofHash,
+        bool $securityOverride = false,
     ): Run {
         if (! $type->isHumanOverride() || trim($reason) === '' || $finding->run_id !== $run->id) {
             throw new RunTransitionConflict('finding_disposition_invalid', 'The finding disposition is invalid.');
         }
         $project = Project::query()->findOrFail($run->project_id);
-        if (! $this->projectPolicy->decide(ProjectAction::DISPOSE_FINDING, $actor, $project)) {
-            throw new RunTransitionConflict('finding_disposition_unauthorized', 'The actor cannot dispose findings.');
-        }
-        // The policy above owns the authorization decision; the membership is read only to
-        // record which role decided, never to decide a second time.
         $membership = ProjectMembership::query()->where('project_id', $project->id)
             ->where('user_id', $actor->getKey())->first();
         if (! $membership instanceof ProjectMembership) {
             throw new RunTransitionConflict('finding_disposition_unauthorized', 'The actor has no project membership.');
+        }
+        $authorized = $securityOverride
+            ? $membership->role === ProjectRole::ADMIN
+                && $finding->reviewResult()->where('role', AgentRole::SECURITY_REVIEW->value)->exists()
+                && $this->projectPolicy->decide(ProjectAction::INTERVENE_RUN, $actor, $project)
+            : $this->projectPolicy->decide(ProjectAction::DISPOSE_FINDING, $actor, $project);
+        if (! $authorized) {
+            throw new RunTransitionConflict('finding_disposition_unauthorized', 'The actor cannot dispose findings.');
         }
 
         $requestHash = hash('sha256', implode(':', [
@@ -300,6 +307,14 @@ final readonly class RunOrchestrator
                 return ['type' => $type, 'number' => 1];
             }
         }
+        // Finalization freezes the publish candidate. Findings produced by the
+        // later security review belong to its candidate-bound gate and must
+        // never re-enter verification or the ordinary review/fix loop.
+        if (isset($completed[ExecutionStepType::FINALIZE->value.':1'])) {
+            return ! isset($completed[ExecutionStepType::SECURITY_REVIEW->value.':1'])
+                ? ['type' => ExecutionStepType::SECURITY_REVIEW, 'number' => 1]
+                : null;
+        }
         if ($hasFindings && ! isset($completed[ExecutionStepType::VERIFY->value.':1'])) {
             return ['type' => ExecutionStepType::VERIFY, 'number' => 1];
         }
@@ -313,9 +328,7 @@ final readonly class RunOrchestrator
         if (! isset($completed[ExecutionStepType::FIX->value.':'.$reviewRound])) {
             return $hasEffectiveBlocker
                 ? ['type' => ExecutionStepType::FIX, 'number' => $reviewRound]
-                : (! isset($completed[ExecutionStepType::FINALIZE->value.':1'])
-                    ? ['type' => ExecutionStepType::FINALIZE, 'number' => 1]
-                    : null);
+                : ['type' => ExecutionStepType::FINALIZE, 'number' => 1];
         }
         $nextRound = $reviewRound + 1;
         if (! isset($completed[ExecutionStepType::CHECK->value.':'.$nextRound])) {
@@ -423,6 +436,12 @@ final readonly class RunOrchestrator
         }
         if ($completed === ExecutionStepType::FIX && $fresh->phase === RunPhase::FIX) {
             $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::CHECK);
+        }
+        if ($completed === ExecutionStepType::FINALIZE && $fresh->phase === RunPhase::FINALIZE) {
+            $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::SECURITY_REVIEW);
+        }
+        if ($completed === ExecutionStepType::SECURITY_REVIEW && $fresh->phase === RunPhase::SECURITY_REVIEW) {
+            $fresh = $this->advancePhase($fresh, $fresh->version, RunPhase::PUBLISH);
         }
 
         $this->planNextStep($fresh, $completed, $completedNumber);
@@ -1539,6 +1558,36 @@ final readonly class RunOrchestrator
     {
         RunAgent::query()->where('run_id', $run->id)->where('slot_id', $slotId)
             ->where('role', 'quality_review')->update(['session_id' => null]);
+    }
+
+    /** Start a fresh immutable security-review slot and retire every predecessor. */
+    public function startSecurityReviewSession(Run $run, AgentSelection $selection, string $sessionId): RunAgent
+    {
+        if ($selection->role !== AgentRole::SECURITY_REVIEW || $sessionId === '') {
+            throw new RunTransitionConflict('security_reviewer_binding_invalid', 'The security reviewer binding is invalid.');
+        }
+
+        return DB::transaction(function () use ($run, $selection, $sessionId): RunAgent {
+            DB::table('runs')->where('id', $run->id)->lockForUpdate()->first();
+            RunAgent::query()->where('run_id', $run->id)->where('role', AgentRole::SECURITY_REVIEW->value)
+                ->where('is_active', true)->update(['is_active' => false]);
+            $revision = (int) RunAgent::query()->where('run_id', $run->id)
+                ->where('role', AgentRole::SECURITY_REVIEW->value)->max('slot_revision') + 1;
+
+            return RunAgent::query()->create([
+                'run_id' => $run->id,
+                'slot_id' => (string) Str::uuid(),
+                'approval_slot_id' => null,
+                'slot_revision' => $revision,
+                'is_active' => true,
+                'role' => AgentRole::SECURITY_REVIEW->value,
+                'provider_profile' => $selection->profile->providerProfileAlias,
+                'model' => $selection->model,
+                'effort' => $selection->effort,
+                'prompt_profile' => 'security',
+                'session_id' => $sessionId,
+            ]);
+        });
     }
 
     public function discardVerifierSession(Run $run, string $slotId): void

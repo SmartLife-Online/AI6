@@ -99,7 +99,8 @@ final class HumanRequestResumeTest extends TicketUiTestCase
 
     /**
      * TC-10; AI6-020 AC-14/TC-12 extend the closed list by scope_approval and
-     * contract_change, AI6-021 AC-11 by check_failure.
+     * contract_change, AI6-021 AC-11 by check_failure and AI6-028 by
+     * security_gate.
      */
     public function test_human_question_and_resource_limit_are_registered_with_resolvers(): void
     {
@@ -107,7 +108,7 @@ final class HumanRequestResumeTest extends TicketUiTestCase
         self::assertSame([
             'human_question', 'resource_limit', 'scope_approval', 'contract_change', 'check_failure',
             'review_limit', 'provider_error', 'invalid_json', 'git_base_changed', 'git_conflict',
-            'manual_gate', 'manual_report', 'status_sync',
+            'manual_gate', 'manual_report', 'status_sync', 'security_gate',
         ], $registry->registeredReasons());
         self::assertSame([
             'producer' => 'needs_human',
@@ -141,6 +142,10 @@ final class HumanRequestResumeTest extends TicketUiTestCase
         } catch (RunTransitionConflict $conflict) {
             self::assertSame('unpaired_wait_reason_producer', $conflict->reason);
         }
-        self::assertFalse($registry->isRegistered(WaitReason::SECURITY_GATE));
+        self::assertSame([
+            'producer' => 'SecurityReviewStep',
+            'resolvers' => ['bound_clear', 'step_up_override'],
+            'cancellable' => true,
+        ], $registry->registration(WaitReason::SECURITY_GATE));
     }
 }

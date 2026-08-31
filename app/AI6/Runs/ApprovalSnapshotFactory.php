@@ -7,6 +7,7 @@ use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentRole;
 use App\AI6\Agents\InstructionSnapshotResolver;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
+use App\AI6\Agents\SecurityReviewerProfileResolver;
 use App\AI6\Git\CanonicalJson;
 use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
@@ -34,6 +35,7 @@ final readonly class ApprovalSnapshotFactory
         private CanonicalJson $canonicalJson,
         private PromptCatalog $promptCatalog,
         private VerifierCandidatePoolFactory $verifierCandidates,
+        private SecurityReviewerProfileResolver $securityReviewer,
     ) {}
 
     public function create(Project $project, TicketReadModel $readModel, ApprovalSelection $selection, string $operationId): ApprovalSnapshot
@@ -46,9 +48,11 @@ final readonly class ApprovalSnapshotFactory
             new PromptRenderRequest('implementation', new PromptVariables(['context' => $promptContext])),
             new PromptRenderRequest('fix', new PromptVariables(['context' => $promptContext])),
         ];
+        $securitySelection = $this->securityReviewer->resolve();
         $firstReviewer = $selection->reviewers[0];
         $promptRequests[] = new PromptRenderRequest('quality_review', new PromptVariables(['context' => $promptContext]), $firstReviewer->promptProfileId);
         $promptRequests[] = new PromptRenderRequest('finding_verification', new PromptVariables(['context' => $promptContext]));
+        $promptRequests[] = new PromptRenderRequest('security_review', new PromptVariables(['context' => $promptContext]));
         $prompt = $this->prompts->snapshot($promptRequests, $context);
         $promptSnapshot = $prompt->jsonSerialize();
         $reviewProfileSnapshots = [];
@@ -81,12 +85,17 @@ final readonly class ApprovalSnapshotFactory
         $promptSnapshot['finding_verification_snapshot'] = $this->prompts->snapshot([
             new PromptRenderRequest('finding_verification', new PromptVariables(['context' => $promptContext])),
         ], $context)->jsonSerialize();
+        $securityEntry = $this->promptCatalog->entry('security_review');
+        $promptSnapshot['security_review_prompt_binding'] = [
+            'entry_version' => $securityEntry->version,
+            'template_sha256' => hash('sha256', $securityEntry->template),
+        ];
 
         $verifierCandidates = $selection->verifierCandidates !== []
             ? $selection->verifierCandidates
             : $this->verifierCandidates->all();
 
-        $providers = [$selection->implementation->profile->providerProfileAlias];
+        $providers = [$selection->implementation->profile->providerProfileAlias, $securitySelection->profile->providerProfileAlias];
         foreach ($selection->reviewers as $reviewer) {
             $providers[] = $reviewer->providerProfile;
         }
@@ -101,7 +110,7 @@ final readonly class ApprovalSnapshotFactory
             $instructionSnapshots[$provider] = $this->instructions->resolve($provider, $candidates, $context)->jsonSerialize();
         }
 
-        $runtimeIds = [$selection->implementation->profile->runtimeProfileId];
+        $runtimeIds = [$selection->implementation->profile->runtimeProfileId, $securitySelection->profile->runtimeProfileId];
         foreach ($selection->reviewers as $reviewer) {
             $profileId = $selection->implementation->profile->id === $reviewer->profileId
                 ? $selection->implementation->profile->runtimeProfileId
@@ -134,6 +143,15 @@ final readonly class ApprovalSnapshotFactory
             'control_generation' => $binding->controlGeneration,
         ];
         $agents = $selection->jsonSerialize();
+        $agents['security_reviewer'] = [
+            'profile_id' => $securitySelection->profile->id,
+            'provider_profile' => $securitySelection->profile->providerProfileAlias,
+            'model' => $securitySelection->model,
+            'effort' => $securitySelection->effort,
+            'prompt_profile_id' => 'security',
+            'runtime_profile_id' => $securitySelection->profile->runtimeProfileId,
+            ...$this->profileSnapshot($securitySelection->profile),
+        ];
         $agents['verifier_candidates'] = array_map(static fn ($candidate): array => $candidate->jsonSerialize(), $verifierCandidates);
         $implementationProfile = $selection->implementation->profile;
         $agents['implementation'] += $this->profileSnapshot($implementationProfile);

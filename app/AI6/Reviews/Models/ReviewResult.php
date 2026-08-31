@@ -7,6 +7,7 @@ use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunArtifact;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * @property string $id
@@ -31,6 +32,19 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $verification_assessment
  * @property string|null $verification_recommendation
  * @property string|null $verification_evidence
+ * @property string|null $candidate_tree_sha
+ * @property string|null $candidate_diff_hash
+ * @property string|null $candidate_base_sha
+ * @property string|null $candidate_ticket_contract_sha256
+ * @property string|null $candidate_scope_hash
+ * @property string|null $candidate_prompt_snapshot_hash
+ * @property string|null $candidate_instruction_snapshot_hash
+ * @property string|null $candidate_agent_profile_id
+ * @property string|null $candidate_runtime_profile_hash
+ * @property string|null $candidate_security_policy_hash
+ * @property string|null $slot_prompt_hash
+ * @property string|null $slot_instruction_hash
+ * @property string|null $slot_runtime_profile_hash
  */
 final class ReviewResult extends Model
 {
@@ -51,6 +65,12 @@ final class ReviewResult extends Model
     public function rawArtifact(): BelongsTo
     {
         return $this->belongsTo(RunArtifact::class, 'raw_artifact_id');
+    }
+
+    /** @return HasMany<Finding, $this> */
+    public function findings(): HasMany
+    {
+        return $this->hasMany(Finding::class);
     }
 
     /** @return array<string, string> */

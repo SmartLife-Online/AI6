@@ -21,7 +21,7 @@ enum AgentResultStatus: string
             AgentRole::IMPLEMENTATION => [self::COMPLETED, self::NO_CHANGE_REQUIRED, self::NEEDS_HUMAN, self::FAILED],
             AgentRole::QUALITY_REVIEW => [self::NOTHING_TO_FIX, self::FINDINGS_TO_FIX, self::NEEDS_HUMAN, self::FAILED],
             AgentRole::FINDING_VERIFICATION => [self::INCONCLUSIVE, self::CLEAR, self::NEEDS_HUMAN, self::FAILED],
-            AgentRole::SECURITY_REVIEW => [self::CLEAR, self::SECURITY_FINDINGS, self::NEEDS_HUMAN, self::FAILED],
+            AgentRole::SECURITY_REVIEW => [self::CLEAR, self::SECURITY_FINDINGS, self::NEEDS_HUMAN, self::INCONCLUSIVE],
         };
     }
 }

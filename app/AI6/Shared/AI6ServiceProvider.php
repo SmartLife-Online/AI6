@@ -16,6 +16,7 @@ use App\AI6\Agents\InstructionProfileRegistry;
 use App\AI6\Agents\InstructionSnapshotResolver;
 use App\AI6\Agents\ModelProfileAllowlist;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
+use App\AI6\Agents\SecurityReviewerProfileResolver;
 use App\AI6\Auth\AuthenticationHmac;
 use App\AI6\Auth\Config\AuthConfiguration;
 use App\AI6\Auth\Config\AuthConfigurationFactory;
@@ -70,6 +71,7 @@ use App\AI6\HumanLoop\HumanRequestNotificationConfiguration;
 use App\AI6\HumanLoop\HumanRequestRecipient;
 use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\HumanLoop\ScopeApprovalService;
+use App\AI6\HumanLoop\SecurityGateService;
 use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Policies\ProjectPolicy;
@@ -84,6 +86,8 @@ use App\AI6\Reviews\ReviewResultParser;
 use App\AI6\Reviews\ReviewResultStore;
 use App\AI6\Reviews\ReviewRound;
 use App\AI6\Reviews\ReviewStallFingerprint;
+use App\AI6\Reviews\SecurityReviewEvidence;
+use App\AI6\Reviews\SecurityReviewStep;
 use App\AI6\Reviews\VerificationContextPackageStore;
 use App\AI6\Reviews\VerifierCandidatePoolFactory;
 use App\AI6\Reviews\VerifierSlotSelector;
@@ -248,6 +252,8 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(ReviewResultStore::class);
         $this->app->singleton(ReviewContextPackageStore::class);
         $this->app->singleton(ReviewRound::class);
+        $this->app->singleton(SecurityReviewEvidence::class);
+        $this->app->singleton(SecurityReviewStep::class);
         $this->app->singleton(VerifierCandidatePoolFactory::class);
         $this->app->singleton(VerifierSlotSelector::class);
         $this->app->singleton(VerificationContextPackageStore::class);
@@ -288,6 +294,7 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(ReviewerSlotFactory::class);
         $this->app->singleton(ApprovalSelectionFactory::class);
         $this->app->singleton(ApprovalSnapshotFactory::class);
+        $this->app->singleton(SecurityReviewerProfileResolver::class);
         $this->app->singleton(RunTransitionMap::class);
         $this->app->singleton(ScopeReconciliation::class);
         $this->app->singleton(
@@ -309,6 +316,7 @@ final class AI6ServiceProvider extends ServiceProvider
         );
         $this->app->singleton(HumanRequestRecipient::class);
         $this->app->singleton(HumanRequestService::class);
+        $this->app->singleton(SecurityGateService::class);
         $this->app->singleton(GateEvidenceService::class);
         $this->app->singleton(ScopeApprovalService::class);
         $this->app->singleton(InstructionPathPolicy::class);
@@ -604,6 +612,12 @@ final class AI6ServiceProvider extends ServiceProvider
             WaitReason::STATUS_SYNC,
             'ReportOnlyCompletionService',
             ['refresh_expected_oid'],
+            true,
+        );
+        $this->app->make(WaitReasonRegistry::class)->register(
+            WaitReason::SECURITY_GATE,
+            'SecurityReviewStep',
+            ['bound_clear', 'step_up_override'],
             true,
         );
         $this->app->make(RunArtifactRoot::class);

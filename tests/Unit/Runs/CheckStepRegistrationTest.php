@@ -22,7 +22,7 @@ final class CheckStepRegistrationTest extends TestCase
         self::assertTrue(ExecutionStepType::REVIEW_PREPARE->hasRegisteredHandler());
         self::assertTrue(ExecutionStepType::REPORT->hasRegisteredHandler());
         self::assertSame(
-            ['preflight', 'review_prepare', 'implement', 'check', 'review', 'verify', 'report', 'fix', 'finalize'],
+            ['preflight', 'review_prepare', 'implement', 'check', 'review', 'verify', 'report', 'fix', 'finalize', 'security_review'],
             array_map(static fn (ExecutionStepType $type): string => $type->value, ExecutionStepType::cases()),
         );
 
@@ -37,6 +37,10 @@ final class CheckStepRegistrationTest extends TestCase
         self::assertSame(
             ['type' => ExecutionStepType::FINALIZE, 'number' => 1],
             RunOrchestrator::decideNextStepRound(RunState::RUNNING, null, ['preflight:1', 'implement:1', 'check:1', 'review:1'], false),
+        );
+        self::assertSame(
+            ['type' => ExecutionStepType::SECURITY_REVIEW, 'number' => 1],
+            RunOrchestrator::decideNextStepRound(RunState::RUNNING, null, ['preflight:1', 'implement:1', 'check:1', 'review:1', 'finalize:1'], false),
         );
         self::assertNull(RunOrchestrator::decideNextStepRound(RunState::WAITING, WaitReason::CHECK_FAILURE, ['preflight:1', 'implement:1'], false));
     }

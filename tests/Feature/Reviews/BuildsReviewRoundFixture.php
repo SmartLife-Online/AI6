@@ -13,6 +13,7 @@ use App\AI6\Agents\FakeAgentAdapter;
 use App\AI6\Agents\InstructionCandidate;
 use App\AI6\Auth\Models\User;
 use App\AI6\Git\HardenedGitRunner;
+use App\AI6\Git\RunCheckpointService;
 use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Reviews\ReviewerSlotFactory;
 use App\AI6\Reviews\ReviewRound;
@@ -28,6 +29,7 @@ use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Runs\ReviewReadinessDecision;
 use App\AI6\Runs\RunOrchestrator;
+use App\AI6\Shared\Redaction\RedactionContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\After;
@@ -88,6 +90,7 @@ trait BuildsReviewRoundFixture
         string $ticketId,
         array $instructionCandidates = [],
         bool $enableIndependentFallback = true,
+        AgentScenario $implementationScenario = AgentScenario::NO_CHANGE_REQUIRED,
     ): array {
         $agentProfiles = config('ai6.agent_profiles');
         $agentProfiles['codex-gpt-5.6-terra']['capability_status'] = 'available';
@@ -109,7 +112,7 @@ trait BuildsReviewRoundFixture
 
         $prepared = $this->preparedImplementationRun(
             $ticketId,
-            scenario: AgentScenario::NO_CHANGE_REQUIRED,
+            scenario: $implementationScenario,
             coherentGitBinding: true,
             instructionCandidates: $instructionCandidates,
         );
@@ -117,7 +120,18 @@ trait BuildsReviewRoundFixture
         self::assertSame(ExecutionJobState::SUCCEEDED, $implementation->state, (string) $implementation->failure_code);
 
         $orchestrator = $this->app->make(RunOrchestrator::class);
-        $run = $orchestrator->recordReviewReadiness($prepared['run']->fresh(), new ReviewReadinessDecision([], []));
+        $run = $prepared['run']->fresh();
+        if ($implementationScenario !== AgentScenario::NO_CHANGE_REQUIRED) {
+            $this->gitOutput(['add', '--all', '--no-renormalize'], (string) $run->worktree_path);
+            $this->gitOutput(['commit', '-m', 'AI6 implementation checkpoint'], (string) $run->worktree_path);
+            $context = new RedactionContext((string) $run->project_id, $run->id, 'review-implementation-checkpoint');
+            $run = $this->app->make(RunCheckpointService::class)->create(
+                $run,
+                (string) $run->project()->value('project_identifier'),
+                $context,
+            );
+        }
+        $run = $orchestrator->recordReviewReadiness($run, new ReviewReadinessDecision([], []));
         $check = ExecutionJob::query()->where('run_id', $run->id)
             ->where('step_type', ExecutionStepType::CHECK->value)->firstOrFail();
         $owner = str_repeat('c', 32);

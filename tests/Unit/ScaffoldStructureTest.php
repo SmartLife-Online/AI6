@@ -114,6 +114,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Agents/ProviderRuntimeProfile.php',
             'app/AI6/Agents/ProviderRuntimeProfileRegistry.php',
             'app/AI6/Agents/RuntimeExtensionType.php',
+            'app/AI6/Agents/SecurityReviewerProfileResolver.php',
             'app/AI6/Agents/TurnContainmentBoundary.php',
             'app/AI6/Auth/.gitkeep',
             'app/AI6/Auth/Actions/CreateUser.php',
@@ -325,6 +326,8 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/HumanLoop/Models/Intervention.php',
             'app/AI6/HumanLoop/ReportOnlyHumanRequestBinding.php',
             'app/AI6/HumanLoop/ScopeApprovalService.php',
+            'app/AI6/HumanLoop/SecurityGateHumanRequestBinding.php',
+            'app/AI6/HumanLoop/SecurityGateService.php',
             'app/AI6/Projects/.gitkeep',
             'app/AI6/Projects/Actions/ApproveProjectConfiguration.php',
             'app/AI6/Projects/Actions/QueueProjectConfigRefresh.php',
@@ -404,6 +407,9 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Reviews/ReviewStallFingerprint.php',
             'app/AI6/Reviews/ReviewerSlot.php',
             'app/AI6/Reviews/ReviewerSlotFactory.php',
+            'app/AI6/Reviews/SecurityReviewEvidence.php',
+            'app/AI6/Reviews/SecurityReviewPrompt.php',
+            'app/AI6/Reviews/SecurityReviewStep.php',
             'app/AI6/Reviews/VerificationContextPackageStore.php',
             'app/AI6/Reviews/VerifierCandidate.php',
             'app/AI6/Reviews/VerifierCandidatePoolFactory.php',
@@ -861,7 +867,7 @@ final class ScaffoldStructureTest extends TestCase
         }
     }
 
-    public function test_migrations_match_the_approved_state_through_ai6_040(): void
+    public function test_migrations_match_the_approved_state_through_ai6_028(): void
     {
         $migrations = glob($this->path('database/migrations/*.php'));
         self::assertIsArray($migrations);
@@ -911,6 +917,7 @@ final class ScaffoldStructureTest extends TestCase
             '2026_08_26_000000_add_review_only_execution_contract.php',
             '2026_08_27_000000_add_finding_verification_contract.php',
             '2026_08_28_000000_add_publish_candidate_contract.php',
+            '2026_08_31_000000_add_security_review_contract.php',
         ], $migrations);
     }
 

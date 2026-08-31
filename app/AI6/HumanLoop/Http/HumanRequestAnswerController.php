@@ -12,6 +12,8 @@ use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\HumanLoop\InterventionAuthorization;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\HumanLoop\ReportOnlyHumanRequestBinding;
+use App\AI6\HumanLoop\SecurityGateHumanRequestBinding;
+use App\AI6\HumanLoop\SecurityGateService;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Runs\ReportOnlyCompletionService;
 use App\AI6\Runs\RunCancellationMode;
@@ -33,6 +35,7 @@ final class HumanRequestAnswerController
         RunCancellationService $cancellations,
         ReportOnlyCompletionService $reportOnlyCompletions,
         GateEvidenceService $gateEvidence,
+        SecurityGateService $securityGate,
     ): RedirectResponse {
         Gate::authorize('interveneRun', $project);
 
@@ -67,7 +70,8 @@ final class HumanRequestAnswerController
             $mode = RunCancellationMode::tryFrom($validated['chosen_effect']);
             $reportOnlyEffect = ReportOnlyHumanRequestBinding::matches($humanRequest, $validated['chosen_effect']);
             $gateEffect = GateEvidenceHumanRequestBinding::matches($humanRequest, $validated['chosen_effect']);
-            $authorization = (($mode instanceof RunCancellationMode) || $reportOnlyEffect || $gateEffect
+            $securityEffect = SecurityGateHumanRequestBinding::matches($humanRequest, $validated['chosen_effect']);
+            $authorization = (($mode instanceof RunCancellationMode) || $reportOnlyEffect || $gateEffect || $securityEffect
                 || HumanRequestService::requiresStepUp($validated['chosen_effect']))
                 ? InterventionAuthorization::consumeFresh(
                     $request,
@@ -105,6 +109,19 @@ final class HumanRequestAnswerController
                     $validated['evidence_observed_at'] ?? null,
                     $validated['evidence_digest'] ?? null,
                 );
+            } elseif ($securityEffect && $authorization instanceof InterventionAuthorization) {
+                $securityGate->override(
+                    $humanRequest,
+                    $user,
+                    (int) $validated['run_version'],
+                    $validated['ticket_contract'],
+                    $validated['checkpoint'],
+                    $validated['scope'],
+                    $validated['agent_slot'],
+                    $validated['requested_effect'],
+                    $authorization,
+                    (string) ($validated['reason'] ?? ''),
+                );
             } else {
                 $service->answer(
                     $humanRequest,
@@ -123,6 +140,10 @@ final class HumanRequestAnswerController
                 );
             }
         } catch (StepUpRequiredException) {
+            if (isset($securityEffect) && $securityEffect) {
+                $securityGate->auditRejected($humanRequest, $user, false, null, 'step_up_required');
+            }
+
             // The missing proof is a form-level condition of the panel flow,
             // not a generic authorization failure: the answer returns to the
             // panel so the step-up form there can be used first.
@@ -150,6 +171,8 @@ final class HumanRequestAnswerController
             'effect_not_offered' => 'Die gewählte Wirkung ist nicht zulässig.',
             'strong_authorization_required', 'step_up_required' => 'Diese Wirkung verlangt eine Approverrolle und frische starke Anmeldung.',
             'reason_required' => 'Für Abbruch oder Blockierung ist eine Begründung erforderlich.',
+            'administrator_role_required' => 'Der Security-Override verlangt die Administratorrolle.',
+            'critical_security_finding_missing' => 'Für den aktuellen Candidate liegt kein kritischer Security-Befund vor.',
             'cancel_after_push_forbidden' => 'Nach bestätigter Branchveröffentlichung ist nur noch die Statussynchronisation zulässig.',
             'attention_user_unavailable' => 'Es ist kein aktiver Attention-User gebunden.',
             'checkpoint_not_bound' => 'Der Run besitzt keinen gebundenen Checkpoint.',

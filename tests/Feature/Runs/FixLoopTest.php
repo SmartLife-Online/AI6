@@ -359,7 +359,7 @@ final class FixLoopTest extends TicketUiTestCase
         $expectedReasons = [
             'human_question', 'resource_limit', 'scope_approval', 'contract_change', 'check_failure',
             'review_limit', 'provider_error', 'invalid_json', 'git_base_changed', 'git_conflict',
-            'manual_gate', 'manual_report', 'status_sync',
+            'manual_gate', 'manual_report', 'status_sync', 'security_gate',
         ];
         self::assertSame($expectedReasons, $this->app->make(WaitReasonRegistry::class)->registeredReasons());
 

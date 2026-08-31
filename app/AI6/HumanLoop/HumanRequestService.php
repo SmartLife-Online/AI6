@@ -29,6 +29,7 @@ use App\AI6\Runs\Models\RunGate;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\RunArtifactKind;
 use App\AI6\Runs\RunArtifactStore;
+use App\AI6\Runs\RunCancellationMode;
 use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
@@ -54,7 +55,7 @@ final readonly class HumanRequestService
      *
      * @var list<string>
      */
-    private const STEP_UP_EFFECTS = ['increase', 'additional_round', 'switch_reviewer', 'switch_profile', 'finding_disposition', GateEvidenceHumanRequestBinding::EFFECT];
+    private const STEP_UP_EFFECTS = ['increase', 'additional_round', 'switch_reviewer', 'switch_profile', 'finding_disposition', GateEvidenceHumanRequestBinding::EFFECT, SecurityGateHumanRequestBinding::EFFECT];
 
     public function __construct(
         private HumanRequestClassifier $classifier,
@@ -432,6 +433,110 @@ final readonly class HumanRequestService
         return $request;
     }
 
+    /** Open the one candidate-bound security decision on the generic intervention route. */
+    public function openSecurityGateRequest(
+        Run $run,
+        ExecutionJob $job,
+        string $profileId,
+        string $instructionHash,
+        string $reason,
+        bool $overrideAllowed,
+    ): HumanRequest {
+        $approval = TicketApproval::query()->findOrFail($run->ticket_approval_id);
+        try {
+            $request = DB::transaction(function () use ($run, $job, $profileId, $instructionHash, $reason, $overrideAllowed, $approval): HumanRequest {
+                DB::table('runs')->where('id', $run->id)->lockForUpdate()->first();
+                $fresh = Run::query()->findOrFail($run->id);
+                $this->assertBoundAttentionUser($approval, $fresh->project_id);
+                if ($fresh->state === RunState::RUNNING) {
+                    $fresh = $this->orchestrator->transition(
+                        $fresh,
+                        $fresh->version,
+                        RunState::WAITING,
+                        $fresh->phase,
+                        WaitReason::SECURITY_GATE,
+                    );
+                } elseif ($fresh->state !== RunState::WAITING || $fresh->wait_reason !== WaitReason::SECURITY_GATE) {
+                    throw new HumanRequestRejected('security_gate_not_waiting', 'The run cannot open a security gate request.');
+                }
+                foreach (['candidate_tree_sha', 'candidate_diff_hash', 'candidate_base_sha'] as $field) {
+                    if (! is_string($fresh->getAttribute($field))) {
+                        throw new HumanRequestRejected('security_candidate_binding_missing', 'The security gate candidate is incomplete.');
+                    }
+                }
+                $effects = [SecurityGateHumanRequestBinding::RETRY_EFFECT];
+                $options = [[
+                    'key' => SecurityGateHumanRequestBinding::RETRY_EFFECT,
+                    'label' => 'Security-Review in neuer Sitzung wiederholen',
+                ]];
+                if ($overrideAllowed) {
+                    $effects[] = SecurityGateHumanRequestBinding::EFFECT;
+                    $options[] = [
+                        'key' => SecurityGateHumanRequestBinding::EFFECT,
+                        'label' => 'Kritischen Security-Befund autorisiert übersteuern',
+                    ];
+                }
+                $effects[] = RunCancellationMode::SOFT->value;
+                $options[] = ['key' => RunCancellationMode::SOFT->value, 'label' => 'Run kontrolliert abbrechen'];
+                $context = new RedactionContext((string) $fresh->project_id, $fresh->id, 'security-gate');
+                $request = HumanRequest::query()->create([
+                    'id' => (string) Str::uuid(),
+                    'run_id' => $fresh->id,
+                    'project_id' => $fresh->project_id,
+                    'kind' => WaitReason::SECURITY_GATE->value,
+                    'response_mode' => 'select',
+                    'title' => 'Security-Gate erfordert eine Entscheidung',
+                    'message' => $this->redact($this->securityGateMessage($reason), $context),
+                    'why_needed' => 'Ohne gebundenes gültiges clear darf der Publish-Kandidat nicht fortgesetzt werden. Technischer Grundcode: '.$reason.'.',
+                    'options' => $options,
+                    'recommended_option' => RunCancellationMode::SOFT->value,
+                    'affected_paths' => [],
+                    'criterion_refs' => [],
+                    'allowed_effects' => $effects,
+                    'required_action' => ProjectAction::INTERVENE_RUN->value,
+                    'bound_run_version' => $fresh->version,
+                    'bound_ticket_contract' => (string) $fresh->candidate_ticket_contract_sha256,
+                    'bound_checkpoint' => (string) $fresh->candidate_tree_sha,
+                    'bound_scope' => (string) $fresh->candidate_scope_hash,
+                    'bound_agent_slot' => SecurityGateHumanRequestBinding::agentSlot($profileId),
+                    'bound_requested_effect' => SecurityGateHumanRequestBinding::requestedEffect(
+                        (string) $fresh->candidate_tree_sha,
+                        (string) $fresh->candidate_diff_hash,
+                        (string) $fresh->candidate_base_sha,
+                        $instructionHash,
+                        $fresh->security_policy_hash,
+                        $profileId,
+                    ),
+                    'bound_step_key' => $job->idempotency_key,
+                    'delivery_status' => HumanRequestDeliveryStatus::QUEUED,
+                    'delivery_attempts' => 0,
+                    'delivery_revision' => 1,
+                    'delivery_status_changed_at' => now(),
+                    'resolution_state' => HumanRequestResolutionState::OPEN,
+                    'attention_user_id' => $approval->attention_user_id,
+                ]);
+                if (! $this->orchestrator->parkBoundStep($job)) {
+                    throw new HumanRequestRejected('bound_step_not_parkable', 'The security review step could not be parked.');
+                }
+
+                return $request;
+            });
+        } catch (UniqueConstraintViolationException) {
+            $existing = HumanRequest::query()->where('run_id', $run->id)
+                ->where('resolution_state', HumanRequestResolutionState::OPEN->value)->first();
+            if (! $existing instanceof HumanRequest || $existing->kind !== WaitReason::SECURITY_GATE->value) {
+                throw new HumanRequestRejected('open_request_exists', 'An open blocking human request already exists for this run.');
+            }
+
+            return $existing;
+        } catch (RunTransitionConflict $conflict) {
+            throw new HumanRequestRejected($conflict->reason, $conflict->getMessage());
+        }
+        $this->dispatchNotification($request);
+
+        return $request;
+    }
+
     /** Open the report confirmation without inventing an execution-job producer. */
     public function openManualReportRequest(Run $run): HumanRequest
     {
@@ -641,6 +746,9 @@ final readonly class HumanRequestService
                 if ($chosenEffect === GateEvidenceHumanRequestBinding::EFFECT) {
                     throw new HumanRequestRejected('specialized_effect_required', 'Gate evidence must use its candidate-bound resolver.');
                 }
+                if ($chosenEffect === SecurityGateHumanRequestBinding::EFFECT) {
+                    throw new HumanRequestRejected('specialized_effect_required', 'The security override must use its candidate-bound resolver.');
+                }
                 if (in_array($chosenEffect, [self::CANCEL_EFFECT, 'controlled_abort', 'confirm_report', 'refresh_expected_oid'], true)) {
                     throw new HumanRequestRejected('legacy_cancel_forbidden', 'Cancellation must use the status-operation-bound cancellation saga.');
                 }
@@ -772,6 +880,15 @@ final readonly class HumanRequestService
     private function redact(string $text, RedactionContext $context): string
     {
         return $this->redactor->redact($text, $context)->text;
+    }
+
+    private function securityGateMessage(string $reason): string
+    {
+        return match (true) {
+            str_starts_with($reason, 'security_result_') => 'Der Sicherheitsreview lieferte kein gebundenes gültiges clear. Der Schritt kann in einer neuen Sitzung wiederholt, kontrolliert abgebrochen oder – ausschließlich bei einem kritischen Befund – autorisiert übersteuert werden.',
+            $reason === 'security_runtime_limit' => 'Der Sicherheitsreview hat das gebundene Laufzeitlimit erreicht. Der Schritt kann in einer neuen Sitzung wiederholt oder kontrolliert abgebrochen werden.',
+            default => 'Der Sicherheitsreview konnte für den gebundenen Publish-Kandidaten nicht sicher abgeschlossen werden. Der Schritt kann in einer neuen Sitzung wiederholt oder kontrolliert abgebrochen werden.',
+        };
     }
 
     private function assertBinding(string $reason, string $provided, string $expected): void

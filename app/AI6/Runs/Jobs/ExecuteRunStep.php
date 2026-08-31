@@ -8,6 +8,7 @@ use App\AI6\HumanLoop\Models\Intervention;
 use App\AI6\Reviews\FindingVerificationRound;
 use App\AI6\Reviews\ReviewRound;
 use App\AI6\Reviews\ReviewStallFingerprint;
+use App\AI6\Reviews\SecurityReviewStep;
 use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\ExecutionStepType;
 use App\AI6\Runs\ImportLimit;
@@ -56,6 +57,7 @@ final class ExecuteRunStep implements ShouldQueue
         ?ReviewOnlyRunCoordinator $reviewOnly = null,
         ?FindingVerificationRound $verifications = null,
         ?RunFinalizationStep $finalization = null,
+        ?SecurityReviewStep $securityReview = null,
     ): void {
         $job = ExecutionJob::query()->find($this->executionJobId);
         if (! $job instanceof ExecutionJob
@@ -97,6 +99,7 @@ final class ExecuteRunStep implements ShouldQueue
             ExecutionStepType::FIX,
             ExecutionStepType::VERIFY,
             ExecutionStepType::FINALIZE,
+            ExecutionStepType::SECURITY_REVIEW,
         ], true) ? $limits->runtimeExceeded($run) : null;
         $waitReason = WaitReason::RESOURCE_LIMIT;
         if ($exceeded === null && $type === ExecutionStepType::REVIEW) {
@@ -137,6 +140,11 @@ final class ExecuteRunStep implements ShouldQueue
             $waitReason = WaitReason::REVIEW_LIMIT;
         }
         if ($exceeded instanceof ImportLimitResult) {
+            if ($type === ExecutionStepType::SECURITY_REVIEW) {
+                ($securityReview ?? app(SecurityReviewStep::class))->parkForFailure($claimed, $run, 'security_runtime_limit');
+
+                return;
+            }
             try {
                 $humanRequests->openLimitRequest($run, $claimed, $exceeded, $waitReason);
             } catch (HumanRequestRejected $rejected) {
@@ -197,6 +205,12 @@ final class ExecuteRunStep implements ShouldQueue
 
         if ($type === ExecutionStepType::FINALIZE) {
             ($finalization ?? app(RunFinalizationStep::class))->execute($claimed, $run, $owner);
+
+            return;
+        }
+
+        if ($type === ExecutionStepType::SECURITY_REVIEW) {
+            ($securityReview ?? app(SecurityReviewStep::class))->execute($claimed, $run, $owner);
 
             return;
         }

@@ -12,6 +12,7 @@ enum AgentScenario: string
     case INVALID_JSON = 'invalid_json';
     case PROVIDER_ERROR = 'provider_error';
     case SECURITY_FINDINGS = 'security_findings';
+    case SECURITY_INCONCLUSIVE = 'security_inconclusive';
     case UNTRUSTED_EVIDENCE = 'untrusted_evidence';
     case INVALID_CRITERION_REFERENCE = 'invalid_criterion_reference';
     case REGRESSION_AFTER_FIX = 'regression_after_fix';
