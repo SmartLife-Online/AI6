@@ -13,6 +13,7 @@ use App\AI6\HumanLoop\Models\Intervention;
 use App\AI6\Projects\Models\ProjectMembership;
 use App\AI6\Projects\Policies\ProjectPolicy;
 use App\AI6\Projects\ProjectAction;
+use App\AI6\Projects\ProjectRole;
 use App\AI6\Reviews\FindingDispositionType;
 use App\AI6\Reviews\Models\Finding;
 use App\AI6\Reviews\Models\ReviewResult;
@@ -55,7 +56,7 @@ final readonly class HumanRequestService
      *
      * @var list<string>
      */
-    private const STEP_UP_EFFECTS = ['increase', 'additional_round', 'switch_reviewer', 'switch_profile', 'finding_disposition', GateEvidenceHumanRequestBinding::EFFECT, SecurityGateHumanRequestBinding::EFFECT];
+    private const STEP_UP_EFFECTS = ['increase', 'additional_round', 'switch_reviewer', 'switch_profile', 'finding_disposition', 'authorize_push', GateEvidenceHumanRequestBinding::EFFECT, SecurityGateHumanRequestBinding::EFFECT];
 
     public function __construct(
         private HumanRequestClassifier $classifier,
@@ -75,13 +76,14 @@ final readonly class HumanRequestService
         string $boundStepKey,
         ?WaitReason $waitReason = null,
         ?ImportLimitResult $limit = null,
+        ?string $requestedEffectBinding = null,
     ): HumanRequest {
         $waitReason ??= $proposal->kind === 'resource_limit' ? WaitReason::RESOURCE_LIMIT : WaitReason::HUMAN_QUESTION;
         $classification = $this->classifier->classify($proposal);
         $approval = TicketApproval::query()->whereKey($run->ticket_approval_id)->firstOrFail();
 
         try {
-            $request = DB::transaction(function () use ($run, $proposal, $classification, $approval, $agentSlotId, $boundStepKey, $waitReason, $limit): HumanRequest {
+            $request = DB::transaction(function () use ($run, $proposal, $classification, $approval, $agentSlotId, $boundStepKey, $waitReason, $limit, $requestedEffectBinding): HumanRequest {
                 DB::table('runs')->where('id', $run->getKey())->lockForUpdate()->first();
                 $fresh = Run::query()->findOrFail($run->getKey());
                 $this->assertBoundAttentionUser($approval, $fresh->project_id);
@@ -141,7 +143,7 @@ final readonly class HumanRequestService
                     'bound_checkpoint' => $checkpoint,
                     'bound_scope' => $fresh->scope_hash,
                     'bound_agent_slot' => $agentSlotId,
-                    'bound_requested_effect' => $classification->requestedEffectBinding,
+                    'bound_requested_effect' => $requestedEffectBinding ?? $classification->requestedEffectBinding,
                     'bound_step_key' => $boundStepKey,
                     'delivery_status' => HumanRequestDeliveryStatus::QUEUED,
                     'delivery_attempts' => 0,
@@ -351,6 +353,28 @@ final readonly class HumanRequestService
             'system:'.$job->step_type,
             $job->idempotency_key,
             WaitReason::GIT_BASE_CHANGED,
+        );
+    }
+
+    public function openManualPushRequest(Run $run, ExecutionJob $job): HumanRequest
+    {
+        return $this->open(
+            $run,
+            new HumanRequestProposal(
+                WaitReason::MANUAL_PUSH->value,
+                'Branchveröffentlichung bestätigen',
+                'Der unveränderte, gebundene Publish-Candidate ist bereit zur Veröffentlichung.',
+                'Der Approval-Snapshot verlangt eine ausdrückliche autorisierte Pushentscheidung.',
+                'select',
+                [new HumanRequestOption('authorize_push', 'Gebundenen Branch veröffentlichen')],
+                'authorize_push',
+                [],
+                [],
+            ),
+            PublishHumanRequestBinding::AGENT_SLOT,
+            $job->idempotency_key,
+            WaitReason::MANUAL_PUSH,
+            requestedEffectBinding: PublishHumanRequestBinding::candidateBinding($run),
         );
     }
 
@@ -683,6 +707,73 @@ final readonly class HumanRequestService
         return $request;
     }
 
+    /** Open a post-push CAS conflict decision with publish-only provenance. */
+    public function openPublishStatusConflictRequest(Run $run): HumanRequest
+    {
+        $approval = TicketApproval::query()->findOrFail($run->ticket_approval_id);
+        try {
+            $request = DB::transaction(function () use ($run, $approval): HumanRequest {
+                DB::table('runs')->where('id', $run->id)->lockForUpdate()->first();
+                $fresh = Run::query()->findOrFail($run->id);
+                $this->assertBoundAttentionUser($approval, $fresh->project_id);
+                if ($fresh->state !== RunState::WAITING || $fresh->wait_reason !== WaitReason::GIT_CONFLICT
+                    || $fresh->pending_status_operation_id !== null
+                    || $fresh->confirmed_branch_publication_oid === null
+                    || $fresh->checkpoint_tree_sha === null || $fresh->checkpoint_diff_hash === null) {
+                    throw new HumanRequestRejected(
+                        'publish_status_conflict_not_waiting',
+                        'The run cannot open a publish status conflict decision.',
+                    );
+                }
+                $effect = PublishHumanRequestBinding::candidateBinding($fresh);
+                $context = new RedactionContext((string) $fresh->project_id, $fresh->id, 'publish-status-conflict');
+                $request = HumanRequest::query()->create([
+                    'id' => (string) Str::uuid(),
+                    'run_id' => $fresh->id,
+                    'project_id' => $fresh->project_id,
+                    'kind' => WaitReason::GIT_CONFLICT->value,
+                    'response_mode' => 'select',
+                    'title' => $this->redact('Statusabgleich nach Branchveröffentlichung in Konflikt', $context),
+                    'message' => $this->redact('Der Branch ist bereits veröffentlicht; die noch offene Statussynchronisation benötigt eine neue autorisierte Compare-and-Swap-Entscheidung.', $context),
+                    'why_needed' => $this->redact('Die zuvor gebundene Control-OID ist nicht mehr aktuell.', $context),
+                    'options' => [['key' => 'refresh_expected_oid', 'label' => 'OID aktualisieren und Statussynchronisation erneut autorisieren']],
+                    'recommended_option' => 'refresh_expected_oid',
+                    'affected_paths' => [],
+                    'criterion_refs' => [],
+                    'allowed_effects' => ['refresh_expected_oid'],
+                    'required_action' => ProjectAction::ANSWER_HUMAN_REQUEST->value,
+                    'bound_run_version' => $fresh->version,
+                    'bound_ticket_contract' => $fresh->ticket_contract_sha256 ?? $approval->ticket_contract_sha256,
+                    'bound_checkpoint' => $fresh->checkpoint_tree_sha,
+                    'bound_scope' => $fresh->scope_hash,
+                    'bound_agent_slot' => PublishHumanRequestBinding::AGENT_SLOT,
+                    'bound_requested_effect' => $effect,
+                    'bound_step_key' => PublishHumanRequestBinding::statusConflictStepKey($fresh->id),
+                    'delivery_status' => HumanRequestDeliveryStatus::QUEUED,
+                    'delivery_attempts' => 0,
+                    'delivery_revision' => 1,
+                    'delivery_status_changed_at' => now(),
+                    'resolution_state' => HumanRequestResolutionState::OPEN,
+                    'attention_user_id' => $approval->attention_user_id,
+                ]);
+
+                return $request;
+            });
+        } catch (UniqueConstraintViolationException) {
+            $existing = HumanRequest::query()->where('run_id', $run->id)
+                ->where('resolution_state', HumanRequestResolutionState::OPEN->value)->first();
+            if (! $existing instanceof HumanRequest
+                || ! PublishHumanRequestBinding::matchesStatusConflict($existing, 'refresh_expected_oid')) {
+                throw new HumanRequestRejected('open_request_exists', 'An open blocking human request already exists for this run.');
+            }
+
+            return $existing;
+        }
+        $this->dispatchNotification($request);
+
+        return $request;
+    }
+
     public function answer(
         HumanRequest $request,
         User $user,
@@ -726,6 +817,11 @@ final readonly class HumanRequestService
                     ->where('user_id', $user->getKey())->first();
                 if (! $membership instanceof ProjectMembership) {
                     throw new HumanRequestRejected('unauthorized', 'The user has no project membership.');
+                }
+                if ($chosenEffect === PublishHumanRequestBinding::AUTHORIZE_PUSH
+                    && ($membership->role !== ProjectRole::APPROVER
+                        || ! PublishHumanRequestBinding::matchesManualPush($fresh, $run))) {
+                    throw new HumanRequestRejected('unauthorized', 'Only an approver may authorize the bound publish candidate.');
                 }
                 if ($fresh->resolution_state !== HumanRequestResolutionState::OPEN) {
                     throw new HumanRequestRejected('request_already_resolved', 'The human request is already resolved.');

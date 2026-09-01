@@ -15,6 +15,7 @@ use App\AI6\Runs\ImportLimit;
 use App\AI6\Runs\ImportLimitResult;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\PublishCompletionService;
 use App\AI6\Runs\ReviewOnlyPrepareStep;
 use App\AI6\Runs\ReviewOnlyRunCoordinator;
 use App\AI6\Runs\RunCheckStep;
@@ -58,6 +59,7 @@ final class ExecuteRunStep implements ShouldQueue
         ?FindingVerificationRound $verifications = null,
         ?RunFinalizationStep $finalization = null,
         ?SecurityReviewStep $securityReview = null,
+        ?PublishCompletionService $publish = null,
     ): void {
         $job = ExecutionJob::query()->find($this->executionJobId);
         if (! $job instanceof ExecutionJob
@@ -100,6 +102,7 @@ final class ExecuteRunStep implements ShouldQueue
             ExecutionStepType::VERIFY,
             ExecutionStepType::FINALIZE,
             ExecutionStepType::SECURITY_REVIEW,
+            ExecutionStepType::PUBLISH,
         ], true) ? $limits->runtimeExceeded($run) : null;
         $waitReason = WaitReason::RESOURCE_LIMIT;
         if ($exceeded === null && $type === ExecutionStepType::REVIEW) {
@@ -211,6 +214,12 @@ final class ExecuteRunStep implements ShouldQueue
 
         if ($type === ExecutionStepType::SECURITY_REVIEW) {
             ($securityReview ?? app(SecurityReviewStep::class))->execute($claimed, $run, $owner);
+
+            return;
+        }
+
+        if ($type === ExecutionStepType::PUBLISH) {
+            ($publish ?? app(PublishCompletionService::class))->execute($claimed, $run, $owner);
 
             return;
         }

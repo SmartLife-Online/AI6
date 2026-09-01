@@ -22,7 +22,7 @@ final class CheckStepRegistrationTest extends TestCase
         self::assertTrue(ExecutionStepType::REVIEW_PREPARE->hasRegisteredHandler());
         self::assertTrue(ExecutionStepType::REPORT->hasRegisteredHandler());
         self::assertSame(
-            ['preflight', 'review_prepare', 'implement', 'check', 'review', 'verify', 'report', 'fix', 'finalize', 'security_review'],
+            ['preflight', 'review_prepare', 'implement', 'check', 'review', 'verify', 'report', 'fix', 'finalize', 'security_review', 'publish'],
             array_map(static fn (ExecutionStepType $type): string => $type->value, ExecutionStepType::cases()),
         );
 

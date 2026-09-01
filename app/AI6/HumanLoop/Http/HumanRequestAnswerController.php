@@ -11,10 +11,12 @@ use App\AI6\HumanLoop\HumanRequestRejected;
 use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\HumanLoop\InterventionAuthorization;
 use App\AI6\HumanLoop\Models\HumanRequest;
+use App\AI6\HumanLoop\PublishHumanRequestBinding;
 use App\AI6\HumanLoop\ReportOnlyHumanRequestBinding;
 use App\AI6\HumanLoop\SecurityGateHumanRequestBinding;
 use App\AI6\HumanLoop\SecurityGateService;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Runs\PublishCompletionService;
 use App\AI6\Runs\ReportOnlyCompletionService;
 use App\AI6\Runs\RunCancellationMode;
 use App\AI6\Runs\RunCancellationService;
@@ -36,6 +38,7 @@ final class HumanRequestAnswerController
         ReportOnlyCompletionService $reportOnlyCompletions,
         GateEvidenceService $gateEvidence,
         SecurityGateService $securityGate,
+        PublishCompletionService $publishCompletions,
     ): RedirectResponse {
         Gate::authorize('interveneRun', $project);
 
@@ -69,9 +72,10 @@ final class HumanRequestAnswerController
         try {
             $mode = RunCancellationMode::tryFrom($validated['chosen_effect']);
             $reportOnlyEffect = ReportOnlyHumanRequestBinding::matches($humanRequest, $validated['chosen_effect']);
+            $publishStatusEffect = PublishHumanRequestBinding::matchesStatusConflict($humanRequest, $validated['chosen_effect']);
             $gateEffect = GateEvidenceHumanRequestBinding::matches($humanRequest, $validated['chosen_effect']);
             $securityEffect = SecurityGateHumanRequestBinding::matches($humanRequest, $validated['chosen_effect']);
-            $authorization = (($mode instanceof RunCancellationMode) || $reportOnlyEffect || $gateEffect || $securityEffect
+            $authorization = (($mode instanceof RunCancellationMode) || $reportOnlyEffect || $publishStatusEffect || $gateEffect || $securityEffect
                 || HumanRequestService::requiresStepUp($validated['chosen_effect']))
                 ? InterventionAuthorization::consumeFresh(
                     $request,
@@ -94,6 +98,8 @@ final class HumanRequestAnswerController
                 $reportOnlyCompletions->confirm($humanRequest, $user, $authorization);
             } elseif ($reportOnlyEffect && $validated['chosen_effect'] === 'refresh_expected_oid') {
                 $reportOnlyCompletions->resolveStatusConflict($humanRequest, $user, $authorization);
+            } elseif ($publishStatusEffect) {
+                $publishCompletions->resolveStatusConflict($humanRequest, $user, $authorization);
             } elseif ($gateEffect && $authorization instanceof InterventionAuthorization) {
                 $gateEvidence->authorize(
                     $humanRequest,
@@ -178,6 +184,12 @@ final class HumanRequestAnswerController
             'checkpoint_not_bound' => 'Der Run besitzt keinen gebundenen Checkpoint.',
             'bound_step_not_parkable' => 'Der gebundene Schritt konnte nicht geparkt werden.',
             'report_status_binding_missing' => 'Für den aktuellen Control-Stand fehlt die gebundene Ticketprojektion. Bitte zuerst den Ticket-Read-Model-Refresh ausführen.',
+            'publish_status_target_stale' => 'Die gebundene Publish-Statusprojektion ist veraltet. Bitte die aktuelle Control-OID neu laden.',
+            'publish_status_sync_state_invalid' => 'Der Publish-Statusabgleich ist im aktuellen Runzustand nicht zulässig.',
+            'mutation_binding_changed', 'editor_base_binding_changed' => 'Ticketprojektion oder Control-Bindung haben sich geändert. Bitte den aktuellen Stand neu laden.',
+            'publish_contract_changed' => 'Die Status- und Scope-Rückschreibung würde den Ticketvertrag verändern und wurde abgewiesen.',
+            'project_operation_locked' => 'Eine andere Projektoperation ist aktiv. Bitte den Statusabgleich danach erneut versuchen.',
+            'publish_status_unauthorized' => 'Die Berechtigung für den Publish-Statusabgleich ist nicht mehr aktuell.',
             'external_evidence_incomplete' => 'Externe Evidenz benötigt Quelle, Beobachtungszeitpunkt und optional einen SHA-256-Digest.',
             default => 'Die Antwort wurde ohne Wirkung abgewiesen.',
         };

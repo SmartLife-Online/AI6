@@ -11,7 +11,10 @@ final readonly class TicketV1Parser
         'schema', 'id', 'title', 'status', 'depends_on', 'kind', 'milestone', 'risk', 'files', 'spec_refs',
     ];
 
-    public function __construct(private RestrictedYaml $yaml) {}
+    public function __construct(
+        private RestrictedYaml $yaml,
+        private TicketSectionLocator $sectionLocator,
+    ) {}
 
     /** @throws TicketParseException */
     public function parse(string $content): TicketDocument
@@ -50,13 +53,13 @@ final readonly class TicketV1Parser
     /** @return array{array<string, string>, list<string>} */
     private function sections(string $body): array
     {
-        preg_match_all('/(?m)^## ([^\r\n]+)\r?\n/', $body, $matches, PREG_OFFSET_CAPTURE);
+        $headings = $this->sectionLocator->levelTwoHeadings($body);
         $sections = [];
         $duplicates = [];
-        for ($index = 0, $count = count($matches[0]); $index < $count; $index++) {
-            $name = $matches[1][$index][0];
-            $start = $matches[0][$index][1] + strlen($matches[0][$index][0]);
-            $end = $index + 1 < $count ? $matches[0][$index + 1][1] : strlen($body);
+        for ($index = 0, $count = count($headings); $index < $count; $index++) {
+            $name = $headings[$index]['title'];
+            $start = $headings[$index]['content_offset'];
+            $end = $headings[$index + 1]['offset'] ?? strlen($body);
             if (array_key_exists($name, $sections)) {
                 $duplicates[] = $name;
             } else {

@@ -15,7 +15,10 @@ final readonly class TicketContractHasher
         'schema', 'id', 'title', 'depends_on', 'kind', 'milestone', 'risk', 'files', 'spec_refs',
     ];
 
-    public function __construct(private CanonicalJson $canonicalJson) {}
+    public function __construct(
+        private CanonicalJson $canonicalJson,
+        private TicketSectionLocator $sections,
+    ) {}
 
     public function hash(TicketDocument $document): string
     {
@@ -37,7 +40,7 @@ final readonly class TicketContractHasher
         // and never invalidates review evidence. Line-ending normalization can
         // neither create nor destroy that heading, so doing it first yields the
         // same bytes as the plan's order.
-        $body = self::stripRecordedScope($body);
+        $body = $this->stripRecordedScope($body);
         $body = Normalizer::normalize($body, Normalizer::FORM_C);
         if (! is_string($body)) {
             throw new RuntimeException('Ticket body Unicode could not be normalized.');
@@ -49,34 +52,19 @@ final readonly class TicketContractHasher
     }
 
     /** Remove the AI6-owned `## Recorded Scope` section from an LF-normalized body. */
-    private static function stripRecordedScope(string $body): string
+    private function stripRecordedScope(string $body): string
     {
-        if (! str_contains($body, '## Recorded Scope')) {
+        $headings = $this->sections->levelTwoHeadings($body);
+        $recorded = array_find_key(
+            $headings,
+            static fn (array $heading): bool => $heading['title'] === 'Recorded Scope',
+        );
+        if (! is_int($recorded)) {
             return $body;
         }
-        $kept = [];
-        $inRecordedScope = false;
-        foreach (explode("\n", $body) as $line) {
-            if ($inRecordedScope) {
-                if (! self::isSectionHeading($line)) {
-                    continue;
-                }
-                $inRecordedScope = false;
-            }
-            if (rtrim($line, " \t") === '## Recorded Scope') {
-                $inRecordedScope = true;
+        $start = $headings[$recorded]['offset'];
+        $end = $headings[$recorded + 1]['offset'] ?? strlen($body);
 
-                continue;
-            }
-            $kept[] = $line;
-        }
-
-        return implode("\n", $kept);
-    }
-
-    /** A `##` heading ends the AI6-owned section; a deeper `###` heading belongs to it. */
-    private static function isSectionHeading(string $line): bool
-    {
-        return str_starts_with($line, '## ') || rtrim($line, " \t") === '##';
+        return substr($body, 0, $start).substr($body, $end);
     }
 }

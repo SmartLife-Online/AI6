@@ -12,6 +12,12 @@ depends_on: []
 
 Das generische Ticketformat prüfen.
 
+```markdown
+## Recorded Scope
+
+- Beispielaufgabe im Codeblock unverändert lassen.
+```
+
 ## Recorded Scope
 
 **Initialer Scope:**

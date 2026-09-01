@@ -28,6 +28,7 @@ final class TicketStatusTransitionPolicy
         'in_progress:return_to_todo' => [ProjectRole::ADMIN, ProjectRole::OPERATOR],
         'in_progress:block' => [ProjectRole::APPROVER],
         'in_progress:complete_report_only' => [ProjectRole::APPROVER],
+        'in_progress:complete_implementation' => [ProjectRole::APPROVER],
     ];
 
     public function decide(
@@ -43,6 +44,9 @@ final class TicketStatusTransitionPolicy
     ): string {
         if ($operation === TicketStatusOperation::COMPLETE_REPORT_ONLY) {
             throw new TicketMutationConflict('report_only_saga_required', 'Der report-only Statusübergang ist ausschließlich über die gebundene Saga zulässig.');
+        }
+        if ($operation === TicketStatusOperation::COMPLETE_IMPLEMENTATION) {
+            throw new TicketMutationConflict('publish_saga_required', 'Der Publish-Statusübergang ist ausschließlich über die gebundene Saga zulässig.');
         }
         $target = $operation->targetFor($sourceStatus);
         $roles = self::ROLES[$sourceStatus.':'.$operation->value] ?? [];
@@ -80,6 +84,9 @@ final class TicketStatusTransitionPolicy
         if ($operation === TicketStatusOperation::COMPLETE_REPORT_ONLY) {
             throw new TicketMutationConflict('report_only_saga_required', 'Der report-only Statusübergang ist ausschließlich über die gebundene Saga zulässig.');
         }
+        if ($operation === TicketStatusOperation::COMPLETE_IMPLEMENTATION) {
+            throw new TicketMutationConflict('publish_saga_required', 'Der Publish-Statusübergang ist ausschließlich über die gebundene Saga zulässig.');
+        }
         $target = $operation->targetFor($sourceStatus);
         $roles = self::ROLES[$sourceStatus.':'.$operation->value] ?? [];
 
@@ -112,6 +119,30 @@ final class TicketStatusTransitionPolicy
         $target = $operation->targetFor($sourceStatus);
         if ($target === null || ! in_array($role, self::ROLES[$sourceStatus.':'.$operation->value] ?? [], true)) {
             throw new TicketMutationConflict('transition_not_authorized', 'Der report-only Statusübergang ist nicht freigegeben.');
+        }
+        if (! hash_equals($expectedBlob, $actualBlob)) {
+            throw new TicketMutationConflict('ticket_blob_changed', 'Der erwartete Ticketblob ist veraltet.');
+        }
+        if (! hash_equals($expectedControlOid, $actualControlOid)) {
+            throw new TicketMutationConflict('control_head_changed', 'Der erwartete Control-Head ist veraltet.');
+        }
+
+        return $target;
+    }
+
+    /** Authorize the server-bound implementation edge after confirmed branch publication. */
+    public function decideImplementation(
+        ProjectRole $role,
+        string $sourceStatus,
+        string $expectedBlob,
+        string $actualBlob,
+        string $expectedControlOid,
+        string $actualControlOid,
+    ): string {
+        $operation = TicketStatusOperation::COMPLETE_IMPLEMENTATION;
+        $target = $operation->targetFor($sourceStatus);
+        if ($target === null || ! in_array($role, self::ROLES[$sourceStatus.':'.$operation->value] ?? [], true)) {
+            throw new TicketMutationConflict('transition_not_authorized', 'Der Publish-Statusübergang ist nicht freigegeben.');
         }
         if (! hash_equals($expectedBlob, $actualBlob)) {
             throw new TicketMutationConflict('ticket_blob_changed', 'Der erwartete Ticketblob ist veraltet.');

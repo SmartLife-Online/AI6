@@ -311,8 +311,12 @@ final readonly class RunOrchestrator
         // later security review belong to its candidate-bound gate and must
         // never re-enter verification or the ordinary review/fix loop.
         if (isset($completed[ExecutionStepType::FINALIZE->value.':1'])) {
-            return ! isset($completed[ExecutionStepType::SECURITY_REVIEW->value.':1'])
-                ? ['type' => ExecutionStepType::SECURITY_REVIEW, 'number' => 1]
+            if (! isset($completed[ExecutionStepType::SECURITY_REVIEW->value.':1'])) {
+                return ['type' => ExecutionStepType::SECURITY_REVIEW, 'number' => 1];
+            }
+
+            return ! isset($completed[ExecutionStepType::PUBLISH->value.':1'])
+                ? ['type' => ExecutionStepType::PUBLISH, 'number' => 1]
                 : null;
         }
         if ($hasFindings && ! isset($completed[ExecutionStepType::VERIFY->value.':1'])) {
@@ -1117,6 +1121,12 @@ final readonly class RunOrchestrator
                 && $terminalMutation->target_status !== 'ready') {
                 throw new RunTransitionConflict('review_only_terminal_target_invalid', 'A review-only run can complete only on ticket status ready.');
             }
+            if ($state === RunState::COMPLETED && $run->run_type === RunType::IMPLEMENTATION
+                && ($terminalMutation->target_status !== 'review'
+                    || $statusOperation !== TicketStatusOperation::COMPLETE_IMPLEMENTATION->value
+                    || $run->confirmed_branch_publication_oid === null)) {
+                throw new RunTransitionConflict('publish_terminal_binding_invalid', 'Only the bound post-push saga may complete an implementation run.');
+            }
         }
         $terminalBase = $confirmedStatusOperation?->target_control_oid;
         $updated = DB::transaction(function () use ($run, $expectedVersion, $state, $phase, $waitReason, $terminal, $terminalBase): int {
@@ -1125,6 +1135,10 @@ final readonly class RunOrchestrator
                 'phase' => $phase,
                 'wait_reason' => $waitReason,
                 'run_base_sha' => $terminalBase ?? $run->run_base_sha,
+                'candidate_invalidated_at' => $terminal && $run->candidate_tree_sha !== null
+                    && $run->candidate_invalidated_at === null
+                    ? now()
+                    : $run->candidate_invalidated_at,
                 'version' => DB::raw('version + 1'),
                 'updated_at' => now(),
             ]);
@@ -1254,6 +1268,131 @@ final readonly class RunOrchestrator
         return Run::query()->findOrFail($run->id);
     }
 
+    public function prepareBranchPublication(Run $run, int $expectedVersion, string $expectedRemoteOid): Run
+    {
+        if (preg_match('/\A[0-9a-f]{64}\z/D', $expectedRemoteOid) !== 1
+            || $run->phase !== RunPhase::PUBLISH || $run->candidate_tree_sha === null) {
+            throw new RunTransitionConflict('publish_binding_invalid', 'Die Publish-Bindung ist ungültig.');
+        }
+        if ($run->branch_publication_expected_oid !== null) {
+            if (! hash_equals($run->branch_publication_expected_oid, $expectedRemoteOid)) {
+                throw new RunTransitionConflict('publish_binding_changed', 'Die erwartete Remote-OID weicht ab.');
+            }
+
+            return $run;
+        }
+        $updated = Run::query()->whereKey($run->id)->where('version', $expectedVersion)
+            ->whereNull('branch_publication_expected_oid')->update([
+                'branch_publication_expected_oid' => $expectedRemoteOid,
+                'final_commit_timestamp' => now()->getTimestamp(),
+                'branch_publication_state' => 'preparing',
+                'version' => $expectedVersion + 1,
+                'updated_at' => now(),
+            ]);
+        if ($updated !== 1) {
+            throw new RunTransitionConflict('stale_run_version', 'Der Run änderte sich vor dem Publish-Intent.');
+        }
+
+        return Run::query()->findOrFail($run->id);
+    }
+
+    public function bindPublishIntent(
+        Run $run,
+        int $expectedVersion,
+        string $publicationTargetOid,
+        string $expectedRemoteOid,
+        bool $createdCommit,
+    ): Run {
+        foreach ([$publicationTargetOid, $expectedRemoteOid] as $oid) {
+            if (preg_match('/\A[0-9a-f]{64}\z/D', $oid) !== 1) {
+                throw new RunTransitionConflict('publish_binding_invalid', 'Die Publish-Bindung ist ungültig.');
+            }
+        }
+        if ($run->phase !== RunPhase::PUBLISH || $run->candidate_tree_sha === null
+            || $run->candidate_base_sha === null || ! hash_equals($run->candidate_base_sha, $run->run_base_sha)) {
+            throw new RunTransitionConflict('publish_binding_invalid', 'Der Publish-Intent passt nicht zum gebundenen Candidate.');
+        }
+        if ($run->branch_publication_target_oid !== null) {
+            if (! hash_equals($run->branch_publication_target_oid, $publicationTargetOid)
+                || $run->final_commit_kind !== ($createdCommit ? 'created' : 'no_change')
+                || ! hash_equals((string) $run->branch_publication_expected_oid, $expectedRemoteOid)) {
+                throw new RunTransitionConflict('publish_binding_changed', 'Der persistierte Publish-Intent weicht ab.');
+            }
+
+            return $run;
+        }
+        $updated = Run::query()->whereKey($run->id)->where('version', $expectedVersion)
+            ->whereNull('branch_publication_target_oid')->update([
+                'branch_publication_target_oid' => $publicationTargetOid,
+                'final_commit_kind' => $createdCommit ? 'created' : 'no_change',
+                'final_commit_oid' => $createdCommit ? $publicationTargetOid : null,
+                'final_commit_tree_oid' => $createdCommit ? $run->candidate_tree_sha : null,
+                'final_commit_parent_oid' => $createdCommit ? $run->run_base_sha : null,
+                'branch_publication_state' => 'prepared',
+                'version' => $expectedVersion + 1,
+                'updated_at' => now(),
+            ]);
+        if ($updated !== 1) {
+            throw new RunTransitionConflict('stale_run_version', 'Der Run änderte sich vor der Publish-Bindung.');
+        }
+
+        return Run::query()->findOrFail($run->id);
+    }
+
+    public function confirmBranchPublication(Run $run, int $expectedVersion, string $publishedOid): Run
+    {
+        if ($run->branch_publication_target_oid === null
+            || ! hash_equals($run->branch_publication_target_oid, $publishedOid)) {
+            throw new RunTransitionConflict('publish_confirmation_invalid', 'Die Branchveröffentlichung passt nicht zum Intent.');
+        }
+        if ($run->confirmed_branch_publication_oid !== null) {
+            return $run;
+        }
+        $updated = Run::query()->whereKey($run->id)->where('version', $expectedVersion)
+            ->whereNull('confirmed_branch_publication_oid')->update([
+                'confirmed_branch_publication_oid' => $publishedOid,
+                'branch_publication_state' => 'confirmed',
+                'branch_publication_confirmed_at' => now(),
+                'version' => $expectedVersion + 1,
+                'updated_at' => now(),
+            ]);
+        if ($updated !== 1) {
+            throw new RunTransitionConflict('stale_run_version', 'Der Run änderte sich vor der Pushbestätigung.');
+        }
+
+        return Run::query()->findOrFail($run->id);
+    }
+
+    public function bindPublishCompletionOperation(
+        Run $run,
+        int $expectedVersion,
+        ControlOperation $operation,
+        string $recordedScopeHash,
+    ): Run {
+        $this->assertPublishStatusSynchronizationState($run);
+        if ($run->run_type !== RunType::IMPLEMENTATION
+            || $run->confirmed_branch_publication_oid === null
+            || $operation->operation_type !== ControlOperationType::TICKET_STATUS_CHANGE
+            || $operation->project_id !== $run->project_id
+            || preg_match('/\A[0-9a-f]{64}\z/D', $recordedScopeHash) !== 1) {
+            throw new RunTransitionConflict('publish_completion_operation_invalid', 'Die Statussynchronisation ist nicht an den veröffentlichten Run gebunden.');
+        }
+        $updated = Run::query()->whereKey($run->id)->where('version', $expectedVersion)
+            ->whereNull('pending_status_operation_id')->update([
+                'pending_status_operation_id' => $operation->id,
+                'state' => RunState::WAITING,
+                'wait_reason' => WaitReason::STATUS_SYNC,
+                'recorded_scope_sha256' => $recordedScopeHash,
+                'version' => $expectedVersion + 1,
+                'updated_at' => now(),
+            ]);
+        if ($updated !== 1) {
+            throw new RunTransitionConflict('stale_run_version', 'Der Run änderte sich vor der Statussynchronisation.');
+        }
+
+        return Run::query()->findOrFail($run->id);
+    }
+
     /**
      * Supersede a conflicted cancellation binding so a re-authorized decision
      * can bind a fresh status operation (AC-14). The conflicted operation and
@@ -1266,11 +1405,25 @@ final readonly class RunOrchestrator
             ->where('pending_status_operation_id', $operation->id)
             ->update([
                 'pending_status_operation_id' => null,
+                'recorded_scope_sha256' => null,
                 'version' => DB::raw('version + 1'),
                 'updated_at' => now(),
             ]);
 
         return Run::query()->findOrFail($run->id);
+    }
+
+    private function assertPublishStatusSynchronizationState(Run $run): void
+    {
+        $runningPublish = $run->state === RunState::RUNNING && $run->phase === RunPhase::PUBLISH;
+        $retryingConflict = $run->state === RunState::WAITING && $run->phase === RunPhase::PUBLISH
+            && $run->wait_reason === WaitReason::GIT_CONFLICT;
+        if (! $runningPublish && ! $retryingConflict) {
+            throw new RunTransitionConflict(
+                'publish_status_sync_state_invalid',
+                'Die Publish-Statussynchronisation ist aus diesem Runzustand nicht zulässig.',
+            );
+        }
     }
 
     /** Park a planned bound step while its run waits for a human decision. */

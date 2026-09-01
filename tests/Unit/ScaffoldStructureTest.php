@@ -324,6 +324,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/HumanLoop/Mail/HumanRequestNotificationMail.php',
             'app/AI6/HumanLoop/Models/HumanRequest.php',
             'app/AI6/HumanLoop/Models/Intervention.php',
+            'app/AI6/HumanLoop/PublishHumanRequestBinding.php',
             'app/AI6/HumanLoop/ReportOnlyHumanRequestBinding.php',
             'app/AI6/HumanLoop/ScopeApprovalService.php',
             'app/AI6/HumanLoop/SecurityGateHumanRequestBinding.php',
@@ -456,6 +457,8 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Runs/Models/TicketApproval.php',
             'app/AI6/Runs/Models/TicketApprovalEvaluation.php',
             'app/AI6/Runs/Models/TicketApprovalPreview.php',
+            'app/AI6/Runs/PublishCompletionService.php',
+            'app/AI6/Runs/RecordedScopeRenderer.php',
             'app/AI6/Runs/ReportOnlyCompletionService.php',
             'app/AI6/Runs/RequiredReviewEvidence.php',
             'app/AI6/Runs/ReviewBlocker.php',
@@ -607,6 +610,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Tickets/TicketParseException.php',
             'app/AI6/Tickets/TicketProjection.php',
             'app/AI6/Tickets/TicketReadModelProjector.php',
+            'app/AI6/Tickets/TicketSectionLocator.php',
             'app/AI6/Tickets/TicketSourceBlockers.php',
             'app/AI6/Tickets/TicketStatus.php',
             'app/AI6/Tickets/TicketStatusOperation.php',
@@ -918,6 +922,7 @@ final class ScaffoldStructureTest extends TestCase
             '2026_08_27_000000_add_finding_verification_contract.php',
             '2026_08_28_000000_add_publish_candidate_contract.php',
             '2026_08_31_000000_add_security_review_contract.php',
+            '2026_09_01_000000_add_publish_completion_contract.php',
         ], $migrations);
     }
 

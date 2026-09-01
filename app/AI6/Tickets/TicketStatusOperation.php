@@ -10,6 +10,7 @@ enum TicketStatusOperation: string
     case RETURN_TO_TODO = 'return_to_todo';
     case COMPLETE_REVIEW = 'complete_review';
     case COMPLETE_REPORT_ONLY = 'complete_report_only';
+    case COMPLETE_IMPLEMENTATION = 'complete_implementation';
 
     public function targetFor(string $source): ?string
     {
@@ -20,6 +21,7 @@ enum TicketStatusOperation: string
             self::RETURN_TO_TODO => in_array($source, ['ready', 'blocked', 'review', 'in_progress'], true) ? 'todo' : null,
             self::COMPLETE_REVIEW => $source === 'review' ? 'done' : null,
             self::COMPLETE_REPORT_ONLY => $source === 'in_progress' ? 'ready' : null,
+            self::COMPLETE_IMPLEMENTATION => $source === 'in_progress' ? 'review' : null,
         };
     }
 }

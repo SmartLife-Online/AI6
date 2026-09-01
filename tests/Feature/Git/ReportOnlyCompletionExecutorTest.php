@@ -37,6 +37,7 @@ use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunArtifact;
 use App\AI6\Runs\Models\TicketApproval;
+use App\AI6\Runs\RecordedScopeRenderer;
 use App\AI6\Runs\ReportOnlyCompletionService;
 use App\AI6\Runs\ReviewOnlyCompletionMode;
 use App\AI6\Runs\RunOrchestrator;
@@ -44,6 +45,7 @@ use App\AI6\Runs\RunPhase;
 use App\AI6\Runs\RunState;
 use App\AI6\Runs\RunType;
 use App\AI6\Runs\WaitReason;
+use App\AI6\Tickets\TicketContentStatus;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -54,6 +56,36 @@ use Tests\Feature\Tickets\TicketUiTestCase;
 final class ReportOnlyCompletionExecutorTest extends TicketUiTestCase
 {
     use BuildsManagedControlRuntimeFixture;
+
+    public function test_published_implementation_status_saga_reaches_review_and_releases_the_run_lock(): void
+    {
+        if (DIRECTORY_SEPARATOR !== '/') {
+            self::markTestSkipped('The publish completion worker proof requires the POSIX process and effect-lock runtime.');
+        }
+
+        $fixture = $this->managedFixture();
+        $bound = $this->publishedImplementationManagedRun($fixture, 'AI6-PUBLISH-COMPLETE');
+        $run = $bound['run'];
+        $operation = ControlOperation::query()->findOrFail($run->pending_status_operation_id);
+        $mutation = TicketMutation::query()->findOrFail($operation->id);
+
+        self::assertSame('in_progress', $mutation->source_status);
+        self::assertSame('review', $mutation->target_status);
+        self::assertStringContainsString('## Recorded Scope', $mutation->target_content);
+        $this->app->make(ControlOperationExecutor::class)->execute($operation->id);
+
+        $completed = $run->fresh();
+        self::assertSame(ControlOperationState::COMPLETED, $operation->fresh()->state);
+        self::assertSame(RunState::COMPLETED, $completed->state);
+        self::assertNull($fixture['project']->fresh()->active_run_id);
+        self::assertSame($mutation->prepared_commit_oid, $completed->run_base_sha);
+        self::assertStringContainsString('status: review', $this->managedFixtureGit([
+            '--git-dir='.$fixture['remote'], 'show', $completed->run_base_sha.':'.$bound['relativePath'],
+        ], $fixture['root']));
+        self::assertStringContainsString('## Recorded Scope', $this->managedFixtureGit([
+            '--git-dir='.$fixture['remote'], 'show', $completed->run_base_sha.':'.$bound['relativePath'],
+        ], $fixture['root']));
+    }
 
     public function test_report_only_completion_survives_a_crash_at_every_phase_and_releases_only_after_finalization(): void
     {
@@ -324,6 +356,116 @@ final class ReportOnlyCompletionExecutorTest extends TicketUiTestCase
         DB::table('jobs')->delete();
 
         return ['run' => $run, 'relativePath' => $relativePath, 'operator' => $operator];
+    }
+
+    /**
+     * @param  array{administrator: User, project: Project, root: string, remote: string, source: string, first_oid: string, paths: ManagedProjectPath, runner: HardenedGitRunner, lease: ProjectOperationLease}  $fixture
+     * @return array{run: Run, relativePath: string}
+     */
+    private function publishedImplementationManagedRun(array $fixture, string $ticketId): array
+    {
+        config(['queue.default' => 'database']);
+        $relativePath = 'tickets/'.$ticketId.'.md';
+        $todo = $this->validTicketMarkdown($ticketId, 'todo', '[]', 'Gebundener Publishabschluss.');
+        self::assertNotFalse(file_put_contents($fixture['source'].'/'.$relativePath, $todo));
+        $this->managedFixtureGit(['add', $relativePath], $fixture['source']);
+        $this->managedFixtureGit(['commit', '-m', 'add publish completion fixture'], $fixture['source']);
+        $this->managedFixtureGit(['push', $fixture['remote'], 'refs/heads/main:refs/heads/main'], $fixture['source']);
+
+        $clone = $this->app->make(QueueManagedCloneOperation::class)->handle(
+            $fixture['administrator'], $fixture['project']->refresh(), ControlOperationType::MANAGED_CLONE, (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $this->app->make(ControlOperationExecutor::class)->execute($clone->id);
+        $refresh = $this->app->make(QueueTicketReadModelRefresh::class)->handle(
+            $fixture['administrator'], $fixture['project']->refresh(), $relativePath, (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $this->app->make(ControlOperationExecutor::class)->execute($refresh->id);
+
+        $approver = $this->createUser();
+        $operator = $this->createUser();
+        $this->addMembership($approver, $fixture['project'], ProjectRole::APPROVER);
+        $this->addMembership($operator, $fixture['project'], ProjectRole::OPERATOR);
+        $readModel = TicketReadModel::query()->where('relative_path', $relativePath)->firstOrFail();
+        $selection = $this->implementationApprovalSelection((int) $approver->id);
+        $approvalId = (string) Str::uuid();
+        $snapshot = $this->app->make(ApprovalSnapshotFactory::class)->create(
+            $fixture['project']->refresh(), $readModel, $selection, $approvalId,
+        );
+        $approvalOperation = $this->app->make(QueueTicketMutation::class)->approve(
+            $approver, $fixture['project']->refresh(), $readModel, $approvalId,
+            $readModel->control_commit, $readModel->blob_sha, $todo,
+            'Implementierungsfixture freigeben', true, $selection, $snapshot, $approvalId,
+        );
+        DB::table('jobs')->delete();
+        $this->app->make(ControlOperationExecutor::class)->execute($approvalOperation->id);
+        $start = $this->app->make(QueueRunStart::class)->handle(
+            $operator, $fixture['project']->refresh(), $approvalId, (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $this->app->make(ControlOperationExecutor::class)->execute($start->id);
+
+        $run = Run::query()->sole();
+        $orchestrator = $this->app->make(RunOrchestrator::class);
+        $run = $orchestrator->transition($run, $run->version, RunState::RUNNING, RunPhase::PREPARE);
+        $run = $orchestrator->bindCheckpoint(
+            $run, $run->version, str_repeat('6', 64), str_repeat('7', 64), str_repeat('8', 64),
+        );
+        $approval = TicketApproval::query()->findOrFail($run->ticket_approval_id);
+        Run::query()->whereKey($run->id)->update([
+            'phase' => RunPhase::PUBLISH->value,
+            'candidate_tree_sha' => str_repeat('a', 64),
+            'candidate_diff_hash' => str_repeat('b', 64),
+            'candidate_base_sha' => $run->run_base_sha,
+            'candidate_checkpoint_commit_sha' => $run->checkpoint_commit_sha,
+            'candidate_ticket_contract_sha256' => $approval->ticket_contract_sha256,
+            'candidate_approval_snapshot_hash' => $snapshot->aggregateHash,
+            'candidate_evidence_epoch' => $run->evidence_epoch,
+            'candidate_scope_hash' => $run->effective_scope_hash ?? $run->scope_hash,
+            'candidate_config_hash' => $run->config_hash,
+            'candidate_prompt_hash' => $run->prompt_hash,
+            'candidate_security_policy_hash' => $run->security_policy_hash,
+            'candidate_bound_at' => now(),
+            'version' => DB::raw('version + 1'),
+        ]);
+        $run = $run->fresh();
+        self::assertInstanceOf(Run::class, $run);
+        $run = $orchestrator->prepareBranchPublication($run, $run->version, str_repeat('0', 64));
+        $run = $orchestrator->bindPublishIntent($run, $run->version, str_repeat('d', 64), str_repeat('0', 64), true);
+        $run = $orchestrator->confirmBranchPublication($run, $run->version, str_repeat('d', 64));
+
+        $project = $fixture['project']->refresh();
+        $readModel = TicketReadModel::query()->where('project_id', $project->id)
+            ->where('relative_path', $relativePath)->firstOrFail();
+        $target = $this->app->make(TicketContentStatus::class)->replace(
+            $this->app->make(RecordedScopeRenderer::class)->write($run, $readModel->redacted_content),
+            'in_progress',
+            'review',
+        );
+        $operation = $this->app->make(QueueTicketMutation::class)->completeImplementationRun(
+            $approver, $project, $readModel, $run, (string) Str::uuid(), $target,
+            'Gebundener Publishabschluss mit Recorded Scope.',
+        );
+        $run = $orchestrator->bindPublishCompletionOperation($run, $run->version, $operation, hash('sha256', $target));
+        DB::table('jobs')->delete();
+
+        return ['run' => $run, 'relativePath' => $relativePath];
+    }
+
+    private function implementationApprovalSelection(int $attentionUserId): ApprovalSelection
+    {
+        $profiles = $this->app->make(AgentProfileRegistry::class);
+
+        return new ApprovalSelection(
+            $profiles->resolve('fake', AgentRole::IMPLEMENTATION, 'fake-model', 'medium'),
+            $this->app->make(ReviewerSlotFactory::class)->fromArray([[
+                'id' => (string) Str::uuid(), 'profile' => 'fake', 'model' => 'fake-model',
+                'effort' => 'high', 'prompt_profile' => 'security',
+            ]]),
+            ApprovalLimits::fromConfiguredValues(config('ai6.project_config.server_defaults.limits'), $this->app->make(AgentInputLimits::class)),
+            $attentionUserId, 'automatic_after_gates', RunType::IMPLEMENTATION,
+        );
     }
 
     private function approvalSelection(int $attentionUserId): ApprovalSelection

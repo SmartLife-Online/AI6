@@ -35,6 +35,17 @@ final class TicketParserAndValidationTest extends TestCase
         self::assertSame([], $this->app->make(Ai6DetailV1TicketValidator::class)->validate($detail, 'tickets/AI6-099.md'));
     }
 
+    public function test_v1_parser_ignores_heading_shaped_lines_inside_fenced_code(): void
+    {
+        $document = $this->app->make(TicketV1Parser::class)->parse(
+            $this->fixture('generic-v1-recorded-scope.md'),
+        );
+
+        self::assertStringContainsString("```markdown\n## Recorded Scope", $document->sections['Goal']);
+        self::assertStringContainsString('**Initialer Scope:**', $document->sections['Recorded Scope']);
+        self::assertSame([], $document->duplicateSections);
+    }
+
     public function test_legacy_reader_preserves_every_field_and_projector_never_treats_it_as_v1(): void
     {
         $content = $this->fixture('legacy-m169.md');

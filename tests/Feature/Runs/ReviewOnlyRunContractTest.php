@@ -591,7 +591,7 @@ final class ReviewOnlyRunContractTest extends TicketUiTestCase
     public function test_status_sync_registers_the_authorized_conflict_effect(): void
     {
         self::assertSame([
-            'producer' => 'ReportOnlyCompletionService',
+            'producer' => 'CompletionStatusSaga',
             'resolvers' => ['refresh_expected_oid'],
             'cancellable' => true,
         ], $this->app->make(WaitReasonRegistry::class)->registration(WaitReason::STATUS_SYNC));

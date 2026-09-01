@@ -20,6 +20,16 @@ final class SecurityGateRegistrationTest extends TestCase
             'resolvers' => ['bound_clear', 'step_up_override'],
             'cancellable' => true,
         ], $this->app->make(WaitReasonRegistry::class)->registration(WaitReason::SECURITY_GATE));
+        self::assertSame([
+            'producer' => 'PublishCompletionService',
+            'resolvers' => ['authorize_push'],
+            'cancellable' => true,
+        ], $this->app->make(WaitReasonRegistry::class)->registration(WaitReason::MANUAL_PUSH));
+        self::assertSame([
+            'producer' => 'CompletionStatusSaga',
+            'resolvers' => ['refresh_expected_oid'],
+            'cancellable' => true,
+        ], $this->app->make(WaitReasonRegistry::class)->registration(WaitReason::STATUS_SYNC));
     }
 
     public function test_an_incomplete_security_gate_registration_is_rejected(): void
@@ -35,12 +45,15 @@ final class SecurityGateRegistrationTest extends TestCase
             ['type' => ExecutionStepType::SECURITY_REVIEW, 'number' => 1],
             RunOrchestrator::decideNextStepRound(RunState::RUNNING, null, $completed, true, true),
         );
-        self::assertNull(RunOrchestrator::decideNextStepRound(
-            RunState::RUNNING,
-            null,
-            [...$completed, 'security_review:1'],
-            true,
-            true,
-        ));
+        self::assertSame(
+            ['type' => ExecutionStepType::PUBLISH, 'number' => 1],
+            RunOrchestrator::decideNextStepRound(
+                RunState::RUNNING,
+                null,
+                [...$completed, 'security_review:1'],
+                true,
+                true,
+            ),
+        );
     }
 }

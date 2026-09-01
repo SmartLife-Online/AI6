@@ -30,6 +30,7 @@ use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\ScopeDecision;
 use App\AI6\Runs\Models\TicketApproval;
+use App\AI6\Runs\PublishCompletionService;
 use App\AI6\Runs\ReportOnlyCompletionService;
 use App\AI6\Runs\RunCancellationService;
 use App\AI6\Runs\RunLimitPolicy;
@@ -88,6 +89,7 @@ final readonly class TicketMutationExecutor
         private RunLimitPolicy $runLimits,
         private RunCancellationService $runCancellations,
         private ReportOnlyCompletionService $reportOnlyCompletions,
+        private PublishCompletionService $publishCompletions,
         private HumanRequestService $humanRequests,
     ) {}
 
@@ -107,6 +109,7 @@ final readonly class TicketMutationExecutor
         } catch (ControlOperationTerminalConflict $exception) {
             $this->runCancellations->recordConflict($operation);
             $this->reportOnlyCompletions->recordConflict($operation);
+            $this->publishCompletions->recordConflict($operation);
             if ($this->publishedIntent($operation)) {
                 throw new ControlOperationRecoveryRequired(
                     'A published ticket mutation encountered a terminal preflight deviation.',
@@ -818,6 +821,7 @@ final readonly class TicketMutationExecutor
     {
         $this->runCancellations->reconcileOperation($operation);
         $this->reportOnlyCompletions->reconcileOperation($operation);
+        $this->publishCompletions->reconcileOperation($operation);
 
         return true;
     }
@@ -990,7 +994,29 @@ final readonly class TicketMutationExecutor
             throw new ControlOperationTerminalConflict('status_operation_invalid', 'Die gebundene Statusoperation ist ungültig.');
         }
         try {
-            if ($statusOperation === TicketStatusOperation::COMPLETE_REPORT_ONLY) {
+            if ($statusOperation === TicketStatusOperation::COMPLETE_IMPLEMENTATION) {
+                $run = Run::query()->where('pending_status_operation_id', $operation->id)
+                    ->where('run_type', RunType::IMPLEMENTATION->value)->first();
+                if (! $run instanceof Run
+                    || $run->project_id !== $project->getKey()
+                    || $project->active_run_id !== $run->id
+                    || $run->state !== RunState::WAITING
+                    || $run->wait_reason !== WaitReason::STATUS_SYNC
+                    || $run->confirmed_branch_publication_oid === null
+                    || $mutation->source_status !== 'in_progress'
+                    || $mutation->target_status !== 'review'
+                    || ! hash_equals($mutation->source_contract_sha256, $mutation->target_contract_sha256)) {
+                    throw new TicketMutationConflict('publish_run_binding_invalid', 'Der Publishabschluss ist nicht an seinen aktiven Run gebunden.');
+                }
+                $target = $this->transitions->decideImplementation(
+                    $membership->role,
+                    $mutation->source_status,
+                    $mutation->expected_ticket_blob_sha,
+                    $actualBlobSha,
+                    (string) $operation->expected_control_commit,
+                    (string) $project->control_oid,
+                );
+            } elseif ($statusOperation === TicketStatusOperation::COMPLETE_REPORT_ONLY) {
                 $run = Run::query()->where('pending_status_operation_id', $operation->id)
                     ->where('run_type', RunType::REVIEW_ONLY->value)->first();
                 if (! $run instanceof Run

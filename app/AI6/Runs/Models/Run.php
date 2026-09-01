@@ -20,6 +20,16 @@ use Illuminate\Support\Carbon;
  * @property string $status_operation_id
  * @property string|null $pending_status_operation_id
  * @property string|null $confirmed_branch_publication_oid
+ * @property string|null $final_commit_oid
+ * @property string|null $final_commit_kind
+ * @property string|null $branch_publication_target_oid
+ * @property string|null $final_commit_tree_oid
+ * @property string|null $final_commit_parent_oid
+ * @property int|null $final_commit_timestamp
+ * @property string|null $branch_publication_expected_oid
+ * @property string|null $branch_publication_state
+ * @property Carbon|null $branch_publication_confirmed_at
+ * @property string|null $recorded_scope_sha256
  * @property RunState $state
  * @property RunPhase $phase
  * @property WaitReason|null $wait_reason
@@ -123,6 +133,8 @@ final class Run extends Model
             'candidate_evidence_epoch' => 'integer',
             'candidate_bound_at' => 'immutable_datetime',
             'candidate_invalidated_at' => 'immutable_datetime',
+            'final_commit_timestamp' => 'integer',
+            'branch_publication_confirmed_at' => 'immutable_datetime',
             'review_blockers' => 'array',
             'review_readiness_assessed_at' => 'immutable_datetime',
             'version' => 'integer',

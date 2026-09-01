@@ -61,6 +61,7 @@
     @if ($humanRequest->resolution_state->value === 'open')
         @php($stepUpNeeded = $cancellationActions !== []
             || $reportOnlyEffects !== []
+            || $publishEffects !== []
             || $gateEvidenceEffects !== []
             || collect($humanRequest->allowed_effects)->contains(
                 static fn (string $effect): bool => \App\AI6\HumanLoop\HumanRequestService::requiresStepUp($effect),
@@ -96,8 +97,9 @@
             @endif
             @foreach ($humanRequest->allowed_effects as $effect)
                 @if (in_array($effect, $reportOnlyEffects, true)
+                    || in_array($effect, $publishEffects, true)
                     || in_array($effect, $gateEvidenceEffects, true)
-                    || ! in_array($effect, ['refresh_expected_oid', 'finding_disposition', 'controlled_abort', 'authorize_gate_evidence'], true))
+                    || ! in_array($effect, ['refresh_expected_oid', 'finding_disposition', 'controlled_abort', 'authorize_gate_evidence', 'authorize_push'], true))
                     <button type="submit" name="chosen_effect" value="{{ $effect }}">{{ $effectLabels[$effect] ?? $effect }}</button>
                 @endif
             @endforeach

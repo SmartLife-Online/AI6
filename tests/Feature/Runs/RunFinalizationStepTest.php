@@ -472,7 +472,10 @@ final class RunFinalizationStepTest extends TicketUiTestCase
         $run = $prepared['run']->fresh();
         self::assertSame(ExecutionJobState::SUCCEEDED, $security->fresh()->state, (string) $security->fresh()->failure_code);
         self::assertSame(RunPhase::PUBLISH, $run->phase);
-        self::assertNull($this->app->make(RunOrchestrator::class)->planNextStep($run));
+        $publish = $this->app->make(RunOrchestrator::class)->planNextStep($run);
+        self::assertInstanceOf(ExecutionJob::class, $publish);
+        self::assertSame(ExecutionStepType::PUBLISH->value, $publish->step_type);
+        self::assertSame(1, $publish->step_number);
         self::assertFalse(ExecutionJob::query()->where('run_id', $run->id)
             ->whereIn('step_type', [ExecutionStepType::VERIFY->value, ExecutionStepType::FIX->value])->exists());
     }

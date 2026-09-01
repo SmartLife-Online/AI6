@@ -610,8 +610,14 @@ final class AI6ServiceProvider extends ServiceProvider
         );
         $this->app->make(WaitReasonRegistry::class)->register(
             WaitReason::STATUS_SYNC,
-            'ReportOnlyCompletionService',
+            'CompletionStatusSaga',
             ['refresh_expected_oid'],
+            true,
+        );
+        $this->app->make(WaitReasonRegistry::class)->register(
+            WaitReason::MANUAL_PUSH,
+            'PublishCompletionService',
+            ['authorize_push'],
             true,
         );
         $this->app->make(WaitReasonRegistry::class)->register(

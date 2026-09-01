@@ -108,7 +108,7 @@ final class HumanRequestResumeTest extends TicketUiTestCase
         self::assertSame([
             'human_question', 'resource_limit', 'scope_approval', 'contract_change', 'check_failure',
             'review_limit', 'provider_error', 'invalid_json', 'git_base_changed', 'git_conflict',
-            'manual_gate', 'manual_report', 'status_sync', 'security_gate',
+            'manual_gate', 'manual_report', 'status_sync', 'manual_push', 'security_gate',
         ], $registry->registeredReasons());
         self::assertSame([
             'producer' => 'needs_human',

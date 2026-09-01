@@ -164,6 +164,31 @@ final readonly class QueueTicketMutation
         );
     }
 
+    /** Queue the one status-and-recorded-scope edge owned by a published implementation run. */
+    public function completeImplementationRun(
+        User $actor,
+        Project $project,
+        TicketReadModel $readModel,
+        Run $run,
+        string $operationId,
+        string $targetContent,
+        string $reason,
+    ): ControlOperation {
+        if ($run->project_id !== $project->getKey() || $run->run_type !== RunType::IMPLEMENTATION
+            || $project->active_run_id !== $run->id || $run->pending_status_operation_id !== null
+            || $run->confirmed_branch_publication_oid === null) {
+            throw new TicketMutationConflict('publish_run_binding_invalid', 'Der veröffentlichte Implementierungslauf ist nicht statusfähig gebunden.');
+        }
+
+        return $this->queue(
+            $actor, $project, $readModel, $operationId, (string) $project->control_oid, $readModel->blob_sha,
+            $readModel->redacted_content, $targetContent, $reason, false,
+            TicketStatusOperation::COMPLETE_IMPLEMENTATION, false, null,
+            allowInProgressStatus: true,
+            implementationRunId: $run->id,
+        );
+    }
+
     public function approve(
         User $actor,
         Project $project,
@@ -215,6 +240,7 @@ final readonly class QueueTicketMutation
         ?string $snapshotContextId = null,
         bool $allowInProgressStatus = false,
         ?string $reportOnlyRunId = null,
+        ?string $implementationRunId = null,
     ): ControlOperation {
         if (! ManagedProjectPath::validOperationIdentifier($operationId)) {
             throw new TicketMutationConflict('operation_id_invalid', 'Die Mutations-ID ist ungültig.');
@@ -248,7 +274,7 @@ final readonly class QueueTicketMutation
             || ! hash_equals($readModel->redacted_content, $baseContent)) {
             throw new TicketMutationConflict('editor_base_binding_changed', 'Die bytegenaue Editorbasis ist veraltet oder maskiert.');
         }
-        if (! $freshStepUp && $reportOnlyRunId === null) {
+        if (! $freshStepUp && $reportOnlyRunId === null && $implementationRunId === null) {
             throw new TicketMutationConflict('step_up_required', 'Die Ticketmutation verlangt eine frische Step-up-Bestätigung.');
         }
         foreach (RedactionMatchType::cases() as $type) {
@@ -261,6 +287,7 @@ final readonly class QueueTicketMutation
             $actor, $project, $readModel, $operationId, $expectedControlOid, $expectedBlob,
             $baseContent, $targetContent, $reason, $statusOperation, $externalCompletionConfirmed,
             $approvalSelection, $confirmedApprovalSnapshot, $snapshotContextId, $allowInProgressStatus, $reportOnlyRunId,
+            $implementationRunId,
         ): ControlOperation {
             $currentProject = Project::query()->findOrFail($project->getKey());
             $currentReadModel = TicketReadModel::query()->findOrFail($readModel->getKey());
@@ -319,7 +346,32 @@ final readonly class QueueTicketMutation
                 }
                 $type = ControlOperationType::TICKET_EDIT;
             } else {
-                if ($reportOnlyRunId !== null) {
+                if ($implementationRunId !== null) {
+                    $boundRun = Run::query()->whereKey($implementationRunId)->first();
+                    if ($statusOperation !== TicketStatusOperation::COMPLETE_IMPLEMENTATION
+                        || ! $boundRun instanceof Run || $boundRun->run_type !== RunType::IMPLEMENTATION
+                        || $boundRun->project_id !== $currentProject->getKey()
+                        || $currentProject->active_run_id !== $boundRun->id
+                        || $boundRun->pending_status_operation_id !== null
+                        || $boundRun->confirmed_branch_publication_oid === null
+                        || ! TicketApproval::query()->whereKey($boundRun->ticket_approval_id)
+                            ->where('project_id', $currentProject->getKey())
+                            ->where('relative_path', $currentReadModel->relative_path)->exists()) {
+                        throw new TicketMutationConflict('publish_run_binding_invalid', 'Der veröffentlichte Implementierungslauf ist nicht statusfähig gebunden.');
+                    }
+                    $targetStatus = $this->transitions->decideImplementation(
+                        $membership->role,
+                        $sourceStatus,
+                        $expectedBlob,
+                        $currentReadModel->blob_sha,
+                        $expectedControlOid,
+                        (string) $currentProject->control_oid,
+                    );
+                    $targetDocument = $this->parser->parse($targetContent);
+                    if (($targetDocument->frontmatter['status'] ?? null) !== $targetStatus) {
+                        throw new TicketMutationConflict('publish_target_status_invalid', 'Der gebundene Zielinhalt trägt nicht den Reviewstatus.');
+                    }
+                } elseif ($reportOnlyRunId !== null) {
                     $boundRun = Run::query()->whereKey($reportOnlyRunId)->first();
                     if ($statusOperation !== TicketStatusOperation::COMPLETE_REPORT_ONLY
                         || ! $boundRun instanceof Run || $boundRun->run_type !== RunType::REVIEW_ONLY
@@ -370,6 +422,11 @@ final readonly class QueueTicketMutation
                 && (! is_string($currentReadModel->ticket_contract_sha256)
                     || ! hash_equals($currentReadModel->ticket_contract_sha256, $projection->contractHash))) {
                 throw new TicketMutationConflict('approval_contract_changed', 'Die Status-only-Freigabe hat den Ticketvertrag verändert.');
+            }
+            if ($statusOperation === TicketStatusOperation::COMPLETE_IMPLEMENTATION
+                && (! is_string($currentReadModel->ticket_contract_sha256)
+                    || ! hash_equals($currentReadModel->ticket_contract_sha256, $projection->contractHash))) {
+                throw new TicketMutationConflict('publish_contract_changed', 'Status und Recorded Scope dürfen den Ticketvertrag nicht verändern.');
             }
             $audit = $this->redactor->redact(
                 $reason,
@@ -550,6 +607,7 @@ final readonly class QueueTicketMutation
                 TicketStatusOperation::BLOCK,
                 TicketStatusOperation::CANCEL,
                 TicketStatusOperation::COMPLETE_REPORT_ONLY,
+                TicketStatusOperation::COMPLETE_IMPLEMENTATION,
             ], true)) {
             return false;
         }

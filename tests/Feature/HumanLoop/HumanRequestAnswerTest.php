@@ -2,11 +2,15 @@
 
 namespace Tests\Feature\HumanLoop;
 
+use App\AI6\Auth\StepUpGuard;
 use App\AI6\Git\ControlOperationRuntimeIdentity;
+use App\AI6\Git\PublishCandidate;
+use App\AI6\HumanLoop\Http\HumanRequestAnswerController;
 use App\AI6\HumanLoop\HumanRequestRejected;
 use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\HumanLoop\Models\Intervention;
+use App\AI6\HumanLoop\PublishHumanRequestBinding;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\ProjectMembership;
 use App\AI6\Projects\ProjectRole;
@@ -16,10 +20,12 @@ use App\AI6\Runs\InstructionCandidateSource;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\RunOrchestrator;
+use App\AI6\Runs\RunPhase;
 use App\AI6\Runs\RunState;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\RedactionMatchType;
 use Illuminate\Database\QueryException;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Tests\Feature\Runs\BuildsHumanRequestFixture;
@@ -28,6 +34,184 @@ use Tests\Feature\Tickets\TicketUiTestCase;
 final class HumanRequestAnswerTest extends TicketUiTestCase
 {
     use BuildsHumanRequestFixture;
+
+    public function test_only_an_approver_can_see_and_resolve_the_bound_manual_push_request(): void
+    {
+        Mail::fake();
+        $this->bindInstructionSource();
+        $attention = $this->createUser(['email' => 'attention-ai6-029-push@example.test']);
+        $fixture = $this->completedApproval('AI6-029-MANUAL-PUSH', attentionUser: $attention);
+        $run = $this->finishPreflight($this->bindRunWorkspace($fixture, $this->finalizedRun($fixture)));
+        $approval = $fixture['approval']->fresh();
+        Run::query()->whereKey($run->id)->update([
+            'state' => RunState::RUNNING->value,
+            'phase' => RunPhase::PUBLISH->value,
+            'candidate_tree_sha' => str_repeat('a', 64),
+            'candidate_diff_hash' => str_repeat('b', 64),
+            'candidate_base_sha' => $run->run_base_sha,
+            'candidate_checkpoint_commit_sha' => $run->checkpoint_commit_sha,
+            'candidate_ticket_contract_sha256' => $run->ticket_contract_sha256 ?? $approval->ticket_contract_sha256,
+            'candidate_approval_snapshot_hash' => $approval->approval_snapshot_hash,
+            'candidate_evidence_epoch' => $run->evidence_epoch,
+            'candidate_scope_hash' => $run->effective_scope_hash ?? $run->scope_hash,
+            'candidate_config_hash' => $run->config_hash,
+            'candidate_prompt_hash' => $run->prompt_hash,
+            'candidate_security_policy_hash' => $run->security_policy_hash,
+            'candidate_bound_at' => now(),
+            'version' => DB::raw('version + 1'),
+        ]);
+        $run = $run->fresh();
+        self::assertInstanceOf(Run::class, $run);
+        $job = ExecutionJob::query()->create([
+            'run_id' => $run->id,
+            'step_type' => ExecutionStepType::PUBLISH->value,
+            'step_number' => 1,
+            'idempotency_key' => RunOrchestrator::stepKey($run->id, ExecutionStepType::PUBLISH, 1),
+            'state' => ExecutionJobState::PLANNED,
+            'attempts' => 0,
+        ]);
+        $request = $this->app->make(HumanRequestService::class)->openManualPushRequest($run, $job)->fresh();
+
+        self::assertTrue(PublishHumanRequestBinding::matchesManualPush($request, $run->fresh()));
+        $this->actingAs($fixture['operator'])
+            ->get(route('projects.human-requests.show', [$fixture['project'], $request->id]))
+            ->assertOk()->assertDontSee('value="authorize_push"', false);
+        $this->actingAs($attention)
+            ->get(route('projects.human-requests.show', [$fixture['project'], $request->id]))
+            ->assertOk()->assertSee('value="authorize_push"', false);
+
+        try {
+            $this->app->make(HumanRequestService::class)->answer(
+                $request,
+                $fixture['operator'],
+                $request->bound_run_version,
+                $request->bound_ticket_contract,
+                $request->bound_checkpoint,
+                $request->bound_scope,
+                $request->bound_agent_slot,
+                $request->bound_requested_effect,
+                PublishHumanRequestBinding::AUTHORIZE_PUSH,
+            );
+            self::fail('An operator must not authorize a branch publication.');
+        } catch (HumanRequestRejected $rejected) {
+            self::assertSame('unauthorized', $rejected->reason);
+        }
+
+        $this->actingAs($attention);
+        $this->startSession();
+        $session = $this->app->make('session')->driver();
+        $proof = Request::create('/human-request', 'POST');
+        $proof->setLaravelSession($session);
+        $this->app->make(StepUpGuard::class)->markSatisfied($proof, $attention, HumanRequestAnswerController::STEP_UP_ACTION);
+        $session->save();
+        $answer = [
+            'run_version' => $request->bound_run_version,
+            'ticket_contract' => $request->bound_ticket_contract,
+            'checkpoint' => $request->bound_checkpoint,
+            'scope' => $request->bound_scope,
+            'agent_slot' => $request->bound_agent_slot,
+            'requested_effect' => $request->bound_requested_effect,
+            'chosen_effect' => PublishHumanRequestBinding::AUTHORIZE_PUSH,
+        ];
+        $this->withCookie((string) config('session.cookie'), $session->getId())
+            ->from(route('projects.human-requests.show', [$fixture['project'], $request->id]))
+            ->post(route('projects.human-requests.answer', [$fixture['project'], $request->id]), [
+                ...$answer,
+                'run_version' => $request->bound_run_version - 1,
+            ])
+            ->assertRedirect(route('projects.human-requests.show', [$fixture['project'], $request->id]))
+            ->assertSessionHasErrors(['chosen_effect' => 'Die Runversion ist veraltet.']);
+        self::assertSame(0, Intervention::query()->where('human_request_id', $request->id)->count());
+        self::assertSame('open', $request->fresh()->resolution_state->value);
+        self::assertSame(RunState::WAITING, $run->fresh()->state);
+        self::assertSame('manual_push', $run->fresh()->wait_reason?->value);
+
+        $retryProof = Request::create('/human-request', 'POST');
+        $retryProof->setLaravelSession($session);
+        $this->app->make(StepUpGuard::class)->markSatisfied($retryProof, $attention, HumanRequestAnswerController::STEP_UP_ACTION);
+        $session->save();
+        $this->withCookie((string) config('session.cookie'), $session->getId())
+            ->post(route('projects.human-requests.answer', [$fixture['project'], $request->id]), $answer)
+            ->assertRedirect(route('projects.runs.show', [$fixture['project'], $run->id]));
+
+        self::assertSame(ProjectRole::APPROVER->value, Intervention::query()
+            ->where('human_request_id', $request->id)->sole()->actor_role);
+        self::assertSame(RunState::RUNNING, $run->fresh()->state);
+        self::assertNull($run->fresh()->wait_reason);
+    }
+
+    public function test_a_changed_candidate_invalidates_the_bound_manual_push_request(): void
+    {
+        Mail::fake();
+        $this->bindInstructionSource();
+        $attention = $this->createUser(['email' => 'attention-ai6-029-stale-candidate@example.test']);
+        $fixture = $this->completedApproval('AI6-029-MANUAL-PUSH-STALE', attentionUser: $attention);
+        $run = $this->finishPreflight($this->bindRunWorkspace($fixture, $this->finalizedRun($fixture)));
+        $approval = $fixture['approval']->fresh();
+        Run::query()->whereKey($run->id)->update([
+            'state' => RunState::RUNNING->value,
+            'phase' => RunPhase::PUBLISH->value,
+            'candidate_tree_sha' => str_repeat('a', 64),
+            'candidate_diff_hash' => str_repeat('b', 64),
+            'candidate_base_sha' => $run->run_base_sha,
+            'candidate_checkpoint_commit_sha' => $run->checkpoint_commit_sha,
+            'candidate_ticket_contract_sha256' => $run->ticket_contract_sha256 ?? $approval->ticket_contract_sha256,
+            'candidate_approval_snapshot_hash' => $approval->approval_snapshot_hash,
+            'candidate_evidence_epoch' => $run->evidence_epoch,
+            'candidate_scope_hash' => $run->effective_scope_hash ?? $run->scope_hash,
+            'candidate_config_hash' => $run->config_hash,
+            'candidate_prompt_hash' => $run->prompt_hash,
+            'candidate_security_policy_hash' => $run->security_policy_hash,
+            'candidate_bound_at' => now(),
+            'version' => DB::raw('version + 1'),
+        ]);
+        $run = $run->fresh();
+        self::assertInstanceOf(Run::class, $run);
+        $job = ExecutionJob::query()->create([
+            'run_id' => $run->id,
+            'step_type' => ExecutionStepType::PUBLISH->value,
+            'step_number' => 1,
+            'idempotency_key' => RunOrchestrator::stepKey($run->id, ExecutionStepType::PUBLISH, 1),
+            'state' => ExecutionJobState::PLANNED,
+            'attempts' => 0,
+        ]);
+        $request = $this->app->make(HumanRequestService::class)->openManualPushRequest($run, $job)->fresh();
+
+        Run::query()->whereKey($run->id)->update([
+            'candidate_invalidated_at' => now(),
+            'version' => DB::raw('version + 1'),
+        ]);
+        $changedRun = $run->fresh();
+        self::assertInstanceOf(Run::class, $changedRun);
+        $changedRun = $this->app->make(RunOrchestrator::class)->bindCandidate(
+            $changedRun,
+            $changedRun->version,
+            new PublishCandidate(str_repeat('c', 64), str_repeat('b', 64), (string) $run->run_base_sha),
+        );
+
+        self::assertFalse(PublishHumanRequestBinding::matchesManualPush($request, $changedRun));
+        $this->actingAs($attention)
+            ->get(route('projects.human-requests.show', [$fixture['project'], $request->id]))
+            ->assertOk()->assertDontSee('value="authorize_push"', false);
+        try {
+            $this->app->make(HumanRequestService::class)->answer(
+                $request,
+                $attention,
+                $request->bound_run_version,
+                $request->bound_ticket_contract,
+                $request->bound_checkpoint,
+                $request->bound_scope,
+                $request->bound_agent_slot,
+                $request->bound_requested_effect,
+                PublishHumanRequestBinding::AUTHORIZE_PUSH,
+            );
+            self::fail('A changed candidate must invalidate manual push authorization.');
+        } catch (HumanRequestRejected $rejected) {
+            self::assertSame('unauthorized', $rejected->reason);
+        }
+        self::assertSame(0, Intervention::query()->where('human_request_id', $request->id)->count());
+        self::assertSame('open', $request->fresh()->resolution_state->value);
+    }
 
     /** TC-05 */
     public function test_a_later_wait_creates_a_new_request_and_leaves_the_first_history_intact(): void

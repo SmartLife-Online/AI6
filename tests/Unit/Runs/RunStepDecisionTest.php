@@ -25,6 +25,8 @@ final class RunStepDecisionTest extends TestCase
             [RunState::RUNNING, null, ['preflight', 'implement'], ExecutionStepType::CHECK],
             [RunState::RUNNING, null, ['preflight', 'implement', 'check'], ExecutionStepType::REVIEW],
             [RunState::RUNNING, null, ['preflight', 'implement', 'check', 'review'], ExecutionStepType::FINALIZE],
+            [RunState::RUNNING, null, ['preflight', 'implement', 'check', 'review', 'finalize'], ExecutionStepType::SECURITY_REVIEW],
+            [RunState::RUNNING, null, ['preflight', 'implement', 'check', 'review', 'finalize', 'security_review'], ExecutionStepType::PUBLISH],
             [RunState::WAITING, WaitReason::HUMAN_QUESTION, ['preflight'], null],
             [RunState::FAILED, null, [], null],
             [RunState::COMPLETED, null, ['preflight'], null],
@@ -81,6 +83,8 @@ final class RunStepDecisionTest extends TestCase
         self::assertTrue(ExecutionStepType::REVIEW->hasRegisteredHandler());
         self::assertTrue(ExecutionStepType::FIX->hasRegisteredHandler());
         self::assertTrue(ExecutionStepType::FINALIZE->hasRegisteredHandler());
+        self::assertTrue(ExecutionStepType::SECURITY_REVIEW->hasRegisteredHandler());
+        self::assertTrue(ExecutionStepType::PUBLISH->hasRegisteredHandler());
     }
 
     public function test_a_fix_repeats_checks_checkpoint_readiness_and_the_complete_review_sequence(): void

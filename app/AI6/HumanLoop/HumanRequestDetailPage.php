@@ -59,6 +59,7 @@ final class HumanRequestDetailPage extends Component
             // its own status-saga effects; the identically named cancellation
             // conflict keeps resolving through a re-issued cancellation mode.
             'reportOnlyEffects' => $this->reportOnlyEffects($request, $membership),
+            'publishEffects' => $this->publishEffects($request, $run, $membership),
             'gateEvidenceEffects' => $gateEvidenceEffects,
             'externalGateEvidenceRequired' => $gateBinding !== null
                 && RunGate::query()->where('run_id', $run->id)->where('gate_id', $gateBinding['gate_id'])
@@ -100,6 +101,21 @@ final class HumanRequestDetailPage extends Component
         return array_values(array_filter(
             $request->allowed_effects,
             static fn (string $effect): bool => GateEvidenceHumanRequestBinding::matches($request, $effect),
+        ));
+    }
+
+    /** @return list<string> */
+    private function publishEffects(HumanRequest $request, Run $run, ?ProjectMembership $membership): array
+    {
+        if ($membership?->role !== ProjectRole::APPROVER) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            $request->allowed_effects,
+            static fn (string $effect): bool => ($effect === PublishHumanRequestBinding::AUTHORIZE_PUSH
+                    && PublishHumanRequestBinding::matchesManualPush($request, $run))
+                || PublishHumanRequestBinding::matchesStatusConflict($request, $effect),
         ));
     }
 

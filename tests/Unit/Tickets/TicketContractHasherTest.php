@@ -45,7 +45,50 @@ final class TicketContractHasherTest extends TestCase
         $base = $this->fixture('generic-v1.md');
         $withSection = $this->fixture('generic-v1-recorded-scope.md');
         self::assertStringContainsString('## Recorded Scope', $withSection);
-        self::assertSame($this->hash($base), $this->hash($withSection));
+        $contractWithFence = str_replace(<<<'MARKDOWN'
+
+            ## Recorded Scope
+
+            **Initialer Scope:**
+
+            - `app/Example.php`
+
+            **Aufgenommene Pfade:**
+
+            - `docs/notes.md` — unlisted_auto_allow
+
+            **Quarantänierte Pfade:**
+
+            None.
+
+            **Limitverbrauch:** 1/12
+            MARKDOWN, '', $withSection);
+        self::assertNotSame($this->hash($base), $this->hash($contractWithFence));
+        self::assertSame($this->hash($contractWithFence), $this->hash($withSection));
+
+        // The shared locator accepts horizontal whitespace between the marker
+        // and title. Hasher and renderer must therefore exclude those exact
+        // structural variants under the same rule.
+        $recordedHeadingOffset = strrpos($withSection, "\n## Recorded Scope\n");
+        self::assertIsInt($recordedHeadingOffset);
+        foreach (["##\tRecorded Scope", '##  Recorded Scope'] as $heading) {
+            $variant = substr_replace(
+                $withSection,
+                $heading,
+                $recordedHeadingOffset + 1,
+                strlen('## Recorded Scope'),
+            );
+            self::assertSame($this->hash($contractWithFence), $this->hash($variant));
+        }
+
+        // A heading-shaped line inside a fence is contract prose. Rewriting
+        // the task after it must therefore invalidate the contract hash.
+        $rewrittenFence = str_replace(
+            'Beispielaufgabe im Codeblock unverändert lassen.',
+            'Beispielaufgabe im Codeblock präzisieren.',
+            $withSection,
+        );
+        self::assertNotSame($this->hash($withSection), $this->hash($rewrittenFence));
 
         // Fortschreibung: a rewritten section keeps the same contract hash.
         $rewritten = str_replace('**Limitverbrauch:** 1/12', '**Limitverbrauch:** 4/12
@@ -54,22 +97,24 @@ final class TicketContractHasherTest extends TestCase
 
 - `tests/NewTest.php` — auto_allow', $withSection);
         self::assertNotSame($withSection, $rewritten);
-        self::assertSame($this->hash($base), $this->hash($rewritten));
+        self::assertSame($this->hash($contractWithFence), $this->hash($rewritten));
 
         // The section ends at the next `##` heading; content after it is
         // contract again and still moves the hash.
         $withTrailingSection = $withSection.'
 ## Notes
 
-Hinweis.
-';
-        self::assertNotSame($this->hash($base), $this->hash($withTrailingSection));
+        Hinweis.
+        ';
+        self::assertNotSame($this->hash($contractWithFence), $this->hash($withTrailingSection));
+        $recordedOffset = strrpos($withTrailingSection, '## Recorded Scope');
+        $notesOffset = strrpos($withTrailingSection, '## Notes');
+        self::assertIsInt($recordedOffset);
+        self::assertIsInt($notesOffset);
+        $withoutRecordedScope = substr($withTrailingSection, 0, $recordedOffset)
+            .substr($withTrailingSection, $notesOffset);
         self::assertSame(
-            $this->hash($base.'
-## Notes
-
-Hinweis.
-'),
+            $this->hash($withoutRecordedScope),
             $this->hash($withTrailingSection),
         );
 

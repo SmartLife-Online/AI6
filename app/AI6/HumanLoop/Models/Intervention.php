@@ -22,6 +22,7 @@ use Illuminate\Support\Carbon;
  * @property string $reason
  * @property string $idempotency_key
  * @property string|null $status_operation_id
+ * @property-read HumanRequest $humanRequest
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */

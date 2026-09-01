@@ -94,7 +94,7 @@ final class TicketStatusTransitionPolicyTest extends TestCase
     public function test_reserved_and_free_target_edges_are_not_representable(): void
     {
         self::assertSame(
-            ['approve', 'block', 'cancel', 'return_to_todo', 'complete_review', 'complete_report_only'],
+            ['approve', 'block', 'cancel', 'return_to_todo', 'complete_review', 'complete_report_only', 'complete_implementation'],
             array_map(static fn (TicketStatusOperation $operation): string => $operation->value, TicketStatusOperation::cases()),
         );
         $this->expectException(TicketMutationConflict::class);
@@ -109,6 +109,36 @@ final class TicketStatusTransitionPolicyTest extends TestCase
             str_repeat('b', 64),
             false,
         );
+    }
+
+    public function test_implementation_completion_is_reserved_for_the_bound_publish_saga(): void
+    {
+        $policy = new TicketStatusTransitionPolicy;
+        try {
+            $policy->decide(
+                ProjectRole::APPROVER,
+                TicketStatusOperation::COMPLETE_IMPLEMENTATION,
+                'in_progress',
+                true,
+                str_repeat('a', 64),
+                str_repeat('a', 64),
+                str_repeat('b', 64),
+                str_repeat('b', 64),
+                false,
+            );
+            self::fail('The generic status path accepted the publish-only edge.');
+        } catch (TicketMutationConflict $exception) {
+            self::assertSame('publish_saga_required', $exception->conflict);
+        }
+
+        self::assertSame('review', $policy->decideImplementation(
+            ProjectRole::APPROVER,
+            'in_progress',
+            str_repeat('a', 64),
+            str_repeat('a', 64),
+            str_repeat('b', 64),
+            str_repeat('b', 64),
+        ));
     }
 
     #[DataProvider('unauthorizedRoles')]

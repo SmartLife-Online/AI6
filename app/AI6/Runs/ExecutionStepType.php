@@ -14,6 +14,7 @@ enum ExecutionStepType: string
     case FIX = 'fix';
     case FINALIZE = 'finalize';
     case SECURITY_REVIEW = 'security_review';
+    case PUBLISH = 'publish';
 
     /**
      * Whether a worker handler for this step exists yet.
@@ -24,7 +25,7 @@ enum ExecutionStepType: string
     public function hasRegisteredHandler(): bool
     {
         return match ($this) {
-            self::PREFLIGHT, self::REVIEW_PREPARE, self::IMPLEMENT, self::CHECK, self::REVIEW, self::VERIFY, self::REPORT, self::FIX, self::FINALIZE, self::SECURITY_REVIEW => true,
+            self::PREFLIGHT, self::REVIEW_PREPARE, self::IMPLEMENT, self::CHECK, self::REVIEW, self::VERIFY, self::REPORT, self::FIX, self::FINALIZE, self::SECURITY_REVIEW, self::PUBLISH => true,
         };
     }
 }
