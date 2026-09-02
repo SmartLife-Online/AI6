@@ -47,25 +47,30 @@ final class RuntimeSchedulerTest extends TestCase
     {
         Queue::fake();
         $events = $this->app->make(Schedule::class)->events();
-        self::assertCount(3, $events);
+        self::assertCount(4, $events);
         $eventsByName = collect($events)->keyBy(static fn ($event): string => $event->getSummaryForDisplay());
         $runtime = $eventsByName->get('ai6-runtime-scheduler');
         $reconciler = $eventsByName->get('ai6-control-operation-reconciler');
         $stepReconciler = $eventsByName->get('ai6-run-step-reconciler');
+        $queueReevaluation = $eventsByName->get('ai6-queue-trusted-binding-reevaluation');
         self::assertNotNull($runtime);
         self::assertNotNull($reconciler);
         self::assertNotNull($stepReconciler);
+        self::assertNotNull($queueReevaluation);
         self::assertTrue($runtime->isRepeatable());
         self::assertSame(10, $runtime->repeatSeconds);
         self::assertTrue($reconciler->isRepeatable());
         self::assertSame(10, $reconciler->repeatSeconds);
         self::assertTrue($stepReconciler->isRepeatable());
         self::assertSame(10, $stepReconciler->repeatSeconds);
+        self::assertTrue($queueReevaluation->isRepeatable());
+        self::assertSame(10, $queueReevaluation->repeatSeconds);
 
         $runtime->run($this->app);
         $runtime->run($this->app);
         $reconciler->run($this->app);
         $stepReconciler->run($this->app);
+        $queueReevaluation->run($this->app);
 
         self::assertTrue((new RuntimeHeartbeat($this->directory))->status('scheduler', 10)['healthy']);
         $jobs = Queue::pushed(RuntimeSelfTestJob::class);

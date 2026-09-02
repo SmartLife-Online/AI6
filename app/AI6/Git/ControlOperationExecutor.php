@@ -6,6 +6,8 @@ use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\ControlOperationResult;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\ProjectProvisioningStatus;
+use App\AI6\Runs\QueueReevaluation;
+use App\AI6\Runs\QueueReevaluationTrigger;
 use App\AI6\Shared\Redaction\InvalidRedactionInputException;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
@@ -29,6 +31,7 @@ final readonly class ControlOperationExecutor
         private Redactor $redactor,
         private ControlOperationRecoveryProcessor $recovery,
         private ControlOperationRuntimeIdentity $runtimeIdentity,
+        private QueueReevaluation $queueReevaluation,
     ) {}
 
     public function execute(string $operationId): void
@@ -137,6 +140,11 @@ final readonly class ControlOperationExecutor
                     ControlOperationType::CONTRACT_AMENDMENT => $this->ticketMutations->advance($operation, $attemptToken),
                 };
                 if ($completed) {
+                    $this->queueReevaluation->afterExternalEffect(
+                        $operation->project_id,
+                        $this->reevaluationTrigger($operation->operation_type),
+                    );
+
                     return;
                 }
                 $operation->refresh();
@@ -149,8 +157,16 @@ final readonly class ControlOperationExecutor
                 $attemptToken,
                 new ControlOperationTerminalConflict($exception->conflict, $exception->getMessage()),
             );
+            $this->queueReevaluation->afterExternalEffect(
+                $operation->project_id,
+                $this->reevaluationTrigger($operation->operation_type),
+            );
         } catch (ControlOperationTerminalConflict $exception) {
             $this->recordTerminalConflict($operation, $attemptToken, $exception);
+            $this->queueReevaluation->afterExternalEffect(
+                $operation->project_id,
+                $this->reevaluationTrigger($operation->operation_type),
+            );
         } catch (ControlOperationRecoveryRequired $exception) {
             $this->requireRecovery($operation, $attemptToken, $exception);
         } catch (ControlOperationRetryableConflict $exception) {
@@ -158,6 +174,17 @@ final readonly class ControlOperationExecutor
         } catch (Throwable $exception) {
             $this->recordFailure($operation, $attemptToken, $exception);
         }
+    }
+
+    private function reevaluationTrigger(ControlOperationType $type): QueueReevaluationTrigger
+    {
+        return match ($type) {
+            ControlOperationType::MANAGED_FETCH => QueueReevaluationTrigger::FETCH,
+            ControlOperationType::TICKET_REFRESH => QueueReevaluationTrigger::READ_MODEL_REFRESH,
+            ControlOperationType::CONFIG_REFRESH => QueueReevaluationTrigger::CONFIG_CHANGE,
+            ControlOperationType::TICKET_STATUS_CHANGE => QueueReevaluationTrigger::DEPENDENCY_STATUS_CHANGE,
+            default => QueueReevaluationTrigger::TICKET_CHANGE,
+        };
     }
 
     private function requireRecovery(

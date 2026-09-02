@@ -10,7 +10,6 @@ use App\AI6\Agents\HumanRequestProposal;
 use App\AI6\Auth\Models\User;
 use App\AI6\Auth\StepUpGuard;
 use App\AI6\Git\Actions\QueueManagedCloneOperation;
-use App\AI6\Git\Actions\QueueRunStart;
 use App\AI6\Git\Actions\QueueTicketMutation;
 use App\AI6\Git\Actions\QueueTicketReadModelRefresh;
 use App\AI6\Git\ControlOperationExecutor;
@@ -32,6 +31,7 @@ use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Projects\ProjectRole;
 use App\AI6\Reviews\ReviewerSlotFactory;
+use App\AI6\Runs\ApprovalClaimStarter;
 use App\AI6\Runs\ApprovalLimits;
 use App\AI6\Runs\ApprovalSelection;
 use App\AI6\Runs\ApprovalSnapshotFactory;
@@ -354,7 +354,7 @@ final class RunCancellationExecutorTest extends TicketUiTestCase
         DB::table('jobs')->delete();
         $this->app->make(ControlOperationExecutor::class)->execute($approvalOperation->id);
 
-        $runStart = $this->app->make(QueueRunStart::class)->handle(
+        $runStart = $this->app->make(ApprovalClaimStarter::class)->start(
             $operator,
             $fixture['project']->refresh(),
             $approvalId,

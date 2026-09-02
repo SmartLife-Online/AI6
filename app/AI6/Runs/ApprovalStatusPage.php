@@ -4,14 +4,10 @@ namespace App\AI6\Runs;
 
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
-use App\AI6\Runs\Jobs\EvaluateTicketApproval;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\Models\TicketApprovalEvaluation;
 use Illuminate\Contracts\View\View;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Str;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
@@ -42,26 +38,11 @@ final class ApprovalStatusPage extends Component
         abort_unless($this->approval->project_id === $this->project->getKey(), 404);
     }
 
-    public function requestEvaluation(): void
+    public function requestEvaluation(QueueReevaluation $reevaluation): void
     {
         Gate::authorize('view', $this->project);
         abort_unless($this->approval->project_id === $this->project->getKey(), 404);
-        $evaluation = DB::transaction(function (): TicketApprovalEvaluation {
-            $evaluation = TicketApprovalEvaluation::query()->firstOrCreate(
-                [
-                    'ticket_approval_id' => $this->approval->getKey(),
-                    'state' => 'queued',
-                ],
-                [
-                    'id' => (string) Str::uuid(),
-                ],
-            );
-            if ($evaluation->wasRecentlyCreated) {
-                Queue::connection('database')->push(new EvaluateTicketApproval($evaluation->id));
-            }
-
-            return $evaluation;
-        });
+        $evaluation = $reevaluation->scheduleApproval($this->approval);
         $this->evaluationId = $evaluation->id;
     }
 

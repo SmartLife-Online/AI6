@@ -1,6 +1,7 @@
 <?php
 
 use App\AI6\Git\ControlOperationReconciler;
+use App\AI6\Runs\QueueReevaluation;
 use App\AI6\Runs\RunStepReconciler;
 use App\AI6\Shared\Runtime\RuntimeHeartbeat;
 use App\AI6\Shared\Runtime\RuntimeSelfTestJob;
@@ -31,4 +32,10 @@ Schedule::call(static function (): void {
     app(RunStepReconciler::class)->reconcile();
 })
     ->name('ai6-run-step-reconciler')
+    ->everyTenSeconds();
+
+Schedule::call(static function (): void {
+    app(QueueReevaluation::class)->scheduleTrustedBindingChanges();
+})
+    ->name('ai6-queue-trusted-binding-reevaluation')
     ->everyTenSeconds();

@@ -20,12 +20,14 @@ use App\AI6\Projects\ProjectRole;
 use App\AI6\Reviews\ReviewerSlotFactory;
 use App\AI6\Runs\ApprovalFreshness;
 use App\AI6\Runs\ApprovalLimits;
+use App\AI6\Runs\ApprovalQueue;
 use App\AI6\Runs\ApprovalSelection;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\InstructionCandidateSource;
 use App\AI6\Runs\Jobs\EvaluateTicketApproval;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\Models\TicketApprovalEvaluation;
+use App\AI6\Runs\QueueEligibility;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Tickets\TicketReadModelProjector;
 use App\AI6\Tickets\TicketValidationProfile;
@@ -145,6 +147,20 @@ final class ApprovalEligibilityFeatureTest extends TicketUiTestCase
         self::assertSame('queued', $fixture['approval']->refresh()->queue_state);
     }
 
+    public function test_bound_provider_capability_unavailability_has_its_named_reason(): void
+    {
+        $fixture = $this->completedApproval('E5');
+        $profiles = config('ai6.agent_profiles');
+        self::assertIsArray($profiles);
+        $profiles['fake']['capability_status'] = 'unavailable';
+        config(['ai6.agent_profiles' => $profiles]);
+        foreach ([AgentProfileRegistry::class, ApprovalSnapshotFactory::class, QueueEligibility::class] as $abstract) {
+            $this->app->forgetInstance($abstract);
+        }
+
+        self::assertContains('provider_capability_unavailable', $this->evaluate($fixture['approval']));
+    }
+
     /**
      * @return array{
      *   administrator: User,
@@ -174,7 +190,14 @@ final class ApprovalEligibilityFeatureTest extends TicketUiTestCase
             }
         }
         $todoContent = $this->validTicketMarkdown($ticketId, 'todo', $dependsOn);
-        $readModel = $this->publishReadModel($administrator, $project, 'tickets/'.$ticketId.'.md', $todoContent);
+        $todoBlob = hash('sha256', 'blob '.strlen($todoContent)."\0".$todoContent);
+        $readModel = $this->publishReadModel(
+            $administrator,
+            $project,
+            'tickets/'.$ticketId.'.md',
+            $todoContent,
+            ['blob_sha' => $todoBlob],
+        );
         $selection = $this->selection();
         $operationId = (string) Str::uuid();
         $snapshot = $this->app->make(ApprovalSnapshotFactory::class)->create(
@@ -204,7 +227,7 @@ final class ApprovalEligibilityFeatureTest extends TicketUiTestCase
             'approved_control_sha' => $project->control_oid,
             'intended_commit_sha' => $project->control_oid,
             'saga_phase' => 'complete',
-            'queue_state' => 'queued',
+            'queue_state' => 'available',
             'version' => DB::raw('version + 1'),
             'updated_at' => now(),
         ]));
@@ -229,11 +252,13 @@ final class ApprovalEligibilityFeatureTest extends TicketUiTestCase
             $operation->project_id,
             $attemptToken,
         ));
+        $approval = TicketApproval::query()->findOrFail($operationId);
+        $approval = $this->app->make(ApprovalQueue::class)->enqueue($project->refresh(), $approval->id, $approval->version);
 
         return [
             'administrator' => $administrator,
             'project' => $project->refresh(),
-            'approval' => TicketApproval::query()->findOrFail($operationId),
+            'approval' => $approval,
             'read_model' => $readModel,
             'ready_content' => $readyContent,
         ];

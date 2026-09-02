@@ -37,7 +37,8 @@ final readonly class RunPreflight
             return 'approval_not_complete';
         }
         if (! $this->sha($approval->approved_control_sha)
-            || ! hash_equals((string) $approval->approved_control_sha, $run->claim_parent_control_sha)
+            || (! hash_equals((string) $approval->approved_control_sha, $run->claim_parent_control_sha)
+                && ! $this->confirmedFastForwardClaim($run, $approval))
             || ! $this->sha($approval->approved_ticket_blob_sha)) {
             return 'approval_binding_stale';
         }
@@ -151,6 +152,23 @@ final readonly class RunPreflight
             ->where('state', ControlOperationState::COMPLETED->value)
             ->where('target_control_oid', $run->run_base_sha)
             ->whereRaw("json_extract(operation_parameters_jcs, '\$.run_id') = ?", [$run->getKey()])
+            ->exists();
+    }
+
+    private function confirmedFastForwardClaim(Run $run, TicketApproval $approval): bool
+    {
+        if (! $this->sha($run->claim_parent_control_sha) || ! $this->sha($run->initial_run_base_sha)) {
+            return false;
+        }
+
+        return ControlOperation::query()
+            ->whereKey($run->status_operation_id)
+            ->where('project_id', $run->project_id)
+            ->where('operation_type', ControlOperationType::RUN_START->value)
+            ->where('state', ControlOperationState::COMPLETED->value)
+            ->where('expected_control_commit', $run->claim_parent_control_sha)
+            ->where('target_control_oid', $run->initial_run_base_sha)
+            ->whereRaw("json_extract(operation_parameters_jcs, '\$.approval_id') = ?", [$approval->getKey()])
             ->exists();
     }
 

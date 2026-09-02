@@ -70,9 +70,9 @@ final class ControlBranchArchitectureTest extends TestCase
         $configurationApprovalFile = str_replace('\\', '/', $root.'/app/AI6/Projects/Actions/ApproveProjectConfiguration.php');
         $backfillFile = str_replace('\\', '/', $root.'/app/AI6/Tickets/Console/ReprojectUnparsedTicketsCommand.php');
         $approvalPreviewFile = str_replace('\\', '/', $root.'/app/AI6/Runs/Jobs/BuildTicketApprovalPreview.php');
-        $runStartFile = str_replace('\\', '/', $root.'/app/AI6/Git/Actions/QueueRunStart.php');
+        $runStartExecutorFile = str_replace('\\', '/', $root.'/app/AI6/Git/TicketMutationExecutor.php');
         self::assertSame([$generationFile], $generationMethods);
-        self::assertSame([$runStartFile, $configurationApprovalFile, $generationFile, $approvalPreviewFile, $backfillFile], $generationComparisons);
+        self::assertSame([$runStartExecutorFile, $configurationApprovalFile, $generationFile, $approvalPreviewFile, $backfillFile], $generationComparisons);
         self::assertSame([$approvalPreviewFile], $generationQueueReaders);
         self::assertSame([], $staleMarkerWrites);
 

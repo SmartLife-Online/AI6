@@ -7,7 +7,6 @@ use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentRole;
 use App\AI6\Auth\Models\User;
 use App\AI6\Git\Actions\QueueManagedCloneOperation;
-use App\AI6\Git\Actions\QueueRunStart;
 use App\AI6\Git\Actions\QueueTicketMutation;
 use App\AI6\Git\Actions\QueueTicketReadModelRefresh;
 use App\AI6\Git\ControlOperationConfiguration;
@@ -31,11 +30,14 @@ use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Projects\ProjectRole;
 use App\AI6\Reviews\ReviewerSlotFactory;
+use App\AI6\Runs\ApprovalClaimStarter;
 use App\AI6\Runs\ApprovalLimits;
+use App\AI6\Runs\ApprovalQueue;
 use App\AI6\Runs\ApprovalSelection;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\TicketApproval;
+use App\AI6\Runs\RunPreflight;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\RedactionMatchType;
 use App\AI6\Tickets\TicketMutationConflict;
@@ -276,7 +278,8 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
         if ($kind === 'approval') {
             $approval = TicketApproval::query()->findOrFail($operation->id);
             self::assertSame('complete', $approval->saga_phase);
-            self::assertSame('queued', $approval->queue_state);
+            self::assertSame('available', $approval->queue_state);
+            self::assertNull($approval->queued_at);
             self::assertSame($reviewedSourceBlob, $approval->reviewed_ticket_blob_sha);
             self::assertSame($fresh->blob_sha, $approval->approved_ticket_blob_sha);
             self::assertSame($commitOid, $approval->approved_control_sha);
@@ -362,6 +365,12 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
         $this->app->make(ControlOperationExecutor::class)->execute($approvalOperation->id);
         $approval = TicketApproval::query()->findOrFail($approvalId);
         self::assertSame('complete', $approval->saga_phase);
+        self::assertSame('available', $approval->queue_state);
+        $approval = $this->app->make(ApprovalQueue::class)->enqueue(
+            $fixture['project']->refresh(),
+            $approval->id,
+            $approval->version,
+        );
         self::assertSame('queued', $approval->queue_state);
         $approvedControl = $approval->approved_control_sha;
         self::assertIsString($approvedControl);
@@ -406,7 +415,7 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
         $this->app->make(ControlOperationExecutor::class)->execute($refresh->id);
 
         try {
-            $runStart = $this->app->make(QueueRunStart::class)->handle(
+            $runStart = $this->app->make(ApprovalClaimStarter::class)->start(
                 $operator,
                 $fixture['project']->refresh(),
                 $approvalId,
@@ -502,6 +511,13 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
             $run->claim_parent_control_sha,
             new RedactionContext((string) $fixture['project']->getKey(), $runStart->id, 'run-start-lineage-proof'),
         ));
+        if ($change === 'irrelevant') {
+            self::assertNotSame(
+                'approval_binding_stale',
+                $this->app->make(RunPreflight::class)->failureCode($run),
+                'The completed approval-bound fast-forward claim must pass the relaxed preflight lineage check.',
+            );
+        }
         self::assertSame(1, ControlOperation::query()->where('operation_type', ControlOperationType::RUN_START)->count());
     }
 

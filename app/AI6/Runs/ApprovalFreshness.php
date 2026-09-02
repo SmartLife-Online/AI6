@@ -18,8 +18,11 @@ final readonly class ApprovalFreshness
     public function reasons(TicketApproval $approval, Project $project, TicketReadModel $readModel, string $currentConfigHash, array $currentHashes = []): array
     {
         $reasons = [];
-        if ($approval->saga_phase !== 'complete' || $approval->queue_state !== 'queued') {
+        if ($approval->saga_phase !== 'complete') {
             $reasons[] = 'approval_not_finalized';
+        }
+        if ($approval->queue_state === ApprovalQueueState::CANCELLED->value) {
+            $reasons[] = 'approval_cancelled';
         }
         if ($approval->project_id !== $project->getKey() || $readModel->project_id !== $project->getKey()) {
             $reasons[] = 'project_binding_changed';
@@ -28,7 +31,10 @@ final readonly class ApprovalFreshness
             || ! $this->generations->isCurrent($project, $readModel->control_generation)) {
             $reasons[] = 'control_generation_changed';
         }
-        if (! is_string($approval->approved_ticket_blob_sha) || ! hash_equals($approval->approved_ticket_blob_sha, $readModel->blob_sha)) {
+        $readModelBlobSha = $readModel->getAttribute('blob_sha');
+        if (! is_string($approval->approved_ticket_blob_sha)
+            || ! is_string($readModelBlobSha)
+            || ! hash_equals($approval->approved_ticket_blob_sha, $readModelBlobSha)) {
             $reasons[] = 'ticket_blob_changed';
         }
         if (! is_string($readModel->ticket_contract_sha256) || ! hash_equals($approval->ticket_contract_sha256, $readModel->ticket_contract_sha256)) {
@@ -51,5 +57,10 @@ final readonly class ApprovalFreshness
         }
 
         return $reasons;
+    }
+
+    public function readModelGenerationIsCurrent(Project $project, TicketReadModel $readModel): bool
+    {
+        return $this->generations->isCurrent($project, $readModel->control_generation);
     }
 }

@@ -17,7 +17,9 @@ use App\AI6\Projects\Http\ProjectController;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Prompts\Livewire\PromptHelp;
 use App\AI6\Reviews\FindingDispositionController;
+use App\AI6\Runs\ApprovalQueueController;
 use App\AI6\Runs\ApprovalStatusPage;
+use App\AI6\Runs\ProjectQueueController;
 use App\AI6\Runs\RunStartController;
 use App\AI6\Runs\RunTimelinePage;
 use App\AI6\Runs\TicketApprovalController;
@@ -118,6 +120,15 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/projects/{project}/approvals/{approvalId}', ApprovalStatusPage::class)
         ->middleware('can:view,project')
         ->name('projects.approvals.show');
+    Route::get('/projects/{project}/queue', [ProjectQueueController::class, 'index'])
+        ->middleware('can:view,project')
+        ->name('projects.queue.index');
+    Route::post('/projects/{project}/queue/{approvalId}/enqueue', [ApprovalQueueController::class, 'enqueue'])
+        ->middleware('can:startRun,project')
+        ->name('projects.queue.enqueue');
+    Route::post('/projects/{project}/queue/{approvalId}/remove', [ApprovalQueueController::class, 'remove'])
+        ->middleware('can:startRun,project')
+        ->name('projects.queue.remove');
     Route::post('/projects/{project}/approvals/{approvalId}/start', [RunStartController::class, 'store'])
         ->middleware('can:startRun,project')
         ->name('projects.approvals.start');

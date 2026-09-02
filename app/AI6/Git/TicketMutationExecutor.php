@@ -4,6 +4,7 @@ namespace App\AI6\Git;
 
 use App\AI6\Agents\AgentProfileSelectionException;
 use App\AI6\Agents\InstructionResolutionException;
+use App\AI6\Auth\Models\User;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\ControlOperationRecoveryDecision;
 use App\AI6\Git\Models\ControlOperationResult;
@@ -21,6 +22,7 @@ use App\AI6\Projects\TicketReadModelFreshness;
 use App\AI6\Projects\TicketReadModelRedactionState;
 use App\AI6\Projects\TicketReadModelUsePolicy;
 use App\AI6\Prompts\PromptRenderingException;
+use App\AI6\Runs\ApprovalQueueState;
 use App\AI6\Runs\ApprovalSelectionFactory;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ApprovalSnapshotVerifier;
@@ -746,7 +748,7 @@ final readonly class TicketMutationExecutor
                         'approved_control_sha' => $commitOid,
                         'intended_commit_sha' => $commitOid,
                         'saga_phase' => 'complete',
-                        'queue_state' => 'queued',
+                        'queue_state' => 'available',
                         'version' => DB::raw('version + 1'),
                         'updated_at' => $now,
                     ]);
@@ -833,11 +835,14 @@ final readonly class TicketMutationExecutor
         $actor = $operation->actor()->firstOrFail();
         $mutation = $operation->ticketMutation()->firstOrFail();
         $parameters = $this->parameters($operation);
+        $authorization = $this->authorizationSnapshots->authorization($operation);
         $authorized = match ($operation->operation_type) {
             ControlOperationType::TICKET_EDIT,
             ControlOperationType::CONTRACT_AMENDMENT => $this->projectPolicy->editTicket($actor, $project),
             ControlOperationType::TICKET_APPROVAL => $this->projectPolicy->approveTicket($actor, $project),
-            ControlOperationType::RUN_START => $this->projectPolicy->startRun($actor, $project),
+            ControlOperationType::RUN_START => $authorization === 'approval_auto_start'
+                ? $this->approvedAutoStartAuthorized($operation, $actor, $project, $parameters)
+                : $authorization === 'global_and_project_administrator' && $this->projectPolicy->startRun($actor, $project),
             default => $this->projectPolicy->changeTicketStatus($actor, $project),
         };
         if (! $authorized || ! $this->authorizationSnapshots->matchesCurrent($operation, $actor, $project)) {
@@ -866,6 +871,22 @@ final readonly class TicketMutationExecutor
             $this->paths->assertRepository($this->paths->repositoryDirectory($project->project_identifier)),
             new RedactionContext((string) $project->getKey(), $operation->id, 'ticket-mutation:'.$mutation->relative_path),
         ];
+    }
+
+    /** @param array{approval_id?: string} $parameters */
+    private function approvedAutoStartAuthorized(ControlOperation $operation, User $actor, Project $project, array $parameters): bool
+    {
+        $approvalId = $parameters['approval_id'] ?? null;
+        $approval = is_string($approvalId)
+            ? TicketApproval::query()->whereKey($approvalId)->where('project_id', $project->getKey())->first()
+            : null;
+
+        return $approval instanceof TicketApproval
+            && $approval->saga_phase === 'complete'
+            && $approval->queue_state === ApprovalQueueState::QUEUED->value
+            && $approval->approved_control_sha !== null
+            && $approval->control_generation === $project->control_generation
+            && $this->projectPolicy->startRun($actor, $project);
     }
 
     /** @return array{relative_path: string, expected_binding_version: int, status_operation?: string, approval_id?: string, run_type?: string, run_id?: string|null, human_request_id?: string|null} */

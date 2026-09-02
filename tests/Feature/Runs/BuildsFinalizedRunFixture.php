@@ -6,7 +6,6 @@ use App\AI6\Agents\AgentInputLimits;
 use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentRole;
 use App\AI6\Auth\Models\User;
-use App\AI6\Git\Actions\QueueRunStart;
 use App\AI6\Git\Actions\QueueTicketMutation;
 use App\AI6\Git\ControlOperationPhase;
 use App\AI6\Git\ControlOperationState;
@@ -16,7 +15,9 @@ use App\AI6\Git\ProjectOperationLease;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\ProjectRole;
 use App\AI6\Reviews\ReviewerSlotFactory;
+use App\AI6\Runs\ApprovalClaimStarter;
 use App\AI6\Runs\ApprovalLimits;
+use App\AI6\Runs\ApprovalQueue;
 use App\AI6\Runs\ApprovalSelection;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\Models\Run;
@@ -37,7 +38,7 @@ trait BuildsFinalizedRunFixture
     /** @param array{operator: User, project: Project, approval: TicketApproval} $fixture */
     protected function queueStart(array $fixture): ControlOperation
     {
-        return $this->app->make(QueueRunStart::class)->handle(
+        return $this->app->make(ApprovalClaimStarter::class)->start(
             $fixture['operator'],
             $fixture['project']->refresh(),
             $fixture['approval']->id,
@@ -46,9 +47,9 @@ trait BuildsFinalizedRunFixture
     }
 
     /** @param array{operator: User, project: Project, approval: TicketApproval} $fixture */
-    protected function finalizedRun(array $fixture, ?string $confirmedCommitSha = null): Run
+    protected function finalizedRun(array $fixture, ?string $confirmedCommitSha = null, ?ControlOperation $operation = null): Run
     {
-        $operation = $this->queueStart($fixture);
+        $operation ??= $this->queueStart($fixture);
         DB::table('jobs')->delete();
         $attemptToken = $this->app->make(ProjectOperationLease::class)->claim($operation, str_repeat('f', 32));
         self::assertIsInt($attemptToken);
@@ -73,9 +74,18 @@ trait BuildsFinalizedRunFixture
         );
     }
 
-    /** @return array{operator: User, project: Project, approval: TicketApproval, attention: ?User} */
-    protected function completedApproval(string $ticketId, ?Project $project = null, ?User $operator = null, ?User $attentionUser = null): array
-    {
+    /**
+     * @param  array<string, string>  $dependencyStatuses
+     * @return array{administrator: User, operator: User, project: Project, approval: TicketApproval, attention: ?User}
+     */
+    protected function completedApproval(
+        string $ticketId,
+        ?Project $project = null,
+        ?User $operator = null,
+        ?User $attentionUser = null,
+        string $dependsOn = '[]',
+        array $dependencyStatuses = [],
+    ): array {
         $administrator = $this->createUser(['is_global_admin' => true]);
         $approver = $this->createUser();
         $operator ??= $this->createUser();
@@ -91,7 +101,15 @@ trait BuildsFinalizedRunFixture
         if ($attentionUser instanceof User) {
             $this->addMembership($attentionUser, $project, ProjectRole::APPROVER);
         }
-        $todo = $this->validTicketMarkdown($ticketId, 'todo');
+        foreach ($dependencyStatuses as $dependencyId => $status) {
+            $this->publishReadModel(
+                $administrator,
+                $project,
+                'tickets/'.$dependencyId.'.md',
+                $this->validTicketMarkdown($dependencyId, $status),
+            );
+        }
+        $todo = $this->validTicketMarkdown($ticketId, 'todo', $dependsOn);
         $todoBlob = hash('sha256', 'blob '.strlen($todo)."\0".$todo);
         $readModel = $this->publishReadModel($administrator, $project, 'tickets/'.$ticketId.'.md', $todo, ['blob_sha' => $todoBlob]);
         $selection = $this->approvalSelection($attentionUser);
@@ -119,7 +137,7 @@ trait BuildsFinalizedRunFixture
             'approved_control_sha' => $project->control_oid,
             'intended_commit_sha' => $project->control_oid,
             'saga_phase' => 'complete',
-            'queue_state' => 'queued',
+            'queue_state' => 'available',
             'version' => DB::raw('version + 1'),
             'updated_at' => now(),
         ]));
@@ -155,11 +173,14 @@ trait BuildsFinalizedRunFixture
         ]);
         self::assertTrue($this->app->make(ProjectOperationLease::class)->release($operation->id, $operation->project_id, $attemptToken));
         DB::table('jobs')->delete();
+        $approval = TicketApproval::query()->findOrFail($operationId);
+        $approval = $this->app->make(ApprovalQueue::class)->enqueue($project->refresh(), $approval->id, $approval->version);
 
         return [
+            'administrator' => $administrator,
             'operator' => $operator,
             'project' => $project->refresh(),
-            'approval' => TicketApproval::query()->findOrFail($operationId),
+            'approval' => $approval,
             'attention' => $attentionUser,
         ];
     }

@@ -42,6 +42,7 @@ use Illuminate\Support\Carbon;
  * @property array<string, int> $limits_snapshot
  * @property string $approval_snapshot_hash
  * @property string $queue_state
+ * @property Carbon|null $queued_at
  * @property int|null $attention_user_id
  * @property string $push_mode
  * @property RunType $run_type
@@ -93,6 +94,7 @@ final class TicketApproval extends Model
             'attention_user_id' => 'integer',
             'version' => 'integer',
             'approved_at' => 'immutable_datetime',
+            'queued_at' => 'immutable_datetime',
             'run_type' => RunType::class,
             'completion_mode' => ReviewOnlyCompletionMode::class,
         ];

@@ -7,7 +7,6 @@ use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentRole;
 use App\AI6\Auth\Models\User;
 use App\AI6\Git\Actions\QueueManagedCloneOperation;
-use App\AI6\Git\Actions\QueueRunStart;
 use App\AI6\Git\Actions\QueueTicketMutation;
 use App\AI6\Git\Actions\QueueTicketReadModelRefresh;
 use App\AI6\Git\ControlOperationConflict;
@@ -31,6 +30,7 @@ use App\AI6\Projects\ProjectRole;
 use App\AI6\Reviews\Models\ReviewResult;
 use App\AI6\Reviews\ReviewerSlotFactory;
 use App\AI6\Reviews\ReviewInvocationOutcome;
+use App\AI6\Runs\ApprovalClaimStarter;
 use App\AI6\Runs\ApprovalLimits;
 use App\AI6\Runs\ApprovalSelection;
 use App\AI6\Runs\ApprovalSnapshotFactory;
@@ -159,7 +159,7 @@ final class ReportOnlyCompletionExecutorTest extends TicketUiTestCase
 
         self::assertSame('consumed', TicketApproval::query()->findOrFail($run->ticket_approval_id)->queue_state);
         try {
-            $this->app->make(QueueRunStart::class)->handle(
+            $this->app->make(ApprovalClaimStarter::class)->start(
                 $bound['operator'],
                 $fixture['project']->fresh(),
                 $run->ticket_approval_id,
@@ -338,7 +338,7 @@ final class ReportOnlyCompletionExecutorTest extends TicketUiTestCase
         DB::table('jobs')->delete();
         $this->app->make(ControlOperationExecutor::class)->execute($approvalOperation->id);
 
-        $start = $this->app->make(QueueRunStart::class)->handle(
+        $start = $this->app->make(ApprovalClaimStarter::class)->start(
             $operator, $fixture['project']->refresh(), $approvalId, (string) Str::uuid(),
         );
         DB::table('jobs')->delete();
@@ -400,7 +400,7 @@ final class ReportOnlyCompletionExecutorTest extends TicketUiTestCase
         );
         DB::table('jobs')->delete();
         $this->app->make(ControlOperationExecutor::class)->execute($approvalOperation->id);
-        $start = $this->app->make(QueueRunStart::class)->handle(
+        $start = $this->app->make(ApprovalClaimStarter::class)->start(
             $operator, $fixture['project']->refresh(), $approvalId, (string) Str::uuid(),
         );
         DB::table('jobs')->delete();

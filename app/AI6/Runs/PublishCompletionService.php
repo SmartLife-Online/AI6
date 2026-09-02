@@ -62,6 +62,8 @@ final readonly class PublishCompletionService
         private HumanRequestService $humanRequests,
         private RunWorkspaceLifecycle $workspaces,
         private ProjectPolicy $policy,
+        private QueueReevaluation $reevaluation,
+        private QueueAutoStarter $autoStarter,
     ) {}
 
     public function execute(ExecutionJob $job, Run $run, string $owner): void
@@ -158,6 +160,8 @@ final readonly class PublishCompletionService
             new RedactionContext((string) $project->id, $completed->id, 'publish-cleanup'),
         );
         $this->paths->removeOwnedOperation((string) $project->project_identifier, $completed->id);
+        $this->reevaluation->afterExternalEffect($project, QueueReevaluationTrigger::RUN_COMPLETION);
+        $this->autoStarter->afterCompletion($project, $completed);
 
         return $completed;
     }

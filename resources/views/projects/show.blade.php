@@ -5,6 +5,7 @@
 @section('content')
     <h1>{{ $project->name }}</h1>
     <p>Projekt-ID: {{ $project->getKey() }}</p>
+    <p><a href="{{ route('projects.queue.index', $project) }}">Projektqueue anzeigen</a></p>
 
     <dl>
         <dt>Remote</dt>

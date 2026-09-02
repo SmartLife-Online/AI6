@@ -3,7 +3,6 @@
 namespace App\AI6\Runs;
 
 use App\AI6\Auth\Models\User;
-use App\AI6\Git\Actions\QueueRunStart;
 use App\AI6\Git\ControlOperationConflict;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Policies\ProjectPolicy;
@@ -14,7 +13,7 @@ use Illuminate\Validation\ValidationException;
 
 final readonly class RunStartController
 {
-    public function store(Request $request, Project $project, string $approvalId, ProjectPolicy $policy, QueueRunStart $starts): RedirectResponse
+    public function store(Request $request, Project $project, string $approvalId, ProjectPolicy $policy, ApprovalClaimStarter $starts): RedirectResponse
     {
         $actor = $request->user();
         abort_unless($actor instanceof User && $policy->startRun($actor, $project), 403);
@@ -22,7 +21,7 @@ final readonly class RunStartController
             throw ValidationException::withMessages(['run' => ['Der Runstart akzeptiert keine neue oder abweichende Quelle.']]);
         }
         try {
-            $operation = $starts->handle($actor, $project, $approvalId, (string) Str::uuid());
+            $operation = $starts->start($actor, $project, $approvalId, (string) Str::uuid());
         } catch (ControlOperationConflict $exception) {
             throw ValidationException::withMessages(['run' => ['Die Approval ist nicht startbereit.']]);
         }

@@ -32,7 +32,7 @@ final class RunArchitectureTest extends TestCase
         self::assertIsString($controller);
         self::assertStringNotContainsString('HardenedGitRunner', $controller);
         self::assertStringNotContainsString('ControlProcessRunner', $controller);
-        self::assertStringContainsString('QueueRunStart', $controller);
+        self::assertStringContainsString('ApprovalClaimStarter', $controller);
     }
 
     /** TC-11: step state is written by the orchestrator only, never from a browser entry point. */

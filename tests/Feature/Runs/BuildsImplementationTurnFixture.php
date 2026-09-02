@@ -18,6 +18,7 @@ use App\AI6\Git\ProjectOperationLease;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\ProjectProvisioningStatus;
 use App\AI6\Projects\ProjectRole;
+use App\AI6\Runs\ApprovalQueue;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\ExecutionStepType;
@@ -176,7 +177,7 @@ trait BuildsImplementationTurnFixture
             'approved_control_sha' => $project->control_oid,
             'intended_commit_sha' => $project->control_oid,
             'saga_phase' => 'complete',
-            'queue_state' => 'queued',
+            'queue_state' => 'available',
             'version' => DB::raw('version + 1'),
             'updated_at' => now(),
         ]));
@@ -211,10 +212,12 @@ trait BuildsImplementationTurnFixture
             'updated_at' => now(),
         ]);
         self::assertTrue($this->app->make(ProjectOperationLease::class)->release($operation->id, $operation->project_id, $attemptToken));
+        $approval = TicketApproval::query()->findOrFail($operationId);
+        $approval = $this->app->make(ApprovalQueue::class)->enqueue($project->refresh(), $approval->id, $approval->version);
         $fixture = [
             'operator' => $operator,
             'project' => $project->refresh(),
-            'approval' => TicketApproval::query()->findOrFail($operationId),
+            'approval' => $approval,
             'attention' => $attention,
         ];
         $run = $this->finalizedRun($fixture, $coherentGitBinding ? $controlOid : null);
