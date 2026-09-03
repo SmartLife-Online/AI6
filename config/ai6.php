@@ -111,6 +111,35 @@ return [
     'run_artifacts' => [
         'root' => env('AI6_RUN_ARTIFACT_ROOT', storage_path('app/ai6/run-artifacts')),
     ],
+    /*
+     * Trusted retention per stored category (SEC-011, plan §10.6).
+     *
+     * `max_days` bounds how long the raw bytes of a category stay readable,
+     * `max_bytes` bounds how large one stored record of that category may be.
+     * A run that is still queued, running or waiting may defer the deletion of
+     * its expired data by at most `active_run_grace_days`. Project
+     * configuration and provider output can neither set nor extend any of
+     * these values; only this instance configuration is read.
+     */
+    'retention' => [
+        'run_logs' => [
+            'max_days' => env('AI6_RETENTION_RUN_LOGS_MAX_DAYS', '90'),
+            'max_bytes' => env('AI6_RETENTION_RUN_LOGS_MAX_BYTES', '65536'),
+        ],
+        'agent_raw_output' => [
+            'max_days' => env('AI6_RETENTION_AGENT_RAW_OUTPUT_MAX_DAYS', '14'),
+            'max_bytes' => env('AI6_RETENTION_AGENT_RAW_OUTPUT_MAX_BYTES', '10000000'),
+        ],
+        'check_logs' => [
+            'max_days' => env('AI6_RETENTION_CHECK_LOGS_MAX_DAYS', '30'),
+            'max_bytes' => env('AI6_RETENTION_CHECK_LOGS_MAX_BYTES', '5000000'),
+        ],
+        'artifacts' => [
+            'max_days' => env('AI6_RETENTION_ARTIFACTS_MAX_DAYS', '30'),
+            'max_bytes' => env('AI6_RETENTION_ARTIFACTS_MAX_BYTES', '20000000'),
+        ],
+        'active_run_grace_days' => env('AI6_RETENTION_ACTIVE_RUN_GRACE_DAYS', '7'),
+    ],
     'execution_mailboxes' => [
         'version' => 1,
         'max_envelope_bytes' => env('AI6_MAILBOX_MAX_ENVELOPE_BYTES', '12000000'),

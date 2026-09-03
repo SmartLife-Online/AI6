@@ -11,4 +11,5 @@ enum RunArtifactKind: string
     case QUARANTINED_PATH = 'quarantined_path';
     case CONTEXT_PACKAGE = 'context_package';
     case COMPLETION_REPORT = 'completion_report';
+    case CHECKPOINT_DIFF = 'checkpoint_diff';
 }

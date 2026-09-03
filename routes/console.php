@@ -2,6 +2,7 @@
 
 use App\AI6\Git\ControlOperationReconciler;
 use App\AI6\Runs\QueueReevaluation;
+use App\AI6\Runs\RunRetentionSweep;
 use App\AI6\Runs\RunStepReconciler;
 use App\AI6\Shared\Runtime\RuntimeHeartbeat;
 use App\AI6\Shared\Runtime\RuntimeSelfTestJob;
@@ -39,3 +40,9 @@ Schedule::call(static function (): void {
 })
     ->name('ai6-queue-trusted-binding-reevaluation')
     ->everyTenSeconds();
+
+Schedule::call(static function (): void {
+    app(RunRetentionSweep::class)->sweep();
+})
+    ->name('ai6-run-retention')
+    ->hourly();

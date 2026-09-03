@@ -57,6 +57,7 @@ final class PublicRouteInventoryTest extends TestCase
             'GET /projects/{project}/operations/{operation} [web, auth, can:view,project]',
             'GET /projects/{project}/queue [web, auth, can:view,project]',
             'GET /projects/{project}/runs/{runId} [web, auth, can:viewRun,project]',
+            'GET /projects/{project}/runs/{runId}/artifacts/{artifactId} [web, auth, can:viewRun,project]',
             'GET /projects/{project}/tickets [web, auth, can:view,project]',
             'GET /projects/{project}/tickets/{readModel} [web, auth, can:view,project]',
             'GET /projects/{project}/tickets/{readModel}/approval [web, auth, can:approveTicket,project]',

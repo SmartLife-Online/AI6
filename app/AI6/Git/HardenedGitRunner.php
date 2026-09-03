@@ -387,6 +387,26 @@ final class HardenedGitRunner
         ], $redactionContext);
     }
 
+    /**
+     * The patch text between two bound commits: no colour, no renames, no
+     * external diff, no textconv, full object names. The bytes are untrusted
+     * repository content and leave the caller only through the central
+     * redaction.
+     */
+    public function textualDiff(
+        string $repository,
+        string $fromCommit,
+        string $toCommit,
+        RedactionContext $redactionContext,
+    ): ProcessResult {
+        $this->assertOid($fromCommit);
+        $this->assertOid($toCommit);
+
+        return $this->runRepositoryCommand($repository, [
+            'diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--no-color', '--patch', '--unified=3', '--full-index', $fromCommit, $toCommit,
+        ], $redactionContext);
+    }
+
     /** Compare a bound commit with the complete index/worktree state without mutating it. */
     public function canonicalWorkingTreeDiff(
         string $repository,

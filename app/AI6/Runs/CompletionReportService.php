@@ -79,7 +79,19 @@ final readonly class CompletionReportService
         }
         $artifacts = [];
         foreach ((new RunArtifact)->newQuery()->where('run_id', $run->id)->where('kind', '<>', RunArtifactKind::COMPLETION_REPORT->value)->orderBy('sequence')->get() as $artifact) {
-            $artifacts[] = ['id' => $artifact->id, 'kind' => $artifact->kind->value, 'digest' => $artifact->digest, 'reference' => $artifact->storage_reference];
+            // The report binds every artifact by its central keyed fingerprint,
+            // never by the unkeyed digest or the storage path: both disappear
+            // with the retention deletion and must not survive here (SEC-011).
+            $artifacts[] = [
+                'id' => $artifact->id,
+                'kind' => $artifact->kind->value,
+                'sequence' => $artifact->sequence,
+                'size_bytes' => $artifact->size_bytes,
+                'fingerprint' => $artifact->fingerprint,
+                'fingerprint_key_id' => $artifact->fingerprint_key_id,
+                'fingerprint_version' => $artifact->fingerprint_version,
+                'retention_state' => $artifact->retention_state->value,
+            ];
         }
 
         $payload = [

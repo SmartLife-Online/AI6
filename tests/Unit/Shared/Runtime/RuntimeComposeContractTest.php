@@ -30,6 +30,19 @@ final class RuntimeComposeContractTest extends TestCase
     ];
 
     /** @var list<string> */
+    /** The nine trusted retention values (SEC-011); they reach exactly the roles that persist, show, delete or — in the retention migration — bind retention data. */
+    private const RETENTION_ENVIRONMENT = [
+        'AI6_RETENTION_ACTIVE_RUN_GRACE_DAYS',
+        'AI6_RETENTION_AGENT_RAW_OUTPUT_MAX_BYTES',
+        'AI6_RETENTION_AGENT_RAW_OUTPUT_MAX_DAYS',
+        'AI6_RETENTION_ARTIFACTS_MAX_BYTES',
+        'AI6_RETENTION_ARTIFACTS_MAX_DAYS',
+        'AI6_RETENTION_CHECK_LOGS_MAX_BYTES',
+        'AI6_RETENTION_CHECK_LOGS_MAX_DAYS',
+        'AI6_RETENTION_RUN_LOGS_MAX_BYTES',
+        'AI6_RETENTION_RUN_LOGS_MAX_DAYS',
+    ];
+
     private const AUTH_ENVIRONMENT = [
         'AI6_AUTH_ENROLLMENT_TTL_SECONDS',
         'AI6_AUTH_LOGIN_CONFIRMATION_MAX_ATTEMPTS',
@@ -70,6 +83,7 @@ final class RuntimeComposeContractTest extends TestCase
         'caddy' => [],
         'init' => [
             ...self::SECURITY_ENVIRONMENT,
+            ...self::RETENTION_ENVIRONMENT,
             'AI6_EFFECT_LOCK_DIRECTORY', 'AI6_EFFECT_LOCK_OBJECT_COUNT', 'AI6_EFFECT_LOCK_OWNER_UID',
             'AI6_MANAGED_PROJECT_ROOT',
             'AI6_RUNTIME_ROLE', 'APP_DEBUG', 'APP_ENV', 'DB_BUSY_TIMEOUT', 'DB_CONNECTION', 'DB_DATABASE',
@@ -80,6 +94,7 @@ final class RuntimeComposeContractTest extends TestCase
             ...self::HTTP_ENVIRONMENT,
             ...self::SECURITY_ENVIRONMENT,
             ...self::REDACTION_ENVIRONMENT,
+            ...self::RETENTION_ENVIRONMENT,
             'AI6_CONTROL_OPERATION_HEARTBEAT_SECONDS', 'AI6_CONTROL_OPERATION_LEASE_SECONDS', 'AI6_CONTROL_OPERATION_MANAGED_REF_ALLOWLIST',
             'AI6_CONTROL_OPERATION_STALE_SECONDS',
             'AI6_GIT_ALLOWED_HOSTS', 'AI6_GIT_ALLOWED_REMOTE_PATHS', 'AI6_GIT_ALLOWED_REF_PATTERNS', 'AI6_GIT_PINNED_HOST_KEYS',
@@ -91,6 +106,7 @@ final class RuntimeComposeContractTest extends TestCase
             ...self::MAIL_ENVIRONMENT,
             ...self::SECURITY_ENVIRONMENT,
             ...self::REDACTION_ENVIRONMENT,
+            ...self::RETENTION_ENVIRONMENT,
             'AI6_CONTROL_OPERATION_HEARTBEAT_SECONDS', 'AI6_CONTROL_OPERATION_LEASE_SECONDS',
             'AI6_CONTROL_OPERATION_KNOWN_HOSTS_FILE', 'AI6_CONTROL_OPERATION_MANAGED_REF_ALLOWLIST',
             'AI6_CONTROL_OPERATION_MAX_ATTEMPTS', 'AI6_CONTROL_OPERATION_RECONCILIATION_BUDGET',
@@ -108,6 +124,7 @@ final class RuntimeComposeContractTest extends TestCase
         'scheduler' => [
             ...self::SECURITY_ENVIRONMENT,
             ...self::REDACTION_ENVIRONMENT,
+            ...self::RETENTION_ENVIRONMENT,
             'AI6_CONTROL_OPERATION_RECONCILER_SECONDS',
             'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'APP_DEBUG', 'APP_ENV',
             'CACHE_STORE', 'DB_BUSY_TIMEOUT', 'DB_CONNECTION', 'DB_DATABASE',
@@ -291,6 +308,39 @@ final class RuntimeComposeContractTest extends TestCase
         $unknownService = $this->compose();
         $unknownService['services']['unexpected'] = [];
         self::assertNotSame([], $this->allowlistErrors($unknownService));
+    }
+
+    public function test_retention_configuration_reaches_exactly_init_app_worker_and_scheduler(): void
+    {
+        $services = $this->services();
+        foreach (['init', 'app', 'worker', 'scheduler'] as $role) {
+            foreach (self::RETENTION_ENVIRONMENT as $variable) {
+                self::assertSame('${'.$variable.':-'.$this->retentionDefault($variable).'}', $services[$role]['environment'][$variable] ?? null, $role.' '.$variable);
+            }
+        }
+        foreach (['agent', 'checker', 'caddy'] as $role) {
+            foreach (self::RETENTION_ENVIRONMENT as $variable) {
+                self::assertArrayNotHasKey($variable, $services[$role]['environment'] ?? [], $role.' '.$variable);
+            }
+        }
+    }
+
+    private function retentionDefault(string $variable): string
+    {
+        $defaults = [
+            'AI6_RETENTION_ACTIVE_RUN_GRACE_DAYS' => '7',
+            'AI6_RETENTION_AGENT_RAW_OUTPUT_MAX_BYTES' => '10000000',
+            'AI6_RETENTION_AGENT_RAW_OUTPUT_MAX_DAYS' => '14',
+            'AI6_RETENTION_ARTIFACTS_MAX_BYTES' => '20000000',
+            'AI6_RETENTION_ARTIFACTS_MAX_DAYS' => '30',
+            'AI6_RETENTION_CHECK_LOGS_MAX_BYTES' => '5000000',
+            'AI6_RETENTION_CHECK_LOGS_MAX_DAYS' => '30',
+            'AI6_RETENTION_RUN_LOGS_MAX_BYTES' => '65536',
+            'AI6_RETENTION_RUN_LOGS_MAX_DAYS' => '90',
+        ];
+        self::assertArrayHasKey($variable, $defaults);
+
+        return $defaults[$variable];
     }
 
     public function test_security_and_redaction_configuration_reaches_only_the_required_php_roles(): void

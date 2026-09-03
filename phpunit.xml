@@ -20,6 +20,17 @@
         </include>
     </source>
     <php>
+        <!--
+            Retained memory of the regular suite is compiled code, not leaked
+            objects: with OPcache off in the CLI every loaded test, app and
+            vendor class stays on the PHP heap (profiled 2026-09-03 with
+            PHPUnit's verbose event log: ~70 MiB after the first test, ~122 MiB
+            retained after the last of 1449 tests, ~18 MiB with
+            opcache.enable_cli=1; a per-test gc_collect_cycles() changed
+            nothing). The suite therefore declares its own budget instead of
+            depending on a php.ini default that a few more tests exceed.
+        -->
+        <ini name="memory_limit" value="256M"/>
         <env name="APP_ENV" value="testing"/>
         <env name="APP_KEY" value="base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>

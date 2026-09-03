@@ -56,7 +56,28 @@ final readonly class RunCheckStep
         private HumanRequestService $humanRequests,
         private ReviewSubjectNormalizer $reviewSubjects,
         private BoundCheckProfiles $boundCheckProfiles,
+        private CheckpointDiffRecorder $checkpointDiffs,
     ) {}
+
+    /**
+     * The textual diff of the bound checkpoint is evidence for the human, not
+     * a condition of the step: a store that refuses it is named in the
+     * timeline, and the step continues on the bound hashes.
+     */
+    private function recordCheckpointDiff(Run $run, RedactionContext $context): void
+    {
+        try {
+            $this->checkpointDiffs->record($run, $context);
+        } catch (ImplementationImportException $exception) {
+            $this->orchestrator->recordStepEvent(
+                $run->id,
+                ExecutionStepType::CHECK->value,
+                ExecutionJobState::RUNNING,
+                'Der Checkpoint-Diff konnte nicht abgelegt werden: '.$exception->reason.'.',
+                'checkpoint-diff-unavailable:'.$run->id.':'.$run->checkpoint_tree_sha,
+            );
+        }
+    }
 
     public function execute(ExecutionJob $job, Run $run, string $owner): void
     {
@@ -238,6 +259,7 @@ final readonly class RunCheckStep
                 $run = $this->checkpoints->create($run, $project->project_identifier, $context);
                 $diff = $this->trees->workingTreeDiff($run, $run->initial_run_base_sha, $context);
             }
+            $this->recordCheckpointDiff($run, $context);
             $decision = $this->orchestrator->reviewReadiness($run, $diff->hash, $this->checks->currentTreeBinding($run));
             $run = $this->orchestrator->recordReviewReadiness($run, $decision);
         } catch (ReviewSubjectException $exception) {

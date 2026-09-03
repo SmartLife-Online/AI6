@@ -13,7 +13,7 @@ if ($normalizedMemoryLimit !== '-1') {
         default => $numericLimit,
     };
 
-    if ($memoryLimitBytes < 512 * 1024 * 1024 && ini_set('memory_limit', '512M') === false) {
-        throw new RuntimeException('PHPStan requires at least a 512M analysis memory limit.');
+    if ($memoryLimitBytes < 1024 * 1024 * 1024 && ini_set('memory_limit', '1G') === false) {
+        throw new RuntimeException('PHPStan requires at least a 1G analysis memory limit.');
     }
 }

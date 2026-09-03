@@ -419,6 +419,16 @@ final class ReviewOnlyRunContractTest extends TicketUiTestCase
         self::assertSame($finding->id, $report['findings'][0]['id']);
         self::assertTrue($report['findings'][0]['blocks']);
         self::assertNotEmpty($report['artifacts']);
+        // AI6-031: the report binds artifacts by the central keyed fingerprint,
+        // never by the unkeyed digest or the storage path (SEC-011).
+        foreach ($report['artifacts'] as $entry) {
+            self::assertEqualsCanonicalizing(['id', 'kind', 'sequence', 'size_bytes', 'fingerprint', 'fingerprint_key_id', 'fingerprint_version', 'retention_state'], array_keys($entry));
+            self::assertSame(1, preg_match('/\A[0-9a-f]{64}\z/', (string) $entry['fingerprint']));
+            self::assertSame('app-key-v1', $entry['fingerprint_key_id']);
+            self::assertSame('stored', $entry['retention_state']);
+        }
+        self::assertStringNotContainsString('"reference"', $bytes);
+        self::assertStringNotContainsString('"digest"', $bytes);
         self::assertTrue($first->expires_at->greaterThan(now()->addDays(29)));
         self::assertTrue($this->app->make(ReviewOnlyCompletionPredicate::class)->decide($run)->ready());
         self::assertSame($ticketBefore, DB::table('ticket_read_models')->where('project_id', $run->project_id)->value('redacted_content'));
@@ -706,6 +716,7 @@ final class ReviewOnlyRunContractTest extends TicketUiTestCase
             'redacted_metadata' => [], 'digest' => str_repeat('9', 64), 'size_bytes' => 2,
             'sequence' => RunArtifact::query()->where('run_id', $run->id)->count() + 1,
             'storage_reference' => 'test://review-only-result/'.Str::uuid(), 'expires_at' => now()->addDay(),
+            'fingerprint_version' => 1, 'fingerprint_key_id' => 'app-key-v1', 'fingerprint' => str_repeat('a', 64),
         ]);
 
         $result = ReviewResult::query()->create([

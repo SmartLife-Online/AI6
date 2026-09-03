@@ -37,6 +37,20 @@ final readonly class RunTreeService
         return $this->diffs->fromRaw($raw->output, $context);
     }
 
+    /**
+     * The redacted patch text between two bound object identifiers of this run.
+     * The raw bytes cross the central UTF-8/redaction boundary here, exactly once.
+     */
+    public function textualDiff(Run $run, string $fromOid, string $toOid, RedactionContext $context): string
+    {
+        $raw = $this->git->textualDiff($this->repository($run), $fromOid, $toOid, $context);
+        if (! $raw->succeeded()) {
+            throw new RuntimeException('The bound run patch text could not be resolved.');
+        }
+
+        return $this->redactor->redact($raw->output, $context)->text;
+    }
+
     /** Compute the canonical difference from a bound commit to the complete staged worktree. */
     public function workingTreeDiff(Run $run, string $fromOid, RedactionContext $context): CanonicalDiff
     {

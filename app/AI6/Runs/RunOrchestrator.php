@@ -40,6 +40,9 @@ use App\AI6\Runs\Models\RunGate;
 use App\AI6\Runs\Models\ScopeDecision;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Shared\Redaction\RedactionContext;
+use App\AI6\Shared\Redaction\RedactionFingerprint;
+use App\AI6\Shared\Redaction\RedactionFingerprintGenerator;
+use App\AI6\Shared\Redaction\RedactionMatchType;
 use App\AI6\Shared\Redaction\Redactor;
 use App\AI6\Tickets\TicketDocument;
 use App\AI6\Tickets\TicketStatusOperation;
@@ -60,7 +63,89 @@ final readonly class RunOrchestrator
         private ScopeReconciliation $scopeReconciliation,
         private ProjectPolicy $projectPolicy,
         private EffectiveFindingState $findingState,
+        private RetentionPolicy $retention,
+        private RedactionFingerprintGenerator $fingerprints,
     ) {}
+
+    /** The visible marker a timeline payload ends with when the trusted run-log size limit cut it. */
+    public const RUN_LOG_TRUNCATION_MARKER = RetentionLimit::TRUNCATION_MARKER;
+
+    /** The prefix of a bound event identity: `hmac:<key id>:<version>:<fingerprint>`. */
+    public const EVENT_IDENTITY_PREFIX = 'hmac:';
+
+    /** The context under which the retention run rebinds a legacy unkeyed digest to a keyed identity. */
+    public const LEGACY_EVENT_IDENTITY_CONTEXT = 'run-event-key:legacy';
+
+    /**
+     * The durable identity of an event without an explicit key: the central
+     * keyed, versioned HMAC over its kind and text, bound to project and run
+     * and self-describing — `hmac:<key id>:<version>:<fingerprint>`. Unlike an
+     * unkeyed digest it may stay on the retention tombstone, so a redelivered
+     * message finds its event instead of resurrecting the payload.
+     *
+     * The lookup recomputes the identity under every key the versioned ring
+     * still holds — also over the legacy unkeyed digest a row carried before
+     * the keyed binding, which the retention run rebinds the same way — and
+     * returns the event written under any of them as it is, tombstone or
+     * not. It never re-creates a found event under the key it was found by:
+     * the retention run may rebind a legacy digest between the lookup and a
+     * write, and a create keyed on the stale digest would store the deleted
+     * payload again as a second row. Only a message no key of the ring
+     * recognizes is created, under a fresh identity bound to the active key
+     * — a retired key signs nothing new, or the rotation would never take
+     * effect. Two processes whose rings overlap but whose active keys differ,
+     * as during a staggered key rollout, would derive two identities for one
+     * message; lookup and create therefore run serialized per run: the
+     * transaction opens with a write, so SQLite's single writer orders every
+     * recording of the run behind the one in flight, and the later lookup
+     * finds the earlier row under whichever key of its ring wrote it. The
+     * retention run never rewrites a bound identity. A run that carries an
+     * identity bound to a key id or version the ring cannot recompute makes
+     * the repetition check unverifiable; recording then refuses by name.
+     */
+    private function recordDerivedEvent(Run $run, string $identifier, string $value, string $legacyDigest, string $eventType, string $payload): RunEvent
+    {
+        $context = new RedactionContext((string) $run->project_id, $run->id, 'run-event-key:'.$identifier);
+        $legacyContext = new RedactionContext((string) $run->project_id, $run->id, self::LEGACY_EVENT_IDENTITY_CONTEXT);
+        $candidates = [$legacyDigest];
+        $ringVersions = [];
+        foreach ($this->fingerprints->keyIds() as $keyId) {
+            $bound = $this->fingerprints->generateUnderKey($keyId, RedactionMatchType::SECRET, $context, $value);
+            $ringVersions[$keyId] = $bound->version;
+            $candidates[] = self::boundEventIdentity($bound);
+            $candidates[] = self::boundEventIdentity($this->fingerprints->generateUnderKey($keyId, RedactionMatchType::SECRET, $legacyContext, $legacyDigest));
+        }
+        $identity = self::boundEventIdentity($this->fingerprints->generate(RedactionMatchType::SECRET, $context, $value));
+
+        return DB::transaction(function () use ($run, $candidates, $ringVersions, $identity, $eventType, $payload): RunEvent {
+            // The run's event log is taken for writing before anything is
+            // read: a zero-row update still acquires SQLite's write lock.
+            RunEvent::query()->where('run_id', $run->id)->update(['updated_at' => DB::raw('updated_at')]);
+            /** @var RunEvent|null $existing */
+            $existing = RunEvent::query()->where('run_id', $run->id)->whereIn('event_key', $candidates)->orderBy('id')->first();
+            if ($existing instanceof RunEvent) {
+                return $existing;
+            }
+            foreach (RunEvent::query()->where('run_id', $run->id)->where('event_key', 'like', self::EVENT_IDENTITY_PREFIX.'%')->pluck('event_key') as $bound) {
+                $parts = explode(':', (string) $bound, 4);
+                if (count($parts) !== 4 || ($ringVersions[$parts[1]] ?? null) !== (int) $parts[2]) {
+                    throw new RunTransitionConflict('event_identity_unverifiable', 'The run carries an event identity bound to a redaction key the ring cannot recompute; the event is not recorded.');
+                }
+            }
+
+            return RunEvent::query()->create([
+                'run_id' => $run->id,
+                'event_type' => $eventType,
+                'event_key' => $identity,
+                'redacted_payload' => $payload,
+            ]);
+        });
+    }
+
+    public static function boundEventIdentity(RedactionFingerprint $fingerprint): string
+    {
+        return self::EVENT_IDENTITY_PREFIX.$fingerprint->keyId.':'.$fingerprint->version.':'.$fingerprint->value;
+    }
 
     public function recordHumanFindingDisposition(
         Run $run,
@@ -744,14 +829,28 @@ final readonly class RunOrchestrator
     {
         $run = Run::query()->findOrFail($runId);
         $redacted = $this->redactor->redact($message, new RedactionContext((string) $run->project_id, $runId, 'run-timeline'));
+        // The trusted run-log size limit bounds what is persisted (SEC-011);
+        // a cut is visible in the payload instead of silent, the marker counts
+        // against the budget, and the redaction ran over the complete text
+        // first so the cut can expose no secret.
+        $payload = $this->retention->limit(RetentionCategory::RUN_LOGS)->truncate($redacted->text);
 
-        return RunEvent::query()->firstOrCreate([
-            'event_key' => $eventKey ?? hash('sha256', implode(':', [$runId, $stepType, $state->value, $message])),
-        ], [
-            'run_id' => $runId,
-            'event_type' => 'step.'.$stepType.'.'.$state->value,
-            'redacted_payload' => $redacted->text,
-        ]);
+        if ($eventKey !== null) {
+            return RunEvent::query()->firstOrCreate(['event_key' => $eventKey], [
+                'run_id' => $runId,
+                'event_type' => 'step.'.$stepType.'.'.$state->value,
+                'redacted_payload' => $payload,
+            ]);
+        }
+
+        return $this->recordDerivedEvent(
+            $run,
+            'step',
+            implode(':', [$stepType, $state->value, $message]),
+            hash('sha256', implode(':', [$runId, $stepType, $state->value, $message])),
+            'step.'.$stepType.'.'.$state->value,
+            $payload,
+        );
     }
 
     public function finalizeClaim(
@@ -2451,12 +2550,13 @@ final readonly class RunOrchestrator
 
     private function recordEvidenceInvalidation(string $runId, string $cause): void
     {
-        RunEvent::query()->firstOrCreate([
-            'event_key' => hash('sha256', implode(':', [$runId, 'evidence.invalidated', $cause])),
-        ], [
-            'run_id' => $runId,
-            'event_type' => 'evidence.invalidated',
-            'redacted_payload' => 'Abhängige Evidenz wurde durch eine Scope- oder Vertragsänderung unwirksam.',
-        ]);
+        $this->recordDerivedEvent(
+            Run::query()->findOrFail($runId),
+            'evidence.invalidated',
+            $cause,
+            hash('sha256', implode(':', [$runId, 'evidence.invalidated', $cause])),
+            'evidence.invalidated',
+            'Abhängige Evidenz wurde durch eine Scope- oder Vertragsänderung unwirksam.',
+        );
     }
 }

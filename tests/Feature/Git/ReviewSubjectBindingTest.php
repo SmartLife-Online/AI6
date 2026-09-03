@@ -273,6 +273,9 @@ final class ReviewSubjectBindingTest extends TicketUiTestCase
                 'size_bytes' => 2,
                 'sequence' => 1,
                 'storage_reference' => 'test://implementation-summary/'.$sourceRun->id,
+                'fingerprint_version' => 1,
+                'fingerprint_key_id' => 'app-key-v1',
+                'fingerprint' => str_repeat('a', 64),
                 'expires_at' => now()->addDay(),
             ]);
         }

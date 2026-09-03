@@ -90,6 +90,11 @@ final class RuntimeQueueTest extends TestCase
             '--sleep' => 0,
             '--timeout' => 0,
             '--tries' => 3,
+            // The in-process worker measures the whole test process; inside the
+            // complete suite that already holds more than the worker's default
+            // 128 MB of compiled code, so the default would stop it with exit
+            // code 12 before the queue is empty.
+            '--memory' => 1024,
             '--stop-when-empty' => true,
         ]);
 
@@ -109,6 +114,11 @@ final class RuntimeQueueTest extends TestCase
             '--sleep' => 0,
             '--timeout' => 0,
             '--tries' => 3,
+            // The in-process worker measures the whole test process; inside the
+            // complete suite that already holds more than the worker's default
+            // 128 MB of compiled code, so the default would stop it with exit
+            // code 12 before the queue is empty.
+            '--memory' => 1024,
             '--stop-when-empty' => true,
         ]);
 

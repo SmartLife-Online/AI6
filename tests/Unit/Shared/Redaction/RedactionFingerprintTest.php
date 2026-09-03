@@ -8,6 +8,7 @@ use App\AI6\Shared\Redaction\RedactionFingerprintGenerator;
 use App\AI6\Shared\Redaction\RedactionKeyring;
 use App\AI6\Shared\Redaction\RedactionKeyringFactory;
 use App\AI6\Shared\Redaction\RedactionMatchType;
+use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 
@@ -69,10 +70,37 @@ final class RedactionFingerprintTest extends TestCase
         self::assertSame(2, $new->version);
         self::assertSame('key-v2', $new->keyId);
         self::assertNotSame($old->value, $new->value);
-        self::assertSame(['__construct', 'generate'], array_map(
+        // Exactly these entry points: generation under the active key, the
+        // recomputation under a named key of the ring for consumers that must
+        // recognize a value bound under a retired key, and the key inventory.
+        self::assertSame(['__construct', 'generate', 'generateUnderKey', 'hasKey', 'keyIds'], array_map(
             static fn ($method): string => $method->getName(),
             (new ReflectionClass(RedactionFingerprintGenerator::class))->getMethods(),
         ));
+    }
+
+    public function test_generation_under_the_active_key_equals_generate_and_only_ring_keys_are_available(): void
+    {
+        $entries = [
+            'key-v1' => ['version' => 1, 'key' => str_repeat("\x01", 32)],
+            'key-v2' => ['version' => 2, 'key' => str_repeat("\x02", 32)],
+        ];
+        $generator = new RedactionFingerprintGenerator(new RedactionKeyring('key-v2', $entries));
+        $context = new RedactionContext('project-a', 'run-a', 'log');
+
+        self::assertEquals($generator->generate(RedactionMatchType::TOKEN, $context, 'private-token'), $generator->generateUnderKey('key-v2', RedactionMatchType::TOKEN, $context, 'private-token'));
+        $retired = $generator->generateUnderKey('key-v1', RedactionMatchType::TOKEN, $context, 'private-token');
+        self::assertSame(1, $retired->version);
+        self::assertSame('key-v1', $retired->keyId);
+        self::assertEquals((new RedactionFingerprintGenerator(new RedactionKeyring('key-v1', $entries)))->generate(RedactionMatchType::TOKEN, $context, 'private-token'), $retired, 'The retired key yields exactly what it yielded while active.');
+        self::assertNotSame($retired->value, $generator->generate(RedactionMatchType::TOKEN, $context, 'private-token')->value);
+        self::assertTrue($generator->hasKey('key-v1'));
+        self::assertTrue($generator->hasKey('key-v2'));
+        self::assertFalse($generator->hasKey('key-v3'));
+        self::assertSame(['key-v1', 'key-v2'], $generator->keyIds());
+
+        $this->expectException(InvalidArgumentException::class);
+        $generator->generateUnderKey('key-v3', RedactionMatchType::TOKEN, $context, 'private-token');
     }
 
     public function test_fingerprint_is_not_plaintext_or_an_unkeyed_digest_and_cannot_be_reproduced_without_the_key(): void

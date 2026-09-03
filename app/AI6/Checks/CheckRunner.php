@@ -5,6 +5,8 @@ namespace App\AI6\Checks;
 use App\AI6\Checks\Models\CheckResultRecord;
 use App\AI6\Git\IsolatedTreeExporter;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\RetentionCategory;
+use App\AI6\Runs\RetentionPolicy;
 use App\AI6\Shared\Process\ControlProcessRunner;
 use App\AI6\Shared\Process\ExecutionMailbox;
 use App\AI6\Shared\Process\ExecutionMailboxFactory;
@@ -45,6 +47,7 @@ final readonly class CheckRunner
         private ProcessPolicyRegistry $policies,
         private SecurityPolicy $security,
         private CheckerRuntimeConfiguration $runtime,
+        private RetentionPolicy $retention,
     ) {}
 
     /**
@@ -496,7 +499,11 @@ final readonly class CheckRunner
             'reason' => $result->reason,
             'exit_code' => $result->exitCode,
             'duration_ms' => $result->durationMilliseconds,
-            'redacted_output' => $result->redactedOutput,
+            // The trusted check-log size limit binds at the persistence
+            // boundary (SEC-011): the output already crossed the central
+            // redaction in the checker role, so the visible cut can expose
+            // no secret even where it splits a marker.
+            'redacted_output' => $this->retention->limit(RetentionCategory::CHECK_LOGS)->truncate($result->redactedOutput),
             'tree_sha' => $result->treeShaBefore,
             'result_tree_sha' => $result->treeShaAfter,
             'declared_side_effects' => $result->declaredMetadata['side_effects'],

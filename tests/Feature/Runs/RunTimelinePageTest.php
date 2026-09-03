@@ -181,15 +181,20 @@ final class RunTimelinePageTest extends TicketUiTestCase
             ->where('step_type', ExecutionStepType::IMPLEMENT->value)->count());
     }
 
-    /** TC-10: the base page shows no remaining detail area that AI6-031 only adds later. */
-    public function test_the_base_page_does_not_fake_the_later_detail_areas(): void
+    /**
+     * TC-10 of AI6-017 pinned the absence of the later detail areas; AI6-031
+     * added them, so the base page now carries every UI-004 area as a real
+     * server-rendered section instead of a placeholder.
+     */
+    public function test_the_base_page_renders_the_detail_areas_added_by_ai6_031(): void
     {
         [$run, $project, $operator] = $this->preparedRun('AI6-017-UI-8');
 
         $response = $this->actingAs($operator)->get(route('projects.runs.show', [$project, $run->id]));
 
-        foreach (['Diff', 'Checks', 'Security-Gate', 'Pushstatus', 'Interventionen'] as $later) {
-            $response->assertDontSee($later);
+        $response->assertOk();
+        foreach (['data-diff', 'data-checks', 'data-security', 'data-push', 'data-human-requests', 'data-artifacts', 'data-timeline'] as $area) {
+            $response->assertSee($area, false);
         }
     }
 

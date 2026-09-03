@@ -48,7 +48,15 @@ trait BrowserSmokeTestHarness
         return $path;
     }
 
-    protected function startApplicationServer(int $port): void
+    /**
+     * Start the smoke application server. It is a separate PHP process, so a
+     * configuration value the seeding changed in this process — an artifact
+     * root under a temporary directory, for example — reaches it only through
+     * the explicitly passed environment.
+     *
+     * @param  array<string, string>  $environment
+     */
+    protected function startApplicationServer(int $port, array $environment = []): void
     {
         $key = config('app.key');
         self::assertIsString($key);
@@ -62,7 +70,7 @@ trait BrowserSmokeTestHarness
                 base_path('vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php'),
             ],
             public_path(),
-            [
+            $environment + [
                 'APP_ENV' => 'testing',
                 'APP_DEBUG' => 'false',
                 'APP_KEY' => $key,

@@ -494,6 +494,7 @@ final class ReportOnlyCompletionExecutorTest extends TicketUiTestCase
             'redacted_metadata' => [], 'digest' => str_repeat('9', 64), 'size_bytes' => 2,
             'sequence' => 1, 'storage_reference' => 'test://report-only-result/'.Str::uuid(),
             'expires_at' => now()->addDay(),
+            'fingerprint_version' => 1, 'fingerprint_key_id' => 'app-key-v1', 'fingerprint' => str_repeat('a', 64),
         ]);
         ReviewResult::query()->create([
             'id' => (string) Str::uuid(), 'run_id' => $run->id, 'round_number' => 1,

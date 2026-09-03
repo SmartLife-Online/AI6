@@ -1,0 +1,25 @@
+{
+    "project_id": "golden-project",
+    "run_id": "golden-run",
+    "context_identifier": "run-timeline",
+    "input": "Login mit password=hunter2 und \u001b[31mtoken=abc123def456\u001b[0m; Bearer 1234567890abcdef\n\u001b]8;;http://evil.test\u0007Pfad /home/alice/geheim.txt\u0000 Ende\r\nsk-live-0123456789abcdef\nAuthorization: Bearer\u000bvt0987654321zyxw fertig",
+    "expected_output": "Login mit password=[REDACTED:SECRET] und �token=[REDACTED:TOKEN]; Bearer [REDACTED:TOKEN]\n�Pfad [REDACTED:PATH] Ende\n[REDACTED:TOKEN]\nAuthorization: Bearer�[REDACTED:TOKEN] fertig",
+    "reversed_order_output": "Login mit password=[REDACTED:SECRET] und �token=[REDACTED:TOKEN]; Bearer [REDACTED:TOKEN]\n�Pfad [REDACTED:PATH] Ende\n[REDACTED:TOKEN]\nAuthorization: Bearer�vt0987654321zyxw fertig",
+    "secrets": [
+        "hunter2",
+        "abc123def456",
+        "1234567890abcdef",
+        "/home/alice/geheim.txt",
+        "sk-live-0123456789abcdef",
+        "vt0987654321zyxw"
+    ],
+    "reversed_order_leaks": [
+        "vt0987654321zyxw"
+    ],
+    "marker_counts": {
+        "secret": 1,
+        "token": 4,
+        "sensitive_path": 1
+    },
+    "placeholder_count": 3
+}

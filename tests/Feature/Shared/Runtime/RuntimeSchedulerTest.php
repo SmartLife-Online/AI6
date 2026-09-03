@@ -47,16 +47,18 @@ final class RuntimeSchedulerTest extends TestCase
     {
         Queue::fake();
         $events = $this->app->make(Schedule::class)->events();
-        self::assertCount(4, $events);
+        self::assertCount(5, $events);
         $eventsByName = collect($events)->keyBy(static fn ($event): string => $event->getSummaryForDisplay());
         $runtime = $eventsByName->get('ai6-runtime-scheduler');
         $reconciler = $eventsByName->get('ai6-control-operation-reconciler');
         $stepReconciler = $eventsByName->get('ai6-run-step-reconciler');
         $queueReevaluation = $eventsByName->get('ai6-queue-trusted-binding-reevaluation');
+        $retention = $eventsByName->get('ai6-run-retention');
         self::assertNotNull($runtime);
         self::assertNotNull($reconciler);
         self::assertNotNull($stepReconciler);
         self::assertNotNull($queueReevaluation);
+        self::assertNotNull($retention);
         self::assertTrue($runtime->isRepeatable());
         self::assertSame(10, $runtime->repeatSeconds);
         self::assertTrue($reconciler->isRepeatable());
@@ -65,12 +67,18 @@ final class RuntimeSchedulerTest extends TestCase
         self::assertSame(10, $stepReconciler->repeatSeconds);
         self::assertTrue($queueReevaluation->isRepeatable());
         self::assertSame(10, $queueReevaluation->repeatSeconds);
+        // AI6-031: the retention run is the one named hourly entry; the four
+        // ten-second entries above stay unchanged.
+        self::assertFalse($retention->isRepeatable());
+        self::assertSame('0 * * * *', $retention->expression);
 
         $runtime->run($this->app);
         $runtime->run($this->app);
         $reconciler->run($this->app);
         $stepReconciler->run($this->app);
         $queueReevaluation->run($this->app);
+        $retention->run($this->app);
+        $retention->run($this->app);
 
         self::assertTrue((new RuntimeHeartbeat($this->directory))->status('scheduler', 10)['healthy']);
         $jobs = Queue::pushed(RuntimeSelfTestJob::class);

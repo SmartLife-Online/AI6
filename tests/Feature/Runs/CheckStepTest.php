@@ -19,12 +19,16 @@ use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Projects\ProjectRole;
+use App\AI6\Runs\CheckpointDiffRecorder;
 use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\ExecutionStepType;
 use App\AI6\Runs\Jobs\ExecuteRunStep;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\Models\RunArtifact;
 use App\AI6\Runs\Models\RunCheckpoint;
+use App\AI6\Runs\RunArtifactKind;
+use App\AI6\Runs\RunArtifactStore;
 use App\AI6\Runs\RunCheckStep;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunPhase;
@@ -493,6 +497,109 @@ final class CheckStepTest extends TicketUiTestCase
         self::assertSame(ExecutionJobState::SUCCEEDED, $job->fresh()?->state, (string) $job->fresh()?->failure_code);
         self::assertSame(2, RunCheckpoint::query()->where('run_id', $run->id)->count());
         self::assertSame($this->gitOutput(['rev-parse', 'HEAD'], $prepared['worktree']), $run->checkpoint_commit_sha);
+
+        // The worker persisted the redacted patch text of exactly this
+        // checkpoint as its own artifact, computed over the hardened seam.
+        $diffArtifact = CheckpointDiffRecorder::boundArtifact($run);
+        self::assertInstanceOf(RunArtifact::class, $diffArtifact);
+        self::assertSame($run->checkpoint_commit_sha, $diffArtifact->redacted_metadata['checkpoint_commit_sha']);
+        self::assertSame($run->checkpoint_diff_hash, $diffArtifact->redacted_metadata['diff_hash']);
+        self::assertNull($diffArtifact->redacted_metadata['unavailable']);
+        self::assertFalse($diffArtifact->redacted_metadata['truncated']);
+        $diffText = $this->app->make(RunArtifactStore::class)->bytes($diffArtifact);
+        self::assertIsString($diffText);
+        self::assertStringContainsString('diff --git a/app/Example.php b/app/Example.php', $diffText);
+        self::assertSame(1, preg_match('/^\+.+$/m', $diffText), 'The artifact carries actual change lines.');
+        $header = CheckpointDiffRecorder::header((string) $run->checkpoint_commit_sha, (string) $run->checkpoint_tree_sha, (string) $run->checkpoint_diff_hash);
+        self::assertStringStartsWith($header, $diffText, 'The bytes carry their own checkpoint binding.');
+        self::assertSame(strlen($diffText) - strlen($header), $diffArtifact->redacted_metadata['total_bytes']);
+        self::assertSame($diffArtifact->id, CheckpointDiffRecorder::boundArtifact($run)->id, 'A second delivery records nothing again.');
+        $recorder = $this->app->make(CheckpointDiffRecorder::class);
+        self::assertSame($diffArtifact->id, $recorder->record($run, $context)?->id, 'The same checkpoint records nothing again.');
+
+        // Two further checkpoints whose objects the repository does not hold:
+        // the seam cannot deliver, both payloads are empty and named
+        // unavailable — and each checkpoint still resolves to its own
+        // artifact, because the bytes carry the binding.
+        $orchestrator = $this->app->make(RunOrchestrator::class);
+        $run = $orchestrator->bindCheckpoint($run, $run->version, str_repeat('7', 64), str_repeat('8', 64), str_repeat('9', 64));
+        $second = $recorder->record($run, $context);
+        self::assertInstanceOf(RunArtifact::class, $second);
+        self::assertSame('git_output_unavailable', $second->redacted_metadata['unavailable']);
+        self::assertSame(0, $second->redacted_metadata['total_bytes']);
+        self::assertSame($second->id, CheckpointDiffRecorder::boundArtifact($run)?->id);
+        self::assertSame($second->id, $recorder->record($run->fresh() ?? $run, $context)?->id);
+        $run = $orchestrator->bindCheckpoint($run->fresh() ?? $run, ($run->fresh() ?? $run)->version, str_repeat('a', 64), str_repeat('b', 64), str_repeat('c', 64));
+        $third = $recorder->record($run, $context);
+        self::assertInstanceOf(RunArtifact::class, $third);
+        self::assertNotSame($second->id, $third->id, 'Identical empty payloads still get their own artifacts.');
+        self::assertSame($third->id, CheckpointDiffRecorder::boundArtifact($run)?->id);
+        self::assertSame(str_repeat('a', 64), $third->redacted_metadata['checkpoint_commit_sha']);
+        self::assertSame(3, RunArtifact::query()->where('run_id', $run->id)->where('kind', RunArtifactKind::CHECKPOINT_DIFF->value)->count());
+
+        // Header and patch text share the artifact budget.
+        config(['ai6.retention.artifacts.max_bytes' => strlen($header) + 40]);
+        $this->app->forgetInstance(RunArtifactStore::class);
+        self::assertNotFalse(file_put_contents($prepared['worktree'].'/app/Cut.php', '<?php
+
+// '.str_repeat('lang ', 40).'
+'));
+        $this->gitOutput(['add', '--all', '--no-renormalize'], $prepared['worktree']);
+        $this->gitOutput(['commit', '-m', 'checkpoint for the budget probe'], $prepared['worktree']);
+        $run = $orchestrator->bindCheckpoint(
+            $run->fresh() ?? $run,
+            ($run->fresh() ?? $run)->version,
+            $this->gitOutput(['rev-parse', 'HEAD'], $prepared['worktree']),
+            $this->gitOutput(['rev-parse', 'HEAD^{tree}'], $prepared['worktree']),
+            str_repeat('e', 64),
+        );
+        $cut = $this->app->make(CheckpointDiffRecorder::class)->record($run, $context);
+        self::assertInstanceOf(RunArtifact::class, $cut);
+        self::assertTrue($cut->redacted_metadata['truncated']);
+        self::assertLessThanOrEqual(strlen($header) + 40, $cut->size_bytes);
+        self::assertGreaterThan(0, $cut->redacted_metadata['total_bytes']);
+        // The smallest budget the policy admits is the SHA-256 header size;
+        // under it a further checkpoint with a real patch still gets its
+        // bound, named-as-cut diff instead of no diff at all.
+        config(['ai6.retention.artifacts.max_bytes' => CheckpointDiffRecorder::HEADER_MAX_BYTES]);
+        $this->app->forgetInstance(RunArtifactStore::class);
+        self::assertNotFalse(file_put_contents($prepared['worktree'].'/app/Smallest.php', '<?php
+
+// '.str_repeat('klein ', 40).'
+'));
+        $this->gitOutput(['add', '--all', '--no-renormalize'], $prepared['worktree']);
+        $this->gitOutput(['commit', '-m', 'checkpoint for the smallest budget'], $prepared['worktree']);
+        $smallestCommit = $this->gitOutput(['rev-parse', 'HEAD'], $prepared['worktree']);
+        $smallestTree = $this->gitOutput(['rev-parse', 'HEAD^{tree}'], $prepared['worktree']);
+        $run = $orchestrator->bindCheckpoint($run->fresh() ?? $run, ($run->fresh() ?? $run)->version, $smallestCommit, $smallestTree, str_repeat('f', 64));
+        $smallest = $this->app->make(CheckpointDiffRecorder::class)->record($run, $context);
+        self::assertInstanceOf(RunArtifact::class, $smallest);
+        self::assertNotSame($cut->id, $smallest->id);
+        self::assertTrue($smallest->redacted_metadata['truncated']);
+        self::assertGreaterThan(0, $smallest->redacted_metadata['total_bytes']);
+        self::assertLessThanOrEqual(CheckpointDiffRecorder::HEADER_MAX_BYTES, $smallest->size_bytes);
+        $smallestBytes = $this->app->make(RunArtifactStore::class)->bytes($smallest);
+        self::assertIsString($smallestBytes);
+        self::assertStringStartsWith(CheckpointDiffRecorder::header($smallestCommit, $smallestTree, str_repeat('f', 64)), $smallestBytes);
+        self::assertSame($smallest->id, CheckpointDiffRecorder::boundArtifact($run)?->id);
+        config(['ai6.retention.artifacts.max_bytes' => 20000000]);
+        $this->app->forgetInstance(RunArtifactStore::class);
+
+        // A further commit with the unchanged tree and the same diff hash: the
+        // artifact resolves by commit, tree and diff hash together, so this
+        // checkpoint gets its own artifact and repeated deliveries stay idempotent.
+        $previousCommit = (string) $run->checkpoint_commit_sha;
+        $this->gitOutput(['commit', '--allow-empty', '-m', 'same tree, new commit'], $prepared['worktree']);
+        $sameTreeCommit = $this->gitOutput(['rev-parse', 'HEAD'], $prepared['worktree']);
+        self::assertNotSame($previousCommit, $sameTreeCommit);
+        $run = $orchestrator->bindCheckpoint($run->fresh() ?? $run, ($run->fresh() ?? $run)->version, $sameTreeCommit, (string) $run->checkpoint_tree_sha, (string) $run->checkpoint_diff_hash);
+        $recorder = $this->app->make(CheckpointDiffRecorder::class);
+        $sameTree = $recorder->record($run, $context);
+        self::assertInstanceOf(RunArtifact::class, $sameTree);
+        self::assertNotSame($cut->id, $sameTree->id);
+        self::assertSame($sameTreeCommit, $sameTree->redacted_metadata['checkpoint_commit_sha']);
+        self::assertSame($sameTree->id, CheckpointDiffRecorder::boundArtifact($run)?->id);
+        self::assertSame($sameTree->id, $recorder->record($run->fresh() ?? $run, $context)?->id, 'The same checkpoint stays idempotent.');
     }
 
     public function test_the_worker_parks_unresolved_scope_for_approval_instead_of_failing_the_run(): void

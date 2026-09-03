@@ -104,6 +104,7 @@ use App\AI6\Runs\InstructionCandidateSource;
 use App\AI6\Runs\InstructionPathPolicy;
 use App\AI6\Runs\ReportOnlyCompletionService;
 use App\AI6\Runs\RequiredReviewEvidence;
+use App\AI6\Runs\RetentionPolicy;
 use App\AI6\Runs\ReviewOnlyCompletionPredicate;
 use App\AI6\Runs\ReviewOnlyPrepareStep;
 use App\AI6\Runs\ReviewOnlyRunCoordinator;
@@ -206,6 +207,7 @@ final class AI6ServiceProvider extends ServiceProvider
                 $app->make(ProcessPolicyRegistry::class),
                 $app->make(SecurityPolicy::class),
                 $app->make(CheckerRuntimeConfiguration::class),
+                $app->make(RetentionPolicy::class),
             ),
         );
         $this->app->singleton(

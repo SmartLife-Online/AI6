@@ -24,8 +24,23 @@ final readonly class RedactionFingerprintGenerator
         RedactionContext $context,
         string $removedValue,
     ): RedactionFingerprint {
+        return $this->generateUnderKey($this->keyring->activeKeyId(), $type, $context, $removedValue);
+    }
+
+    /**
+     * The same fingerprint under a named key of the ring. A consumer that has
+     * to recognize a value bound under a retired key recomputes it here with
+     * that key's own version; new fingerprints always use generate().
+     */
+    public function generateUnderKey(
+        string $keyId,
+        RedactionMatchType $type,
+        RedactionContext $context,
+        string $removedValue,
+    ): RedactionFingerprint {
+        $version = $this->keyring->versionOf($keyId);
         $fields = [
-            (string) $this->keyring->activeVersion(),
+            (string) $version,
             $type->value,
             $context->identifier,
             $context->projectId,
@@ -39,9 +54,25 @@ final readonly class RedactionFingerprintGenerator
         $bytes = CanonicalByteFrame::encode(self::DOMAIN, $fields);
 
         return new RedactionFingerprint(
-            $this->keyring->activeVersion(),
-            $this->keyring->activeKeyId(),
-            hash_hmac('sha256', $bytes, $this->keyring->activeKey()),
+            $version,
+            $keyId,
+            hash_hmac('sha256', $bytes, $this->keyring->keyOf($keyId)),
         );
+    }
+
+    public function hasKey(string $keyId): bool
+    {
+        return $this->keyring->has($keyId);
+    }
+
+    /**
+     * Every key id of the ring, active and retired, for consumers that must
+     * recognize a value bound under any of them.
+     *
+     * @return list<string>
+     */
+    public function keyIds(): array
+    {
+        return $this->keyring->keyIds();
     }
 }

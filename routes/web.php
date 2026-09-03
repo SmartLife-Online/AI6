@@ -20,6 +20,7 @@ use App\AI6\Reviews\FindingDispositionController;
 use App\AI6\Runs\ApprovalQueueController;
 use App\AI6\Runs\ApprovalStatusPage;
 use App\AI6\Runs\ProjectQueueController;
+use App\AI6\Runs\RunArtifactDownloadController;
 use App\AI6\Runs\RunStartController;
 use App\AI6\Runs\RunTimelinePage;
 use App\AI6\Runs\TicketApprovalController;
@@ -135,6 +136,9 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/projects/{project}/runs/{runId}', RunTimelinePage::class)
         ->middleware('can:viewRun,project')
         ->name('projects.runs.show');
+    Route::get('/projects/{project}/runs/{runId}/artifacts/{artifactId}', RunArtifactDownloadController::class)
+        ->middleware('can:viewRun,project')
+        ->name('projects.runs.artifacts.download');
     Route::post('/projects/{project}/runs/{runId}/findings/{findingId}/disposition', [FindingDispositionController::class, 'store'])
         ->middleware('can:disposeFinding,project')
         ->name('projects.runs.findings.disposition');

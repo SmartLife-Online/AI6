@@ -54,6 +54,9 @@ final class RecordedScopeRendererTest extends TicketUiTestCase
             'sequence' => 1,
             'storage_reference' => 'test://recorded-scope/quarantine',
             'expires_at' => now()->addDay(),
+            'fingerprint_version' => 1,
+            'fingerprint_key_id' => 'app-key-v1',
+            'fingerprint' => str_repeat('a', 64),
         ]);
         RunArtifact::query()->create([
             'id' => (string) Str::uuid(),
@@ -65,6 +68,9 @@ final class RecordedScopeRendererTest extends TicketUiTestCase
             'sequence' => 2,
             'storage_reference' => 'test://recorded-scope/redacted-quarantine',
             'expires_at' => now()->addDay(),
+            'fingerprint_version' => 1,
+            'fingerprint_key_id' => 'app-key-v1',
+            'fingerprint' => str_repeat('a', 64),
         ]);
         $input = "---\nstatus: in_progress\n---\n\n# Test\n\n## Goal\n\n```md\n## Notes\n```\n\n## Notes\n\nNotiz.\n";
 
