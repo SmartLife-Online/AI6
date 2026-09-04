@@ -59,16 +59,22 @@ nicht sicher auflösbare Entscheidung fehlt.
 ## 3. Verifikation
 
 Führe die für den Diff einschlägigen Tickettests und die in `AGENTS.md` verlangten Qualitätschecks
-aus. Dazu gehören, soweit anwendbar:
+aus. Während einer Entwicklungs-, Review- oder Findings-Fix-Iteration testest du nur das geänderte
+Verhalten und die berührten Verträge: neue oder angepasste Tests sowie unveränderte Regressionstests,
+Inventartests und Architekturtests, die diese Verträge absichern. Ein vollständiger Lauf der regulären
+Suite ist nach einem einzelnen Iterationsschritt nicht erforderlich; er gehört an das Abschluss-Gate.
+Dazu gehören, soweit anwendbar:
 
-1. direkt betroffene Tests und anschließend `php artisan test`;
+1. die an das geänderte Verhalten und die berührten Verträge gebundenen Tests;
 2. `vendor/bin/pint --test`;
 3. `vendor/bin/phpstan analyse`;
 4. Composer-, Manifest- und `git diff --check`-Prüfungen;
 5. der getrennte externe Locked-Install-Nachweis nur dann, wenn Dependency-, Lockfile-, Plattform-
    oder Installationsverhalten im Scope liegt und die expliziten Laufzeitpfade verfügbar sind.
 
-Repariere ticketbezogene Fehler und prüfe erneut. Verschweige keine fehlgeschlagenen,
+Vor dem Abschlussbericht für ein fertig umgesetztes Ticket ist zusätzlich die vollständige reguläre
+Suite mit `php artisan test` als Abschluss-Gate auszuführen. Repariere ticketbezogene Fehler und prüfe
+die an die Änderung gebundenen Tests erneut. Verschweige keine fehlgeschlagenen,
 nicht verfügbaren oder wegen eines echten Gates offenen Prüfungen. Behaupte nie, ein manuelles oder
 externes Gate sei bestanden, wenn kein gebundener Nachweis vorliegt.
 

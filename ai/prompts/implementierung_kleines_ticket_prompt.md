@@ -49,8 +49,11 @@ Lies vor der ersten Änderung vollständig:
    folgenreiche, nicht sicher auflösbare Entscheidung fehlt.
 3. Implementiere die kleinste vollständige Lösung und ergänze die vorgesehenen Verhaltenstests.
 4. Setze das Ticket nach der ersten tatsächlichen Umsetzung auf `in_progress`.
-5. Führe alle vom Ticket und von `AGENTS.md` verlangten Checks aus. Berichte fehlende oder
-   fehlgeschlagene Prüfungen offen.
+5. Führe während der Iteration nur die Tests aus, die an das geänderte Verhalten und die berührten
+   Verträge gebunden sind: neue oder angepasste Tests sowie unveränderte Regressionstests,
+   Inventartests und Architekturtests, die diese Verträge absichern. Den vollständigen regulären
+   Suite-Lauf und die Abschlussprüfungen führst du erst am Abschluss-Gate gemäß `AGENTS.md` aus.
+   Berichte fehlende oder fehlgeschlagene Prüfungen offen.
 6. Aktualisiere genau einen Abschnitt `## Umsetzungshinweise für die Review-KI` in der
    Ticketdatei. Verwende `Keine besonderen Hinweise.`, wenn es nichts Relevantes mitzuteilen gibt.
 7. Setze den Status nur bei vollständig bestandenen automatischen und verpflichtenden echten
