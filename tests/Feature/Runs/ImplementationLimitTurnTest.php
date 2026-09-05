@@ -12,7 +12,6 @@ use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\HumanLoop\InterventionAuthorization;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Runs\ExecutionJobState;
-use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunArtifact;
 use App\AI6\Runs\RunImplementation;
 use App\AI6\Runs\RunLimitPolicy;
@@ -20,7 +19,6 @@ use App\AI6\Runs\RunState;
 use Illuminate\Http\Request;
 use Illuminate\Session\ArraySessionHandler;
 use Illuminate\Session\Store;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Tests\Feature\Tickets\TicketUiTestCase;
 
@@ -108,8 +106,7 @@ final class ImplementationLimitTurnTest extends TicketUiTestCase
     public function test_an_authorized_increase_lets_the_resumed_step_import(): void
     {
         Mail::fake();
-        $prepared = $this->preparedImplementationRun('AI6-019-TC08-TURN');
-        $this->overrideLimits($prepared['run'], ['max_provider_output_bytes' => 20]);
+        $prepared = $this->preparedImplementationRun('AI6-019-TC08-TURN', limitOverrides: ['max_provider_output_bytes' => 20]);
         $original = (string) file_get_contents($prepared['worktree'].'/app/Example.php');
         $waiting = $this->executeImplement($prepared['run']->fresh());
         self::assertSame(ExecutionJobState::WAITING, $waiting->state, (string) $waiting->failure_code);
@@ -150,8 +147,7 @@ final class ImplementationLimitTurnTest extends TicketUiTestCase
         if (str_contains($ticketId, 'FILES') && ! str_contains($ticketId, 'OVER')) {
             $files = ['app/Example.php'];
         }
-        $prepared = $this->preparedImplementationRun($ticketId, $files);
-        $this->overrideLimits($prepared['run'], $limits);
+        $prepared = $this->preparedImplementationRun($ticketId, $files, limitOverrides: $limits);
         $this->app->instance(AgentAdapter::class, $adapter);
         $this->app->forgetInstance(RunImplementation::class);
         $job = $this->executeImplement($prepared['run']->fresh());
@@ -166,8 +162,7 @@ final class ImplementationLimitTurnTest extends TicketUiTestCase
      */
     private function assertRejectedImport(string $ticketId, array $limits, AgentAdapter $adapter, array $files = ['app/Example.php']): void
     {
-        $prepared = $this->preparedImplementationRun($ticketId, $files);
-        $this->overrideLimits($prepared['run'], $limits);
+        $prepared = $this->preparedImplementationRun($ticketId, $files, limitOverrides: $limits);
         $this->app->instance(AgentAdapter::class, $adapter);
         $this->app->forgetInstance(RunImplementation::class);
         $original = (string) file_get_contents($prepared['worktree'].'/app/Example.php');
@@ -176,20 +171,6 @@ final class ImplementationLimitTurnTest extends TicketUiTestCase
         self::assertSame($original, (string) file_get_contents($prepared['worktree'].'/app/Example.php'), $ticketId);
         self::assertSame(0, RunArtifact::query()->where('run_id', $prepared['run']->id)
             ->whereIn('kind', ['implementation_summary', 'provider_raw'])->count(), $ticketId);
-    }
-
-    /**
-     * @param  array<string, int>  $limits
-     */
-    private function overrideLimits(Run $run, array $limits): void
-    {
-        $snapshot = $run->agent_profile_snapshot ?? [];
-        $snapshot['limits'] = array_merge(is_array($snapshot['limits'] ?? null) ? $snapshot['limits'] : [], $limits);
-        DB::table('runs')->where('id', $run->id)->update([
-            'agent_profile_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR),
-            'version' => DB::raw('version + 1'),
-            'updated_at' => now(),
-        ]);
     }
 
     private function authorization(User $actor, HumanRequest $request, string $effect): InterventionAuthorization

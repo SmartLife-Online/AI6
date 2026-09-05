@@ -106,12 +106,7 @@ final class PublishCandidateTest extends TicketUiTestCase
         $prepared = $this->preparedCandidate('AI6-029-PUBLISH', "published\n");
         $candidate = $this->app->make(PublishCandidateService::class)->prospect($prepared['run']);
         $run = $this->app->make(PublishCandidateService::class)->bind($prepared['run'], $candidate);
-        Run::query()->whereKey($run->id)->update([
-            'phase' => RunPhase::PUBLISH->value,
-            'state' => 'running',
-            'version' => DB::raw('version + 1'),
-        ]);
-        $run = $run->fresh();
+        $run = $this->app->make(RunOrchestrator::class)->transition($run, $run->version, RunState::RUNNING, RunPhase::PUBLISH);
         self::assertInstanceOf(Run::class, $run);
         $orchestrator = $this->app->make(RunOrchestrator::class);
         $run = $orchestrator->prepareBranchPublication($run, $run->version, str_repeat('0', 64));
@@ -159,12 +154,7 @@ final class PublishCandidateTest extends TicketUiTestCase
         $prepared = $this->preparedCandidate('AI6-029-NO-CHANGE', '', noChange: true);
         $candidate = $this->app->make(PublishCandidateService::class)->prospect($prepared['run']);
         $run = $this->app->make(PublishCandidateService::class)->bind($prepared['run'], $candidate);
-        Run::query()->whereKey($run->id)->update([
-            'phase' => RunPhase::PUBLISH->value,
-            'state' => 'running',
-            'version' => DB::raw('version + 1'),
-        ]);
-        $run = $run->fresh();
+        $run = $this->app->make(RunOrchestrator::class)->transition($run, $run->version, RunState::RUNNING, RunPhase::PUBLISH);
         self::assertInstanceOf(Run::class, $run);
         $orchestrator = $this->app->make(RunOrchestrator::class);
         $run = $orchestrator->prepareBranchPublication($run, $run->version, str_repeat('0', 64));
@@ -237,12 +227,7 @@ final class PublishCandidateTest extends TicketUiTestCase
         $prepared = $this->preparedCandidate('AI6-029-STATUS-CONFLICT', "status conflict\n");
         $candidate = $this->app->make(PublishCandidateService::class)->prospect($prepared['run']);
         $run = $this->app->make(PublishCandidateService::class)->bind($prepared['run'], $candidate);
-        Run::query()->whereKey($run->id)->update([
-            'phase' => RunPhase::PUBLISH->value,
-            'state' => 'running',
-            'version' => DB::raw('version + 1'),
-        ]);
-        $run = $run->fresh();
+        $run = $this->app->make(RunOrchestrator::class)->transition($run, $run->version, RunState::RUNNING, RunPhase::PUBLISH);
         self::assertInstanceOf(Run::class, $run);
         $orchestrator = $this->app->make(RunOrchestrator::class);
         $run = $orchestrator->prepareBranchPublication($run, $run->version, str_repeat('0', 64));

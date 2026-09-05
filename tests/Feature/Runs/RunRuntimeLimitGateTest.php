@@ -25,15 +25,13 @@ final class RunRuntimeLimitGateTest extends TicketUiTestCase
     {
         Mail::fake();
 
-        $prepared = $this->preparedImplementationRun('AI6-026-RUNTIME-AT');
-        $this->overrideLimits($prepared['run'], ['max_run_minutes' => 60]);
+        $prepared = $this->preparedImplementationRun('AI6-026-RUNTIME-AT', limitOverrides: ['max_run_minutes' => 60]);
         $this->ageRun($prepared['run'], 60);
         $job = $this->executeImplement($prepared['run']->fresh());
         self::assertSame(ExecutionJobState::SUCCEEDED, $job->state, (string) $job->failure_code);
         self::assertSame(RunState::RUNNING, $prepared['run']->fresh()->state);
 
-        $prepared = $this->preparedImplementationRun('AI6-026-RUNTIME-OVER');
-        $this->overrideLimits($prepared['run'], ['max_run_minutes' => 60]);
+        $prepared = $this->preparedImplementationRun('AI6-026-RUNTIME-OVER', limitOverrides: ['max_run_minutes' => 60]);
         $this->ageRun($prepared['run'], 61);
         $original = (string) file_get_contents($prepared['worktree'].'/app/Example.php');
         $job = $this->executeImplement($prepared['run']->fresh());
@@ -53,18 +51,6 @@ final class RunRuntimeLimitGateTest extends TicketUiTestCase
         self::assertSame(60, $pending->redacted_metadata['maximum']);
         self::assertSame('resource_limit', HumanRequest::query()->where('run_id', $fresh->id)
             ->where('resolution_state', 'open')->sole()->kind);
-    }
-
-    /** @param array<string, int> $limits */
-    private function overrideLimits(Run $run, array $limits): void
-    {
-        $snapshot = $run->agent_profile_snapshot ?? [];
-        $snapshot['limits'] = array_merge(is_array($snapshot['limits'] ?? null) ? $snapshot['limits'] : [], $limits);
-        DB::table('runs')->where('id', $run->id)->update([
-            'agent_profile_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR),
-            'version' => DB::raw('version + 1'),
-            'updated_at' => now(),
-        ]);
     }
 
     private function ageRun(Run $run, int $minutes): void

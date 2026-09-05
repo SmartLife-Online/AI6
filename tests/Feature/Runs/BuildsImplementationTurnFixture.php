@@ -3,6 +3,7 @@
 namespace Tests\Feature\Runs;
 
 use App\AI6\Agents\AgentAdapter;
+use App\AI6\Agents\AgentInputLimits;
 use App\AI6\Agents\AgentScenario;
 use App\AI6\Agents\FakeAgentAdapter;
 use App\AI6\Agents\InstructionCandidate;
@@ -18,7 +19,9 @@ use App\AI6\Git\ProjectOperationLease;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\ProjectProvisioningStatus;
 use App\AI6\Projects\ProjectRole;
+use App\AI6\Runs\ApprovalLimits;
 use App\AI6\Runs\ApprovalQueue;
+use App\AI6\Runs\ApprovalSelection;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\ExecutionStepType;
@@ -62,6 +65,7 @@ trait BuildsImplementationTurnFixture
     /**
      * @param  list<string>  $files
      * @param  list<InstructionCandidate>  $instructionCandidates
+     * @param  array<string, int>  $limitOverrides
      * @return array{run: Run, project: Project, operator: User, worktree: string, isolatedRoot: string}
      */
     protected function preparedImplementationRun(
@@ -71,6 +75,7 @@ trait BuildsImplementationTurnFixture
         bool $shippedProcessPolicy = false,
         bool $coherentGitBinding = false,
         array $instructionCandidates = [],
+        array $limitOverrides = [],
     ): array {
         $this->app->instance(ControlOperationRuntimeIdentity::class, new ControlOperationRuntimeIdentity('worker', 'testing'));
         $this->app->instance(InstructionCandidateSource::class, new class(...$instructionCandidates) implements InstructionCandidateSource
@@ -153,6 +158,19 @@ trait BuildsImplementationTurnFixture
         $todoBlob = hash('sha256', 'blob '.strlen($markdown)."\0".$markdown);
         $readModel = $this->publishReadModel($administrator, $project, 'tickets/'.$ticketId.'.md', $markdown, ['blob_sha' => $todoBlob]);
         $selection = $this->approvalSelection($attention);
+        if ($limitOverrides !== []) {
+            $selection = new ApprovalSelection(
+                $selection->implementation,
+                $selection->reviewers,
+                ApprovalLimits::fromConfiguredValues(array_replace($selection->limits->values, $limitOverrides), $this->app->make(AgentInputLimits::class)),
+                $selection->attentionUserId,
+                $selection->pushMode,
+                $selection->runType,
+                $selection->reviewSubjectReference,
+                $selection->completionMode,
+                $selection->verifierCandidates,
+            );
+        }
         $operationId = (string) Str::uuid();
         $snapshot = $this->app->make(ApprovalSnapshotFactory::class)->create($project, $readModel, $selection, $operationId);
         $operation = $this->app->make(QueueTicketMutation::class)->approve(

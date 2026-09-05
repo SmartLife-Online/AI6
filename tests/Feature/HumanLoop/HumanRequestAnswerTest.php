@@ -249,13 +249,60 @@ final class HumanRequestAnswerTest extends TicketUiTestCase
     }
 
     /** TC-07 */
-    public function test_a_second_answer_creates_no_second_intervention_or_resume(): void
+    public function test_two_authenticated_browser_sessions_create_one_effect_and_name_the_stale_version(): void
     {
         Mail::fake();
         $opened = $this->openedHumanRequest('AI6-018-DUP');
         $request = $opened['request'];
-        $service = $this->app->make(HumanRequestService::class);
-        $first = $service->answer(
+        $route = route('projects.human-requests.answer', [$opened['project'], $request->id]);
+        $payload = [
+            'run_version' => $request->bound_run_version,
+            'ticket_contract' => $request->bound_ticket_contract,
+            'checkpoint' => $request->bound_checkpoint,
+            'scope' => $request->bound_scope,
+            'agent_slot' => $request->bound_agent_slot,
+            'requested_effect' => $request->bound_requested_effect,
+            'chosen_effect' => 'a',
+        ];
+
+        $this->actingAs($opened['attention'])->post($route, [
+            ...$payload,
+            'run_version' => $request->bound_run_version - 1,
+            'chosen_effect' => 'b',
+        ])->assertRedirect()->assertSessionHasErrors([
+            'chosen_effect' => 'Die Runversion ist veraltet.',
+        ]);
+        self::assertSame('open', $request->fresh()->resolution_state->value);
+        self::assertSame(0, Intervention::query()->where('human_request_id', $request->id)->count());
+
+        $this->actingAs($opened['operator'])->post($route, $payload)->assertRedirect();
+        $this->actingAs($opened['attention'])->post($route, [
+            ...$payload,
+            'chosen_effect' => 'b',
+        ])->assertRedirect()->assertSessionHasErrors([
+            'chosen_effect' => 'Diese Anfrage ist bereits beantwortet.',
+        ]);
+
+        self::assertSame(1, Intervention::query()->where('human_request_id', $request->id)->count());
+        $audit = Intervention::query()->where('human_request_id', $request->id)->sole();
+        self::assertSame('operator', $audit->actor_role);
+        self::assertFalse($audit->step_up_verified);
+        self::assertNull($audit->step_up_proof_hash);
+        self::assertSame($request->bound_run_version, $audit->expected_run_version);
+        self::assertSame('human_question', $audit->wait_reason);
+        self::assertSame($request->bound_step_key, $audit->bound_step_key);
+        self::assertNotSame('', trim((string) $audit->reason));
+        self::assertSame(1, ExecutionJob::query()->where('run_id', $opened['run']->id)
+            ->where('idempotency_key', $request->bound_step_key)
+            ->where('state', ExecutionJobState::PLANNED)->count());
+    }
+
+    public function test_the_intervention_audit_cannot_be_updated_or_deleted(): void
+    {
+        Mail::fake();
+        $opened = $this->openedHumanRequest('AI6-018-AUDIT-IMMUTABLE');
+        $request = $opened['request'];
+        $this->app->make(HumanRequestService::class)->answer(
             $request,
             $opened['operator'],
             $request->bound_run_version,
@@ -266,34 +313,8 @@ final class HumanRequestAnswerTest extends TicketUiTestCase
             $request->bound_requested_effect,
             'a',
         );
-
-        try {
-            $service->answer(
-                $request->fresh(),
-                $opened['attention'],
-                $request->bound_run_version,
-                $request->bound_ticket_contract,
-                $request->bound_checkpoint,
-                $request->bound_scope,
-                $request->bound_agent_slot,
-                $request->bound_requested_effect,
-                'b',
-            );
-            self::fail('The second answer must be rejected.');
-        } catch (HumanRequestRejected $rejected) {
-            self::assertSame('request_already_resolved', $rejected->reason);
-        }
-
-        self::assertSame(1, Intervention::query()->where('human_request_id', $request->id)->count());
         $audit = Intervention::query()->where('human_request_id', $request->id)->sole();
-        self::assertSame($first->id, $audit->id);
-        self::assertSame('operator', $audit->actor_role);
-        self::assertFalse($audit->step_up_verified);
-        self::assertNull($audit->step_up_proof_hash);
-        self::assertSame($request->bound_run_version, $audit->expected_run_version);
-        self::assertSame('human_question', $audit->wait_reason);
-        self::assertSame($request->bound_step_key, $audit->bound_step_key);
-        self::assertNotSame('', trim((string) $audit->reason));
+
         try {
             DB::table('interventions')->where('id', $audit->id)->update(['reason' => 'manipuliert']);
             self::fail('The intervention audit was mutable.');
@@ -306,9 +327,6 @@ final class HumanRequestAnswerTest extends TicketUiTestCase
         } catch (QueryException) {
             self::assertSame($audit->id, $audit->fresh()->id);
         }
-        self::assertSame(1, ExecutionJob::query()->where('run_id', $opened['run']->id)
-            ->where('idempotency_key', $request->bound_step_key)
-            ->where('state', ExecutionJobState::PLANNED)->count());
     }
 
     /** TC-08 */

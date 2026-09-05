@@ -21,6 +21,8 @@ use App\AI6\Runs\InstructionCandidateSource;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\ScopeDecision;
+use App\AI6\Runs\RunArtifactRoot;
+use App\AI6\Runs\RunArtifactStore;
 use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
@@ -29,6 +31,7 @@ use App\AI6\Shared\Redaction\RedactionContext;
 use Illuminate\Http\Request;
 use Illuminate\Session\ArraySessionHandler;
 use Illuminate\Session\Store;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Mail;
 use Tests\Feature\Runs\BuildsHumanRequestFixture;
 use Tests\Feature\Tickets\TicketUiTestCase;
@@ -37,6 +40,29 @@ use Tests\Feature\Tickets\TicketUiTestCase;
 final class ScopeApprovalTest extends TicketUiTestCase
 {
     use BuildsHumanRequestFixture;
+
+    private ?string $scopeArtifactRoot = null;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->scopeArtifactRoot = rtrim(str_replace('\\', '/', sys_get_temp_dir()), '/').'/ai6-scope-artifacts-'.bin2hex(random_bytes(8));
+        config(['ai6.run_artifacts.root' => $this->scopeArtifactRoot]);
+        $this->app->forgetInstance(RunArtifactRoot::class);
+        $this->app->forgetInstance(RunArtifactStore::class);
+    }
+
+    protected function tearDown(): void
+    {
+        $root = $this->scopeArtifactRoot;
+        $temporary = rtrim(str_replace('\\', '/', sys_get_temp_dir()), '/').'/';
+        if (is_string($root) && str_starts_with(str_replace('\\', '/', $root).'/', $temporary.'ai6-scope-artifacts-')) {
+            File::deleteDirectory($root);
+        }
+        $this->scopeArtifactRoot = null;
+
+        parent::tearDown();
+    }
 
     public function test_an_auto_allow_path_is_added_without_any_human_decision(): void
     {

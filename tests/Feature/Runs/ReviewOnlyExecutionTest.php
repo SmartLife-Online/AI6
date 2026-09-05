@@ -11,6 +11,10 @@ use App\AI6\Auth\Models\User;
 use App\AI6\Checks\CheckPhase;
 use App\AI6\Checks\CheckResultState;
 use App\AI6\Checks\Models\CheckResultRecord;
+use App\AI6\Git\ManagedProjectPath;
+use App\AI6\Git\ReviewSubject;
+use App\AI6\Git\ReviewSubjectException;
+use App\AI6\Git\ReviewSubjectKind;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Reviews\Models\Finding;
@@ -35,10 +39,17 @@ use App\AI6\Runs\RunPhase;
 use App\AI6\Runs\RunState;
 use App\AI6\Runs\RunType;
 use App\AI6\Runs\WaitReason;
+use App\AI6\Shared\Redaction\InvalidRedactionInputException;
 use App\AI6\Shared\Redaction\RedactionContext;
+use App\AI6\Shared\Redaction\Redactor;
+use App\AI6\Shared\Security\SecurityMeasure;
+use App\AI6\Shared\Security\SecurityPolicy;
+use App\AI6\Shared\Security\SecurityPolicyFactory;
+use App\AI6\Shared\Security\SecurityProfile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Feature\Git\BuildsRunWorkspaceGitFixture;
 use Tests\Feature\Tickets\TicketUiTestCase;
 
@@ -104,6 +115,103 @@ final class ReviewOnlyExecutionTest extends TicketUiTestCase
                 || ($fresh->state === RunState::WAITING && $fresh->wait_reason === WaitReason::MANUAL_REPORT),
             'The manual completion mode ends in its own bound saga or wait.',
         );
+    }
+
+    /** @param list<SecurityMeasure> $disabledMeasures */
+    #[DataProvider('securityProfiles')]
+    public function test_a_complete_review_only_workflow_keeps_reductions_visible_under_every_security_profile(
+        SecurityProfile $profile,
+        array $disabledMeasures,
+    ): void {
+        $this->requiresPosixEffectRuntime();
+        $configuration = config('ai6.security');
+        self::assertIsArray($configuration);
+        $configuration['profile'] = $profile->value;
+        $configuration['acknowledge_reduced_mode'] = $disabledMeasures === [] ? 'false' : 'true';
+        foreach (SecurityMeasure::cases() as $measure) {
+            $configuration['measures'][$measure->value] = in_array($measure, $disabledMeasures, true) ? 'false' : 'true';
+        }
+        $policy = (new SecurityPolicyFactory)->inspect($configuration);
+        self::assertInstanceOf(SecurityPolicy::class, $policy);
+        $this->app->instance(SecurityPolicy::class, $policy);
+
+        $prepared = $this->preparedReviewOnlyRun('AI6-032-PROFILE-'.strtoupper($profile->value));
+        $run = $this->prepareAndCheck($prepared);
+        $this->bindReviewAdapter(AgentScenario::SUCCESS);
+        $this->assertStepSucceeded($this->executeReviewOnlyStep($run, ExecutionStepType::REVIEW));
+        $this->assertStepSucceeded($this->executeReviewOnlyStep($run, ExecutionStepType::REPORT));
+
+        $fresh = $run->fresh();
+        self::assertInstanceOf(Run::class, $fresh);
+        self::assertSame($policy->hash(), $fresh->security_policy_hash);
+        self::assertSame($profile, $policy->bannerData()->profile);
+        self::assertSame($disabledMeasures, $policy->disabledMeasures());
+        $this->assertFlaglessBoundaries($profile);
+        self::assertSame(1, ReviewResult::query()->where('run_id', $run->id)->count());
+        self::assertSame(1, CheckResultRecord::query()->where('run_id', $run->id)->count());
+    }
+
+    /** @param list<SecurityMeasure> $disabledMeasures */
+    #[DataProvider('securityProfiles')]
+    public function test_flagless_boundaries_reject_unsafe_input_under_every_security_profile(
+        SecurityProfile $profile,
+        array $disabledMeasures,
+    ): void {
+        $configuration = config('ai6.security');
+        $configuration['profile'] = $profile->value;
+        $configuration['acknowledge_reduced_mode'] = $disabledMeasures === [] ? 'false' : 'true';
+        foreach (SecurityMeasure::cases() as $measure) {
+            $configuration['measures'][$measure->value] = in_array($measure, $disabledMeasures, true) ? 'false' : 'true';
+        }
+        $policy = (new SecurityPolicyFactory)->inspect($configuration);
+        self::assertInstanceOf(SecurityPolicy::class, $policy);
+        $this->app->instance(SecurityPolicy::class, $policy);
+        $this->assertFlaglessBoundaries($profile);
+    }
+
+    private function assertFlaglessBoundaries(SecurityProfile $profile): void
+    {
+        try {
+            new ReviewSubject(
+                ReviewSubjectKind::MANAGED_BRANCH,
+                str_repeat('a', 64),
+                str_repeat('b', 64),
+                "refs/heads/main\nforged",
+            );
+            self::fail('The flagless Git ref validation accepted an injected ref under '.$profile->value.'.');
+        } catch (ReviewSubjectException $exception) {
+            self::assertSame('managed_branch_ref_invalid', $exception->reason);
+            self::assertSame('The review subject is invalid.', $exception->getMessage());
+        }
+        try {
+            $this->app->make(ManagedProjectPath::class)->repositoryDirectory('../outside');
+            self::fail('The flagless path boundary accepted traversal under '.$profile->value.'.');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('The managed project identifier is invalid.', $exception->getMessage());
+        }
+
+        $redactor = $this->app->make(Redactor::class);
+        $context = new RedactionContext('profile-test', $profile->value, 'flagless-boundaries');
+        self::assertSame('password=[REDACTED:SECRET]', $redactor->redact('password=fixture-secret', $context)->text);
+        try {
+            $redactor->redact("password=fixture-secret\xFF", $context);
+            self::fail('The flagless UTF-8 boundary accepted malformed input under '.$profile->value.'.');
+        } catch (InvalidRedactionInputException $exception) {
+            self::assertSame('Redaction input must be valid UTF-8.', $exception->getMessage());
+        }
+    }
+
+    /** @return iterable<string, array{SecurityProfile, list<SecurityMeasure>}> */
+    public static function securityProfiles(): iterable
+    {
+        yield 'strict' => [SecurityProfile::STRICT, []];
+        yield 'custom' => [SecurityProfile::CUSTOM, [
+            SecurityMeasure::LOGIN_EMAIL_CONFIRMATION,
+            SecurityMeasure::REQUIRE_LLM_PRECOMMIT_REVIEW,
+        ]];
+        yield 'development' => [SecurityProfile::DEVELOPMENT, [
+            SecurityMeasure::REQUIRE_HTTPS_OR_PRIVATE_ACCESS,
+        ]];
     }
 
     public function test_the_bound_checks_run_on_the_ref_free_review_checkpoint(): void

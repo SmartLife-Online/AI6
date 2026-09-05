@@ -133,6 +133,53 @@ final class ImplementationImportIsolationTest extends TicketUiTestCase
         }
     }
 
+    /**
+     * TC-04: the implementation role carries the same isolation promise as the
+     * reviewer and checker roles. No managed Git metadata reaches its view, a
+     * hook planted in the managed clone never runs, and a host instruction
+     * beside the agent root stays invisible to the isolated turn.
+     */
+    public function test_the_agent_view_carries_no_git_metadata_hook_or_host_instruction(): void
+    {
+        $prepared = $this->preparedImplementationRun('AI6-032-AGENT-ISOLATION');
+        $worktree = $prepared['worktree'];
+        $hookMarker = $prepared['isolatedRoot'].'/agent-hook-ran';
+        self::assertTrue(is_dir($worktree.'/.git/hooks') || mkdir($worktree.'/.git/hooks', 0700, true));
+        self::assertNotFalse(file_put_contents(
+            $worktree.'/.git/hooks/post-checkout',
+            "#!/bin/sh\nprintf hook > \"{$hookMarker}\"\n",
+        ));
+        self::assertTrue(chmod($worktree.'/.git/hooks/post-checkout', 0700));
+        $hostInstruction = "Nicht freigegebene Host-Instruktion.\n";
+        self::assertNotFalse(file_put_contents($prepared['isolatedRoot'].'/AGENTS.md', $hostInstruction));
+        // Positive control: ordinary repository content does reach the export,
+        // so a `missing` verdict below is a stripped path and not a dead probe.
+        self::assertTrue(mkdir($worktree.'/nested', 0700));
+        self::assertNotFalse(file_put_contents($worktree.'/nested/AGENTS.md', "Projektinhalt.\n"));
+
+        $adapter = new FakeAgentAdapter(AgentScenario::SUCCESS);
+        $this->app->instance(FakeAgentAdapter::class, $adapter);
+        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->forgetInstance(RunImplementation::class);
+
+        $job = $this->executeImplement($prepared['run']);
+
+        self::assertSame(ExecutionJobState::SUCCEEDED, $job->state, (string) $job->failure_code);
+        self::assertFileDoesNotExist($hookMarker);
+        self::assertSame('reachable', $adapter->lastAccessProbes['workspace:nested/AGENTS.md'] ?? null);
+        foreach (['.git', '.git/refs', '.git/hooks', '.git/commondir', '../.git'] as $path) {
+            self::assertSame('missing', $adapter->lastAccessProbes['workspace:'.$path] ?? null, $path);
+        }
+        $forbiddenInstruction = 'sha256:'.hash('sha256', $hostInstruction);
+        for ($level = 0; $level < 4; $level++) {
+            self::assertNotSame(
+                $forbiddenInstruction,
+                $adapter->lastAccessProbes['instruction-parent:'.$level] ?? null,
+                'instruction-parent:'.$level,
+            );
+        }
+    }
+
     /** TC-04 */
     public function test_the_implementation_turn_starts_with_the_shipped_agent_policy(): void
     {

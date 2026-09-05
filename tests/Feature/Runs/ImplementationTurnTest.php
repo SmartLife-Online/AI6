@@ -6,6 +6,8 @@ use App\AI6\Agents\AgentAdapter;
 use App\AI6\Agents\AgentResultContext;
 use App\AI6\Agents\AgentScenario;
 use App\AI6\Agents\FakeAgentAdapter;
+use App\AI6\Git\CanonicalDiffHasher;
+use App\AI6\HumanLoop\Mail\HumanRequestNotificationMail;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Prompts\PromptCatalog;
 use App\AI6\Prompts\PromptRenderer;
@@ -16,15 +18,120 @@ use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Runs\Models\RunArtifact;
 use App\AI6\Runs\Models\RunLimitConsumption;
 use App\AI6\Runs\RunImplementation;
+use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
 use App\AI6\Runs\WaitReason;
+use App\AI6\Shared\Redaction\RedactionContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Component\Process\ExecutableFinder;
+use Symfony\Component\Process\Process;
 use Tests\Feature\Tickets\TicketUiTestCase;
 
 final class ImplementationTurnTest extends TicketUiTestCase
 {
     use BuildsImplementationTurnFixture;
+
+    /** @return iterable<string, array{AgentScenario}> */
+    public static function exactOutcomeScenarios(): iterable
+    {
+        yield 'success' => [AgentScenario::SUCCESS];
+        yield 'no change' => [AgentScenario::NO_CHANGE_REQUIRED];
+    }
+
+    #[DataProvider('exactOutcomeScenarios')]
+    public function test_success_and_no_change_bind_exact_session_tree_diff_status_and_mail(AgentScenario $scenario): void
+    {
+        Mail::fake();
+        $ticketId = 'AI6-032-'.strtoupper(str_replace('_', '-', $scenario->value));
+        $prepared = $this->preparedImplementationRun($ticketId, scenario: AgentScenario::HUMAN_REQUEST, coherentGitBinding: true);
+        $run = $prepared['run'];
+        $orchestrator = $this->app->make(RunOrchestrator::class);
+        $slot = $orchestrator->ensureImplementationSlot($run);
+        $session = 'session-'.$ticketId;
+        $orchestrator->bindImplementationSession($run, $slot->slot_id, $session);
+        $worktree = $prepared['worktree'];
+        $baseTree = $this->gitOutput(['rev-parse', 'HEAD^{tree}'], $worktree);
+        $ticket = (string) file_get_contents($worktree.'/tickets/'.$ticketId.'.md');
+        self::assertStringContainsString("status: in_progress\n", str_replace("\r\n", "\n", $ticket));
+        $ticketBlob = $this->gitOutput(['rev-parse', 'HEAD:tickets/'.$ticketId.'.md'], $worktree);
+
+        self::assertSame(ExecutionJobState::WAITING, $this->executeImplement($run)->state);
+        $request = HumanRequest::query()->where('run_id', $run->id)->sole();
+        Mail::assertSent(HumanRequestNotificationMail::class, 1);
+        Mail::assertSent(HumanRequestNotificationMail::class, function (HumanRequestNotificationMail $mail) use ($ticketId, $request): bool {
+            self::assertSame(['attention-'.strtolower($ticketId).'@example.test'], array_column($mail->to, 'address'));
+            self::assertSame('AI6 Attention: offene Frage im Panel', $mail->envelope()->subject);
+            self::assertSame(route('projects.human-requests.show', [$request->project_id, $request->id]), $mail->content()->with['detailUrl']);
+
+            return true;
+        });
+        $this->actingAs($prepared['operator'])->post(
+            route('projects.human-requests.answer', [$prepared['project'], $request->id]),
+            [
+                'run_version' => $request->bound_run_version,
+                'ticket_contract' => $request->bound_ticket_contract,
+                'checkpoint' => $request->bound_checkpoint,
+                'scope' => $request->bound_scope,
+                'agent_slot' => $request->bound_agent_slot,
+                'requested_effect' => $request->bound_requested_effect,
+                'chosen_effect' => 'a',
+            ],
+        )->assertRedirect()->assertSessionHasNoErrors();
+        $adapter = new FakeAgentAdapter($scenario);
+        $this->app->instance(FakeAgentAdapter::class, $adapter);
+        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->forgetInstance(RunImplementation::class);
+        $job = $this->executeImplement($run->fresh());
+        self::assertSame(ExecutionJobState::SUCCEEDED, $job->state, (string) $job->failure_code);
+        self::assertSame($session, $slot->fresh()->session_id);
+        self::assertSame(1, $adapter->turnCount);
+        self::assertSame($ticket, file_get_contents($worktree.'/tickets/'.$ticketId.'.md'));
+        Mail::assertSentCount(1);
+
+        $original = "<?php\n\n// original\n";
+        $expected = $scenario === AgentScenario::SUCCESS ? "<?php\n\n// fake-agent-change\n" : $original;
+        $oldBlob = self::gitObjectHash('blob', $original);
+        $newBlob = self::gitObjectHash('blob', $expected);
+        // Build the expected SHA-256 tree from known fixture bytes, independently
+        // of the actual imported worktree and its Git index.
+        $appTree = self::gitObjectHash('tree', "100644 Example.php\0".hex2bin($newBlob));
+        $ticketTree = self::gitObjectHash('tree', '100644 '.$ticketId.".md\0".hex2bin($ticketBlob));
+        $expectedTree = self::gitObjectHash('tree', "40000 app\0".hex2bin($appTree)."40000 tickets\0".hex2bin($ticketTree));
+        $index = $this->implementationTemp('assert-index-'.$scenario->value).'/index';
+        $this->scenarioGitBytes(['read-tree', 'HEAD'], $worktree, $index);
+        $this->scenarioGitBytes(['add', '-A'], $worktree, $index);
+        $actualTree = trim($this->scenarioGitBytes(['write-tree'], $worktree, $index));
+        self::assertSame($expectedTree, $actualTree);
+        $raw = $this->scenarioGitBytes(['diff-tree', '--raw', '-z', '--no-abbrev', '--no-renames', '-r', $baseTree, $actualTree], $worktree, $index);
+        $expectedRaw = $scenario === AgentScenario::SUCCESS
+            ? ':100644 100644 '.$oldBlob.' '.$newBlob." M\0app/Example.php\0"
+            : '';
+        self::assertSame($expectedRaw, $raw);
+        $hasher = $this->app->make(CanonicalDiffHasher::class);
+        $context = new RedactionContext((string) $run->project_id, $run->id, 'exact-outcome');
+        $expectedDiffHash = $scenario === AgentScenario::SUCCESS
+            ? '46e4087d84a91967663bfc934df733aad3684212b01d72c0a2c94d5292a78594'
+            : 'c8194ce3beb63682f9da97aa999bf743e4cf196be99a7834da9292723cb16f70';
+        self::assertSame($expectedDiffHash, $hasher->fromRaw($raw, $context)->hash);
+    }
+
+    private static function gitObjectHash(string $type, string $bytes): string
+    {
+        return hash('sha256', $type.' '.strlen($bytes)."\0".$bytes);
+    }
+
+    /** @param list<string> $arguments */
+    private function scenarioGitBytes(array $arguments, string $worktree, string $index): string
+    {
+        $git = (new ExecutableFinder)->find('git');
+        self::assertIsString($git);
+        $process = new Process([$git, ...$arguments], $worktree, ['GIT_INDEX_FILE' => $index]);
+        $process->mustRun();
+
+        return $process->getOutput();
+    }
 
     /** TC-01 */
     public function test_fake_success_imports_a_diff_and_other_scenarios_do_not(): void

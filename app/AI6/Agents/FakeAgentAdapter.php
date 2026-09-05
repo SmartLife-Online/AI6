@@ -177,6 +177,12 @@ final class FakeAgentAdapter implements AgentAdapter
         $request = json_encode([
             'write_example' => $context->role === AgentRole::IMPLEMENTATION
                 && in_array($scenario, [AgentScenario::SUCCESS, AgentScenario::NO_CHANGE_WITH_DIFF], true),
+            // Workspace visibility and parent-instruction discovery are probed
+            // for every isolated role: no role may reach managed Git metadata,
+            // provider-specific configuration or host/parent instructions
+            // (GIT-010, AGT-009). Only the write denial and the candidate
+            // evidence are reviewer semantics on a read-only tree.
+            'probe_workspace' => true,
             'probe_read_only' => in_array($context->role, [AgentRole::QUALITY_REVIEW, AgentRole::SECURITY_REVIEW], true),
             // A fix turn binds its own finding package, so the deterministic
             // content differs per round and a second fix produces a real diff.
@@ -371,10 +377,24 @@ foreach ($request['path_probes'] ?? [] as $path) {
         $probes['path-write:'.$path] = 'denied';
     }
 }
-if (($request['probe_read_only'] ?? false) === true) {
-    foreach (['.git', '.git/refs', '.git/hooks', '.git/commondir', '../.git'] as $path) {
+if (($request['probe_workspace'] ?? false) === true) {
+    foreach ([
+        '.git', '.git/refs', '.git/hooks', '.git/commondir', '../.git',
+        '.codex', '.codex/config.toml', '.codex/plugins/plugin.json', '.codex/skills/SKILL.md',
+        '.codex/commands/run.md', '.claude/settings.json', '.mcp.json', 'mcp.json', '.gitconfig',
+        '.git-credentials', 'nested/AGENTS.md',
+    ] as $path) {
         $probes['workspace:'.$path] = (@file_exists($tree.'/'.$path) || @is_link($tree.'/'.$path)) ? 'reachable' : 'missing';
     }
+    $cursor = $tree;
+    for ($level = 0; $level < 4; $level++) {
+        $candidate = rtrim(str_replace('\\', '/', $cursor), '/').'/AGENTS.md';
+        $bytes = @file_get_contents($candidate);
+        $probes['instruction-parent:'.$level] = $bytes === false ? 'missing' : 'sha256:'.hash('sha256', $bytes);
+        $cursor = dirname($cursor);
+    }
+}
+if (($request['probe_read_only'] ?? false) === true) {
     $existing = rtrim(str_replace('\\', '/', $tree), '/').'/app/Example.php';
     $new = rtrim(str_replace('\\', '/', $tree), '/').'/review-write-probe';
     $probes['write:existing'] = @file_put_contents($existing, "review mutation\n", LOCK_EX) === false ? 'denied' : 'writable';
@@ -384,13 +404,6 @@ if (($request['probe_read_only'] ?? false) === true) {
     $probes['candidate-evidence:app/Example.php'] = $candidateBytes === false
         ? 'missing'
         : 'sha256:'.hash('sha256', $candidateBytes);
-    $cursor = $tree;
-    for ($level = 0; $level < 4; $level++) {
-        $candidate = rtrim(str_replace('\\', '/', $cursor), '/').'/AGENTS.md';
-        $bytes = @file_get_contents($candidate);
-        $probes['instruction-parent:'.$level] = $bytes === false ? 'missing' : 'sha256:'.hash('sha256', $bytes);
-        $cursor = dirname($cursor);
-    }
 }
 if (($request['write_example'] ?? false) === true) {
     $target = rtrim(str_replace('\\', '/', $tree), '/').'/app/Example.php';

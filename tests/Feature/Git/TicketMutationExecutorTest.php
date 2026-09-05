@@ -178,6 +178,32 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
             (string) $projectBeforePublish->host_key_fingerprint,
             $publishContext,
         )->succeeded());
+        $retry = $fixture['runner']->pushCommitCas(
+            $repository,
+            (string) $projectBeforePublish->remote,
+            (string) $projectBeforePublish->control_branch,
+            (string) $operation->expected_control_commit,
+            $commitOid,
+            (string) $projectBeforePublish->deploy_key_reference,
+            $configuration->knownHostsFile,
+            (string) $projectBeforePublish->host_key_fingerprint,
+            $publishContext,
+        );
+        // Git accepts an already-published target as up to date, even with the
+        // original lease. Idempotence concerns the remote effect, not failure.
+        self::assertTrue($retry->succeeded(), $retry->output);
+        self::assertStringContainsString("=\t".$commitOid.":refs/heads/main\t[up to date]", $retry->output);
+        self::assertSame($commitOid, trim($this->managedFixtureGit([
+            '--git-dir='.$fixture['remote'],
+            'rev-parse',
+            'refs/heads/main',
+        ], $fixture['root'])));
+        self::assertSame('1', trim($this->managedFixtureGit([
+            '--git-dir='.$fixture['remote'],
+            'rev-list',
+            '--count',
+            $parentOid.'..refs/heads/main',
+        ], $fixture['root'])));
 
         self::assertTrue($fixture['lease']->expire($operation->id, $operation->project_id, $attemptToken));
         $attemptToken = $fixture['lease']->claim($operation->refresh(), str_repeat('1', 32));

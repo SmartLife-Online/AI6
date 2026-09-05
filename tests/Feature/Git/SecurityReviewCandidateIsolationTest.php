@@ -26,6 +26,16 @@ final class SecurityReviewCandidateIsolationTest extends TicketUiTestCase
         }
         self::assertNotFalse(file_put_contents($hook, "#!/bin/sh\nprintf hook > \"{$hookMarker}\"\n"));
         self::assertTrue(chmod($hook, 0700));
+        foreach (['.codex/plugins', '.codex/skills', '.codex/commands', '.claude', 'nested'] as $directory) {
+            self::assertTrue(is_dir($run->worktree_path.'/'.$directory) || mkdir($run->worktree_path.'/'.$directory, 0700, true));
+        }
+        foreach ([
+            '.codex/config.toml', '.codex/plugins/plugin.json', '.codex/skills/SKILL.md',
+            '.codex/commands/run.md', '.claude/settings.json', '.mcp.json', 'mcp.json',
+            '.gitconfig', '.git-credentials', 'nested/AGENTS.md',
+        ] as $path) {
+            self::assertNotFalse(file_put_contents($run->worktree_path.'/'.$path, 'malicious provider configuration'));
+        }
         $refsBefore = $this->gitOutput(['show-ref'], $repository);
         $metadata = $this->app->make(WorktreeGitMetadataPaths::class)->resolve((string) $run->worktree_path);
         self::assertNotEmpty($metadata);
@@ -38,6 +48,13 @@ final class SecurityReviewCandidateIsolationTest extends TicketUiTestCase
         self::assertFileDoesNotExist($hookMarker);
         self::assertSame($refsBefore, $this->gitOutput(['show-ref'], $repository));
         foreach (['.git', '.git/refs', '.git/hooks', '.git/commondir', '../.git'] as $path) {
+            self::assertSame('missing', $adapter->lastAccessProbes['workspace:'.$path] ?? null, $path);
+        }
+        foreach ([
+            '.codex', '.codex/config.toml', '.codex/plugins/plugin.json', '.codex/skills/SKILL.md',
+            '.codex/commands/run.md', '.claude/settings.json', '.mcp.json', 'mcp.json', '.gitconfig',
+            '.git-credentials', 'nested/AGENTS.md',
+        ] as $path) {
             self::assertSame('missing', $adapter->lastAccessProbes['workspace:'.$path] ?? null, $path);
         }
         self::assertSame('denied', $adapter->lastAccessProbes['write:existing'] ?? null);

@@ -346,11 +346,7 @@ final class ReviewOnlyRunContractTest extends TicketUiTestCase
         $predicate = $this->app->make(ReviewOnlyCompletionPredicate::class);
         self::assertTrue($predicate->decide($run)->ready());
 
-        DB::table('runs')->where('id', $run->id)->update([
-            'state' => RunState::WAITING->value,
-            'wait_reason' => WaitReason::STATUS_SYNC->value,
-            'version' => DB::raw('version + 1'),
-        ]);
+        $this->app->make(RunOrchestrator::class)->transition($run, $run->version, RunState::WAITING, $run->phase, WaitReason::STATUS_SYNC);
         self::assertContains('run_waiting:status_sync', $predicate->decide($run->fresh())->blockers);
     }
 
@@ -478,11 +474,7 @@ final class ReviewOnlyRunContractTest extends TicketUiTestCase
     {
         $fixture = $this->completedApproval('AI6-REVIEW-ONLY-LIMIT');
         $run = $this->completionReadyRun($fixture);
-        DB::table('runs')->where('id', $run->id)->update([
-            'state' => RunState::WAITING->value,
-            'wait_reason' => WaitReason::RESOURCE_LIMIT->value,
-            'version' => DB::raw('version + 1'),
-        ]);
+        $this->app->make(RunOrchestrator::class)->transition($run, $run->version, RunState::WAITING, $run->phase, WaitReason::RESOURCE_LIMIT);
 
         self::assertContains(
             'run_waiting:resource_limit',

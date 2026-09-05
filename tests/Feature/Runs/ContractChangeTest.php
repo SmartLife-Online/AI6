@@ -2,8 +2,12 @@
 
 namespace Tests\Feature\Runs;
 
+use App\AI6\Agents\InstructionCandidate;
+use App\AI6\Agents\InstructionCandidateOrigin;
+use App\AI6\Agents\InstructionFileType;
 use App\AI6\Auth\Models\User;
 use App\AI6\Git\Actions\QueueTicketMutation;
+use App\AI6\Git\ControlOperationConflict;
 use App\AI6\Git\ControlOperationPhase;
 use App\AI6\Git\ControlOperationRuntimeIdentity;
 use App\AI6\Git\ControlOperationState;
@@ -13,6 +17,8 @@ use App\AI6\Git\Models\TicketMutation;
 use App\AI6\Git\ProjectOperationLease;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
+use App\AI6\Runs\ApprovalClaimStarter;
+use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ContractChangeService;
 use App\AI6\Runs\InstructionCandidateSource;
 use App\AI6\Runs\Models\Run;
@@ -100,6 +106,22 @@ final class ContractChangeTest extends TicketUiTestCase
         $service = $this->app->make(ContractChangeService::class);
         $run = $service->request($run, $fixture['project']);
 
+        $resolved = $this->controlledReset($fixture, $run, $service);
+
+        self::assertSame(RunState::CANCELLED, $resolved->state);
+        // The change becomes effective only through a new approval, run and
+        // sessions: the old run ends without any session to take over.
+        self::assertNull(RunAgent::query()->where('run_id', $run->id)->where('role', 'implementation')->value('session_id'));
+        self::assertNull($fixture['project']->fresh()->active_run_id);
+    }
+
+    /**
+     * Drive the one controlled reset saga to its terminal state.
+     *
+     * @param  array{run: Run, project: Project, admin: User, ticketId: string}  $fixture
+     */
+    private function controlledReset(array $fixture, Run $run, ContractChangeService $service): Run
+    {
         // The controlled reset is a real status mutation through the one
         // existing saga: in_progress → todo via return_to_todo.
         $base = $this->validTicketMarkdown($fixture['ticketId'], 'in_progress');
@@ -171,13 +193,100 @@ final class ContractChangeTest extends TicketUiTestCase
             'control_binding_version' => DB::raw('control_binding_version + 1'),
         ]));
 
-        $resolved = $service->resolveReturnToTodo($run->fresh(), $operation->refresh());
+        return $service->resolveReturnToTodo($run->fresh(), $operation->refresh());
+    }
 
-        self::assertSame(RunState::CANCELLED, $resolved->state);
-        // The change becomes effective only through a new approval, run and
-        // sessions: the old run ends without any session to take over.
+    /**
+     * TC-11/TC-12: the whole lineage after a refused same-run instruction
+     * change. The reset ends the old run; only a new approval binds the
+     * changed instruction bytes, that approval produces a new run with a new
+     * session, and the consumed old approval can no longer be started.
+     */
+    public function test_the_reset_lineage_binds_the_changed_instruction_to_a_new_approval_run_and_session(): void
+    {
+        $ticketId = 'AI6-032-CC-LINEAGE';
+        $fixture = $this->runningRun($ticketId);
+        $run = $fixture['run'];
+        $project = $fixture['project'];
+        $oldApprovalId = $run->ticket_approval_id;
+        $orchestrator = $this->app->make(RunOrchestrator::class);
+        $slot = $orchestrator->ensureImplementationSlot($run);
+        $orchestrator->bindImplementationSession($run, $slot->slot_id, 'session-old');
+        $provider = ($run->agent_profile_snapshot ?? [])['implementation']['provider_profile'] ?? null;
+        self::assertIsString($provider);
+        $oldInstructionHash = ($run->instruction_snapshot ?? [])[$provider]['instruction_snapshot_hash'] ?? null;
+        self::assertIsString($oldInstructionHash);
+
+        $service = $this->app->make(ContractChangeService::class);
+        $parked = $service->request($run, $project);
+        self::assertSame(WaitReason::CONTRACT_CHANGE, $parked->wait_reason);
         self::assertNull(RunAgent::query()->where('run_id', $run->id)->where('role', 'implementation')->value('session_id'));
-        self::assertNull($fixture['project']->fresh()->active_run_id);
+
+        $cancelled = $this->controlledReset($fixture, $parked, $service);
+        self::assertSame(RunState::CANCELLED, $cancelled->state);
+        self::assertNull($project->fresh()->active_run_id);
+        // The parked run keeps its own binding: the reset never rewrites it.
+        self::assertSame($oldInstructionHash, ($cancelled->instruction_snapshot ?? [])[$provider]['instruction_snapshot_hash'] ?? null);
+
+        // Only from here on does the released instruction file reach a binding.
+        $updated = "# neue freigegebene Instruktion\n";
+        $this->app->instance(InstructionCandidateSource::class, new class($updated) implements InstructionCandidateSource
+        {
+            public function __construct(private readonly string $content) {}
+
+            public function collect(Project $project, string $providerProfile, array $ticketFiles, RedactionContext $context): array
+            {
+                return [new InstructionCandidate(
+                    'agents_md',
+                    InstructionCandidateOrigin::REPOSITORY,
+                    true,
+                    InstructionFileType::REGULAR,
+                    'AGENTS.md',
+                    str_repeat('b', 40),
+                    $this->content,
+                )];
+            }
+        });
+        $this->app->forgetInstance(ApprovalSnapshotFactory::class);
+
+        // The control branch carries the ticket back at `todo`; the read-model
+        // refresh replaces the stale projection. This projection row is the one
+        // simulated Git effect — approval, run and sessions below are produced
+        // exclusively by their real services.
+        TicketReadModel::query()->where('project_id', $project->getKey())
+            ->where('relative_path', 'tickets/'.$ticketId.'.md')->delete();
+        $second = $this->completedApproval($ticketId, project: $project->refresh(), operator: $fixture['admin']);
+        self::assertNotSame($oldApprovalId, $second['approval']->id);
+        $newRun = $this->finishPreflight($this->bindRunWorkspace($second, $this->finalizedRun($second)));
+
+        self::assertNotSame($run->id, $newRun->id);
+        self::assertSame($second['approval']->id, $newRun->ticket_approval_id);
+        self::assertSame(RunState::RUNNING, $newRun->state);
+        $newProvider = ($newRun->agent_profile_snapshot ?? [])['implementation']['provider_profile'] ?? null;
+        self::assertIsString($newProvider);
+        $newBinding = ($newRun->instruction_snapshot ?? [])[$newProvider] ?? null;
+        self::assertIsArray($newBinding);
+        self::assertNotSame($oldInstructionHash, $newBinding['instruction_snapshot_hash'] ?? null);
+        self::assertSame($updated, $newBinding['entries'][0]['effective_content'] ?? null);
+
+        $newSlot = $orchestrator->ensureImplementationSlot($newRun);
+        $orchestrator->bindImplementationSession($newRun, $newSlot->slot_id, 'session-new');
+        self::assertSame('session-new', $newSlot->fresh()->session_id);
+        self::assertNotSame($slot->slot_id, $newSlot->slot_id);
+        self::assertNull(RunAgent::query()->where('run_id', $run->id)->where('role', 'implementation')->value('session_id'));
+
+        // The consumed approval of the cancelled lineage cannot be started again.
+        try {
+            $this->app->make(ApprovalClaimStarter::class)->start(
+                $fixture['admin'],
+                $project->refresh(),
+                (string) $oldApprovalId,
+                (string) Str::uuid(),
+            );
+            self::fail('The consumed approval of the reset lineage was startable again.');
+        } catch (ControlOperationConflict $conflict) {
+            self::assertStringContainsString('not eligible', $conflict->getMessage());
+        }
     }
 
     public function test_the_cancel_path_ends_the_wait_through_the_abort_path(): void

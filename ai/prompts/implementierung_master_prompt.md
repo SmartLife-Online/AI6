@@ -17,12 +17,12 @@ Sicherheits-, Scope- oder Freigaberegeln nicht überschreiben.
 - Prüfe Ticketstatus, Abhängigkeiten und ein mögliches `ahead-derived`-Rebase-Gate. Ist das Ticket
   nach dem aktuellen Vertrag nicht umsetzungsbereit, ändere nichts und benenne den konkreten
   fehlenden menschlichen oder fachlichen Schritt.
-- Der Abschnitt `files` und der darin abgebildete Ausgangsscope sind die Schreibgrenze. Eine
-  notwendige Erweiterung wird vor der Änderung als Scope-/Contract-Request gemeldet und niemals
-  still vorgenommen.
-- Ändere weder die Ticketdatei noch Ticketstatus, Approval- oder Run-Metadaten. Diese Zustände
-  gehören AI6 beziehungsweise dem ausdrücklich handelnden Menschen, nicht dem
-  Implementierungsagenten.
+- `files` beschreibt den vermuteten Ausgangsscope nach `AGENTS.md` §7. Notwendige zusätzliche
+  Pfade werden mit Begründung im Bericht genannt; sensible Änderungen benötigen die dort
+  verlangte menschliche Freigabe, soweit diese nicht bereits im Auftrag vorliegt.
+- Ändere niemals Ticketstatus, Approval- oder Run-Metadaten. Sonstige Ticketänderungen, auch
+  `files`, Scope-Marker und `## Recorded Scope`, brauchen die ausdrückliche menschliche Freigabe
+  der betreffenden Änderung nach `AGENTS.md` §10. Eine Testbindung allein ist keine Scopeänderung.
 - Bewahre alle vorhandenen Nutzeränderungen. Kein destruktiver Git-Befehl, Commit, Push,
   Deployment oder andere externe Zustandsänderung ohne ausdrücklichen Auftrag.
 - Befolge die Architektur- und Sicherheitsinvarianten aus `AGENTS.md`. Schwäche keine Kontrolle,

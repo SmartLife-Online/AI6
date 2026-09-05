@@ -8,6 +8,7 @@ use App\AI6\Auth\Http\EnsureCompletedAuthentication;
 use App\AI6\Auth\StepUpRequiredException;
 use App\AI6\Git\ControlOperationConflict;
 use App\AI6\Git\ControlOperationRecoveryRequired;
+use App\AI6\Runs\Console\FakeAgentReleaseGateCommand;
 use App\AI6\Shared\Config\ConfigurationException;
 use App\AI6\Shared\Doctor\DoctorCommand;
 use App\AI6\Shared\Http\BlockPersistentLoginCookies;
@@ -49,6 +50,7 @@ return Application::configure(basePath: dirname(__DIR__))
         RuntimeHealthCommand::class,
         RuntimeSelfTestCommand::class,
         ReprojectUnparsedTicketsCommand::class,
+        FakeAgentReleaseGateCommand::class,
     ])
     ->withSingletons([
         $workerHeartbeatService => static fn (): RuntimeHeartbeat => new RuntimeHeartbeat(RuntimeHeartbeat::WORKER_DIRECTORY),

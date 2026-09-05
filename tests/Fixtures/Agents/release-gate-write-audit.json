@@ -1,0 +1,1109 @@
+{
+    "tests/Feature/Agents/ImplementationInstructionTest.php::test_instruction_and_runtime_drift_stop_before_resume#1": {
+        "decision": "external_effect",
+        "reason": "Simulierter Verlust der bereits gebundenen Instruction-/Runtime-Snapshotintegrität. Kein öffentlicher Producer darf diesen ungültigen Zustand erzeugen; die anschließende Voraufruf-/Resume-Sperre ist Prüfgegenstand.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $prepared['run']->id)->update(['instruction_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "29784e6a8803a64e2f2072ce64b59286c37a093eead9598fc5dbe8ffd90ea00f"
+        }
+    },
+    "tests/Feature/Agents/ImplementationInstructionTest.php::test_instruction_and_runtime_drift_stop_before_resume#2": {
+        "decision": "external_effect",
+        "reason": "Simulierter Verlust der bereits gebundenen Instruction-/Runtime-Snapshotintegrität. Kein öffentlicher Producer darf diesen ungültigen Zustand erzeugen; die anschließende Voraufruf-/Resume-Sperre ist Prüfgegenstand.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $prepared['run']->id)->update(['runtime_profile_snapshot' => json_encode($runtime, JSON_THROW_ON_ERROR), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "29784e6a8803a64e2f2072ce64b59286c37a093eead9598fc5dbe8ffd90ea00f"
+        }
+    },
+    "tests/Feature/Agents/ImplementationInstructionTest.php::test_instruction_and_runtime_drift_stop_before_the_provider_turn#1": {
+        "decision": "external_effect",
+        "reason": "Simulierter Verlust der bereits gebundenen Instruction-/Runtime-Snapshotintegrität. Kein öffentlicher Producer darf diesen ungültigen Zustand erzeugen; die anschließende Voraufruf-/Resume-Sperre ist Prüfgegenstand.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $prepared['run']->id)->update(['instruction_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "e374fa24796c31a02ff6c7121fa590fad847c7641a2c2a0514f5161e9a8af689"
+        }
+    },
+    "tests/Feature/Agents/ImplementationInstructionTest.php::test_instruction_and_runtime_drift_stop_before_the_provider_turn#2": {
+        "decision": "external_effect",
+        "reason": "Simulierter Verlust der bereits gebundenen Instruction-/Runtime-Snapshotintegrität. Kein öffentlicher Producer darf diesen ungültigen Zustand erzeugen; die anschließende Voraufruf-/Resume-Sperre ist Prüfgegenstand.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $prepared['run']->id)->update(['runtime_profile_snapshot' => json_encode($runtime, JSON_THROW_ON_ERROR), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "e374fa24796c31a02ff6c7121fa590fad847c7641a2c2a0514f5161e9a8af689"
+        }
+    },
+    "tests/Feature/Git/BuildsManagedControlRuntimeFixture.php::managedFixture#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$project->forceFill(['remote' => 'git@git.fixture.test:acme/control.git', 'host_key_fingerprint' => $fingerprint, 'provisioning_status' => \\App\\AI6\\Projects\\ProjectProvisioningStatus::PROVISIONED, 'deploy_key_reference' => (string) realpath($privateKey), 'public_deploy_key' => \"ssh-ed25519 fixture\\n\"])->save()",
+            "context_sha256": "1a69280bed0959eeadeeac06082cf356be416f191194dad87221687c151ef070"
+        }
+    },
+    "tests/Feature/Git/ContractAmendmentTest.php::amendableRun#1": {
+        "decision": "requires_service",
+        "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
+        "source": {
+            "target": "ticket_read_models",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('ticket_read_models')->where('id', $readModel->id)->update(['control_operation_id' => $run->status_operation_id, 'control_commit' => $run->run_base_sha, 'blob_sha' => hash('sha256', 'blob ' . strlen($base) . \"\\x00\" . $base), 'redacted_content' => $base, 'ticket_contract_sha256' => $projection->contractHash, 'document_state' => 'valid', 'editor_eligible' => true, 'approval_eligible' => true, 'generated_at' => now(), 'updated_at' => now()])",
+            "context_sha256": "7e9ba1509dd6c89b89639b6ec5a9d81f2cd929cd071f86e67e115b7954742e79"
+        }
+    },
+    "tests/Feature/Git/ContractAmendmentTest.php::test_a_terminal_amendment_conflict_parks_a_queued_run#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "Run",
+            "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($fixture['run']->id)->update(['state' => \\App\\AI6\\Runs\\RunState::QUEUED, 'wait_reason' => null, 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "c5e7af8cb139dd54962579d4de26a96e5afbcc619ad591c3533b43897d938c8f"
+        }
+    },
+    "tests/Feature/Git/ContractAmendmentTest.php::test_preflight_accepts_amended_bindings_only_with_a_confirmed_amendment#1": {
+        "decision": "external_effect",
+        "reason": "Gezielte Hashabweichung einer bestehenden Runbindung prüft die Ablehnung einer unbestätigten bzw. falsch gebundenen Änderung; eine gültige Serviceaktion erzeugt diese Inkonsistenz nicht.",
+        "source": {
+            "target": "Run",
+            "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($run->id)->update(['scope_hash' => str_repeat('e', 64), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "ab5ca3a84b18d4cbca750a4c547a23cb1bf8ed9b1eb65d7727876ffca8f9bc98"
+        }
+    },
+    "tests/Feature/Git/ContractAmendmentTest.php::test_preflight_accepts_amended_bindings_only_with_a_confirmed_amendment#2": {
+        "decision": "external_effect",
+        "reason": "Gezielte Hashabweichung einer bestehenden Runbindung prüft die Ablehnung einer unbestätigten bzw. falsch gebundenen Änderung; eine gültige Serviceaktion erzeugt diese Inkonsistenz nicht.",
+        "source": {
+            "target": "Run",
+            "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($amended->id)->update(['config_hash' => str_repeat('c', 64), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "ab5ca3a84b18d4cbca750a4c547a23cb1bf8ed9b1eb65d7727876ffca8f9bc98"
+        }
+    },
+    "tests/Feature/Git/ControlOperationCrashInjectionTest.php::placeAtPhase#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$operation->forceFill(['updated_at' => now()->subMinute()])->save()",
+            "context_sha256": "fa3aa8b3edbb43171447e149b581ef1b928c8be98b9a4b7d718af055b0fafc38"
+        }
+    },
+    "tests/Feature/Git/ControlOperationCrashInjectionTest.php::placeAtPhase#2": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$project->forceFill(['operation_lock_operation_id' => $operation->id, 'operation_lock_attempt_token' => 1, 'operation_lock_lease_expires_at' => now()->subSecond(), 'operation_lock_heartbeat_at' => now()->subMinute()])->save()",
+            "context_sha256": "fa3aa8b3edbb43171447e149b581ef1b928c8be98b9a4b7d718af055b0fafc38"
+        }
+    },
+    "tests/Feature/Git/ControlOperationCrashInjectionTest.php::placeAtPhase#3": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$project->forceFill(['operation_lock_lease_expires_at' => now()->addMinute()])->save()",
+            "context_sha256": "fa3aa8b3edbb43171447e149b581ef1b928c8be98b9a4b7d718af055b0fafc38"
+        }
+    },
+    "tests/Feature/Git/ControlOperationCrashInjectionTest.php::placeAtPhase#4": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$operation->forceFill(['phase' => \\App\\AI6\\Git\\ControlOperationPhase::CLAIMED, 'state' => \\App\\AI6\\Git\\ControlOperationState::RUNNING, 'attempts' => 1, 'current_attempt_token' => 1, 'version' => 6])->save()",
+            "context_sha256": "fa3aa8b3edbb43171447e149b581ef1b928c8be98b9a4b7d718af055b0fafc38"
+        }
+    },
+    "tests/Feature/Git/ControlOperationCrashInjectionTest.php::placeAtPhase#5": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$operation->forceFill(['phase' => $phase, 'state' => \\App\\AI6\\Git\\ControlOperationState::RECOVERY_REQUIRED, 'finding_text' => 'Gebundener Crash-Recoverybefund.', 'finding_hash' => $findingHash, 'recovery_attempt_token' => 1, 'recovery_version' => 7, 'recovery_effect_hash' => $effectHash, 'version' => 7])->save()",
+            "context_sha256": "fa3aa8b3edbb43171447e149b581ef1b928c8be98b9a4b7d718af055b0fafc38"
+        }
+    },
+    "tests/Feature/Git/ControlOperationCrashInjectionTest.php::placeAtPhase#6": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$project->forceFill(['deploy_key_reference' => $active . '/id_ed25519', 'public_deploy_key' => rtrim((string) file_get_contents($active . '/id_ed25519.pub')) . \"\\n\", 'provisioning_status' => \\App\\AI6\\Projects\\ProjectProvisioningStatus::PROVISIONED])->save()",
+            "context_sha256": "fa3aa8b3edbb43171447e149b581ef1b928c8be98b9a4b7d718af055b0fafc38"
+        }
+    },
+    "tests/Feature/Git/ControlOperationCrashInjectionTest.php::placeAtPhase#7": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$operation->forceFill(['phase' => $phase, 'state' => $phase === \\App\\AI6\\Git\\ControlOperationPhase::ATTEMPT_COMPLETED ? \\App\\AI6\\Git\\ControlOperationState::COMPLETED : \\App\\AI6\\Git\\ControlOperationState::RUNNING, 'attempts' => 1, 'current_attempt_token' => 1, 'effect_attempt_token' => in_array($phase, [\\App\\AI6\\Git\\ControlOperationPhase::LAUNCH_INTENT, \\App\\AI6\\Git\\ControlOperationPhase::PROCESS_STARTED, \\App\\AI6\\Git\\ControlOperationPhase::KEY_GENERATED, \\App\\AI6\\Git\\ControlOperationPhase::KEY_ACTIVATED, \\App\\AI6\\Git\\ControlOperationPhase::PROVISIONING_FINALIZED, \\App\\AI6\\Git\\ControlOperationPhase::ATTEMPT_COMPLETED], true) ? 1 : null, 'launch_argument_hash' => in_array($phase, [\\App\\AI6\\Git\\ControlOperationPhase::QUEUED, \\App\\AI6\\Git\\ControlOperationPhase::CLAIMED], true) ? null : $launchHash, 'process_id' => $phase === \\App\\AI6\\Git\\ControlOperationPhase::PROCESS_STARTED ? 1234 : null, 'process_started_at' => $phase === \\App\\AI6\\Git\\ControlOperationPhase::PROCESS_STARTED ? now() : null, 'key_fingerprint' => $fingerprint, 'completed_at' => $phase === \\App\\AI6\\Git\\ControlOperationPhase::ATTEMPT_COMPLETED ? now() : null, 'version' => 4])->save()",
+            "context_sha256": "fa3aa8b3edbb43171447e149b581ef1b928c8be98b9a4b7d718af055b0fafc38"
+        }
+    },
+    "tests/Feature/Git/ControlOperationCrashInjectionTest.php::test_control_branch_redelivery_is_exactly_once_at_every_phase_boundary#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$project->forceFill(['provisioning_status' => \\App\\AI6\\Projects\\ProjectProvisioningStatus::PROVISIONED, 'deploy_key_reference' => '/managed/key', 'public_deploy_key' => \"ssh-ed25519 fixture\\n\", 'control_oid' => str_repeat('a', 64), 'control_binding_version' => 4, 'control_generation' => 7])->save()",
+            "context_sha256": "54570eda0a97fb769ed621bf45d6564f55f5fa11ffb45c7c8ac766abadf8f83e"
+        }
+    },
+    "tests/Feature/Git/ControlOperationCrashInjectionTest.php::test_control_branch_redelivery_is_exactly_once_at_every_phase_boundary#2": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$operation->forceFill(['updated_at' => now()->subSeconds($this->app->make(\\App\\AI6\\Git\\ControlOperationConfiguration::class)->reconcilerSeconds + 1)])->save()",
+            "context_sha256": "54570eda0a97fb769ed621bf45d6564f55f5fa11ffb45c7c8ac766abadf8f83e"
+        }
+    },
+    "tests/Feature/Git/ControlOperationCrashInjectionTest.php::test_reconciler_requeues_the_same_operation_after_a_crash_boundary#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$operation->forceFill(['phase' => $phase, 'state' => \\App\\AI6\\Git\\ControlOperationState::RUNNING, 'attempts' => 1, 'current_attempt_token' => 1, 'effect_attempt_token' => in_array($phase, [\\App\\AI6\\Git\\ControlOperationPhase::KEY_GENERATED, \\App\\AI6\\Git\\ControlOperationPhase::KEY_ACTIVATED], true) ? 1 : null, 'launch_argument_hash' => hash('sha256', 'fixture-arguments'), 'process_id' => $phase === \\App\\AI6\\Git\\ControlOperationPhase::PROCESS_STARTED ? 1234 : null, 'process_started_at' => $phase === \\App\\AI6\\Git\\ControlOperationPhase::PROCESS_STARTED ? now() : null])->save()",
+            "context_sha256": "34a7e144fa3372147e03946d85c104f8428c3239f29f89eaf53929e36b3942f5"
+        }
+    },
+    "tests/Feature/Git/ControlOperationCrashInjectionTest.php::test_reconciler_requeues_the_same_operation_after_a_crash_boundary#2": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$project->forceFill(['operation_lock_operation_id' => null, 'operation_lock_lease_expires_at' => null, 'operation_lock_heartbeat_at' => null])->save()",
+            "context_sha256": "34a7e144fa3372147e03946d85c104f8428c3239f29f89eaf53929e36b3942f5"
+        }
+    },
+    "tests/Feature/Git/ControlOperationReconcilerTest.php::test_exhausted_job_is_detected_and_requeued_visibly#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$operation->forceFill(['updated_at' => now()->subMinute()])->save()",
+            "context_sha256": "88af283e4f06a19d54e7d7dded8daa8996404f4da8a24b0de08be06d9aa6783d"
+        }
+    },
+    "tests/Feature/Git/ControlOperationReconcilerTest.php::test_healthy_queued_job_is_not_duplicated#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$operation->forceFill(['updated_at' => now()->subMinute()])->save()",
+            "context_sha256": "5c303ef39c52a5fd989f63fe9081d72da31f7ae7526bf75c091f47d4a9962227"
+        }
+    },
+    "tests/Feature/Git/ControlOperationReconcilerTest.php::test_missing_job_is_requeued_once#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$operation->forceFill(['updated_at' => now()->subMinute()])->save()",
+            "context_sha256": "d420e0682a2fa4498184f957a7048418040c8823c3087882445097d9b1449a5d"
+        }
+    },
+    "tests/Feature/Git/ControlOperationReconcilerTest.php::test_running_operation_lease_renewed_while_the_batch_is_processed_is_not_requeued#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$project->forceFill(['operation_lock_operation_id' => $operation->id, 'operation_lock_attempt_token' => 1, 'operation_lock_lease_expires_at' => now()->subSecond(), 'operation_lock_heartbeat_at' => now()->subMinute()])->save()",
+            "context_sha256": "35b343054b891c3f782e05b31dacd0b83c16767b8b86f5f75379498569376862"
+        }
+    },
+    "tests/Feature/Git/ControlOperationReconcilerTest.php::test_running_operation_lease_renewed_while_the_batch_is_processed_is_not_requeued#2": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$operation->forceFill(['state' => \\App\\AI6\\Git\\ControlOperationState::RUNNING, 'current_attempt_token' => 1])->save()",
+            "context_sha256": "35b343054b891c3f782e05b31dacd0b83c16767b8b86f5f75379498569376862"
+        }
+    },
+    "tests/Feature/Git/ControlOperationReconcilerTest.php::test_running_operation_lease_renewed_while_the_batch_is_processed_is_not_requeued#3": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$project->forceFill(['operation_lock_lease_expires_at' => now()->addMinute()])->save()",
+            "context_sha256": "35b343054b891c3f782e05b31dacd0b83c16767b8b86f5f75379498569376862"
+        }
+    },
+    "tests/Feature/Git/ControlOperationReconcilerTest.php::test_terminal_operation_with_a_crash_left_project_lease_is_released#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$operation->forceFill(['phase' => \\App\\AI6\\Git\\ControlOperationPhase::ATTEMPT_COMPLETED, 'state' => \\App\\AI6\\Git\\ControlOperationState::FAILED, 'completed_at' => now()])->save()",
+            "context_sha256": "6a8cce2e5b9142afd0dd16af2daa12017a715efdcf30fc269a4e2e6e13625df5"
+        }
+    },
+    "tests/Feature/Git/ControlOperationTestCase.php::configureRealWorkerRuntime#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$project->forceFill(['project_identifier' => $identifier])->save()",
+            "context_sha256": "1da0761174aa7460e5866344561f1100504f07ac4fa552545d473148645010ac"
+        }
+    },
+    "tests/Feature/Git/PublishCandidateTest.php::test_no_change_publication_records_no_fictitious_commit_parent_tuple#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "Run",
+            "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($bound->id)->update(['run_base_sha' => $statusCommit, 'candidate_invalidated_at' => now(), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "f228a47607a907e17d08821f7eb7de20c47490795f59fc3bdba7433fb75288d5"
+        }
+    },
+    "tests/Feature/Git/PublishCandidateTest.php::test_publish_rechecks_the_candidate_binding_before_any_git_effect#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "Run",
+            "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($run->id)->update(['phase' => \\App\\AI6\\Runs\\RunPhase::PUBLISH->value, 'state' => 'running', 'candidate_invalidated_at' => now(), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "9252363f0c658bdd5fb5115460cef37581be67bfd98dc895c1df3231852b0957"
+        }
+    },
+    "tests/Feature/Git/PublishCandidateTest.php::test_publish_rechecks_the_candidate_binding_before_any_git_effect#2": {
+        "decision": "requires_service",
+        "reason": "Schritt über RunOrchestrator planen und beanspruchen; Recovery aus einem echten beanspruchten Schritt mit abgelaufenem Lease statt eines direkt vorgegebenen Zustands nachweisen.",
+        "source": {
+            "target": "ExecutionJob",
+            "code": "\\App\\AI6\\Runs\\Models\\ExecutionJob::query()->create(['run_id' => $run->id, 'step_type' => \\App\\AI6\\Runs\\ExecutionStepType::PUBLISH->value, 'step_number' => 1, 'idempotency_key' => \\App\\AI6\\Runs\\RunOrchestrator::stepKey($run->id, \\App\\AI6\\Runs\\ExecutionStepType::PUBLISH, 1), 'state' => \\App\\AI6\\Runs\\ExecutionJobState::PLANNED, 'attempts' => 0])",
+            "context_sha256": "9252363f0c658bdd5fb5115460cef37581be67bfd98dc895c1df3231852b0957"
+        }
+    },
+    "tests/Feature/Git/PublishCandidateTest.php::test_publish_status_conflict_releases_operation_and_scope_binding_for_reauthorization#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "Run",
+            "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($run->id)->update(['state' => 'waiting', 'wait_reason' => \\App\\AI6\\Runs\\WaitReason::MANUAL_PUSH->value, 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "45ba68b79cdc4a5954229964b7b0c26a245847ea5e02be5dc55a2428645780ad"
+        }
+    },
+    "tests/Feature/Git/PublishCandidateTest.php::test_publish_status_conflict_releases_operation_and_scope_binding_for_reauthorization#2": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "Run",
+            "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($run->id)->update(['state' => 'running', 'wait_reason' => null, 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "45ba68b79cdc4a5954229964b7b0c26a245847ea5e02be5dc55a2428645780ad"
+        }
+    },
+    "tests/Feature/Git/PublishCandidateTest.php::test_publish_status_conflict_releases_operation_and_scope_binding_for_reauthorization#3": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$session->save()",
+            "context_sha256": "45ba68b79cdc4a5954229964b7b0c26a245847ea5e02be5dc55a2428645780ad"
+        }
+    },
+    "tests/Feature/Git/PublishCandidateTest.php::test_publish_status_conflict_releases_operation_and_scope_binding_for_reauthorization#4": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$session->save()",
+            "context_sha256": "45ba68b79cdc4a5954229964b7b0c26a245847ea5e02be5dc55a2428645780ad"
+        }
+    },
+    "tests/Feature/Git/PublishCandidateTest.php::test_the_candidate_is_reconstructed_on_the_new_run_base_without_rebasing_the_run_branch#1": {
+        "decision": "not_authoritative",
+        "reason": "Der Write betrifft die Projekt-Control-OID als externe Drift, nicht die acht überwachten Tabellen; die Runbindung bleibt unverändert.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$prepared['run']->project()->update(['control_oid' => $amendedBase])",
+            "context_sha256": "b542f691f4edbfd7f01b351cd39ee7f3de09d88801d8d21b9ff85375b76a5219"
+        }
+    },
+    "tests/Feature/Git/ReportOnlyCompletionExecutorTest.php::publishedImplementationManagedRun#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "Run",
+            "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($run->id)->update(['phase' => \\App\\AI6\\Runs\\RunPhase::PUBLISH->value, 'candidate_tree_sha' => str_repeat('a', 64), 'candidate_diff_hash' => str_repeat('b', 64), 'candidate_base_sha' => $run->run_base_sha, 'candidate_checkpoint_commit_sha' => $run->checkpoint_commit_sha, 'candidate_ticket_contract_sha256' => $approval->ticket_contract_sha256, 'candidate_approval_snapshot_hash' => $snapshot->aggregateHash, 'candidate_evidence_epoch' => $run->evidence_epoch, 'candidate_scope_hash' => $run->effective_scope_hash ?? $run->scope_hash, 'candidate_config_hash' => $run->config_hash, 'candidate_prompt_hash' => $run->prompt_hash, 'candidate_security_policy_hash' => $run->security_policy_hash, 'candidate_bound_at' => now(), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "012aabec5b2ccd48ca4bacdfb0c9a9b8f04fa3227da7141b76bc261c6596a5fd"
+        }
+    },
+    "tests/Feature/Git/TicketMutationExecutorTest.php::test_precommit_recovery_can_be_abandoned_and_releases_the_project_lock#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$operation->forceFill(['phase' => \\App\\AI6\\Git\\ControlOperationPhase::RECOVERY_REQUIRED, 'state' => \\App\\AI6\\Git\\ControlOperationState::RECOVERY_REQUIRED, 'finding_text' => $finding['text'], 'finding_hash' => $finding['hash'], 'recovery_attempt_token' => $fixture['attempt_token'], 'recovery_version' => $recoveryVersion, 'recovery_effect_hash' => $finding['effect_hash'], 'last_error' => 'Recovery vor Persistenz des Mutationscommits.', 'version' => $recoveryVersion])->save()",
+            "context_sha256": "8a9fdeb12ae6718e745fe81ed3bccf400fc1a6c7aa321142a2deb9f217923ac3"
+        }
+    },
+    "tests/Feature/Git/TicketMutationExecutorTest.php::test_published_commit_abandonment_refuses_history_rewrite_and_adoption_moves_forward#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$operation->forceFill(['phase' => \\App\\AI6\\Git\\ControlOperationPhase::RECOVERY_REQUIRED, 'state' => \\App\\AI6\\Git\\ControlOperationState::RECOVERY_REQUIRED, 'finding_text' => $finding['text'], 'finding_hash' => $finding['hash'], 'recovery_attempt_token' => $fixture['attempt_token'], 'recovery_version' => $recoveryVersion, 'recovery_effect_hash' => $finding['effect_hash'], 'last_error' => 'Crash nach bestätigtem Push.', 'version' => $recoveryVersion])->save()",
+            "context_sha256": "e6d236722b2d25d8d2bc8b8ddd1fd06852530dcfd61c9d851c3cefe81d1624f7"
+        }
+    },
+    "tests/Feature/Git/TicketMutationExecutorTest.php::test_ticket_mutation_recovery_decisions_reconcile_only_the_bound_commit#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$operation->forceFill(['phase' => \\App\\AI6\\Git\\ControlOperationPhase::RECOVERY_REQUIRED, 'state' => \\App\\AI6\\Git\\ControlOperationState::RECOVERY_REQUIRED, 'finding_text' => $finding['text'], 'finding_hash' => $finding['hash'], 'recovery_attempt_token' => $attemptToken, 'recovery_version' => $recoveryVersion, 'recovery_effect_hash' => $finding['effect_hash'], 'last_error' => 'Crash nach bestätigtem Push.', 'version' => $recoveryVersion])->save()",
+            "context_sha256": "98a8ed8f09f26f3eab8a7b34ce5ec2d2082c91b3d692f64e5e50d535a9acd466"
+        }
+    },
+    "tests/Feature/HumanLoop/CandidateGateInteractionTest.php::manualGateRequest#1": {
+        "decision": "requires_service",
+        "reason": "Schritt über RunOrchestrator planen und beanspruchen; Recovery aus einem echten beanspruchten Schritt mit abgelaufenem Lease statt eines direkt vorgegebenen Zustands nachweisen.",
+        "source": {
+            "target": "ExecutionJob",
+            "code": "\\App\\AI6\\Runs\\Models\\ExecutionJob::query()->create(['run_id' => $run->id, 'step_type' => \\App\\AI6\\Runs\\ExecutionStepType::FINALIZE->value, 'step_number' => 1, 'idempotency_key' => \\App\\AI6\\Runs\\RunOrchestrator::stepKey($run->id, \\App\\AI6\\Runs\\ExecutionStepType::FINALIZE, 1), 'state' => \\App\\AI6\\Runs\\ExecutionJobState::PLANNED])",
+            "context_sha256": "d58c03e591e1330cfc2b612ed2226fd486063a2c9d5240b157d34786e91e2b82"
+        }
+    },
+    "tests/Feature/HumanLoop/CandidateGateInteractionTest.php::postGateAnswer#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$session->save()",
+            "context_sha256": "a6b28ed9fec74b1de9237700da125c5972a02de353b907f07690182b4a5d6b91"
+        }
+    },
+    "tests/Feature/HumanLoop/CandidateGateInteractionTest.php::test_cancel_resolves_a_manual_gate_wait_without_candidate_binding#1": {
+        "decision": "requires_service",
+        "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
+        "source": {
+            "target": "TicketReadModel",
+            "code": "\\App\\AI6\\Projects\\Models\\TicketReadModel::query()->whereKey($readModel->id)->update(['control_operation_id' => $opened['run']->status_operation_id, 'control_commit' => $opened['project']->control_oid, 'redacted_content' => $inProgress, 'blob_sha' => hash('sha256', 'blob ' . strlen($inProgress) . \"\\x00\" . $inProgress), 'editor_eligible' => true, 'approval_eligible' => true, 'generated_at' => now(), 'updated_at' => now()])",
+            "context_sha256": "06f15908e8fc76c6027fbadacf4fc8485801fe98890f807ed1531d84a227d2f6"
+        }
+    },
+    "tests/Feature/HumanLoop/HumanRequestAnswerTest.php::test_a_changed_candidate_invalidates_the_bound_manual_push_request#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "Run",
+            "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($run->id)->update(['state' => \\App\\AI6\\Runs\\RunState::RUNNING->value, 'phase' => \\App\\AI6\\Runs\\RunPhase::PUBLISH->value, 'candidate_tree_sha' => str_repeat('a', 64), 'candidate_diff_hash' => str_repeat('b', 64), 'candidate_base_sha' => $run->run_base_sha, 'candidate_checkpoint_commit_sha' => $run->checkpoint_commit_sha, 'candidate_ticket_contract_sha256' => $run->ticket_contract_sha256 ?? $approval->ticket_contract_sha256, 'candidate_approval_snapshot_hash' => $approval->approval_snapshot_hash, 'candidate_evidence_epoch' => $run->evidence_epoch, 'candidate_scope_hash' => $run->effective_scope_hash ?? $run->scope_hash, 'candidate_config_hash' => $run->config_hash, 'candidate_prompt_hash' => $run->prompt_hash, 'candidate_security_policy_hash' => $run->security_policy_hash, 'candidate_bound_at' => now(), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "53d1a3ca3f0eed1a03d94c89109259fd436a4f7e9a0bd558c0c814525aa4b53b"
+        }
+    },
+    "tests/Feature/HumanLoop/HumanRequestAnswerTest.php::test_a_changed_candidate_invalidates_the_bound_manual_push_request#2": {
+        "decision": "requires_service",
+        "reason": "Schritt über RunOrchestrator planen und beanspruchen; Recovery aus einem echten beanspruchten Schritt mit abgelaufenem Lease statt eines direkt vorgegebenen Zustands nachweisen.",
+        "source": {
+            "target": "ExecutionJob",
+            "code": "\\App\\AI6\\Runs\\Models\\ExecutionJob::query()->create(['run_id' => $run->id, 'step_type' => \\App\\AI6\\Runs\\ExecutionStepType::PUBLISH->value, 'step_number' => 1, 'idempotency_key' => \\App\\AI6\\Runs\\RunOrchestrator::stepKey($run->id, \\App\\AI6\\Runs\\ExecutionStepType::PUBLISH, 1), 'state' => \\App\\AI6\\Runs\\ExecutionJobState::PLANNED, 'attempts' => 0])",
+            "context_sha256": "53d1a3ca3f0eed1a03d94c89109259fd436a4f7e9a0bd558c0c814525aa4b53b"
+        }
+    },
+    "tests/Feature/HumanLoop/HumanRequestAnswerTest.php::test_a_changed_candidate_invalidates_the_bound_manual_push_request#3": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "Run",
+            "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($run->id)->update(['candidate_invalidated_at' => now(), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "53d1a3ca3f0eed1a03d94c89109259fd436a4f7e9a0bd558c0c814525aa4b53b"
+        }
+    },
+    "tests/Feature/HumanLoop/HumanRequestAnswerTest.php::test_a_running_leased_step_is_parked_and_an_unparkable_step_is_rejected#1": {
+        "decision": "requires_service",
+        "reason": "Schritt über RunOrchestrator planen und beanspruchen; Recovery aus einem echten beanspruchten Schritt mit abgelaufenem Lease statt eines direkt vorgegebenen Zustands nachweisen.",
+        "source": {
+            "target": "ExecutionJob",
+            "code": "\\App\\AI6\\Runs\\Models\\ExecutionJob::query()->where('idempotency_key', $claimed->idempotency_key)->update(['state' => \\App\\AI6\\Runs\\ExecutionJobState::RUNNING, 'lease_owner' => null])",
+            "context_sha256": "2e418990c65e66aeadeed02606b642ed81bfb7fe21304038f69a3c70f48da053"
+        }
+    },
+    "tests/Feature/HumanLoop/HumanRequestAnswerTest.php::test_only_an_approver_can_see_and_resolve_the_bound_manual_push_request#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "Run",
+            "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($run->id)->update(['state' => \\App\\AI6\\Runs\\RunState::RUNNING->value, 'phase' => \\App\\AI6\\Runs\\RunPhase::PUBLISH->value, 'candidate_tree_sha' => str_repeat('a', 64), 'candidate_diff_hash' => str_repeat('b', 64), 'candidate_base_sha' => $run->run_base_sha, 'candidate_checkpoint_commit_sha' => $run->checkpoint_commit_sha, 'candidate_ticket_contract_sha256' => $run->ticket_contract_sha256 ?? $approval->ticket_contract_sha256, 'candidate_approval_snapshot_hash' => $approval->approval_snapshot_hash, 'candidate_evidence_epoch' => $run->evidence_epoch, 'candidate_scope_hash' => $run->effective_scope_hash ?? $run->scope_hash, 'candidate_config_hash' => $run->config_hash, 'candidate_prompt_hash' => $run->prompt_hash, 'candidate_security_policy_hash' => $run->security_policy_hash, 'candidate_bound_at' => now(), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "b9907f9f004a2b633911aec978a2a90197cfebabbcedc745329f762ba1cace54"
+        }
+    },
+    "tests/Feature/HumanLoop/HumanRequestAnswerTest.php::test_only_an_approver_can_see_and_resolve_the_bound_manual_push_request#2": {
+        "decision": "requires_service",
+        "reason": "Schritt über RunOrchestrator planen und beanspruchen; Recovery aus einem echten beanspruchten Schritt mit abgelaufenem Lease statt eines direkt vorgegebenen Zustands nachweisen.",
+        "source": {
+            "target": "ExecutionJob",
+            "code": "\\App\\AI6\\Runs\\Models\\ExecutionJob::query()->create(['run_id' => $run->id, 'step_type' => \\App\\AI6\\Runs\\ExecutionStepType::PUBLISH->value, 'step_number' => 1, 'idempotency_key' => \\App\\AI6\\Runs\\RunOrchestrator::stepKey($run->id, \\App\\AI6\\Runs\\ExecutionStepType::PUBLISH, 1), 'state' => \\App\\AI6\\Runs\\ExecutionJobState::PLANNED, 'attempts' => 0])",
+            "context_sha256": "b9907f9f004a2b633911aec978a2a90197cfebabbcedc745329f762ba1cace54"
+        }
+    },
+    "tests/Feature/HumanLoop/HumanRequestAnswerTest.php::test_only_an_approver_can_see_and_resolve_the_bound_manual_push_request#3": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$session->save()",
+            "context_sha256": "b9907f9f004a2b633911aec978a2a90197cfebabbcedc745329f762ba1cace54"
+        }
+    },
+    "tests/Feature/HumanLoop/HumanRequestAnswerTest.php::test_only_an_approver_can_see_and_resolve_the_bound_manual_push_request#4": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$session->save()",
+            "context_sha256": "b9907f9f004a2b633911aec978a2a90197cfebabbcedc745329f762ba1cace54"
+        }
+    },
+    "tests/Feature/HumanLoop/HumanRequestAnswerTest.php::test_the_intervention_audit_cannot_be_updated_or_deleted#1": {
+        "decision": "write_under_test",
+        "reason": "Der direkte UPDATE-/DELETE-Versuch selbst ist Prüfgegenstand: der unveränderliche Interventions-Audit muss ihn zurückweisen.",
+        "source": {
+            "target": "interventions",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('interventions')->where('id', $audit->id)->update(['reason' => 'manipuliert'])",
+            "context_sha256": "41439c96be633f30d39f792f1c712756da04aef07b9f3779dca30f8c894d1b30"
+        }
+    },
+    "tests/Feature/HumanLoop/HumanRequestAnswerTest.php::test_the_intervention_audit_cannot_be_updated_or_deleted#2": {
+        "decision": "write_under_test",
+        "reason": "Der direkte UPDATE-/DELETE-Versuch selbst ist Prüfgegenstand: der unveränderliche Interventions-Audit muss ihn zurückweisen.",
+        "source": {
+            "target": "interventions",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('interventions')->where('id', $audit->id)->delete()",
+            "context_sha256": "41439c96be633f30d39f792f1c712756da04aef07b9f3779dca30f8c894d1b30"
+        }
+    },
+    "tests/Feature/Reviews/ReReviewCompletenessTest.php::test_every_status_entry_is_unique_per_slot_and_round_and_immutable#1": {
+        "decision": "write_under_test",
+        "reason": "Der persistierende Mutationsversuch selbst prüft den unveränderlichen Audit-/Reviewdatensatz; er muss zurückgewiesen werden.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$existing->forceFill(['evidence' => 'Nachtraeglich veraendert.'])->save()",
+            "context_sha256": "7e1ba0878355fef4f2c9ab5a8bef73580bf300c8e5e5ca22b694f1168994c0ba"
+        }
+    },
+    "tests/Feature/Reviews/ReviewRoundTest.php::test_missing_approval_reviewers_keep_their_typed_failure_code#1": {
+        "decision": "external_effect",
+        "reason": "Gezielte Korruption einer zuvor gültigen Snapshotbindung für den Fail-closed-Nachweis; es existiert kein erlaubter Producer für diese ungültige Snapshotform.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$prepared['run']->forceFill(['agent_profile_snapshot' => $snapshot, 'version' => $prepared['run']->version + 1])->save()",
+            "context_sha256": "c08459ec0853d7f785b446f6231316ea0b30946bcb05ab1a96452aa6f811bbe3"
+        }
+    },
+    "tests/Feature/Runs/BuildsFinalizedRunFixture.php::completedApproval#1": {
+        "decision": "requires_service",
+        "reason": "Approval- und Queuezustand über die vorhandene Approval-/TicketMutationExecutor-Saga erzeugen; deren Abschluss wird hier noch direkt vorgegeben.",
+        "source": {
+            "target": "TicketApproval",
+            "code": "\\App\\AI6\\Runs\\Models\\TicketApproval::query()->whereKey($operationId)->update(['approved_ticket_blob_sha' => $readyBlob, 'approved_control_sha' => $project->control_oid, 'intended_commit_sha' => $project->control_oid, 'saga_phase' => 'complete', 'queue_state' => 'available', 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "7a1d32115dd0361df5d192d283e730cedf9608b829807d4032e5ab385f9a8a06"
+        }
+    },
+    "tests/Feature/Runs/BuildsFinalizedRunFixture.php::completedApproval#2": {
+        "decision": "requires_service",
+        "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
+        "source": {
+            "target": "ticket_read_models",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('ticket_read_models')->where('id', $readModel->id)->update(['control_operation_id' => $operation->id, 'blob_sha' => $readyBlob, 'redacted_content' => $ready, 'editor_eligible' => true, 'approval_eligible' => true, 'generated_at' => \\Illuminate\\Support\\Facades\\Date::now(), 'updated_at' => \\Illuminate\\Support\\Facades\\Date::now()])",
+            "context_sha256": "7a1d32115dd0361df5d192d283e730cedf9608b829807d4032e5ab385f9a8a06"
+        }
+    },
+    "tests/Feature/Runs/BuildsFixLoopFixture.php::disposeAsHuman#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$session->save()",
+            "context_sha256": "43a58787cb9bcdc18a40c25c675e72dc872b1cddf0c6b5f8f465ef2822eb851f"
+        }
+    },
+    "tests/Feature/Runs/BuildsImplementationTurnFixture.php::preparedImplementationRun#1": {
+        "decision": "requires_service",
+        "reason": "Approval- und Queuezustand über die vorhandene Approval-/TicketMutationExecutor-Saga erzeugen; deren Abschluss wird hier noch direkt vorgegeben.",
+        "source": {
+            "target": "TicketApproval",
+            "code": "\\App\\AI6\\Runs\\Models\\TicketApproval::query()->whereKey($operationId)->update(['approved_ticket_blob_sha' => $readyBlob, 'approved_control_sha' => $project->control_oid, 'intended_commit_sha' => $project->control_oid, 'saga_phase' => 'complete', 'queue_state' => 'available', 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "dc359b4c19f43d7aea10399d692fe963e9f65eaf634fc040687ab3d8683053fc"
+        }
+    },
+    "tests/Feature/Runs/BuildsImplementationTurnFixture.php::preparedImplementationRun#2": {
+        "decision": "requires_service",
+        "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
+        "source": {
+            "target": "ticket_read_models",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('ticket_read_models')->where('id', $readModel->id)->update(['control_operation_id' => $operation->id, 'blob_sha' => $readyBlob, 'redacted_content' => $ready, 'editor_eligible' => true, 'approval_eligible' => true, 'generated_at' => now(), 'updated_at' => now()])",
+            "context_sha256": "dc359b4c19f43d7aea10399d692fe963e9f65eaf634fc040687ab3d8683053fc"
+        }
+    },
+    "tests/Feature/Runs/BuildsReviewOnlyRunFixture.php::crashedStep#1": {
+        "decision": "requires_service",
+        "reason": "Schritt über RunOrchestrator planen und beanspruchen; Recovery aus einem echten beanspruchten Schritt mit abgelaufenem Lease statt eines direkt vorgegebenen Zustands nachweisen.",
+        "source": {
+            "target": "execution_jobs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('execution_jobs')->where('id', $job->id)->update(['state' => \\App\\AI6\\Runs\\ExecutionJobState::RUNNING->value, 'lease_owner' => 'worker:crashed', 'lease_expires_at' => now()->subMinute(), 'updated_at' => now()])",
+            "context_sha256": "0509f2cd5d844a02b33eb13da4b72f54c6624b6fee2a76ca71139cdf6932f4ba"
+        }
+    },
+    "tests/Feature/Runs/BuildsReviewOnlyRunFixture.php::markTicketInProgress#1": {
+        "decision": "requires_service",
+        "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
+        "source": {
+            "target": "TicketReadModel",
+            "code": "\\App\\AI6\\Projects\\Models\\TicketReadModel::query()->whereKey($model->getKey())->update(['control_operation_id' => $operation->id, 'blob_sha' => hash('sha256', $content), 'redacted_content' => $content, 'generated_at' => now(), 'updated_at' => now()])",
+            "context_sha256": "953f5d3e7c04ed4be9afa54be0d08a59945e3c27144f73fa1eaf90a893ba0de3"
+        }
+    },
+    "tests/Feature/Runs/BuildsReviewOnlyRunFixture.php::withoutBoundChecks#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $run->id)->update(['config_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "f97bc0776c9fe8b20d50e1446ee13a0e70164e1a2ca9f56b412c738b51839848"
+        }
+    },
+    "tests/Feature/Runs/CheckStepTest.php::finalizationJob#1": {
+        "decision": "requires_service",
+        "reason": "Schritt über RunOrchestrator planen und beanspruchen; Recovery aus einem echten beanspruchten Schritt mit abgelaufenem Lease statt eines direkt vorgegebenen Zustands nachweisen.",
+        "source": {
+            "target": "ExecutionJob",
+            "code": "\\App\\AI6\\Runs\\Models\\ExecutionJob::query()->create(['run_id' => $run->id, 'step_type' => \\App\\AI6\\Runs\\ExecutionStepType::FINALIZE->value, 'step_number' => 1, 'idempotency_key' => \\App\\AI6\\Runs\\RunOrchestrator::stepKey($run->id, \\App\\AI6\\Runs\\ExecutionStepType::FINALIZE, 1), 'state' => \\App\\AI6\\Runs\\ExecutionJobState::PLANNED])",
+            "context_sha256": "ea3901787b14dffdd05ca7519ab35438fcc3c69bfc78fff327900eb5911e796e"
+        }
+    },
+    "tests/Feature/Runs/CheckStepTest.php::test_a_malformed_bound_checks_block_fails_the_step_closed#1": {
+        "decision": "external_effect",
+        "reason": "Gezielte Korruption einer zuvor gültigen Snapshotbindung für den Fail-closed-Nachweis; es existiert kein erlaubter Producer für diese ungültige Snapshotform.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $prepared['run']->id)->update(['config_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "95d678b81a834f8116d85c197e76088ac55d77ad581ad37b58dbb1ac6c22a464"
+        }
+    },
+    "tests/Feature/Runs/CheckStepTest.php::test_a_redelivery_after_a_retry_binds_the_live_result_not_the_superseded_one#1": {
+        "decision": "requires_service",
+        "reason": "Schritt über RunOrchestrator planen und beanspruchen; Recovery aus einem echten beanspruchten Schritt mit abgelaufenem Lease statt eines direkt vorgegebenen Zustands nachweisen.",
+        "source": {
+            "target": "ExecutionJob",
+            "code": "\\App\\AI6\\Runs\\Models\\ExecutionJob::query()->whereKey($current->getKey())->update(['state' => \\App\\AI6\\Runs\\ExecutionJobState::PLANNED, 'lease_owner' => null, 'lease_expires_at' => null])",
+            "context_sha256": "acf0ba6f1975ae38914553625bcb99290374667aa33f72034e4d6c3f14c80fa2"
+        }
+    },
+    "tests/Feature/Runs/CheckStepTest.php::test_an_empty_bound_checks_list_finishes_the_step_without_a_check#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $prepared['run']->id)->update(['config_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "20fd29251fadc79e723769f90ca643e5e8a058c16b982a2e8a39ee5118b6dc7a"
+        }
+    },
+    "tests/Feature/Runs/CheckStepTest.php::test_the_same_step_message_twice_produces_exactly_one_result#1": {
+        "decision": "requires_service",
+        "reason": "Schritt über RunOrchestrator planen und beanspruchen; Recovery aus einem echten beanspruchten Schritt mit abgelaufenem Lease statt eines direkt vorgegebenen Zustands nachweisen.",
+        "source": {
+            "target": "ExecutionJob",
+            "code": "\\App\\AI6\\Runs\\Models\\ExecutionJob::query()->whereKey($job->getKey())->update(['state' => \\App\\AI6\\Runs\\ExecutionJobState::PLANNED, 'lease_owner' => null, 'lease_expires_at' => null])",
+            "context_sha256": "701e6160f1a1cdf09eef237f458169ce5d3ebc1fa7633ce92e1f43def3937fd4"
+        }
+    },
+    "tests/Feature/Runs/CheckStepTest.php::test_the_worker_boundary_parks_ticket_drift_without_persisting_gates#1": {
+        "decision": "requires_service",
+        "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
+        "source": {
+            "target": "ticket_read_models",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('ticket_read_models')->where('id', $readModel->id)->update(['control_operation_id' => $prepared['run']->status_operation_id, 'control_commit' => $prepared['run']->run_base_sha, 'blob_sha' => hash('sha256', 'blob ' . strlen($changed) . \"\\x00\" . $changed), 'redacted_content' => $changed, 'ticket_contract_sha256' => $projection->contractHash, 'document_state' => 'valid', 'editor_eligible' => true, 'approval_eligible' => true, 'generated_at' => now(), 'updated_at' => now()])",
+            "context_sha256": "bc7d0688233674dab2497b61bcfa14282e007a8b0e13afd36105f534ad3409d9"
+        }
+    },
+    "tests/Feature/Runs/ContractChangeTest.php::controlledReset#1": {
+        "decision": "requires_service",
+        "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
+        "source": {
+            "target": "ticket_read_models",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('ticket_read_models')->where('id', $readModel->id)->update(['control_operation_id' => $run->status_operation_id, 'control_commit' => $run->run_base_sha, 'blob_sha' => $baseBlob, 'redacted_content' => $base, 'editor_eligible' => true, 'approval_eligible' => true, 'generated_at' => now(), 'updated_at' => now()])",
+            "context_sha256": "9229358694e83b22d434ce39092a5d9043dc714960c8a91602f06f3e3dcf9278"
+        }
+    },
+    "tests/Feature/Runs/ContractChangeTest.php::test_the_reset_lineage_binds_the_changed_instruction_to_a_new_approval_run_and_session#1": {
+        "decision": "requires_service",
+        "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
+        "source": {
+            "target": "TicketReadModel",
+            "code": "\\App\\AI6\\Projects\\Models\\TicketReadModel::query()->where('project_id', $project->getKey())->where('relative_path', 'tickets/' . $ticketId . '.md')->delete()",
+            "context_sha256": "5308a73c7931850a3cff7e8873d453dcc2d2b4952c188f79673e3754c48db776"
+        }
+    },
+    "tests/Feature/Runs/ExecutionJobContractTest.php::expireLease#1": {
+        "decision": "external_effect",
+        "reason": "Ausschließlich Zeitablauf am unveränderten fachlichen Zustand wird nachgestellt; keine Zustands-/Phasen-/Approvalkante wird vorweggenommen.",
+        "source": {
+            "target": "ExecutionJob",
+            "code": "\\App\\AI6\\Runs\\Models\\ExecutionJob::query()->whereKey($job->getKey())->update(['lease_expires_at' => \\Illuminate\\Support\\Facades\\Date::now()->subSecond(), 'updated_at' => \\Illuminate\\Support\\Facades\\Date::now()->subSeconds(3600)])",
+            "context_sha256": "df1974b2b79a92bfaa6a29ac11523f6cad8ec40878cc408390b9d281a9501917"
+        }
+    },
+    "tests/Feature/Runs/ExecutionJobContractTest.php::test_a_step_without_a_registered_handler_is_never_delivered#1": {
+        "decision": "external_effect",
+        "reason": "Ausschließlich Zeitablauf am unveränderten fachlichen Zustand wird nachgestellt; keine Zustands-/Phasen-/Approvalkante wird vorweggenommen.",
+        "source": {
+            "target": "ExecutionJob",
+            "code": "\\App\\AI6\\Runs\\Models\\ExecutionJob::query()->whereKey($implement->getKey())->update(['updated_at' => \\Illuminate\\Support\\Facades\\Date::now()->subSeconds(3600)])",
+            "context_sha256": "3904aca626e210f326057206aeaf8ac23452da715bf822d257d1acec418b3afd"
+        }
+    },
+    "tests/Feature/Runs/ExecutionJobContractTest.php::test_the_unique_index_refuses_a_second_step_with_the_same_key#1": {
+        "decision": "write_under_test",
+        "reason": "Der doppelte INSERT ist der getestete Angriff auf den eindeutigen Schrittindex; der Test erwartet die Datenbankablehnung.",
+        "source": {
+            "target": "ExecutionJob",
+            "code": "\\App\\AI6\\Runs\\Models\\ExecutionJob::query()->create(['run_id' => $run->id, 'step_type' => $planned->step_type, 'step_number' => 2, 'idempotency_key' => $planned->idempotency_key, 'state' => \\App\\AI6\\Runs\\ExecutionJobState::PLANNED])",
+            "context_sha256": "489b3d568cccb2a4bef32a3c4d6f5f96dc0e2e50e4e79709ea0425ac94b0f93d"
+        }
+    },
+    "tests/Feature/Runs/ImplementationTurnTest.php::test_the_bound_prompt_snapshot_is_the_only_prompt_source#1": {
+        "decision": "external_effect",
+        "reason": "Gezielte Korruption einer zuvor gültigen Snapshotbindung für den Fail-closed-Nachweis; es existiert kein erlaubter Producer für diese ungültige Snapshotform.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $other['run']->id)->update(['prompt_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "0e27c47ebe5849cd951b14ea48943505b480e901494d5273c341ff07d3962326"
+        }
+    },
+    "tests/Feature/Runs/ProjectQueueStartFeatureTest.php::test_auto_start_waits_for_active_run_pending_control_sync_and_project_operation_lock#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "Run",
+            "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($completedRun->id)->update(['state' => \\App\\AI6\\Runs\\RunState::COMPLETED->value, 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "1bf299792c9ef7e6ef042da8d27f9924dda3227f5761adac16f23de0021e7eab"
+        }
+    },
+    "tests/Feature/Runs/ProjectQueueStartFeatureTest.php::test_auto_start_waits_for_active_run_pending_control_sync_and_project_operation_lock#2": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "Run",
+            "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($activeRun->id)->update(['state' => \\App\\AI6\\Runs\\RunState::CANCELLED->value, 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "1bf299792c9ef7e6ef042da8d27f9924dda3227f5761adac16f23de0021e7eab"
+        }
+    },
+    "tests/Feature/Runs/ProjectQueueStartFeatureTest.php::test_blocked_head_does_not_prevent_later_independent_run#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "Run",
+            "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($completedRun->id)->update(['state' => \\App\\AI6\\Runs\\RunState::COMPLETED->value, 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "4fb4686b96b1c03dadcc143917557079a7a23af8a01f44a4ea4e2da3e02bd250"
+        }
+    },
+    "tests/Feature/Runs/ProjectQueueStartFeatureTest.php::test_claim_reports_named_project_and_read_model_integrity_conflicts#1": {
+        "decision": "requires_service",
+        "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
+        "source": {
+            "target": "TicketReadModel",
+            "code": "\\App\\AI6\\Projects\\Models\\TicketReadModel::query()->where('project_id', $invalidDocument['project']->id)->where('relative_path', $invalidDocument['approval']->relative_path)->delete()",
+            "context_sha256": "1008cf6acb40e2a7016c92221f9bb4782f1c598f27965dcb329a4166f2bfae52"
+        }
+    },
+    "tests/Feature/Runs/ProjectQueueStartFeatureTest.php::test_claim_reports_named_project_and_read_model_integrity_conflicts#2": {
+        "decision": "requires_service",
+        "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
+        "source": {
+            "target": "TicketReadModel",
+            "code": "\\App\\AI6\\Projects\\Models\\TicketReadModel::query()->where('project_id', $redactedDocument['project']->id)->where('relative_path', $redactedDocument['approval']->relative_path)->delete()",
+            "context_sha256": "1008cf6acb40e2a7016c92221f9bb4782f1c598f27965dcb329a4166f2bfae52"
+        }
+    },
+    "tests/Feature/Runs/ProjectQueueStartFeatureTest.php::test_claim_reports_named_project_and_read_model_integrity_conflicts#3": {
+        "decision": "requires_service",
+        "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
+        "source": {
+            "target": "TicketReadModel",
+            "code": "\\App\\AI6\\Projects\\Models\\TicketReadModel::query()->where('project_id', $inconsistentBlob['project']->id)->where('relative_path', $inconsistentBlob['approval']->relative_path)->delete()",
+            "context_sha256": "1008cf6acb40e2a7016c92221f9bb4782f1c598f27965dcb329a4166f2bfae52"
+        }
+    },
+    "tests/Feature/Runs/ProjectQueueStartFeatureTest.php::test_disabled_auto_start_waits_for_the_manual_route_to_create_the_run#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "Run",
+            "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($completedRun->id)->update(['state' => \\App\\AI6\\Runs\\RunState::COMPLETED->value, 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "56f3d58205c31e92075e4be3458cf0585a9aa378b0e44ad3c55669bf6cb13ebe"
+        }
+    },
+    "tests/Feature/Runs/ProjectQueueStartFeatureTest.php::test_revocation_and_ticket_contract_change_remain_visible_with_named_reasons#1": {
+        "decision": "requires_service",
+        "reason": "Approval- und Queuezustand über die vorhandene Approval-/TicketMutationExecutor-Saga erzeugen; deren Abschluss wird hier noch direkt vorgegeben.",
+        "source": {
+            "target": "ticket_approvals",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('ticket_approvals')->where('id', $revoked['approval']->id)->update(['queue_state' => 'cancelled', 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "8a2698861de3e94c5f0d74112eddf61c30b15458de7907f475cea8b327cb12ef"
+        }
+    },
+    "tests/Feature/Runs/ProjectQueueStartFeatureTest.php::test_revocation_and_ticket_contract_change_remain_visible_with_named_reasons#2": {
+        "decision": "requires_service",
+        "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
+        "source": {
+            "target": "TicketReadModel",
+            "code": "\\App\\AI6\\Projects\\Models\\TicketReadModel::query()->where('project_id', $changed['project']->id)->where('relative_path', $changed['approval']->relative_path)->delete()",
+            "context_sha256": "8a2698861de3e94c5f0d74112eddf61c30b15458de7907f475cea8b327cb12ef"
+        }
+    },
+    "tests/Feature/Runs/ProjectQueueStartFeatureTest.php::test_two_parallel_auto_start_attempts_claim_exactly_one_next_run#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "Run",
+            "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($completedRun->id)->update(['state' => \\App\\AI6\\Runs\\RunState::COMPLETED->value, 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "a96d8512670a627cc82748902cc70df7eb009f3a50363aca7175276d1c99ead0"
+        }
+    },
+    "tests/Feature/Runs/ProjectQueueStartFeatureTest.php::test_unsatisfied_dependency_stays_queued_then_is_claimed_on_fresh_eligibility#1": {
+        "decision": "requires_service",
+        "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
+        "source": {
+            "target": "TicketReadModel",
+            "code": "\\App\\AI6\\Projects\\Models\\TicketReadModel::query()->where('project_id', $fixture['project']->id)->where('relative_path', 'tickets/QUEUE-DEPENDENCY-1.md')->delete()",
+            "context_sha256": "df38fb30a34df9c119ac8f557e34ac84863db44603b57518353f5d8c995924a8"
+        }
+    },
+    "tests/Feature/Runs/PublishCandidateGateTest.php::changeSecurityPolicyBinding#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $run->id)->update(['security_policy_hash' => str_repeat('f', 64), 'candidate_invalidated_at' => now(), 'version' => $run->version + 1])",
+            "context_sha256": "392e4bf326a8903fb3c0010d96f3083969a7e5d52ddf238595769517730f6dd9"
+        }
+    },
+    "tests/Feature/Runs/PublishCandidateGateTest.php::test_a_prospective_candidate_mismatch_stales_evidence_and_reparks_manual_gate#1": {
+        "decision": "requires_service",
+        "reason": "Schritt über RunOrchestrator planen und beanspruchen; Recovery aus einem echten beanspruchten Schritt mit abgelaufenem Lease statt eines direkt vorgegebenen Zustands nachweisen.",
+        "source": {
+            "target": "ExecutionJob",
+            "code": "\\App\\AI6\\Runs\\Models\\ExecutionJob::query()->create(['run_id' => $run->id, 'step_type' => \\App\\AI6\\Runs\\ExecutionStepType::FINALIZE->value, 'step_number' => 1, 'idempotency_key' => \\App\\AI6\\Runs\\RunOrchestrator::stepKey($run->id, \\App\\AI6\\Runs\\ExecutionStepType::FINALIZE, 1), 'state' => \\App\\AI6\\Runs\\ExecutionJobState::PLANNED])",
+            "context_sha256": "1db1c88fbf9ccc60f0b19dd8684941955529a1065fa0eb203aa4b75126c1982a"
+        }
+    },
+    "tests/Feature/Runs/PublishCandidateGateTest.php::test_manual_gate_request_authorizes_one_bound_intervention_and_resumes_the_same_step#1": {
+        "decision": "requires_service",
+        "reason": "Schritt über RunOrchestrator planen und beanspruchen; Recovery aus einem echten beanspruchten Schritt mit abgelaufenem Lease statt eines direkt vorgegebenen Zustands nachweisen.",
+        "source": {
+            "target": "ExecutionJob",
+            "code": "\\App\\AI6\\Runs\\Models\\ExecutionJob::query()->create(['run_id' => $run->id, 'step_type' => \\App\\AI6\\Runs\\ExecutionStepType::FINALIZE->value, 'step_number' => 1, 'idempotency_key' => \\App\\AI6\\Runs\\RunOrchestrator::stepKey($run->id, \\App\\AI6\\Runs\\ExecutionStepType::FINALIZE, 1), 'state' => \\App\\AI6\\Runs\\ExecutionJobState::PLANNED])",
+            "context_sha256": "38b7dd5e10fe8c8b886c5d0a67cea37b9639ab3d21f721d4fbc6162cc3aa6bef"
+        }
+    },
+    "tests/Feature/Runs/QueueSessionIsolationTest.php::test_sequential_queue_claims_materialize_new_implementation_and_review_sessions#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "Run",
+            "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($firstRun->id)->update(['state' => \\App\\AI6\\Runs\\RunState::CANCELLED->value, 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "fd0bb4ba145033b781b2c5228555f273aa6df176b698f1fa21087dbf09e94501"
+        }
+    },
+    "tests/Feature/Runs/ReviewOnlyExecutionTest.php::test_a_blocked_completion_predicate_ends_the_report_step_visibly#1": {
+        "decision": "requires_service",
+        "reason": "Gate aus dem gebundenen Ticket über RunOrchestrator::prepareGates erzeugen; die direkte Anlage umgeht den Producer.",
+        "source": {
+            "target": "RunGate",
+            "code": "\\App\\AI6\\Runs\\Models\\RunGate::query()->create(['id' => (string) \\Illuminate\\Support\\Str::uuid(), 'run_id' => $run->id, 'gate_id' => 'MG-01', 'kind' => \\App\\AI6\\Runs\\GateKind::MANUAL, 'state' => \\App\\AI6\\Runs\\GateState::OPEN, 'blocks_candidate' => true, 'blocks_final_commit' => true, 'blocks_push' => true, 'ticket_contract_sha256' => (string) $run->ticket_contract_sha256])",
+            "context_sha256": "35a9be4a75817f8fb8bba30a1402d3a98c048053fef17f9acbd9d29c45a50ab2"
+        }
+    },
+    "tests/Feature/Runs/ReviewOnlyExecutionTest.php::test_a_cancelled_review_only_run_publishes_no_report#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $run->id)->update(['state' => \\App\\AI6\\Runs\\RunState::CANCELLED->value, 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "3a142852882173431dd01076401deebe451b0bd4c57dae8e286f7bb5b466a8cf"
+        }
+    },
+    "tests/Feature/Runs/ReviewOnlyExecutionTest.php::test_an_exceeded_artifact_limit_parks_the_report_without_persisting_it#1": {
+        "decision": "requires_service",
+        "reason": "Die reguläre Slot-/Limitauswahl vor der Approval binden; ein nachträglicher Snapshotwrite darf die freigegebene Auswahl nicht ersetzen.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $run->id)->update(['agent_profile_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "0eb02d1c7bcbaab6e3b5fb04641bbce3106a0e38d77cdb3cf2bd8015755636dc"
+        }
+    },
+    "tests/Feature/Runs/ReviewOnlyRunContractTest.php::test_completion_predicate_blocks_an_open_gate#1": {
+        "decision": "requires_service",
+        "reason": "Gate aus dem gebundenen Ticket über RunOrchestrator::prepareGates erzeugen; die direkte Anlage umgeht den Producer.",
+        "source": {
+            "target": "RunGate",
+            "code": "\\App\\AI6\\Runs\\Models\\RunGate::query()->create(['id' => (string) \\Illuminate\\Support\\Str::uuid(), 'run_id' => $run->id, 'gate_id' => 'MG-01', 'kind' => \\App\\AI6\\Runs\\GateKind::MANUAL, 'state' => \\App\\AI6\\Runs\\GateState::OPEN, 'blocks_candidate' => true, 'blocks_final_commit' => true, 'blocks_push' => true, 'ticket_contract_sha256' => $fixture['approval']->ticket_contract_sha256])",
+            "context_sha256": "9add79a2d40a47f57a0826296e7dc4b6831cf8dc47890056b1c7608ecae8ed93"
+        }
+    },
+    "tests/Feature/Runs/ReviewOnlyRunContractTest.php::test_completion_rejects_a_missing_current_control_read_model_with_a_named_reason#1": {
+        "decision": "requires_service",
+        "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
+        "source": {
+            "target": "ticket_read_models",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('ticket_read_models')->where('project_id', $run->project_id)->delete()",
+            "context_sha256": "87b6fc56c797b9973616ee13d43421e6bd35749253882f44da98e53656dfc89d"
+        }
+    },
+    "tests/Feature/Runs/ReviewOnlyRunContractTest.php::test_manual_completion_binds_status_sync_before_any_lock_release#1": {
+        "decision": "requires_service",
+        "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
+        "source": {
+            "target": "ticket_read_models",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('ticket_read_models')->where('project_id', $run->project_id)->update(['control_operation_id' => $run->status_operation_id, 'control_commit' => $run->run_base_sha, 'blob_sha' => hash('sha256', 'blob ' . strlen($inProgress) . \"\\x00\" . $inProgress), 'redacted_content' => $inProgress, 'generated_at' => now(), 'updated_at' => now()])",
+            "context_sha256": "16743bf03d57ae8098a1a4e317d901c09dba4d6e951b4a63ea8a366b0edfcadf"
+        }
+    },
+    "tests/Feature/Runs/ReviewOnlyRunContractTest.php::test_panel_offers_the_report_status_conflict_decision_but_not_the_cancellation_one#1": {
+        "decision": "requires_service",
+        "reason": "Die Zustandsvorbereitung ist noch auf den öffentlichen Producer umzustellen; diese Stelle ist keine freigegebene Ausnahme und hält AC-02 offen.",
+        "source": {
+            "target": "human_requests",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('human_requests')->where('id', $reportConflict->id)->update(['bound_agent_slot' => 'implementation-slot', 'bound_step_key' => hash('sha256', $run->id . ':cancellation')])",
+            "context_sha256": "59d144de7dee2b4151ba3e2a9db11bab86fe164ac9e7ac8815192ee7aa19f284"
+        }
+    },
+    "tests/Feature/Runs/ReviewOnlyRunContractTest.php::test_review_only_approval_and_run_bindings_are_immutable#1": {
+        "decision": "write_under_test",
+        "reason": "Der Test erwartet die Datenbankablehnung der nachträglichen Änderung einer unveränderlichen Approval-/Run-Bindung.",
+        "source": {
+            "target": "ticket_approvals",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('ticket_approvals')->where('id', $fixture['approval']->id)->update(['run_type' => 'implementation'])",
+            "context_sha256": "0dd1a699a23c48b7891e51b37bba1eaccada6ea0acd6994599fdcccd04918cd0"
+        }
+    },
+    "tests/Feature/Runs/ReviewOnlyRunContractTest.php::test_review_only_approval_and_run_bindings_are_immutable#2": {
+        "decision": "write_under_test",
+        "reason": "Der Test erwartet die Datenbankablehnung der nachträglichen Änderung einer unveränderlichen Approval-/Run-Bindung.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $run->id)->update(['review_subject_reference' => 'checkpoint:changed'])",
+            "context_sha256": "0dd1a699a23c48b7891e51b37bba1eaccada6ea0acd6994599fdcccd04918cd0"
+        }
+    },
+    "tests/Feature/Runs/ReviewStallResumeTest.php::test_a_mid_round_reviewer_revision_keeps_the_round_complete#1": {
+        "decision": "requires_service",
+        "reason": "Die Zustandsvorbereitung ist noch auf den öffentlichen Producer umzustellen; diese Stelle ist keine freigegebene Ausnahme und hält AC-02 offen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$copy->save()",
+            "context_sha256": "14ad66eaea1437a5f0ad179aa5358444702dd1b1d052c904ebfdbd8310a2ad76"
+        }
+    },
+    "tests/Feature/Runs/RunFinalizationStepTest.php::postSecurityAnswer#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$session->save()",
+            "context_sha256": "8b53bb939d715afbbec9badc2f0a0621e737326e8ea3c24cee825adaeb8cf9ac"
+        }
+    },
+    "tests/Feature/Runs/RunFinalizationStepTest.php::test_control_base_drift_parks_finalization_without_rewriting_run_branch_or_binding_candidate#1": {
+        "decision": "not_authoritative",
+        "reason": "Der Write betrifft die Projekt-Control-OID als externe Drift, nicht die acht überwachten Tabellen; die Runbindung bleibt unverändert.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$run->project()->update(['control_oid' => str_repeat('f', 64)])",
+            "context_sha256": "407f871a4e8bab33e0ca4ea6e395400f98e0087fb75ca2e74df0574e91bbb4e6"
+        }
+    },
+    "tests/Feature/Runs/RunFinalizationStepTest.php::test_security_runtime_limit_parks_under_security_gate_before_resource_limit#1": {
+        "decision": "requires_service",
+        "reason": "Die reguläre Slot-/Limitauswahl vor der Approval binden; ein nachträglicher Snapshotwrite darf die freigegebene Auswahl nicht ersetzen.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $prepared['run']->id)->update(['agent_profile_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR), 'created_at' => now()->subMinutes(2), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "24350dc82deeb04bb8c71c0ea76b229adf4d53407aa207b6d897649c05c6c494"
+        }
+    },
+    "tests/Feature/Runs/RunInterventionLimitTest.php::publishInProgressReadModel#1": {
+        "decision": "requires_service",
+        "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
+        "source": {
+            "target": "TicketReadModel",
+            "code": "\\App\\AI6\\Projects\\Models\\TicketReadModel::query()->whereKey($readModel->id)->update(['control_operation_id' => $run->status_operation_id, 'control_commit' => $project->control_oid, 'blob_sha' => $blob, 'redacted_content' => $content, 'editor_eligible' => true, 'approval_eligible' => true, 'generated_at' => now(), 'updated_at' => now()])",
+            "context_sha256": "0d00fa4cdd127ed2c9f771a6bd963a129f9a529b18118c4be980f54d44982067"
+        }
+    },
+    "tests/Feature/Runs/RunInterventionLimitTest.php::test_base_drift_opens_the_abort_request_and_the_controlled_abort_ends_terminal#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $run->id)->update(['run_base_sha' => str_repeat('9', 64), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "d71092e4b3ea404fb97c7dc3d78c05bc0beacf024281e19099ae78d0f6f037a4"
+        }
+    },
+    "tests/Feature/Runs/RunInterventionLimitTest.php::test_confirmed_branch_publication_forbids_every_generic_cancel_mode#1": {
+        "decision": "requires_service",
+        "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $opened['run']->id)->update(['confirmed_branch_publication_oid' => str_repeat('a', 64), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "0e49993ef285d42c83aa0a4a8aeeb5136f7d436cd7622c1fae912c6ae44c01a4"
+        }
+    },
+    "tests/Feature/Runs/RunInterventionLimitTest.php::test_the_panel_offers_step_up_and_a_block_succeeds_over_the_real_route#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$session->save()",
+            "context_sha256": "5e45076261aa02f1e9482b25972fed5943a035735f4faba8c00fb79301f4d6af"
+        }
+    },
+    "tests/Feature/Runs/RunRetentionQueueRedeliveryTest.php::test_a_redelivered_implementation_job_does_not_resurrect_removed_provider_output#1": {
+        "decision": "external_effect",
+        "reason": "Ausschließlich Zeitablauf am unveränderten fachlichen Zustand wird nachgestellt; keine Zustands-/Phasen-/Approvalkante wird vorweggenommen.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $prepared['run']->id)->update(['created_at' => \\Illuminate\\Support\\Facades\\Date::now()->subMinute(), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => \\Illuminate\\Support\\Facades\\Date::now()])",
+            "context_sha256": "70742117341b15271ca8270ba8c67f87f55c97d9c5ea120833aa9060ee5086df"
+        }
+    },
+    "tests/Feature/Runs/RunRetentionQueueRedeliveryTest.php::test_a_redelivered_implementation_job_does_not_resurrect_removed_provider_output#2": {
+        "decision": "requires_service",
+        "reason": "Schritt über RunOrchestrator planen und beanspruchen; Recovery aus einem echten beanspruchten Schritt mit abgelaufenem Lease statt eines direkt vorgegebenen Zustands nachweisen.",
+        "source": {
+            "target": "ExecutionJob",
+            "code": "\\App\\AI6\\Runs\\Models\\ExecutionJob::query()->whereKey($job->id)->update(['state' => \\App\\AI6\\Runs\\ExecutionJobState::PLANNED->value, 'lease_owner' => null, 'lease_expires_at' => null, 'attempts' => 0])",
+            "context_sha256": "70742117341b15271ca8270ba8c67f87f55c97d9c5ea120833aa9060ee5086df"
+        }
+    },
+    "tests/Feature/Runs/RunRoundLimitGateTest.php::overrideLimits#1": {
+        "decision": "requires_service",
+        "reason": "Die reguläre Slot-/Limitauswahl vor der Approval binden; ein nachträglicher Snapshotwrite darf die freigegebene Auswahl nicht ersetzen.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $run->id)->update(['agent_profile_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "4978922e6eb830caea2861627643eadec8088a44b211b96e48912dd88ac99318"
+        }
+    },
+    "tests/Feature/Runs/RunRuntimeLimitGateTest.php::ageRun#1": {
+        "decision": "external_effect",
+        "reason": "Ausschließlich Zeitablauf am unveränderten fachlichen Zustand wird nachgestellt; keine Zustands-/Phasen-/Approvalkante wird vorweggenommen.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $run->id)->update(['created_at' => now()->subMinutes($minutes), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "d58cf09764d97264e5ab07e33ee9bc1e03c5f68739186b446b941f9835541f89"
+        }
+    },
+    "tests/Feature/Runs/ScopeDecisionTest.php::test_scope_decisions_cannot_be_updated#1": {
+        "decision": "write_under_test",
+        "reason": "Der persistierende Mutationsversuch selbst prüft den unveränderlichen Audit-/Reviewdatensatz; er muss zurückgewiesen werden.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$decision->forceFill(['outcome' => 'rejected'])->save()",
+            "context_sha256": "627a20af8af43aa032619a619566d747ae80167f84b9a6d5c799b68b1156aa6a"
+        }
+    },
+    "tests/Feature/Runs/TicketApprovalQueueTest.php::test_approval_persists_reviewed_binding_and_all_snapshots_before_queueing_effect#1": {
+        "decision": "write_under_test",
+        "reason": "Der Test erwartet die Datenbankablehnung der nachträglichen Änderung einer unveränderlichen Approval-/Run-Bindung.",
+        "source": {
+            "target": "ticket_approvals",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('ticket_approvals')->where('id', $approval->id)->update(['config_hash' => str_repeat('f', 64), 'version' => 2])",
+            "context_sha256": "466f3edc3570a7a4d828c7bb02070151b084f918f79629bb2efc3e2f9dadfd36"
+        }
+    },
+    "tests/Feature/Runs/TicketApprovalQueueTest.php::test_invalid_masked_and_stale_sources_are_rejected_before_any_approval_effect#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$project->delete()",
+            "context_sha256": "ddfe369b535611a48d230f08e8a5b2e87b8172cbc7c6fc9f459a943ad41c6265"
+        }
+    },
+    "tests/Feature/Runs/WaitResolverMatrixTest.php::bindReviewerSnapshot#1": {
+        "decision": "requires_service",
+        "reason": "Die reguläre Slot-/Limitauswahl vor der Approval binden; ein nachträglicher Snapshotwrite darf die freigegebene Auswahl nicht ersetzen.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $run->id)->update(['agent_profile_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
+            "context_sha256": "9d9fde1381c74038a5c32fa654536570f13fd200800a8756bf04402b4fb5dbae"
+        }
+    },
+    "tests/Feature/Tickets/TicketUiTestCase.php::markProjectMovedOn#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$project->forceFill(['control_oid' => str_repeat('f', 64)])->save()",
+            "context_sha256": "83b0708c8380aa67350bd525fc0bb538d9ba02f224917ba55a52e7d7aa1c6f53"
+        }
+    },
+    "tests/Feature/Tickets/TicketUiTestCase.php::provisionedProject#1": {
+        "decision": "not_authoritative",
+        "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$project->forceFill(['provisioning_status' => \\App\\AI6\\Projects\\ProjectProvisioningStatus::PROVISIONED, 'deploy_key_reference' => '/managed/test-key', 'public_deploy_key' => \"ssh-ed25519 fixture\\n\", 'control_oid' => str_repeat('a', 64)])->save()",
+            "context_sha256": "8b716b2bdabfe9eefc280ced3816b98072ca567ce4d56ea54a53f89f87c062de"
+        }
+    },
+    "tests/Feature/Tickets/TicketUiTestCase.php::publishReadModel#1": {
+        "decision": "requires_service",
+        "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
+        "source": {
+            "target": "TicketReadModel",
+            "code": "\\App\\AI6\\Projects\\Models\\TicketReadModel::query()->create($attributes)",
+            "context_sha256": "13feaff0a3513b792664e1c12da68f8cb8ac12f8cf8573d2a83508b16d55a4f7"
+        }
+    },
+    "tests/Unit/Runs/CandidateGateTest.php::test_each_candidate_gate_violation_blocks_individually_and_the_shared_review_evidence_is_reused#1": {
+        "decision": "requires_service",
+        "reason": "Die Zustandsvorbereitung ist noch auf den öffentlichen Producer umzustellen; diese Stelle ist keine freigegebene Ausnahme und hält AC-02 offen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$incomplete->save()",
+            "context_sha256": "d0688507df70daaa31ec200d62c5620e984c94849d652d17b01d49b18b4ca2b1"
+        }
+    },
+    "tests/Unit/Runs/CandidateGateTest.php::test_each_candidate_gate_violation_blocks_individually_and_the_shared_review_evidence_is_reused#2": {
+        "decision": "requires_service",
+        "reason": "Die Zustandsvorbereitung ist noch auf den öffentlichen Producer umzustellen; diese Stelle ist keine freigegebene Ausnahme und hält AC-02 offen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$coverage->save()",
+            "context_sha256": "d0688507df70daaa31ec200d62c5620e984c94849d652d17b01d49b18b4ca2b1"
+        }
+    },
+    "tests/Unit/Runs/CandidateGateTest.php::test_each_candidate_gate_violation_blocks_individually_and_the_shared_review_evidence_is_reused#3": {
+        "decision": "requires_service",
+        "reason": "Die Zustandsvorbereitung ist noch auf den öffentlichen Producer umzustellen; diese Stelle ist keine freigegebene Ausnahme und hält AC-02 offen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$copy->save()",
+            "context_sha256": "d0688507df70daaa31ec200d62c5620e984c94849d652d17b01d49b18b4ca2b1"
+        }
+    },
+    "tests/Unit/Runs/CandidateGateTest.php::test_each_candidate_gate_violation_blocks_individually_and_the_shared_review_evidence_is_reused#4": {
+        "decision": "requires_service",
+        "reason": "Die Zustandsvorbereitung ist noch auf den öffentlichen Producer umzustellen; diese Stelle ist keine freigegebene Ausnahme und hält AC-02 offen.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$criterionCopy->save()",
+            "context_sha256": "d0688507df70daaa31ec200d62c5620e984c94849d652d17b01d49b18b4ca2b1"
+        }
+    },
+    "tests/Unit/Runs/CandidateGateTest.php::test_each_candidate_gate_violation_blocks_individually_and_the_shared_review_evidence_is_reused#5": {
+        "decision": "requires_service",
+        "reason": "Gate aus dem gebundenen Ticket über RunOrchestrator::prepareGates erzeugen; die direkte Anlage umgeht den Producer.",
+        "source": {
+            "target": "RunGate",
+            "code": "\\App\\AI6\\Runs\\Models\\RunGate::query()->create(['id' => (string) \\Illuminate\\Support\\Str::uuid(), 'run_id' => $run->id, 'gate_id' => 'MG-01', 'kind' => \\App\\AI6\\Runs\\GateKind::MANUAL, 'state' => \\App\\AI6\\Runs\\GateState::OPEN, 'blocks_candidate' => true, 'blocks_final_commit' => true, 'blocks_push' => true, 'ticket_contract_sha256' => \\Illuminate\\Support\\Facades\\DB::table('ticket_approvals')->where('id', $run->ticket_approval_id)->value('ticket_contract_sha256')])",
+            "context_sha256": "d0688507df70daaa31ec200d62c5620e984c94849d652d17b01d49b18b4ca2b1"
+        }
+    }
+}

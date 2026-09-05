@@ -434,6 +434,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Runs/CandidateGateDecision.php',
             'app/AI6/Runs/CheckpointDiffRecorder.php',
             'app/AI6/Runs/CompletionReportService.php',
+            'app/AI6/Runs/Console/FakeAgentReleaseGateCommand.php',
             'app/AI6/Runs/ContractChangeService.php',
             'app/AI6/Runs/EffectiveScope.php',
             'app/AI6/Runs/ExecutionJobState.php',

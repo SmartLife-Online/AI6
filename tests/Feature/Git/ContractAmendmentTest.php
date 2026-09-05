@@ -16,7 +16,6 @@ use App\AI6\Git\TicketMutationExecutor;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
-use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\ExecutionStepType;
 use App\AI6\Runs\InstructionCandidateSource;
 use App\AI6\Runs\Models\ExecutionJob;
@@ -249,8 +248,7 @@ final class ContractAmendmentTest extends TicketUiTestCase
         $fixture = $this->amendableRun('AI6-020-AMEND-RUNNING');
         $job = ExecutionJob::query()->where('run_id', $fixture['run']->id)
             ->where('step_type', ExecutionStepType::IMPLEMENT->value)->firstOrFail();
-        self::assertSame(1, ExecutionJob::query()->whereKey($job->getKey())
-            ->update(['state' => ExecutionJobState::RUNNING]));
+        self::assertInstanceOf(ExecutionJob::class, $this->app->make(RunOrchestrator::class)->claimStep($job, 'worker:amendment-conflict'));
 
         $target = $this->amendmentTicketMarkdown($fixture['ticketId'], 'in_progress', ['app/Example.php'], 'Konkurrierendes Ziel.');
         try {
