@@ -355,6 +355,8 @@ final class ExecutionJobContractTest extends TicketUiTestCase
             'missing workspace' => ['workspace', 'workspace_checkpoint_missing', '11'],
             'sandbox roots not isolated' => ['sandbox', 'sandbox_roots_not_isolated', '12'],
             'process policy unavailable' => ['policy', 'process_policy_unavailable', '13'],
+            'output root missing from policy' => ['output-policy', 'process_policy_unavailable', '14'],
+            'input root missing from policy' => ['input-policy', 'process_policy_unavailable', '15'],
         ];
     }
 
@@ -450,6 +452,8 @@ final class ExecutionJobContractTest extends TicketUiTestCase
             'workspace' => null,
             'sandbox' => config()->set('ai6.execution_mailboxes.agent_output_root', config('ai6.execution_mailboxes.agent_root')),
             'policy' => config()->set('ai6.process.policies.agent.working_roots', ['/somewhere/else']),
+            'output-policy' => config()->set('ai6.process.policies.agent.working_roots', [config('ai6.execution_mailboxes.agent_root')]),
+            'input-policy' => config()->set('ai6.process.policies.agent.working_roots', [config('ai6.execution_mailboxes.agent_output_root')]),
             default => self::fail('Unknown scenario '.$scenario),
         };
         foreach ([ProcessPolicyRegistry::class, RunPreflight::class, RunOrchestrator::class] as $rebuilt) {

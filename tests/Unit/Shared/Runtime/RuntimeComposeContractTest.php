@@ -310,6 +310,12 @@ final class RuntimeComposeContractTest extends TestCase
         self::assertNotSame([], $this->allowlistErrors($unknownService));
     }
 
+    public function test_agent_workspace_volume_has_an_explicit_memory_ceiling(): void
+    {
+        $options = explode(',', $this->compose()['volumes']['ai6_agent_outputs']['driver_opts']['o']);
+        self::assertContains('size=1073741824', $options);
+    }
+
     public function test_retention_configuration_reaches_exactly_init_app_worker_and_scheduler(): void
     {
         $services = $this->services();

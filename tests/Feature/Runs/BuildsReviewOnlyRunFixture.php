@@ -260,7 +260,10 @@ trait BuildsReviewOnlyRunFixture
             'ai6.run_artifacts.root' => $this->implementationTemp('artifacts'),
             'ai6.execution_mailboxes.agent_root' => $this->implementationTemp('isolated'),
             'ai6.execution_mailboxes.agent_output_root' => $this->implementationTemp('agent-outputs'),
-            'ai6.process.policies.agent.working_roots' => [$this->implementationTemp('isolated')],
+            'ai6.process.policies.agent.working_roots' => [
+                $this->implementationTemp('isolated'),
+                $this->implementationTemp('agent-outputs'),
+            ],
             // The review-readiness boundary exports and hashes the bound tree
             // through the same check runner seam; only its roots are local.
             'ai6.execution_mailboxes.checker_root' => $this->implementationTemp('checker'),

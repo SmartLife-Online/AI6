@@ -454,8 +454,11 @@ final readonly class FindingVerificationRound
         if (! is_string($baseInput) || $baseInput === '' || ! is_string($baseOutput) || $baseOutput === '') {
             return null;
         }
-        foreach ([$baseInput, $baseOutput] as $base) {
-            if (! is_dir($base) && ! mkdir($base, 0700, true) && ! is_dir($base)) {
+        foreach ([$baseInput => 0750, $baseOutput => 01730] as $base => $mode) {
+            // A concurrent creator owns chmod; only adjust directories we create.
+            if ((! is_dir($base) && (@mkdir($base, $mode, true)
+                ? ! chmod($base, $mode)
+                : ! is_dir($base))) || is_link($base)) {
                 return null;
             }
         }

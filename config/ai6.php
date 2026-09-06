@@ -90,7 +90,10 @@ return [
                 'output_limit_bytes' => env('AI6_AGENT_PROCESS_OUTPUT_LIMIT_BYTES', '10000000'),
                 'allowed_executables' => [PHP_BINARY],
                 'environment_allowlist' => ['PATH', 'HOME', 'XDG_CONFIG_HOME', 'TMPDIR', 'AI6_RUNTIME_PROFILE', 'AI6_AUTH_FILE', 'LC_ALL', 'LANG'],
-                'working_roots' => [env('AI6_AGENT_EXECUTION_ROOT', '/var/lib/ai6/agent-executions')],
+                'working_roots' => [
+                    env('AI6_AGENT_EXECUTION_ROOT', '/var/lib/ai6/agent-executions'),
+                    env('AI6_AGENT_OUTPUT_ROOT', '/var/lib/ai6/agent-outputs'),
+                ],
                 'requires_process_group' => true,
                 'cancel_grace_milliseconds' => env('AI6_AGENT_CANCEL_GRACE_MILLISECONDS', '2000'),
             ],

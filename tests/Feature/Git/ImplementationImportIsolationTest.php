@@ -151,9 +151,9 @@ final class ImplementationImportIsolationTest extends TicketUiTestCase
         ));
         self::assertTrue(chmod($worktree.'/.git/hooks/post-checkout', 0700));
         $hostInstruction = "Nicht freigegebene Host-Instruktion.\n";
-        self::assertNotFalse(file_put_contents($prepared['isolatedRoot'].'/AGENTS.md', $hostInstruction));
-        // Positive control: ordinary repository content does reach the export,
-        // so a `missing` verdict below is a stripped path and not a dead probe.
+        self::assertNotFalse(file_put_contents(config('ai6.execution_mailboxes.agent_output_root').'/AGENTS.md', $hostInstruction));
+        // Unapproved native instructions are omitted from the execution home;
+        // the worker must preserve their repository bytes during patch import.
         self::assertTrue(mkdir($worktree.'/nested', 0700));
         self::assertNotFalse(file_put_contents($worktree.'/nested/AGENTS.md', "Projektinhalt.\n"));
 
@@ -166,7 +166,10 @@ final class ImplementationImportIsolationTest extends TicketUiTestCase
 
         self::assertSame(ExecutionJobState::SUCCEEDED, $job->state, (string) $job->failure_code);
         self::assertFileDoesNotExist($hookMarker);
-        self::assertSame('reachable', $adapter->lastAccessProbes['workspace:nested/AGENTS.md'] ?? null);
+        self::assertSame('reachable', $adapter->lastAccessProbes['workspace:app/Example.php'] ?? null);
+        self::assertSame('missing', $adapter->lastAccessProbes['workspace:nested/AGENTS.md'] ?? null);
+        self::assertSame("Projektinhalt.\n", file_get_contents($worktree.'/nested/AGENTS.md'));
+        self::assertSame("<?php\n\n// fake-agent-change\n", file_get_contents($worktree.'/app/Example.php'));
         foreach (['.git', '.git/refs', '.git/hooks', '.git/commondir', '../.git'] as $path) {
             self::assertSame('missing', $adapter->lastAccessProbes['workspace:'.$path] ?? null, $path);
         }

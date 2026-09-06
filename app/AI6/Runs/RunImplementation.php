@@ -10,9 +10,14 @@ use App\AI6\Agents\AgentResultStatus;
 use App\AI6\Agents\AgentResultValidationError;
 use App\AI6\Agents\AgentResultValidationException;
 use App\AI6\Agents\AgentRole;
+use App\AI6\Agents\CredentialProjection;
+use App\AI6\Agents\CredentialRevisionRegistry;
+use App\AI6\Agents\ExecutionHome;
+use App\AI6\Agents\ExecutionHomeManager;
 use App\AI6\Agents\HumanRequestOption;
 use App\AI6\Agents\HumanRequestProposal;
 use App\AI6\Agents\ImplementationDecision;
+use App\AI6\Agents\InstructionProfileRegistry;
 use App\AI6\Agents\InstructionSnapshot;
 use App\AI6\Agents\InstructionSnapshotEntry;
 use App\AI6\Agents\ProviderRuntimeProfile;
@@ -69,6 +74,9 @@ final readonly class RunImplementation
         private WorktreeGitMetadataPaths $gitMetadataPaths,
         private ReviewResultParser $reviewResults,
         private RunStepConfiguration $stepConfiguration,
+        private ExecutionHomeManager $homes,
+        private InstructionProfileRegistry $instructionProfiles,
+        private CredentialRevisionRegistry $credentialRevisions,
     ) {}
 
     public function execute(ExecutionJob $job, Run $run, string $owner): void
@@ -152,32 +160,47 @@ final readonly class RunImplementation
             return;
         }
 
-        $resolvedRoot = $this->agentWorkingRoot();
-        if ($resolvedRoot === null) {
-            $this->failNamed($job, $run, $owner, 'isolated_export_unavailable', 'Das isolierte Exportziel ist nicht verfügbar.');
-
-            return;
-        }
-        $batch = $resolvedRoot.DIRECTORY_SEPARATOR.bin2hex(random_bytes(8));
-        if (! is_dir($batch) && ! mkdir($batch, 0700) && ! is_dir($batch)) {
-            $this->failNamed($job, $run, $owner, 'isolated_export_unavailable', 'Das isolierte Exportziel ist nicht verfügbar.');
-
-            return;
-        }
-        $resolvedBatch = realpath($batch);
-        if (! is_string($resolvedBatch)) {
-            $this->failNamed($job, $run, $owner, 'isolated_export_unavailable', 'Das isolierte Exportziel ist nicht verfügbar.');
-
-            return;
-        }
-        $isolated = str_replace('\\', '/', $resolvedBatch).'/tree';
+        $home = null;
+        $invocationInput = null;
+        $invocationOutput = null;
+        $completed = false;
         $context = new RedactionContext((string) $run->project_id, $run->id, $stepType->value.'-turn');
 
         try {
-            $this->exporter->export($worktree, $isolated, true);
             $prompt = $promptOverride ?? $this->boundPrompt($run);
             $instruction = $this->boundInstruction($run);
             $runtime = $this->boundRuntime($run);
+            try {
+                [$inputRoot, $outputRoot] = $this->executionRoots();
+                $name = 'implementation-invocation-'.bin2hex(random_bytes(12));
+                $invocationInput = $inputRoot.DIRECTORY_SEPARATOR.$name;
+                $invocationOutput = $outputRoot.DIRECTORY_SEPARATOR.$name;
+                if (! mkdir($invocationInput, 0750) || ! chmod($invocationInput, 0750)
+                    || ! mkdir($invocationOutput, 01730) || ! chmod($invocationOutput, 01730)) {
+                    throw new RuntimeException('The execution invocation directories are unavailable.');
+                }
+                $export = $invocationInput.DIRECTORY_SEPARATOR.'export';
+                $this->exporter->export($worktree, $export);
+                $home = $this->homes->create(
+                    $invocationInput,
+                    $invocationOutput,
+                    $slot->slot_id,
+                    $sessionId,
+                    $export,
+                    $this->instructionProfiles->get($slot->provider_profile),
+                    $instruction,
+                    $runtime,
+                    new CredentialProjection(
+                        $slot->provider_profile,
+                        $this->credentialRevisions->revision($slot->provider_profile),
+                        [],
+                    ),
+                    writableWorkspace: true,
+                );
+            } catch (Throwable $exception) {
+                throw new ImplementationImportException('implementation_home_unavailable', 'Das gebundene Execution-Home ist nicht verfügbar: '.$exception::class.'.');
+            }
+            $isolated = $home->workspace;
             $instructionUpdate = $this->isInstructionUpdate($run, $instruction);
             $agentContext = new AgentResultContext(
                 AgentRole::IMPLEMENTATION,
@@ -197,6 +220,11 @@ final readonly class RunImplementation
             $turnRevision = Intervention::query()->where('bound_step_key', $job->idempotency_key)
                 ->whereIn('chosen_effect', ['retry', 'new_turn', 'switch_profile'])->count();
             for ($providerAttempt = 1; $providerAttempt <= $maximumAttempts; $providerAttempt++) {
+                try {
+                    $this->homes->assertWorkspaceProjection($home);
+                } catch (Throwable) {
+                    throw new ImplementationImportException('implementation_workspace_projection_rejected', 'Die Workspace-Projektion ist vor dem Providerturn nicht unverändert.');
+                }
                 $invocationLimit = $this->limits->consume(
                     $run,
                     ImportLimit::MAX_AGENT_INVOCATIONS,
@@ -251,7 +279,12 @@ final readonly class RunImplementation
             if (! $validated instanceof AgentResult) {
                 throw new ImplementationImportException('provider_result_missing', 'The provider result is unavailable.');
             }
-            $this->handleResult($job, $run, $owner, $slot, $isolated, $bytes, $validated, $agentContext, $context, $instructionUpdate, $stepType);
+            try {
+                $this->homes->restoreWorkspaceProjection($home, $export);
+            } catch (Throwable) {
+                throw new ImplementationImportException('implementation_workspace_projection_rejected', 'Die unveränderliche Workspace-Projektion wurde verändert oder kann nicht für den Import aufgelöst werden.');
+            }
+            $completed = $this->handleResult($job, $run, $owner, $slot, $isolated, $bytes, $validated, $agentContext, $context, $instructionUpdate);
         } catch (ImplementationImportException $exception) {
             $this->failNamed($job, $run, $owner, $exception->reason, $exception->getMessage());
         } catch (HumanRequestRejected $rejected) {
@@ -261,8 +294,18 @@ final readonly class RunImplementation
         } catch (Throwable $exception) {
             $this->failNamed($job, $run, $owner, 'implementation_turn_failed', $exception::class.': '.$exception->getMessage());
         } finally {
-            $this->removeTree($isolated);
-            $this->removeTree(dirname($isolated));
+            if (! $this->destroy($home, $invocationInput, $invocationOutput)) {
+                $completed = false;
+                $this->orchestrator->recordStepEvent($run->id, $job->step_type, ExecutionJobState::FAILED, 'implementation_home_cleanup_failed: Das Execution-Home konnte nicht vollständig entfernt werden.');
+                $this->failNamed($job, $run, $owner, 'implementation_home_cleanup_failed', 'Das Execution-Home konnte nicht vollständig entfernt werden.');
+            }
+        }
+        if ($completed) {
+            try {
+                $this->completeTurn($job, $run, $owner, $stepType);
+            } catch (Throwable $exception) {
+                $this->failNamed($job, $run, $owner, 'implementation_turn_failed', $exception::class.': '.$exception->getMessage());
+            }
         }
     }
 
@@ -277,8 +320,7 @@ final readonly class RunImplementation
         AgentResultContext $agentContext,
         RedactionContext $context,
         bool $instructionUpdate,
-        ExecutionStepType $stepType,
-    ): void {
+    ): bool {
         $run = Run::query()->findOrFail($run->getKey());
         if ($instructionUpdate && $validated->instructionPatch !== null) {
             try {
@@ -286,7 +328,7 @@ final readonly class RunImplementation
             } catch (Throwable $exception) {
                 $this->failNamed($job, $run, $owner, 'instruction_patch_rejected', $exception->getMessage());
 
-                return;
+                return false;
             }
         }
 
@@ -295,7 +337,7 @@ final readonly class RunImplementation
         } catch (RuntimeException $exception) {
             $this->failNamed($job, $run, $owner, $this->importFailureCode($exception), $exception->getMessage());
 
-            return;
+            return false;
         }
         $changes = [...$partition['in'], ...$partition['out']];
         usort($changes, static fn (RunPatchChange $left, RunPatchChange $right): int => strcmp($left->path, $right->path));
@@ -307,7 +349,7 @@ final readonly class RunImplementation
         if ($actualPaths !== $reported) {
             $this->failNamed($job, $run, $owner, 'reported_path_mismatch', 'Gemeldete und tatsächliche Pfade weichen voneinander ab.');
 
-            return;
+            return false;
         }
 
         $actualDiff = $this->serverDiff($changes);
@@ -333,13 +375,13 @@ final readonly class RunImplementation
                 : $exception->reason->value;
             $this->failNamed($job, $run, $owner, $code, 'Das Providerergebnis ist schemaungültig.');
 
-            return;
+            return false;
         }
 
         if ($validated->status === AgentResultStatus::NO_CHANGE_REQUIRED && trim($validated->summary) === '') {
             $this->failNamed($job, $run, $owner, 'no_change_reason_missing', 'no_change_required verlangt eine konkrete Begründung.');
 
-            return;
+            return false;
         }
 
         $artifactCandidates = $this->artifactCandidates($validated, $bytes);
@@ -347,19 +389,19 @@ final readonly class RunImplementation
         if ($limit instanceof ImportLimitResult) {
             $this->openResourceLimit($job, $run, $slot, $limit);
 
-            return;
+            return false;
         }
 
         if ($validated->status === AgentResultStatus::NEEDS_HUMAN) {
             $this->openHumanQuestion($run, $slot, $job, $validated);
 
-            return;
+            return false;
         }
 
         if ($partition['out'] !== []) {
             $resolved = $this->resolveOutOfScopeChanges($job, $run, $owner, $slot, $isolated, $partition['out'], $context);
             if (! $resolved) {
-                return;
+                return false;
             }
             // Approved paths joined the effective scope; recompute the split so
             // they import through the same seam, and only rejected changes stay
@@ -370,7 +412,7 @@ final readonly class RunImplementation
             } catch (RuntimeException $exception) {
                 $this->failNamed($job, $run, $owner, $this->importFailureCode($exception), $exception->getMessage());
 
-                return;
+                return false;
             }
             // The freigegebene change limits are evaluated over the set that is
             // actually imported. Approved or auto-allowed paths only join that
@@ -382,7 +424,7 @@ final readonly class RunImplementation
             if ($limit instanceof ImportLimitResult) {
                 $this->openResourceLimit($job, $run, $slot, $limit);
 
-                return;
+                return false;
             }
         }
 
@@ -393,7 +435,7 @@ final readonly class RunImplementation
             } catch (RuntimeException $exception) {
                 $this->failNamed($job, $run, $owner, $this->importFailureCode($exception), $exception->getMessage());
 
-                return;
+                return false;
             }
         }
 
@@ -407,6 +449,12 @@ final readonly class RunImplementation
 
         $this->persistOutcome($run, $validated, $bytes, $imported, $context);
         $this->reviewResults->persistImplementationStatuses($run, $slot, $job->step_number, $validated, $context);
+
+        return true;
+    }
+
+    private function completeTurn(ExecutionJob $job, Run $run, string $owner, ExecutionStepType $stepType): void
+    {
         $message = $stepType === ExecutionStepType::FIX ? 'Fixturn abgeschlossen.' : 'Implementierung abgeschlossen.';
         if (! $this->orchestrator->applyPreparedStepEffect($run->fresh() ?? $run, $stepType, $job->step_number)) {
             $this->orchestrator->finishStep(
@@ -882,8 +930,9 @@ final readonly class RunImplementation
     private function failNamed(ExecutionJob $job, Run $run, string $owner, string $code, string $message): void
     {
         $redacted = $this->redactor->redact($message, new RedactionContext((string) $run->project_id, $run->id, 'implementation-failure'));
-        $this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, $redacted->text, $code);
-        $this->orchestrator->failRun($run->id);
+        if ($this->orchestrator->finishStep($job, $owner, ExecutionJobState::FAILED, $redacted->text, $code)) {
+            $this->orchestrator->failRun($run->id);
+        }
     }
 
     /** @return array<string, scalar> */
@@ -919,33 +968,85 @@ final readonly class RunImplementation
         return $decoded === $expected;
     }
 
-    private function agentWorkingRoot(): ?string
+    /** @return array{string, string} */
+    private function executionRoots(): array
     {
-        $roots = config('ai6.process.policies.agent.working_roots');
-        $configured = is_array($roots) ? ($roots[0] ?? null) : null;
-        if (! is_string($configured) || $configured === '') {
-            return null;
+        $input = config('ai6.execution_mailboxes.agent_root');
+        $output = config('ai6.execution_mailboxes.agent_output_root');
+        if (! is_string($input) || ! is_string($output) || $input === '' || $output === '') {
+            throw new RuntimeException('The execution roots are not configured.');
         }
-        if (! is_dir($configured) && ! mkdir($configured, 0700, true) && ! is_dir($configured)) {
-            return null;
+        foreach ([$input => 0750, $output => 01730] as $root => $mode) {
+            // A concurrent creator owns chmod; only adjust directories we create.
+            if ((! is_dir($root) && (@mkdir($root, $mode, true)
+                ? ! chmod($root, $mode)
+                : ! is_dir($root))) || is_link($root)) {
+                throw new RuntimeException('An execution root is unavailable.');
+            }
         }
-        $resolved = realpath($configured);
+        $input = realpath($input);
+        $output = realpath($output);
+        if (! is_string($input) || ! is_string($output)) {
+            throw new RuntimeException('An execution root cannot be resolved.');
+        }
+        $inputPrefix = str_replace('\\', '/', $input).'/';
+        $outputPrefix = str_replace('\\', '/', $output).'/';
+        if (str_starts_with($inputPrefix, $outputPrefix) || str_starts_with($outputPrefix, $inputPrefix)) {
+            throw new RuntimeException('The execution roots overlap.');
+        }
 
-        return is_string($resolved) ? $resolved : null;
+        return [$input, $output];
     }
 
-    private function removeTree(string $path): void
+    private function destroy(?ExecutionHome $home, ?string $invocationInput, ?string $invocationOutput): bool
     {
-        if ($path === '' || ! is_dir($path) || is_link($path)) {
-            return;
+        $complete = true;
+        if ($home instanceof ExecutionHome) {
+            try {
+                $this->homes->destroy($home);
+            } catch (Throwable) {
+                $complete = false;
+            }
+            if (! $this->removeTree($home->outputRoot.'-io')) {
+                $complete = false;
+            }
         }
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST,
-        );
-        foreach ($iterator as $entry) {
-            $entry->isDir() ? @rmdir($entry->getPathname()) : @unlink($entry->getPathname());
+        // Removing both invocation roots also covers partial creation, export
+        // staging, and adapter IO left behind before a home could be returned.
+        foreach ([$invocationInput, $invocationOutput] as $root) {
+            if (is_string($root) && ! $this->removeTree($root)) {
+                $complete = false;
+            }
         }
-        @rmdir($path);
+
+        return $complete;
+    }
+
+    private function removeTree(string $path): bool
+    {
+        try {
+            if (is_link($path)) {
+                return unlink($path);
+            }
+            if (! file_exists($path)) {
+                return true;
+            }
+            if (! is_dir($path)) {
+                return chmod($path, 0600) && unlink($path);
+            }
+            if (! chmod($path, 0700)) {
+                return false;
+            }
+            $complete = true;
+            foreach (new \FilesystemIterator($path, \FilesystemIterator::SKIP_DOTS) as $entry) {
+                if (! $this->removeTree($entry->getPathname())) {
+                    $complete = false;
+                }
+            }
+
+            return $complete && rmdir($path);
+        } catch (Throwable) {
+            return false;
+        }
     }
 }

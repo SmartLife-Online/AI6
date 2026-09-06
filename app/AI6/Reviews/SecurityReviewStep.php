@@ -443,8 +443,11 @@ final readonly class SecurityReviewStep
         if (! is_string($input) || ! is_string($output) || $input === '' || $output === '' || $input === $output) {
             throw new ImplementationImportException('security_workspace_unavailable', 'The security execution roots are unavailable.');
         }
-        foreach ([$input, $output] as $root) {
-            if (! is_dir($root) && ! mkdir($root, 0700, true) && ! is_dir($root)) {
+        foreach ([$input => 0750, $output => 01730] as $root => $mode) {
+            // A concurrent creator owns chmod; only adjust directories we create.
+            if ((! is_dir($root) && (@mkdir($root, $mode, true)
+                ? ! chmod($root, $mode)
+                : ! is_dir($root))) || is_link($root)) {
                 throw new ImplementationImportException('security_workspace_unavailable', 'The security execution root cannot be created.');
             }
         }

@@ -27,6 +27,7 @@ final readonly class ExecutionHomeManager
         InstructionSnapshot $instructionSnapshot,
         ProviderRuntimeProfile $runtimeProfile,
         CredentialProjection $credentials,
+        bool $writableWorkspace = false,
     ): ExecutionHome {
         $this->assertId($slotId);
         if ($sessionId !== null) {
@@ -69,7 +70,7 @@ final readonly class ExecutionHomeManager
         $home = new ExecutionHome(
             $root,
             $writableRoot,
-            $root.'/workspace',
+            ($writableWorkspace ? $writableRoot : $root).'/workspace',
             $root.'/home',
             $root.'/instructions',
             $root.'/runtime/profile.json',
@@ -93,8 +94,14 @@ final readonly class ExecutionHomeManager
                     throw new ExecutionHomeException('Isolated writable execution directory permissions could not be applied.');
                 }
             }
-            $this->copyTree($exportedTree, $home->workspace);
+            $projection = $this->copyTree($exportedTree, $home->workspace);
             $this->materializeInstructions($home, $instructionProfile, $instructionSnapshot);
+            foreach ($instructionSnapshot->entries as $entry) {
+                $projection[$entry->repositoryPath] = $entry->contentSha256;
+            }
+            if ($writableWorkspace) {
+                $this->makeWorkspaceWritable($home->workspace, $projection);
+            }
             $this->writeImmutable($home->runtimeConfiguration, $this->canonicalJson->normalizeAndEncode($runtimeProfile->jsonSerialize())."\n");
             foreach ($credentials->files as $target => $source) {
                 $destination = $home->authDirectory.'/'.$target;
@@ -113,7 +120,64 @@ final readonly class ExecutionHomeManager
             $this->cleanupFailedCreation($home, $exception);
         }
 
-        return $home;
+        return new ExecutionHome(
+            $home->root,
+            $home->outputRoot,
+            $home->workspace,
+            $home->home,
+            $home->instructionOverlay,
+            $home->runtimeConfiguration,
+            $home->authDirectory,
+            $home->resultDirectory,
+            $home->artifactDirectory,
+            $home->patchDirectory,
+            $writableWorkspace ? $projection : [],
+        );
+    }
+
+    public function assertWorkspaceProjection(ExecutionHome $home): void
+    {
+        if (is_link($home->workspace) || ! is_dir($home->workspace)) {
+            throw new ExecutionHomeException('The execution workspace is unavailable.');
+        }
+        $entries = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($home->workspace, FilesystemIterator::SKIP_DOTS));
+        foreach ($entries as $entry) {
+            if ($entry->isLink() || ! $entry->isFile()) {
+                throw new ExecutionHomeException('The execution workspace contains a symbolic link or special file.');
+            }
+        }
+        foreach ($home->workspaceProjection as $path => $expectedHash) {
+            $target = $home->workspace.'/'.$path;
+            if ($expectedHash === null) {
+                if (file_exists($target) || is_link($target)) {
+                    throw new ExecutionHomeException('An omitted execution file was changed by the provider.');
+                }
+            } elseif (! is_file($target) || is_link($target) || ! hash_equals($expectedHash, (string) hash_file('sha256', $target))) {
+                throw new ExecutionHomeException('The native instruction snapshot was changed by the provider.');
+            }
+        }
+    }
+
+    /** Restore projection-only differences after the provider exits, before the worker computes its patch. */
+    public function restoreWorkspaceProjection(ExecutionHome $home, string $exportedTree): void
+    {
+        $this->assertWorkspaceProjection($home);
+        foreach ($home->workspaceProjection as $path => $expectedHash) {
+            $target = $home->workspace.'/'.$path;
+            $original = $exportedTree.'/'.$path;
+            // Snapshot bytes may differ from the repository bytes, or be absent
+            // from it. Neither that overlay nor omission is an agent change.
+            if (is_file($original)) {
+                $parent = dirname($target);
+                if ((! is_dir($parent) && ! mkdir($parent, 0770, true))
+                    || (is_file($target) && ! chmod($target, 0660))
+                    || ! copy($original, $target) || ! chmod($target, 0660)) {
+                    throw new ExecutionHomeException('The execution projection could not be restored for import.');
+                }
+            } elseif ($expectedHash !== null && (! chmod($target, 0660) || ! unlink($target))) {
+                throw new ExecutionHomeException('The execution projection could not be removed for import.');
+            }
+        }
     }
 
     public function destroy(ExecutionHome $home): void
@@ -206,8 +270,10 @@ final readonly class ExecutionHomeManager
         }
     }
 
-    private function copyTree(string $source, string $target): void
+    /** @return array<string, null> */
+    private function copyTree(string $source, string $target): array
     {
+        $omitted = [];
         $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($source, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST);
         foreach ($iterator as $entry) {
             if ($entry->isLink()) {
@@ -218,6 +284,10 @@ final readonly class ExecutionHomeManager
             $segments = explode('/', $portable);
             if (array_intersect($segments, ['.git', '.codex', '.claude']) !== []
                 || in_array(basename($portable), ['AGENTS.md', '.mcp.json', 'mcp.json', '.gitconfig', '.git-credentials'], true)) {
+                if ($entry->isFile()) {
+                    $omitted[$portable] = null;
+                }
+
                 continue;
             }
             $destination = $target.DIRECTORY_SEPARATOR.$relative;
@@ -234,6 +304,27 @@ final readonly class ExecutionHomeManager
                     throw new ExecutionHomeException('The exported tree file could not be copied.');
                 }
             }
+        }
+
+        return $omitted;
+    }
+
+    /** @param array<string, string|null> $projection */
+    private function makeWorkspaceWritable(string $root, array $projection): void
+    {
+        $entries = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($entries as $entry) {
+            $relative = str_replace('\\', '/', substr($entry->getPathname(), strlen($root) + 1));
+            $mode = $entry->isDir() ? 0770 : (isset($projection[$relative]) ? 0440 : 0660);
+            if (! chmod($entry->getPathname(), $mode)) {
+                throw new ExecutionHomeException('The writable workspace permissions could not be applied.');
+            }
+        }
+        if (! chmod($root, 0770)) {
+            throw new ExecutionHomeException('The writable workspace root permissions could not be applied.');
         }
     }
 

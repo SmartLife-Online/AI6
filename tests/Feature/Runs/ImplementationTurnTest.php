@@ -33,6 +33,23 @@ final class ImplementationTurnTest extends TicketUiTestCase
 {
     use BuildsImplementationTurnFixture;
 
+    public function test_named_cleanup_failure_preserves_a_parked_step_and_run(): void
+    {
+        Mail::fake();
+        $prepared = $this->preparedImplementationRun('AI6-046-CLEANUP-WAIT', scenario: AgentScenario::HUMAN_REQUEST);
+        $job = $this->executeImplement($prepared['run']);
+        self::assertSame(ExecutionJobState::WAITING, $job->state);
+        $before = $prepared['run']->fresh();
+
+        $failure = new \ReflectionMethod(RunImplementation::class, 'failNamed');
+        $failure->invoke($this->app->make(RunImplementation::class), $job, $before, 'expired-owner', 'implementation_home_cleanup_failed', 'Bereinigung fehlgeschlagen.');
+
+        self::assertSame(ExecutionJobState::WAITING, $job->fresh()->state);
+        self::assertNull($job->fresh()->lease_owner);
+        self::assertSame($before->state, $before->fresh()->state);
+        self::assertSame($before->wait_reason, $before->fresh()->wait_reason);
+    }
+
     /** @return iterable<string, array{AgentScenario}> */
     public static function exactOutcomeScenarios(): iterable
     {

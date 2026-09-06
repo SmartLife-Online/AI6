@@ -4,6 +4,7 @@ namespace App\AI6\Agents;
 
 final readonly class ExecutionHome
 {
+    /** @param array<string, string|null> $workspaceProjection Worker-owned native hashes; null denotes an omitted file. */
     public function __construct(
         public string $root,
         public string $outputRoot,
@@ -15,5 +16,6 @@ final readonly class ExecutionHome
         public string $resultDirectory,
         public string $artifactDirectory,
         public string $patchDirectory,
+        public array $workspaceProjection = [],
     ) {}
 }

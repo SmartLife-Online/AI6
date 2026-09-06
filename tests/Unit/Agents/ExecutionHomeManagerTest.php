@@ -68,6 +68,64 @@ final class ExecutionHomeManagerTest extends TestCase
         self::assertDirectoryDoesNotExist($home->root);
     }
 
+    public function test_writable_workspace_restores_projection_bytes_without_discarding_regular_changes(): void
+    {
+        $manager = $this->manager();
+        [$profile, $snapshot, $runtime] = $this->bindings();
+        mkdir($this->root.'/export/.codex', 0700);
+        file_put_contents($this->root.'/export/.codex/config.toml', 'unapproved');
+        file_put_contents($this->root.'/export/AGENTS.md', 'repository instructions');
+        $home = $manager->create(
+            $this->root.'/inputs', $this->root.'/outputs', 'slot-write', null,
+            $this->root.'/export', $profile, $snapshot, $runtime,
+            new AuthProjection('codex_cli', 'revision-1', []), writableWorkspace: true,
+        );
+
+        try {
+            self::assertSame($home->outputRoot.'/workspace', $home->workspace);
+            self::assertFileDoesNotExist($home->workspace.'/.codex/config.toml');
+            self::assertSame("bound instructions\n", file_get_contents($home->workspace.'/AGENTS.md'));
+            if (DIRECTORY_SEPARATOR === '/') {
+                self::assertSame(0770, fileperms($home->workspace) & 07777);
+                self::assertSame(0660, fileperms($home->workspace.'/source.php') & 07777);
+                self::assertSame(0440, fileperms($home->workspace.'/AGENTS.md') & 07777);
+                self::assertSame(0550, fileperms($home->root) & 07777);
+            }
+            file_put_contents($home->workspace.'/source.php', '<?php // changed');
+            $manager->restoreWorkspaceProjection($home, $this->root.'/export');
+            self::assertSame('<?php // changed', file_get_contents($home->workspace.'/source.php'));
+            self::assertSame('unapproved', file_get_contents($home->workspace.'/.codex/config.toml'));
+            self::assertSame('repository instructions', file_get_contents($home->workspace.'/AGENTS.md'));
+            self::assertSame("bound instructions\n", file_get_contents($home->instructionOverlay.'/AGENTS.md'));
+        } finally {
+            $manager->destroy($home);
+        }
+        self::assertDirectoryDoesNotExist($home->root);
+        self::assertDirectoryDoesNotExist($home->outputRoot);
+    }
+
+    public function test_a_changed_native_snapshot_is_rejected_before_another_turn(): void
+    {
+        $manager = $this->manager();
+        [$profile, $snapshot, $runtime] = $this->bindings();
+        $home = $manager->create(
+            $this->root.'/inputs', $this->root.'/outputs', 'slot-tamper', null,
+            $this->root.'/export', $profile, $snapshot, $runtime,
+            new AuthProjection('codex_cli', 'revision-1', []), writableWorkspace: true,
+        );
+
+        try {
+            $manager->assertWorkspaceProjection($home);
+            chmod($home->workspace.'/AGENTS.md', 0660);
+            file_put_contents($home->workspace.'/AGENTS.md', 'changed by provider');
+            $this->expectException(ExecutionHomeException::class);
+            $this->expectExceptionMessage('The native instruction snapshot was changed by the provider.');
+            $manager->assertWorkspaceProjection($home);
+        } finally {
+            $manager->destroy($home);
+        }
+    }
+
     public function test_auth_revision_and_instruction_patch_scope_fail_closed(): void
     {
         [$profile, $snapshot, $runtime] = $this->bindings();

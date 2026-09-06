@@ -97,7 +97,9 @@ final readonly class RunPreflight
         // an empty environment allowlist or a foreign working root would let the
         // later process start decide what the preflight already promised.
         $policy = $this->processPolicies->get(ProcessPolicyName::AGENT);
-        if ($policy->environmentAllowlist === [] || ! in_array($inputRoot, $policy->workingRoots, true)) {
+        if ($policy->environmentAllowlist === []
+            || ! in_array($inputRoot, $policy->workingRoots, true)
+            || ! in_array($outputRoot, $policy->workingRoots, true)) {
             return 'process_policy_unavailable';
         }
 

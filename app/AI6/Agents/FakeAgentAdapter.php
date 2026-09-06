@@ -382,7 +382,7 @@ if (($request['probe_workspace'] ?? false) === true) {
         '.git', '.git/refs', '.git/hooks', '.git/commondir', '../.git',
         '.codex', '.codex/config.toml', '.codex/plugins/plugin.json', '.codex/skills/SKILL.md',
         '.codex/commands/run.md', '.claude/settings.json', '.mcp.json', 'mcp.json', '.gitconfig',
-        '.git-credentials', 'nested/AGENTS.md',
+        '.git-credentials', 'nested/AGENTS.md', 'app/Example.php',
     ] as $path) {
         $probes['workspace:'.$path] = (@file_exists($tree.'/'.$path) || @is_link($tree.'/'.$path)) ? 'reachable' : 'missing';
     }

@@ -101,7 +101,10 @@ trait BuildsImplementationTurnFixture
             'ai6.run_artifacts.root' => $this->implementationTemp('artifacts'),
             'ai6.execution_mailboxes.agent_root' => $this->implementationTemp('isolated'),
             'ai6.execution_mailboxes.agent_output_root' => $this->implementationTemp('agent-outputs'),
-            'ai6.process.policies.agent.working_roots' => [$this->implementationTemp('isolated')],
+            'ai6.process.policies.agent.working_roots' => [
+                $this->implementationTemp('isolated'),
+                $this->implementationTemp('agent-outputs'),
+            ],
         ]);
         // The console boot of the migrations already constructed every artisan
         // command; the mailbox command of AI6-045 thereby froze the process

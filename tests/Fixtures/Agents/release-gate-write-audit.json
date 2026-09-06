@@ -527,7 +527,7 @@
         "source": {
             "target": "TicketApproval",
             "code": "\\App\\AI6\\Runs\\Models\\TicketApproval::query()->whereKey($operationId)->update(['approved_ticket_blob_sha' => $readyBlob, 'approved_control_sha' => $project->control_oid, 'intended_commit_sha' => $project->control_oid, 'saga_phase' => 'complete', 'queue_state' => 'available', 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
-            "context_sha256": "dc359b4c19f43d7aea10399d692fe963e9f65eaf634fc040687ab3d8683053fc"
+            "context_sha256": "2698f569e1aa99a1bba9e331724ed6e757cf3f3b51994c34720863a4906b59d4"
         }
     },
     "tests/Feature/Runs/BuildsImplementationTurnFixture.php::preparedImplementationRun#2": {
@@ -536,7 +536,7 @@
         "source": {
             "target": "ticket_read_models",
             "code": "\\Illuminate\\Support\\Facades\\DB::table('ticket_read_models')->where('id', $readModel->id)->update(['control_operation_id' => $operation->id, 'blob_sha' => $readyBlob, 'redacted_content' => $ready, 'editor_eligible' => true, 'approval_eligible' => true, 'generated_at' => now(), 'updated_at' => now()])",
-            "context_sha256": "dc359b4c19f43d7aea10399d692fe963e9f65eaf634fc040687ab3d8683053fc"
+            "context_sha256": "2698f569e1aa99a1bba9e331724ed6e757cf3f3b51994c34720863a4906b59d4"
         }
     },
     "tests/Feature/Runs/BuildsReviewOnlyRunFixture.php::crashedStep#1": {

@@ -405,7 +405,7 @@
       "driver_opts": { "type": "tmpfs", "device": "tmpfs", "o": "uid=10001,gid=10001,mode=0750,nosuid,nodev,noexec" }
     },
     "ai6_agent_outputs": {
-      "driver_opts": { "type": "tmpfs", "device": "tmpfs", "o": "uid=10001,gid=10001,mode=1730,nosuid,nodev,noexec" }
+      "driver_opts": { "type": "tmpfs", "device": "tmpfs", "o": "uid=10001,gid=10001,mode=1730,nosuid,nodev,noexec,size=1073741824" }
     },
     "ai6_checker_executions": {
       "driver_opts": { "type": "tmpfs", "device": "tmpfs", "o": "uid=10001,gid=10001,mode=0750,nosuid,nodev,noexec" }
