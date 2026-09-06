@@ -2,7 +2,7 @@
 
 > **Diese Datei ist weder Ticket noch Vertragsdokument.** Die verbindlichen Regeln für Ticketerkennung und Autorität stehen ausschließlich im [Implementierungsplan](../docs/AI6_IMPLEMENTATION_PLAN.md) (`TKT-001`, `TKT-005`, `TKT-010`).
 
-Diese Übersicht fasst den Erzeugungsstand der 51 geplanten AI6-Tickets zusammen. Sie dient der Navigation und darf nicht als Eingabe für Status-, Freigabe-, Scope- oder Ausführungsentscheidungen verwendet werden.
+Diese Übersicht fasst den Erzeugungsstand der 53 geplanten AI6-Tickets zusammen. Sie dient der Navigation und darf nicht als Eingabe für Status-, Freigabe-, Scope- oder Ausführungsentscheidungen verwendet werden.
 
 ## 1. Quellen und Grenzen
 
@@ -19,8 +19,8 @@ Diese README formuliert keine dieser Regeln neu. Bei Änderungen an Plan, Templa
 
 | Dateistand | Bedeutung | Anzahl |
 |---|---|---|
-| **Detailticket** | Reguläre Ticketdatei vorhanden | 43 |
-| **Blueprint** | Noch keine reguläre Ticketdatei vorhanden | 8 |
+| **Detailticket** | Reguläre Ticketdatei vorhanden | 50 |
+| **Blueprint** | Noch keine reguläre Ticketdatei vorhanden | 3 |
 
 `Dateistand` beschreibt ausschließlich, ob eine reguläre Ticketdatei existiert. Er sagt nichts über Gültigkeit, Freigabe oder Umsetzungsbereitschaft aus. Der Bearbeitungsstand eines Tickets steht in `status` der Ticketdatei. Die hier gezeigten `depends_on`-Werte liefern ausschließlich die Abhängigkeitsbedingung — nicht die Startbarkeit: Nach `RUN-008` wird die Eligibility unmittelbar vor jedem Claim und Start vollständig neu bewertet und hängt zusätzlich von gültiger Approval, Git- und Snapshotbindung, Policy, Capabilities, Projektsperre, Runabschluss und Queuezustand ab. Aus einer erfüllten `depends_on`-Liste folgt daher kein startbares Ticket.
 
@@ -30,8 +30,8 @@ Die Werte in den Spalten `Titel`, `Risiko` und `depends_on` sind ausschließlich
 
 | Ableitungsbasis | Tickets |
 |---|---|
-| Gegen den realen Repositoryzustand abgeleitet oder rebased | AI6-001, AI6-002, AI6-003, AI6-004, AI6-005A, AI6-005B, AI6-006A, AI6-006B, AI6-006C, AI6-006D, AI6-006E, AI6-007, AI6-008, AI6-009, AI6-010, AI6-011, AI6-012, AI6-013, AI6-016, AI6-018, AI6-021, AI6-023, AI6-024, AI6-025, AI6-026, AI6-027, AI6-028, AI6-029 |
-| Gegen den erwarteten Zustand nach den Vorgängertickets abgeleitet | AI6-006F, AI6-044, AI6-014, AI6-015, AI6-017, AI6-019, AI6-020, AI6-022, AI6-039, AI6-040, AI6-043, AI6-030, AI6-031, AI6-032 |
+| Gegen den realen Repositoryzustand abgeleitet oder rebased | AI6-001, AI6-002, AI6-003, AI6-004, AI6-005A, AI6-005B, AI6-006A, AI6-006B, AI6-006C, AI6-006D, AI6-006E, AI6-007, AI6-008, AI6-009, AI6-010, AI6-011, AI6-012, AI6-013, AI6-016, AI6-018, AI6-021, AI6-023, AI6-024, AI6-025, AI6-026, AI6-027, AI6-028, AI6-029, AI6-046 |
+| Gegen den erwarteten Zustand nach den Vorgängertickets abgeleitet | AI6-006F, AI6-044, AI6-014, AI6-015, AI6-017, AI6-019, AI6-020, AI6-022, AI6-039, AI6-040, AI6-043, AI6-030, AI6-031, AI6-032, AI6-033, AI6-034, AI6-035, AI6-041, AI6-042, AI6-047 |
 
 `AI6-001` bis `AI6-020` sowie `AI6-044` sind im Repository integriert und menschlich abgenommen. `AI6-002` wurde am 1. August 2026 gegen den realen `AI6-001`-Stand rebased; `AI6-003` wurde am 2. August 2026 nach der menschlichen Abnahme beider Abhängigkeiten gegen den integrierten `AI6-002`-Stand `29d67fa` rebased. `AI6-004` wurde am 3. August 2026 mit ausdrücklicher menschlicher Freigabe gegen den integrierten Stand `c8b99b2` neu abgeleitet. `AI6-005A` wurde am 3. August 2026 mit ausdrücklicher menschlicher Freigabe gegen den integrierten `main`-Stand `38b3c1d` neu abgeleitet; dabei wurde insbesondere das fehlende `config/mail.php` als neuer Pfad berichtigt. `AI6-006A` wurde am 5. August 2026 mit ausdrücklicher menschlicher Freigabe gegen den integrierten M0-Stand `b29d802` rebased; dabei wurden die reale Symfony-Process-Version, die Redaction-Aufrufnaht, Provider, Konfiguration und Containerbaseline verifiziert. `AI6-006B` wurde am 5. August 2026 mit ausdrücklicher menschlicher Freigabe gegen den integrierten Stand `d6e329f` rebased; dabei wurden die realen Projekt-, Policy-, Controller-, Git-Remote-, Pin- und globalen Inventurverträge verifiziert und die notwendigen eng begrenzten Git- und Unit-Testpfade in den Scope aufgenommen. `AI6-006C` wurde am 6. August 2026 auf ausdrücklichen menschlichen Auftrag gegen den integrierten Stand `e7a9059` rebased; dabei wurden Step-up-, Prozess-, Lock-, Git-, Projekt-, Provider-, Scheduler-, Compose- und Init-Nähte verifiziert und die notwendigen Querschnittstests für Inventur, Compose-Allowlist, Init-Skript, reale Compose-Harness und Runtime-Dokumentation in den Scope aufgenommen. Die später menschlich freigegebene Reviewkorrektur nahm zusätzlich den optionalen Lease-Heartbeat-Callback der bestehenden Process-Naht samt vorhandenem Unit-Test sowie `deploy/Caddyfile` für die an ein separates Caddy-/App-Proxynetz gekoppelte Loopback-Normalisierung in den Scope auf. Diese Abgleiche haben den jeweiligen Status nicht verändert; Statusänderungen blieben getrennte menschliche Entscheidungen.
 
@@ -75,9 +75,13 @@ Die M5-Tickets `AI6-027` bis `AI6-032` wurden am 30. August 2026 gegen den integ
 
 `AI6-031` wurde am 2. September 2026 auf ausdrücklichen menschlichen Auftrag gegen den integrierten Stand `ca544be3a1982312c9efba553cc5eb029c49e039` nach den umgesetzten und menschlich abgenommenen `AI6-029` und `AI6-030` rebased. Verifiziert wurden die konkreten Publish-/Statussaga-/Recorded-Scope-, Queue-/Eligibility-/Auto-Start-, Runansichts-, Artefakt-, Redaction-, Security- und Schedulernähte sowie alle `files` und Scope-Marker. Das Rebase-Gate ist geschlossen; der Status `todo` und vorhandene AC-/TC-/MG-/EXT-IDs blieben unverändert.
 
+Die M6-Adaptertickets `AI6-033`, `AI6-034`, `AI6-041` und `AI6-042` wurden am 6. September 2026 gegen den integrierten Stand `2f89d8e` erzeugt; ihre gemeinsamen `depends_on`-Tickets `AI6-011`, `AI6-015`, `AI6-016` und `AI6-032` sind umgesetzt und menschlich abgenommen. Ein am selben Tag menschlich beauftragtes Review hat `AI6-033`, `AI6-034` und `AI6-042` redaktionell überarbeitet und in `docs/AI6_M6_ADAPTER_REVIEW.md` als Entscheidungsantrag festgehalten, dass gemeinsame Voraussetzungen außerhalb der eigenen `depends_on`-Listen offen sind: Der Mailboxprozess der Rolle `agent` konsumiert keine Turnaufträge, der Implementierungsschritt erzeugt kein versiegeltes Execution-Home (`docs/AI6-032_FOLGEAUFTRAG_IMPLEMENTIERUNGSISOLATION.md`), und Sessions-, Nutzungs- sowie Fehlerübergabe sind noch nicht abgegrenzt. `AI6-041` wurde nach diesem Review in derselben überarbeiteten Form erzeugt und teilt diese Voraussetzungen. Eine zweite, ebenfalls menschlich beauftragte Überarbeitung am 6. September 2026 hat alle fünf M6-Entwürfe gekürzt: gleiche Blueprint-Verträge, aber kürzere Kriterien, zusammengeführte Doppelungen, die gemeinsamen Nähte (Turnübergabe, Aliasauflösung, Rückgabe von Antwort und Nutzungswerten, Fehlerzuordnung) als genau einmal zu bauende Voraussetzung statt als Aufgabe jedes Adapters, Nutzungswerte als Metadaten des vorhandenen Providerartefakts statt neuer Tabellen; die Zuordnung alter zu neuen AC-/TC-IDs steht in den `## Notes` der noch unveröffentlichten Entwürfe. Eine dritte Überarbeitung am selben Tag, nach Planrevision V1.7.5, hat die fünf Entwürfe auf ihren eigenen Anteil begrenzt: Die Verbraucherdateien `RunImplementation`, `ReviewRound` und `FindingVerificationRound` samt ihren Tests gehören zu `AI6-047` und stehen nicht mehr im Adapter-Scope, Cleanup-, Limit-, Konfigurations- und Resume-Aufgaben sind auf den Adapteranteil begrenzt, die Codex-Reviewer-Unabhängigkeit hat ihren Ort in `ApprovalSelection`, Grok liest die vollständige Ausgabe nach Prozessende statt eines eigenen Streams, und `ai6:provider` kennt nur `login` und `logout`; AC-, TC- und MG-IDs blieben unverändert. Planrevision V1.7.5 vom 6. September 2026 hat den Entscheidungsantrag angenommen und die Blueprints `AI6-046` (Execution-Home und Änderungsausgang für Implementierungs-/Fixturns) und `AI6-047` (Providerturn-Übergabe in der Agentrolle) vergeben; `AI6-033` und `AI6-034` hängen zusätzlich von beiden ab, `AI6-041` und `AI6-042` von `AI6-047`. Damit sind die vier Adapterentwürfe durch diese menschliche Entscheidung **ahead-derived** im Sinne von Plan §13.6: Ihr `## Context` benennt die noch fehlenden Nähte samt erzeugendem Blueprint, ihre `## Notes` tragen die Rebase-Verpflichtung, und bis zum Rebase nach der Umsetzung von `AI6-046`/`AI6-047` bleiben sie auf `status: todo` und dürfen weder freigegeben noch beansprucht werden. Auf ausdrückliche menschliche Freigabe vom selben Tag wurden die Detailtickets beider neuen Blueprints erzeugt: `AI6-046` vollständig gegen den integrierten Stand `2f89d8e` (`AI6-019` und `AI6-032` sind umgesetzt und abgenommen), `AI6-047` als angeordnete Vorabableitung, weil `AI6-046` noch nicht umgesetzt ist; sein `## Context` benennt die fehlenden Nähte, seine `## Notes` tragen die Rebase-Verpflichtung, und es bleibt bis zum Rebase auf `status: todo`. `AI6-035` wurde am 6. September 2026 auf ausdrückliche menschliche Anordnung vor der Umsetzung von `AI6-033`, `AI6-041` und `AI6-042` erzeugt und ist damit **ahead-derived** im Sinne von Plan §13.6: Sein `## Context` benennt die noch fehlenden Adapter-, Probe- und Konfigurationsnähte samt erzeugendem Ticket, seine `## Notes` tragen die Rebase-Verpflichtung, und seine `existing`-Marker bezeichnen die Runbasis nach dem Landen der Abhängigkeiten; bis zum Rebase bleibt es auf `status: todo` und darf weder freigegeben noch beansprucht werden. `AI6-036`, `AI6-037` und `AI6-038` bleiben Blueprints. Die Entwürfe `AI6-046` und `AI6-047` wurden am selben Tag ebenfalls einmal überarbeitet: `AI6-046` legt die Gruppenrechte des beschreibbaren Workspaces für die spätere Agentrolle fest und begrenzt die Fake-Sonde auf providerspezifische Orte; `AI6-047` benennt den Turnkontext im versiegelten Home, die eine Anpassung des Adaptervertrags (Home, Heartbeat, Antwortbytes mit Nutzungswerten), die Anerkennung des beschreibbaren Workspaces durch die Isolationsprüfung und genau eine workerseitige Staging-Klasse; AC-, TC- und MG-IDs blieben unverändert. Diese Erzeugungen haben keinen Status verändert; Statusänderungen bleiben getrennte menschliche Entscheidungen.
+
+`AI6-046` wurde am 6. September 2026 auf ausdrücklichen menschlichen Auftrag gegen den integrierten Stand `2f89d8e` nach Umsetzung und menschlicher Abnahme von `AI6-019` und `AI6-032` rebased. Das Rebase-Gate ist geschlossen; Status sowie AC-/TC-/MG-/EXT-IDs blieben unverändert.
+
 ## 3. Backlog
 
-Stand der abgeleiteten Ansicht: 22. August 2026, abgeleitet aus Planrevision V1.7.4 und dem vorhandenen Dateibestand. Revision V1.7.4 trennt den rollenrichtigen Checkvollzug als neuen Blueprint `AI6-045` von `AI6-021` ab; sein Detailticket ist inzwischen vorhanden. Mit der Erzeugung der M4-Tickets sind 37 der 51 Blueprints als Detailticket vorhanden.
+Stand der abgeleiteten Ansicht: 6. September 2026, abgeleitet aus Planrevision V1.7.5 und dem vorhandenen Dateibestand. Revision V1.7.4 trennt den rollenrichtigen Checkvollzug als neuen Blueprint `AI6-045` von `AI6-021` ab; sein Detailticket ist inzwischen vorhanden. Revision V1.7.5 stellt den Adaptern die Blueprints `AI6-046` und `AI6-047` voran; ihre Detailtickets sind vorhanden. Mit der Erzeugung der M6-Tickets sind 50 der 53 Blueprints als Detailticket vorhanden.
 
 ### M0 — Fundament und sichere Laufzeit
 
@@ -145,22 +149,24 @@ Stand der abgeleiteten Ansicht: 22. August 2026, abgeleitet aus Planrevision V1.
 
 | ID | Titel | Risiko | Dateistand | depends_on |
 |---|---|---|---|---|
-| AI6-027 | Finalchecks, Publish-Kandidat und deterministische Provenienz | high | Detailticket | AI6-021, AI6-025, AI6-026 |
-| AI6-028 | Optionales LLM-Sicherheitsgate | high | Detailticket | AI6-003, AI6-016, AI6-018, AI6-024, AI6-027 |
-| AI6-029 | Finaler Commit, Ticketstatus, Push, Drift und Cleanup | high | Detailticket | AI6-009, AI6-014, AI6-027, AI6-028 |
-| AI6-030 | Projektqueue und abhängigkeitssicherer Auto-Start | medium | Detailticket | AI6-008, AI6-012, AI6-013, AI6-029 |
-| AI6-031 | Vollständige Runbeobachtung und mobile Bedienung | medium | Detailticket | AI6-008, AI6-018, AI6-024, AI6-026, AI6-029, AI6-030 |
-| AI6-032 | Vollständiger FakeAgent-End-to-End- und Recovery-Test | high | Detailticket | AI6-026, AI6-028, AI6-029, AI6-030, AI6-031 |
+| [AI6-027](./AI6-027.md) | Finalchecks, Publish-Kandidat und deterministische Provenienz | high | Detailticket | AI6-021, AI6-025, AI6-026 |
+| [AI6-028](./AI6-028.md) | Optionales LLM-Sicherheitsgate | high | Detailticket | AI6-003, AI6-016, AI6-018, AI6-024, AI6-027 |
+| [AI6-029](./AI6-029.md) | Finaler Commit, Ticketstatus, Push, Drift und Cleanup | high | Detailticket | AI6-009, AI6-014, AI6-027, AI6-028 |
+| [AI6-030](./AI6-030.md) | Projektqueue und abhängigkeitssicherer Auto-Start | medium | Detailticket | AI6-008, AI6-012, AI6-013, AI6-029 |
+| [AI6-031](./AI6-031.md) | Vollständige Runbeobachtung und mobile Bedienung | medium | Detailticket | AI6-008, AI6-018, AI6-024, AI6-026, AI6-029, AI6-030 |
+| [AI6-032](./AI6-032.md) | Vollständiger FakeAgent-End-to-End- und Recovery-Test | high | Detailticket | AI6-026, AI6-028, AI6-029, AI6-030, AI6-031 |
 
 ### M6 — Echte Provideradapter
 
 | ID | Titel | Risiko | Dateistand | depends_on |
 |---|---|---|---|---|
-| AI6-033 | Codex-CLI-Adapter | high | Blueprint | AI6-011, AI6-015, AI6-016, AI6-032 |
-| AI6-034 | Claude-CLI-Adapter | high | Blueprint | AI6-011, AI6-015, AI6-016, AI6-032 |
-| AI6-035 | Provider-Onboarding, Credential-Setup und Capability-Doctor | high | Blueprint | AI6-003, AI6-005A, AI6-033, AI6-041, AI6-042 |
-| AI6-041 | Grok-CLI-Adapter | high | Blueprint | AI6-011, AI6-015, AI6-016, AI6-032 |
-| AI6-042 | GitHub-Copilot-CLI-Adapter | high | Blueprint | AI6-011, AI6-015, AI6-016, AI6-032 |
+| [AI6-046](./AI6-046.md) | Execution-Home und Änderungsausgang für Implementierungs- und Fixturns | high | Detailticket | AI6-019, AI6-032 |
+| [AI6-047](./AI6-047.md) | Providerturn-Übergabe in der Agentrolle | high | Detailticket | AI6-015, AI6-016, AI6-045, AI6-046 |
+| [AI6-033](./AI6-033.md) | Codex-CLI-Adapter | high | Detailticket | AI6-011, AI6-015, AI6-016, AI6-032, AI6-046, AI6-047 |
+| [AI6-034](./AI6-034.md) | Claude-CLI-Adapter | high | Detailticket | AI6-011, AI6-015, AI6-016, AI6-032, AI6-046, AI6-047 |
+| [AI6-035](./AI6-035.md) | Provider-Onboarding, Credential-Setup und Capability-Doctor | high | Detailticket | AI6-003, AI6-005A, AI6-033, AI6-041, AI6-042 |
+| [AI6-041](./AI6-041.md) | Grok-CLI-Adapter | high | Detailticket | AI6-011, AI6-015, AI6-016, AI6-032, AI6-047 |
+| [AI6-042](./AI6-042.md) | GitHub-Copilot-CLI-Adapter | high | Detailticket | AI6-011, AI6-015, AI6-016, AI6-032, AI6-047 |
 
 ### M7 — Betrieb, Migration und Pilot
 

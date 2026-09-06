@@ -1,7 +1,7 @@
 schema: ai6.ticket-manifest.v1
 source: docs/AI6_IMPLEMENTATION_PLAN.md
-plan_revision: "V1.7.4"
-blueprint_count: 51
+plan_revision: "V1.7.5"
+blueprint_count: 53
 blueprints:
   - id: "AI6-001"
     title: "Laravel-Grundgerüst und Qualitätsbaseline"
@@ -347,13 +347,29 @@ blueprints:
     kind: "chore"
     depends_on: ["AI6-026", "AI6-028", "AI6-029", "AI6-030", "AI6-031"]
     requirement_refs: ["AGT-005", "AGT-009", "GIT-010", "RUN-005", "RUN-006", "RUN-009", "REV-005", "HUM-004", "SEC-008"]
+  - id: "AI6-046"
+    title: "Execution-Home und Änderungsausgang für Implementierungs- und Fixturns"
+    milestone: "M6"
+    initial_status: "todo"
+    risk: "high"
+    kind: "fix"
+    depends_on: ["AI6-019", "AI6-032"]
+    requirement_refs: ["AGT-009", "GIT-010", "RUN-003", "SEC-005"]
+  - id: "AI6-047"
+    title: "Providerturn-Übergabe in der Agentrolle"
+    milestone: "M6"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-015", "AI6-016", "AI6-045", "AI6-046"]
+    requirement_refs: ["AGT-001", "AGT-004", "AGT-006", "AGT-007", "AGT-010", "RUN-003", "SEC-005"]
   - id: "AI6-033"
     title: "Codex-CLI-Adapter"
     milestone: "M6"
     initial_status: "todo"
     risk: "high"
     kind: "feature"
-    depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032"]
+    depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032", "AI6-046", "AI6-047"]
     requirement_refs: ["AGT-001", "AGT-002", "AGT-003", "AGT-004", "AGT-007", "AGT-009", "AGT-010", "GIT-010", "RUN-006", "SEC-005"]
   - id: "AI6-034"
     title: "Claude-CLI-Adapter"
@@ -361,7 +377,7 @@ blueprints:
     initial_status: "todo"
     risk: "high"
     kind: "feature"
-    depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032"]
+    depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032", "AI6-046", "AI6-047"]
     requirement_refs: ["AGT-001", "AGT-002", "AGT-003", "AGT-004", "AGT-007", "AGT-009", "GIT-010", "RUN-006", "SEC-005"]
   - id: "AI6-035"
     title: "Provider-Onboarding, Credential-Setup und Capability-Doctor"
@@ -377,7 +393,7 @@ blueprints:
     initial_status: "todo"
     risk: "high"
     kind: "feature"
-    depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032"]
+    depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032", "AI6-047"]
     requirement_refs: ["AGT-001", "AGT-002", "AGT-003", "AGT-004", "AGT-007", "AGT-009", "AGT-010", "GIT-010", "RUN-006", "SEC-005"]
   - id: "AI6-042"
     title: "GitHub-Copilot-CLI-Adapter"
@@ -385,7 +401,7 @@ blueprints:
     initial_status: "todo"
     risk: "high"
     kind: "feature"
-    depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032"]
+    depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032", "AI6-047"]
     requirement_refs: ["AGT-001", "AGT-002", "AGT-003", "AGT-004", "AGT-007", "AGT-009", "AGT-010", "GIT-010", "RUN-006", "SEC-005"]
   - id: "AI6-036"
     title: "Installation, Backup/Restore und Security-Release-Gate"

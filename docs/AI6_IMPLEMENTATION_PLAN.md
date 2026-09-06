@@ -1,6 +1,8 @@
-# AI6 – Implementierungsplan V1.7.4 – Ticket-Ready, Lean & Secure
+# AI6 – Implementierungsplan V1.7.5 – Ticket-Ready, Lean & Secure
 
-**Stand:** 19. August 2026
+**Stand:** 6. September 2026
+
+**Revision V1.7.5:** Der Backlog wächst von 51 auf 53 Blueprints. Das menschlich beauftragte Review der M6-Adapterentwürfe vom 6. September 2026 (`docs/AI6_M6_ADAPTER_REVIEW.md`) hat zwei Voraussetzungen belegt, die keinem bestehenden Blueprint gehören und die sonst jeder der vier Adapter ein zweites Mal gebaut hätte. Erstens erzeugt der Implementierungsschritt aus `AI6-019` kein Execution-Home: `RunImplementation` übergibt den reinen Export an den Adapter und berechnet den Patch später aus genau diesem Verzeichnis, während der versiegelte Reviewworkspace aus `ExecutionHomeManager` read-only ist; `AI6-032/AC-04` blieb deshalb als deklarierte Lücke offen (`docs/AI6-032_FOLGEAUFTRAG_IMPLEMENTIERUNGSISOLATION.md`). Zweitens verarbeitet die Execution-Mailbox der Rolle `agent` keine Aufträge, sodass ein realer Providerturn heute im Worker starten würde — mit Managed-Clone, Deploy-Keys und Netzzugriff, entgegen der Credentialmatrix in §4.2. Diese Revision vergibt dafür die nächsten nie verwendeten IDs: `AI6-046` gibt Implementierungs- und Fixturns dieselbe serverseitig gebundene Execution-Home-Erzeugung wie Reviewturns samt einem beschreibbaren Änderungsausgang, aus dem der Worker den validierten Patch importiert, und schließt danach die Lücke `AI6-032/AC-04`; `AI6-047` überträgt einen Providerturn nach dem Muster von `AI6-045` über die vorhandene Mailbox in die Agentrolle, löst das Provideralias genau einmal auf einen konkreten Adapter auf und liefert Antwortbytes, Endzustand und gemeldete Nutzungswerte an den Worker zurück, der sie als Providerartefakt mit Metadaten speichert und im Verbraucher als `invalid_json` oder `provider_error` unterscheidet. Beide Blueprints erweitern bestehende Nähte; sie führen keinen zweiten ProcessRunner, keine zweite Mailbox, keinen zweiten Orchestrator, keine Pluginregistry und keine Session-, Turn- oder Nutzungstabelle ein. `AI6-033` und `AI6-034` hängen zusätzlich von `AI6-046` und `AI6-047` ab, `AI6-041` und `AI6-042` von `AI6-047`; ihre Verträge, Ziele und Requirement-Refs bleiben unverändert, und die uncommitteten Entwürfe werden nach der Umsetzung der neuen Abhängigkeiten am realen Stand erneut abgeleitet. `AI6-035` bleibt unverändert. Requirement-Texte, veröffentlichte `AC-`/`TC-`/`MG-`/`EXT-`-IDs und Meilensteinzuschnitte bleiben unverändert; §14.1, §16 und §21 werden nachgezogen, ADR-019 hält die Entscheidung fest.
 
 **Revision V1.7.4:** Der Backlog wächst von 50 auf 51 Blueprints. Die Umsetzung von `AI6-021` hat eine Vertragslücke zwischen der Checkdefinition und ihrem produktiven Vollzug sichtbar gemacht: Ein Checkprofil führt den Code des verwalteten Projekts aus, also untrusted Repositoryinhalt nach `SEC-007`, und die Zusagen aus `AGT-007`, `GIT-010` und `SEC-005` bestehen ausschließlich in der Checkerrolle — nur dort gelten fehlende Provider-, Git-, SMTP- und Datenbankcredentials, das Fehlen des Managed-Clone-Volumes, `network_mode: none` und die vollständige Isolationsprüfung. Der Worker dagegen trägt den Managed-Clone samt Deploy-Keys und normalen Netzzugriff; ein empirischer Nachweis am 19. August 2026 zeigte, dass ein dort ausgeführter Checkprozess eine beliebige absolute Datei außerhalb des exportierten Baums liest. Der Plan hielt bisher nicht fest, welche Rolle den Checkprozess tatsächlich startet. Diese Revision schließt das in zwei Schritten. Erstens wird der bestehende Blueprint `AI6-021` nach §13.7 gesplittet: Er behält unverändert seinen Vertrag — Profilregistry, Phasen, Runner, Ergebniszustände, Mutations- und Redactiongrenze — und schließt den rollenrichtigen Vollzug ausdrücklich aus; keine seiner Anforderungen, Ziele oder Abhängigkeiten wird umgewidmet. Zweitens erhält der neue Teil die nächste nie vergebene ID `AI6-045`: Der Worker staged den exportierten Baum in das Checker-Volume und schreibt genau einen Auftrag, der Checker konsumiert ihn in seiner eigenen Rolle unter der vollständigen Isolationsprüfung und publiziert das Ergebnis über die vorhandene Ergebnisnaht zurück, und der Checkschritt wird zum wiederaufnehmbaren, heartbeatgebundenen Warteschritt nach `RUN-003`. `AI6-045` entscheidet dabei ausdrücklich die bisher offene Frage, wie ein geprüfter Baum beschreibbar sein kann, obwohl das Eingangsvolumen der Checkerrolle read-only eingehängt ist; ohne diese Entscheidung ist weder ein realistischer Sprachtest noch eine falsifizierbare Mutationserkennung möglich. `AI6-022` hängt zusätzlich von `AI6-045` ab, weil eine Pre-Review-Verifikation ohne tatsächlich ausgeführten Check keine Aussage trägt. Requirement-Texte, veröffentlichte `AC-`/`TC-`/`MG-`/`EXT-`-IDs, Meilensteinzuschnitte und alle übrigen Blueprintverträge bleiben unverändert; §16 und §21 werden nachgezogen. Bis `AI6-045` integriert ist, bleibt die Ausführung außerhalb der Checkerrolle eine ausdrückliche, im Policyhash sichtbare Reduktion und im Profil `strict` unmöglich.
 
@@ -190,6 +192,7 @@ AI6 verwaltet Git-native Softwaretickets, lässt sie menschlich prüfen und orch
 | ADR-016 | Review-only als ticket- und approvalgebundener Runmodus | Derselbe Check-/Review-/Finding-/Gate-Unterbau prüft serverseitig gebundene Stände ohne Push; freie Reviewaufträge bleiben außerhalb der Run-Grenze. |
 | ADR-017 | Erste reale Providerstufe: Codex-, Grok-Build- und GitHub-Copilot-CLI | Drei Headless-CLI-Adapter mit je genau einem gepinnten, doctor-geprüften Transport; Claude bleibt spätere Erweiterung ohne V1-Blockade. |
 | ADR-018 | Quellenabhängige advisory Finding-Verifikation | Unabhängige Evidenzprüfung ohne Auto-Unblock; wirksame Dispositionen bleiben menschlich autorisiert und checkpointgebunden. |
+| ADR-019 | Providerturns laufen ausschließlich in der Agentrolle über die vorhandene Execution-Mailbox | Die Credentialmatrix aus §4.2 gilt nur, wenn der Providerprozess in seiner eigenen Rolle startet; Auftrag, Home, Ergebnis und Nutzungswerte laufen über die eine bestehende Mailbox- und Artefaktnaht statt über einen zweiten Pfad je Adapter. |
 
 ---
 
@@ -1259,14 +1262,16 @@ Erscheint eine neuere Major-, Minor- oder Patchversion einer dieser drei Laufzei
 41. AI6-030 — Projektqueue und abhängigkeitssicherer Auto-Start
 42. AI6-031 — Vollständige Runbeobachtung und mobile Bedienung
 43. AI6-032 — Vollständiger FakeAgent-End-to-End- und Recovery-Test
-44. AI6-033 — Codex-CLI-Adapter
-45. AI6-041 — Grok-CLI-Adapter
-46. AI6-042 — GitHub-Copilot-CLI-Adapter
-47. AI6-035 — Provider-Onboarding, Credential-Setup und Capability-Doctor
-48. AI6-034 — Claude-CLI-Adapter
-49. AI6-036 — Installation, Backup/Restore und Security-Release-Gate
-50. AI6-037 — Migration des bisherigen Ticket-Prompt-Tools
-51. AI6-038 — Realer M169-Pilot und MVP-Abnahme
+44. AI6-046 — Execution-Home und Änderungsausgang für Implementierungs- und Fixturns
+45. AI6-047 — Providerturn-Übergabe in der Agentrolle
+46. AI6-033 — Codex-CLI-Adapter
+47. AI6-041 — Grok-CLI-Adapter
+48. AI6-042 — GitHub-Copilot-CLI-Adapter
+49. AI6-035 — Provider-Onboarding, Credential-Setup und Capability-Doctor
+50. AI6-034 — Claude-CLI-Adapter
+51. AI6-036 — Installation, Backup/Restore und Security-Release-Gate
+52. AI6-037 — Migration des bisherigen Ticket-Prompt-Tools
+53. AI6-038 — Realer M169-Pilot und MVP-Abnahme
 ```
 
 Die Reihenfolge ist eine gültige Topologie, aber nicht jede unabhängige Arbeit muss künstlich seriell erfolgen. Innerhalb eines Meilensteins dürfen nur Tickets parallel entwickelt werden, deren `depends_on` vollständig erfüllt ist und die nicht denselben noch instabilen Vertrag definieren.
@@ -3387,12 +3392,101 @@ Den gesamten Workflow ohne Providerkosten reproduzierbar gegen Erfolgs-, Fehler-
 
 ## 15.7 M6 – Echte Provideradapter
 
+### AI6-046 — Execution-Home und Änderungsausgang für Implementierungs- und Fixturns
+
+- **Initialstatus des späteren Detailtickets:** `todo`
+- **Risiko:** `high`
+- **Kind:** `fix`
+- **Depends on:** `AI6-019`, `AI6-032`
+- **Requirement-Refs:** `AGT-009`, `GIT-010`, `RUN-003`, `SEC-005`
+- **Erwartete Module:** `Runs`, `Agents`
+
+**Ziel**
+
+Implementierungs- und Fixturns dieselbe serverseitig gebundene Execution-Home-Erzeugung wie Reviewturns geben, mit einem beschreibbaren Änderungsausgang, aus dem der Worker den validierten Patch importiert.
+
+**Deliverables**
+
+- `RunImplementation` erzeugt für Implementierung und Fix ein Execution-Home über die vorhandene `ExecutionHomeManager`-Naht, wie es die Reviewpfade bereits tun; kein zweiter Home-Mechanismus.
+- Entscheidung und Umsetzung des Änderungsausgangs: welcher Teil des Homes für den Agenten beschreibbar ist, und dass der Worker den Patch mit dem vorhandenen Patchimport aus genau diesem Verzeichnis ermittelt. Snapshot, Konfiguration und Authprojektion bleiben read-only.
+- Prüfung von Snapshot, Runtimeprofil, Credentialprofil und Session vor jedem Start und Resume über die vorhandenen Bindungen; keine zweite Discovery-, Credential- oder Scopepolicy.
+- Cleanup nach Ergebnisübergabe, auch nach Fehler, Timeout und Abbruch.
+- Ein deterministisches Prozessdouble, das nicht freigegebene `.codex`-/`.claude`-, MCP-, Plugin-, Skill-, Hook-, Command- und Helperkonfiguration tatsächlich zu entdecken oder zu aktivieren versucht und keine Wirkung beobachtet.
+- Schließen der Lücke `AI6-032/AC-04` in der Release-Gate-Liste erst nach bestandenem Nachweis, im selben Änderungssatz mit der Umstellung der bewusst roten Gap-Erwartung des Release-Gate-Tests.
+
+**Akzeptanzvertrag**
+
+- Ein Implementierungs- und ein Fixturn laufen im versiegelten Home; der Worker importiert die Änderung aus genau dem gebundenen Ausgang, und die vorhandenen Nachweise für unveränderten Snapshot, Rollen-/Credentialtrennung, fehlende Gitmetadaten, Retry, Resume und Cleanup bleiben gültig.
+- Eine nicht verfügbare oder abweichende Bindung startet keinen Agenten; nach Fehler und Abbruch bleibt kein Home zurück.
+- Das Prozessdouble erreicht den Prozess, beobachtet Wirkungslosigkeit und schlägt mit einer gezielt geöffneten Testgrenze fehl.
+- `AI6-032/AC-04` gilt erst nach diesem Nachweis als gedeckt; ein grünes Release-Gate ohne den Nachweis ist ein Finding.
+
+**Mindestens zu erzeugende Testfälle**
+
+- End-to-End über den echten Implementierungsverbraucher: Home, Änderung im gebundenen Ausgang, erwarteter importierter Patch.
+- Abweichende und fehlende Bindungen ohne Agentenstart; Cleanup nach Fehler und Abbruch.
+- Discovery-Negativtest mit dem Prozessdouble und geöffneter Testgrenze.
+- Release-Gate-Test mit geschlossener Lücke `AC-04`.
+
+**Nicht Teil dieses Tickets**
+
+- Reale Providertransporte und deren native Discovery (`AI6-033`, `AI6-034`, `AI6-041`, `AI6-042`).
+- Die Übergabe des Turns in die Agentrolle (`AI6-047`).
+- Persistenter Credential-Store und Login (`AI6-035`).
+
+### AI6-047 — Providerturn-Übergabe in der Agentrolle
+
+- **Initialstatus des späteren Detailtickets:** `todo`
+- **Risiko:** `high`
+- **Kind:** `feature`
+- **Depends on:** `AI6-015`, `AI6-016`, `AI6-045`, `AI6-046`
+- **Requirement-Refs:** `AGT-001`, `AGT-004`, `AGT-006`, `AGT-007`, `AGT-010`, `RUN-003`, `SEC-005`
+- **Erwartete Module:** `Agents`, `Shared`, `Runs`, `Reviews`
+
+**Ziel**
+
+Einen Providerturn in der Rolle `agent` ausführen: Der Worker übergibt Auftrag und Home über die vorhandene Execution-Mailbox, der Agentprozess startet den aufgelösten Adapter unter der vollständigen Isolationsprüfung, und der Worker erhält Antwortbytes, Endzustand und Nutzungswerte zurück.
+
+**Deliverables**
+
+- Genau eine explizite Auflösung des Provideraliases auf einen konkreten `AgentAdapter` im Serviceprovider; `fake` behält seine Bindung, ein unbekanntes oder nicht implementiertes Alias endet benannt ohne Start. Keine Pluginregistry und keine abstrakte Basisklasse.
+- Workerseitiges Staging nach dem Muster von `AI6-045`: Home aus `AI6-046`, genau ein Auftrag mit Run-, Slot-, Session-, Rollen-, Snapshot-, Runtimeprofil- und Credential-Revisionsbindung über die vorhandene Agent-Mailbox; der Schritt parkt heartbeatgebunden bis zum Ergebnis.
+- Agentseitige Konsumschleife als Erweiterung des vorhandenen Rollenkommandos: Adapterstart über die vorhandene Agentpolicy und die vollständige Isolationsprüfung, ausschließlich mit der minimalen Authprojektion des gebundenen Profils.
+- Genau ein Ergebnis je Auftrag mit Antwortbytes, Endzustand (`ok`, `invalid_json`, `provider_error` mit Grund) und den von der CLI gemeldeten Nutzungswerten samt Quelle; der Worker speichert die Antwort als Providerartefakt und die Nutzungswerte als dessen Metadaten in der vorhandenen Artefaktnaht. Fehlende Werte bleiben `unknown`.
+- Verbraucher (`RunImplementation`, `ReviewRound`, `FindingVerificationRound`) unterscheiden `invalid_json` und `provider_error` bis zum gespeicherten Schrittresultat; ein `provider_error` verbirgt keinen Parserfehler.
+- Cleanup nach Ergebnisübergabe; ein nach Cancel oder Credentialrotation eintreffendes Ergebnis wird abgewiesen.
+- `FakeAgentAdapter` läuft über denselben Pfad, sobald die Rolle verfügbar ist; die Ausführung außerhalb der Agentrolle bleibt eine ausdrückliche, im Policyhash sichtbare Reduktion für Entwicklung und Test und ist im Profil `strict` unmöglich.
+
+**Akzeptanzvertrag**
+
+- Ein realer Adapter startet nur in der Agentrolle; im Worker oder in der App startet kein Providerprozess, und die Ablehnung ist benannt.
+- Der Agentprozess erreicht weder Managed-Clone noch Deploy-Keys, Git-, SMTP- oder Datenbankcredentials noch fremde Providerprofile; der Nachweis erfolgt in der Agentrolle.
+- Eine doppelt zugestellte Schrittnachricht erzeugt genau einen Prozess und genau ein Ergebnis; ein abgestürzter oder stehengebliebener Agent führt nie zu einem grünen Ergebnis und erreicht eine benannte Grenze.
+- Ein spätes Ergebnis nach Cancel oder Rotation verändert weder Run noch Session.
+- `invalid_json` und `provider_error` sind am gespeicherten Schrittresultat unterscheidbar; Nutzungswerte tragen Quelle oder `unknown`, und es entsteht keine neue Tabelle.
+- Es gibt keinen zweiten ProcessRunner, keine zweite Mailbox und keinen zweiten Orchestratorpfad.
+
+**Mindestens zu erzeugende Testfälle**
+
+- End-to-End in der Agentrolle mit `FakeAgentAdapter`: Auftrag, Ausführung, Ergebnisrückweg, gespeichertes Artefakt mit Metadaten.
+- Isolationsnachweis in der Agentrolle für Credentials, Gitmetadaten und Netz.
+- Doppelte Zustellung, Absturz und stehengebliebener Agent mit heartbeatgebundener Grenze.
+- Spätes Ergebnis nach Cancel und nach Rotation.
+- Aliasauflösung für `fake`, ein registriertes und ein unbekanntes Alias.
+- Fehlerzuordnung `invalid_json`/`provider_error` durch jeden Verbraucher.
+
+**Nicht Teil dieses Tickets**
+
+- Providerspezifische Transporte, Konfiguration und Discovery (`AI6-033`, `AI6-034`, `AI6-041`, `AI6-042`).
+- Persistenter Credential-Store, Login und Capability-Synchronisierung (`AI6-035`).
+- Der Änderungsausgang für Implementierungsturns (`AI6-046`).
+
 ### AI6-033 — Codex-CLI-Adapter
 
 - **Initialstatus des späteren Detailtickets:** `todo`
 - **Risiko:** `high`
 - **Kind:** `feature`
-- **Depends on:** `AI6-011`, `AI6-015`, `AI6-016`, `AI6-032`
+- **Depends on:** `AI6-011`, `AI6-015`, `AI6-016`, `AI6-032`, `AI6-046`, `AI6-047`
 - **Requirement-Refs:** `AGT-001`, `AGT-002`, `AGT-003`, `AGT-004`, `AGT-007`, `AGT-009`, `AGT-010`, `GIT-010`, `RUN-006`, `SEC-005`
 - **Erwartete Module:** `Agents`
 
@@ -3445,7 +3539,7 @@ Codex über den gemeinsamen Adaptervertrag mit strukturiertem Output, Sessionfor
 - **Initialstatus des späteren Detailtickets:** `todo`
 - **Risiko:** `high`
 - **Kind:** `feature`
-- **Depends on:** `AI6-011`, `AI6-015`, `AI6-016`, `AI6-032`
+- **Depends on:** `AI6-011`, `AI6-015`, `AI6-016`, `AI6-032`, `AI6-046`, `AI6-047`
 - **Requirement-Refs:** `AGT-001`, `AGT-002`, `AGT-003`, `AGT-004`, `AGT-007`, `AGT-009`, `GIT-010`, `RUN-006`, `SEC-005`
 - **Erwartete Module:** `Agents`
 
@@ -3538,7 +3632,7 @@ Andere Entwickler sicher durch Providerlogin, Profilprüfung und Adapterfreigabe
 - **Initialstatus des späteren Detailtickets:** `todo`
 - **Risiko:** `high`
 - **Kind:** `feature`
-- **Depends on:** `AI6-011`, `AI6-015`, `AI6-016`, `AI6-032`
+- **Depends on:** `AI6-011`, `AI6-015`, `AI6-016`, `AI6-032`, `AI6-047`
 - **Requirement-Refs:** `AGT-001`, `AGT-002`, `AGT-003`, `AGT-004`, `AGT-007`, `AGT-009`, `AGT-010`, `GIT-010`, `RUN-006`, `SEC-005`
 - **Erwartete Module:** `Agents`
 
@@ -3589,7 +3683,7 @@ Die Grok-Build-CLI als unabhängigen Review- und Verifier-Adapter über den geme
 - **Initialstatus des späteren Detailtickets:** `todo`
 - **Risiko:** `high`
 - **Kind:** `feature`
-- **Depends on:** `AI6-011`, `AI6-015`, `AI6-016`, `AI6-032`
+- **Depends on:** `AI6-011`, `AI6-015`, `AI6-016`, `AI6-032`, `AI6-047`
 - **Requirement-Refs:** `AGT-001`, `AGT-002`, `AGT-003`, `AGT-004`, `AGT-007`, `AGT-009`, `AGT-010`, `GIT-010`, `RUN-006`, `SEC-005`
 - **Erwartete Module:** `Agents`
 
@@ -3819,25 +3913,25 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `GIT-007` | `AI6-012`, `AI6-029` |
 | `GIT-008` | `AI6-009`, `AI6-013`, `AI6-029`, `AI6-039` |
 | `GIT-009` | `AI6-006C`, `AI6-006D`, `AI6-006E`, `AI6-006F`, `AI6-008`, `AI6-009` |
-| `GIT-010` | `AI6-014`, `AI6-015`, `AI6-019`, `AI6-021`, `AI6-023`, `AI6-028`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-040`, `AI6-041`, `AI6-042`, `AI6-045` |
+| `GIT-010` | `AI6-014`, `AI6-015`, `AI6-019`, `AI6-021`, `AI6-023`, `AI6-028`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-040`, `AI6-041`, `AI6-042`, `AI6-045`, `AI6-046` |
 | `GIT-011` | `AI6-040` |
 | `CFG-001` | `AI6-003`, `AI6-011` |
 | `CFG-002` | `AI6-010`, `AI6-020` |
 | `CFG-003` | `AI6-010`, `AI6-021` |
-| `AGT-001` | `AI6-011`, `AI6-016`, `AI6-033`, `AI6-034`, `AI6-038`, `AI6-041`, `AI6-042` |
+| `AGT-001` | `AI6-011`, `AI6-016`, `AI6-033`, `AI6-034`, `AI6-038`, `AI6-041`, `AI6-042`, `AI6-047` |
 | `AGT-002` | `AI6-011`, `AI6-012`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-043` |
 | `AGT-003` | `AI6-019`, `AI6-023`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042` |
-| `AGT-004` | `AI6-016`, `AI6-019`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042` |
+| `AGT-004` | `AI6-016`, `AI6-019`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042`, `AI6-047` |
 | `AGT-005` | `AI6-016`, `AI6-032`, `AI6-040` |
-| `AGT-006` | `AI6-006A`, `AI6-015`, `AI6-045` |
-| `AGT-007` | `AI6-015`, `AI6-021`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-045` |
+| `AGT-006` | `AI6-006A`, `AI6-015`, `AI6-045`, `AI6-047` |
+| `AGT-007` | `AI6-015`, `AI6-021`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-045`, `AI6-047` |
 | `AGT-008` | `AI6-011`, `AI6-012`, `AI6-016`, `AI6-019`, `AI6-044` |
-| `AGT-009` | `AI6-011`, `AI6-012`, `AI6-015`, `AI6-016`, `AI6-019`, `AI6-020`, `AI6-023`, `AI6-028`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042` |
-| `AGT-010` | `AI6-033`, `AI6-035`, `AI6-041`, `AI6-042` |
+| `AGT-009` | `AI6-011`, `AI6-012`, `AI6-015`, `AI6-016`, `AI6-019`, `AI6-020`, `AI6-023`, `AI6-028`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042`, `AI6-046` |
+| `AGT-010` | `AI6-033`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-047` |
 | `AGT-011` | `AI6-044` |
 | `RUN-001` | `AI6-013`, `AI6-017`, `AI6-039` |
 | `RUN-002` | `AI6-012`, `AI6-013`, `AI6-039` |
-| `RUN-003` | `AI6-017`, `AI6-019`, `AI6-021`, `AI6-022`, `AI6-025`, `AI6-027`, `AI6-045` |
+| `RUN-003` | `AI6-017`, `AI6-019`, `AI6-021`, `AI6-022`, `AI6-025`, `AI6-027`, `AI6-045`, `AI6-046`, `AI6-047` |
 | `RUN-004` | `AI6-006C`, `AI6-009`, `AI6-015`, `AI6-040`, `AI6-045` |
 | `RUN-005` | `AI6-006C`, `AI6-013`, `AI6-017`, `AI6-029`, `AI6-030`, `AI6-032`, `AI6-039` |
 | `RUN-006` | `AI6-011`, `AI6-012`, `AI6-015`, `AI6-019`, `AI6-020`, `AI6-026`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042`, `AI6-043` |
@@ -3872,7 +3966,7 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `SEC-002` | `AI6-004`, `AI6-005A`, `AI6-006C` |
 | `SEC-003` | `AI6-005A` |
 | `SEC-004` | `AI6-003`, `AI6-004`, `AI6-005B`, `AI6-010`, `AI6-044` |
-| `SEC-005` | `AI6-015`, `AI6-021`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-045` |
+| `SEC-005` | `AI6-015`, `AI6-021`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-045`, `AI6-046`, `AI6-047` |
 | `SEC-006` | `AI6-006A` |
 | `SEC-007` | `AI6-003`, `AI6-005B`, `AI6-006F`, `AI6-021`, `AI6-031`, `AI6-044`, `AI6-045` |
 | `SEC-008` | `AI6-028`, `AI6-032` |
@@ -4015,4 +4109,4 @@ Der MVP ist erreicht, wenn:
 
 ## 21. Kurzbegründung der Ticketanzahl
 
-51 Tickets sind für den Funktionsumfang bewusst kleiner als die bisherigen zehn Pakete, aber keine künstlichen Mikrotickets. Jeder Blueprint bildet eine reviewbare Grenze: Datenvertrag, vertikaler Benutzerfluss oder sicherheitsrelevante technische Naht. Die fünf mit V1.7.0 ergänzten Blueprints folgen demselben Schnitt: zwei für den Review-only-Modus (Statusvertrag getrennt von Quellbindung und Bedienung), zwei für die neuen Provideradapter (je CLI ein eigenständig testbarer Adapter) und einer für die providerunabhängige Verifier-Orchestrierung. `AI6-044` ergänzt als eigener manueller Benutzerfluss ausschließlich die Clipboard-Bedienung des zentralen Promptkatalogs und bleibt von Provider- und Runwirkung getrennt. `AI6-045` folgt demselben Schnitt als sicherheitsrelevante technische Naht: Die Definition eines Checks und sein rollenrichtiger Vollzug sind getrennt reviewbar, weil der Vollzug eigene Container-, Mount- und Wartezustandsverträge berührt, die die Profildefinition nicht kennt. Ein Ticket darf während der Detailerzeugung weiter gesplittet werden, aber nur über eine explizite Planrevision; ein stilles Zusammenlegen mehrerer Blueprints ist nicht zulässig.
+53 Tickets sind für den Funktionsumfang bewusst kleiner als die bisherigen zehn Pakete, aber keine künstlichen Mikrotickets. Jeder Blueprint bildet eine reviewbare Grenze: Datenvertrag, vertikaler Benutzerfluss oder sicherheitsrelevante technische Naht. Die fünf mit V1.7.0 ergänzten Blueprints folgen demselben Schnitt: zwei für den Review-only-Modus (Statusvertrag getrennt von Quellbindung und Bedienung), zwei für die neuen Provideradapter (je CLI ein eigenständig testbarer Adapter) und einer für die providerunabhängige Verifier-Orchestrierung. `AI6-044` ergänzt als eigener manueller Benutzerfluss ausschließlich die Clipboard-Bedienung des zentralen Promptkatalogs und bleibt von Provider- und Runwirkung getrennt. `AI6-045` folgt demselben Schnitt als sicherheitsrelevante technische Naht: Die Definition eines Checks und sein rollenrichtiger Vollzug sind getrennt reviewbar, weil der Vollzug eigene Container-, Mount- und Wartezustandsverträge berührt, die die Profildefinition nicht kennt. Ein Ticket darf während der Detailerzeugung weiter gesplittet werden, aber nur über eine explizite Planrevision; ein stilles Zusammenlegen mehrerer Blueprints ist nicht zulässig.
