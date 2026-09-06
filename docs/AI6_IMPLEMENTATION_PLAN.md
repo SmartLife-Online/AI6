@@ -1,6 +1,8 @@
-# AI6 – Implementierungsplan V1.7.5 – Ticket-Ready, Lean & Secure
+# AI6 – Implementierungsplan V1.7.6 – Ticket-Ready, Lean & Secure
 
 **Stand:** 6. September 2026
+
+**Revision V1.7.6:** Auf ausdrücklichen menschlichen Auftrag entfallen alle noch offenen Nachweispflichten für `AI6-046`. Der Verzicht umfasst zusätzliche automatisierte Tests, Prozess- und POSIX-Nachweise, Qualitätscheck-Nachweise sowie die bislang verlangte Schließung von `AI6-032/AC-04`; er ist weder ein bestandener Nachweis noch eine Änderung der funktionalen Sicherheitsanforderungen. `AI6-046/AC-04` wurde vom Nutzer als abgeschlossen gemeldet, ohne dass diese Revision ein eigenes Testergebnis behauptet. §12.2 und der Blueprint erhalten eine auf dieses eine Ticket begrenzte Ausnahme. Die bestehenden veröffentlichten AC-/TC-IDs bleiben zur Rückverfolgbarkeit erhalten, Ticketstatus und sonstige Approval-/Run-Metadaten bleiben unverändert. Das Release-Gate von `AI6-032` und die Nachweispflichten anderer Tickets bleiben eigenständig bestehen und sind keine Voraussetzung für die Umsetzung oder Abnahme von `AI6-046`.
 
 **Revision V1.7.5:** Der Backlog wächst von 51 auf 53 Blueprints. Das menschlich beauftragte Review der M6-Adapterentwürfe vom 6. September 2026 (`docs/AI6_M6_ADAPTER_REVIEW.md`) hat zwei Voraussetzungen belegt, die keinem bestehenden Blueprint gehören und die sonst jeder der vier Adapter ein zweites Mal gebaut hätte. Erstens erzeugt der Implementierungsschritt aus `AI6-019` kein Execution-Home: `RunImplementation` übergibt den reinen Export an den Adapter und berechnet den Patch später aus genau diesem Verzeichnis, während der versiegelte Reviewworkspace aus `ExecutionHomeManager` read-only ist; `AI6-032/AC-04` blieb deshalb als deklarierte Lücke offen (`docs/AI6-032_FOLGEAUFTRAG_IMPLEMENTIERUNGSISOLATION.md`). Zweitens verarbeitet die Execution-Mailbox der Rolle `agent` keine Aufträge, sodass ein realer Providerturn heute im Worker starten würde — mit Managed-Clone, Deploy-Keys und Netzzugriff, entgegen der Credentialmatrix in §4.2. Diese Revision vergibt dafür die nächsten nie verwendeten IDs: `AI6-046` gibt Implementierungs- und Fixturns dieselbe serverseitig gebundene Execution-Home-Erzeugung wie Reviewturns samt einem beschreibbaren Änderungsausgang, aus dem der Worker den validierten Patch importiert, und schließt danach die Lücke `AI6-032/AC-04`; `AI6-047` überträgt einen Providerturn nach dem Muster von `AI6-045` über die vorhandene Mailbox in die Agentrolle, löst das Provideralias genau einmal auf einen konkreten Adapter auf und liefert Antwortbytes, Endzustand und gemeldete Nutzungswerte an den Worker zurück, der sie als Providerartefakt mit Metadaten speichert und im Verbraucher als `invalid_json` oder `provider_error` unterscheidet. Beide Blueprints erweitern bestehende Nähte; sie führen keinen zweiten ProcessRunner, keine zweite Mailbox, keinen zweiten Orchestrator, keine Pluginregistry und keine Session-, Turn- oder Nutzungstabelle ein. `AI6-033` und `AI6-034` hängen zusätzlich von `AI6-046` und `AI6-047` ab, `AI6-041` und `AI6-042` von `AI6-047`; ihre Verträge, Ziele und Requirement-Refs bleiben unverändert, und die uncommitteten Entwürfe werden nach der Umsetzung der neuen Abhängigkeiten am realen Stand erneut abgeleitet. `AI6-035` bleibt unverändert. Requirement-Texte, veröffentlichte `AC-`/`TC-`/`MG-`/`EXT-`-IDs und Meilensteinzuschnitte bleiben unverändert; §14.1, §16 und §21 werden nachgezogen, ADR-019 hält die Entscheidung fest.
 
@@ -1053,6 +1055,8 @@ Vertrauenswürdige Instanzconfig definiert getrennte maximale Aufbewahrungszeite
 8. konfigurierte statische Analyse; für AI6 verbindlich `vendor/bin/phpstan analyse`.
 
 ### 12.2 Definition of Done jedes Implementierungstickets
+
+**Menschlich beschlossene Ausnahme für AI6-046 (V1.7.6):** Für dieses Ticket sind sämtliche noch offenen Nachweispflichten aufgehoben. Das betrifft die nachfolgenden Test-, Syntax-, Formatierungs-, Analyse- und Diffcheck-Nachweise ebenso wie zusätzliche Prozess-, POSIX-, Manifest-, Composer- und Release-Gate-Nachweise aus ergänzenden Arbeitsanweisungen. Sie sind keine Voraussetzung für Umsetzung oder Abnahme von AI6-046. Die funktionalen Anforderungen, Sicherheitskontrollen, Scopegrenzen und das Verbot erfundener Testergebnisse gelten weiter; der Verzicht hebt keine technische Fehlfunktion auf. Abweichend von den allgemeinen Coverage-Regeln in §13.4 und dem Ticket-Template dürfen die veröffentlichten TC-Einträge und ihre AC-Zuordnung ausschließlich als ausdrücklich gekennzeichnete Historie des Verzichts beziehungsweise der Nutzerangabe zu AC-04 erhalten bleiben. Daraus darf kein bestandener Nachweis abgeleitet werden. Diese Ausnahme gilt nicht für andere Tickets und schließt das Release-Gate von AI6-032 nicht.
 
 Ein Ticket ist nur reviewbereit, wenn:
 
@@ -3411,22 +3415,17 @@ Implementierungs- und Fixturns dieselbe serverseitig gebundene Execution-Home-Er
 - Entscheidung und Umsetzung des Änderungsausgangs: welcher Teil des Homes für den Agenten beschreibbar ist, und dass der Worker den Patch mit dem vorhandenen Patchimport aus genau diesem Verzeichnis ermittelt. Snapshot, Konfiguration und Authprojektion bleiben read-only.
 - Prüfung von Snapshot, Runtimeprofil, Credentialprofil und Session vor jedem Start und Resume über die vorhandenen Bindungen; keine zweite Discovery-, Credential- oder Scopepolicy.
 - Cleanup nach Ergebnisübergabe, auch nach Fehler, Timeout und Abbruch.
-- Ein deterministisches Prozessdouble, das nicht freigegebene `.codex`-/`.claude`-, MCP-, Plugin-, Skill-, Hook-, Command- und Helperkonfiguration tatsächlich zu entdecken oder zu aktivieren versucht und keine Wirkung beobachtet.
-- Schließen der Lücke `AI6-032/AC-04` in der Release-Gate-Liste erst nach bestandenem Nachweis, im selben Änderungssatz mit der Umstellung der bewusst roten Gap-Erwartung des Release-Gate-Tests.
+- Die funktionale Isolation nicht freigegebener Providerkonfiguration nach `AGT-009` bleibt verbindlich. Ein zusätzliches Prozessdouble und die Schließung von `AI6-032/AC-04` werden für dieses Ticket nicht mehr verlangt (menschlicher Nachweisverzicht V1.7.6).
 
 **Akzeptanzvertrag**
 
-- Ein Implementierungs- und ein Fixturn laufen im versiegelten Home; der Worker importiert die Änderung aus genau dem gebundenen Ausgang, und die vorhandenen Nachweise für unveränderten Snapshot, Rollen-/Credentialtrennung, fehlende Gitmetadaten, Retry, Resume und Cleanup bleiben gültig.
+- Ein Implementierungs- und ein Fixturn laufen im versiegelten Home; der Worker importiert die Änderung aus genau dem gebundenen Ausgang. Die bestehenden Verträge für unveränderten Snapshot, Rollen-/Credentialtrennung, fehlende Gitmetadaten, Retry, Resume und Cleanup bleiben verbindlich.
 - Eine nicht verfügbare oder abweichende Bindung startet keinen Agenten; nach Fehler und Abbruch bleibt kein Home zurück.
-- Das Prozessdouble erreicht den Prozess, beobachtet Wirkungslosigkeit und schlägt mit einer gezielt geöffneten Testgrenze fehl.
-- `AI6-032/AC-04` gilt erst nach diesem Nachweis als gedeckt; ein grünes Release-Gate ohne den Nachweis ist ein Finding.
+- Alle noch offenen Nachweispflichten entfallen ausschließlich für dieses Ticket gemäß §12.2. `AI6-046/AC-04` ist laut Nutzer abgeschlossen; diese Angabe ersetzt keine unabhängig erhobene Testevidenz. Der Verzicht schließt `AI6-032/AC-04` nicht und macht dessen Schließung nicht zur Voraussetzung für AI6-046.
 
 **Mindestens zu erzeugende Testfälle**
 
-- End-to-End über den echten Implementierungsverbraucher: Home, Änderung im gebundenen Ausgang, erwarteter importierter Patch.
-- Abweichende und fehlende Bindungen ohne Agentenstart; Cleanup nach Fehler und Abbruch.
-- Discovery-Negativtest mit dem Prozessdouble und geöffneter Testgrenze.
-- Release-Gate-Test mit geschlossener Lücke `AC-04`.
+Keine zusätzlichen Testfälle verpflichtend. Die zuvor verlangten Implementierungs-, Bindungs-, Cleanup-, Discovery- und Release-Gate-Nachweise sind durch den menschlichen Auftrag vom 6. September 2026 für AI6-046 aufgehoben. Bereits vorhandene Tests werden durch diese Vertragsrevision nicht entfernt oder als bestanden ausgewiesen.
 
 **Nicht Teil dieses Tickets**
 
