@@ -4,6 +4,8 @@ namespace Tests\Feature\Runs;
 
 use App\AI6\Agents\AgentAdapter;
 use App\AI6\Agents\AgentResultContext;
+use App\AI6\Agents\AgentTurnResult;
+use App\AI6\Agents\ExecutionHome;
 use App\AI6\Agents\FakeAgentAdapter;
 use App\AI6\Auth\Models\User;
 use App\AI6\Auth\StepUpGuard;
@@ -148,7 +150,7 @@ final class ImplementationLimitTurnTest extends TicketUiTestCase
             $files = ['app/Example.php'];
         }
         $prepared = $this->preparedImplementationRun($ticketId, $files, limitOverrides: $limits);
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         $this->app->forgetInstance(RunImplementation::class);
         $job = $this->executeImplement($prepared['run']->fresh());
         self::assertSame(ExecutionJobState::SUCCEEDED, $job->state, $ticketId.': '.(string) $job->failure_code);
@@ -163,7 +165,7 @@ final class ImplementationLimitTurnTest extends TicketUiTestCase
     private function assertRejectedImport(string $ticketId, array $limits, AgentAdapter $adapter, array $files = ['app/Example.php']): void
     {
         $prepared = $this->preparedImplementationRun($ticketId, $files, limitOverrides: $limits);
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         $this->app->forgetInstance(RunImplementation::class);
         $original = (string) file_get_contents($prepared['worktree'].'/app/Example.php');
         $job = $this->executeImplement($prepared['run']->fresh());
@@ -217,8 +219,10 @@ final class ImplementationLimitTurnTest extends TicketUiTestCase
                 return json_encode($document, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             }
 
-            public function turn(AgentResultContext $context, string $isolatedTree, array $unreachablePaths = []): string
+            public function turn(AgentResultContext $context, ExecutionHome $home, \Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult
             {
+                $heartbeat();
+                $isolatedTree = $home->workspace;
                 $root = rtrim(str_replace('\\', '/', $isolatedTree), '/');
                 file_put_contents($root.'/app/Example.php', $this->example);
                 foreach ($this->extraWrites as $path => $bytes) {
@@ -230,7 +234,7 @@ final class ImplementationLimitTurnTest extends TicketUiTestCase
                     file_put_contents($target, $bytes);
                 }
 
-                return $this->result($context);
+                return new AgentTurnResult($this->result($context));
             }
         };
     }

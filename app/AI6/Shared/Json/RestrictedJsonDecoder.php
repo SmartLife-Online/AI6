@@ -34,6 +34,38 @@ final class RestrictedJsonDecoder
             throw new JsonDecodingException(JsonDecodingError::INVALID_UTF8);
         }
 
+        return $this->parseDocument($input);
+    }
+
+    /**
+     * Rehydrate the worker's sealed instruction/turn snapshot (AGT-009).
+     * The expected digest must come from the independently bound request,
+     * never from the received bytes. This is not a provider-response parser:
+     * provider output continues to use decode() and its mandatory redaction.
+     * Snapshot bytes and absolute isolation-probe paths must remain exact.
+     *
+     * @return array<string, mixed>|list<mixed>
+     */
+    public function decodeSealedSnapshot(string $bytes, string $expectedSha256): array
+    {
+        if (strlen($bytes) > $this->policies->get(ProcessPolicyName::AGENT)->outputLimitBytes) {
+            throw new JsonDecodingException(JsonDecodingError::SIZE_EXCEEDED);
+        }
+        try {
+            $this->redactor->assertValidInput($bytes);
+        } catch (InvalidRedactionInputException) {
+            throw new JsonDecodingException(JsonDecodingError::INVALID_UTF8);
+        }
+        if (preg_match('/\A[0-9a-f]{64}\z/D', $expectedSha256) !== 1 || ! hash_equals($expectedSha256, hash('sha256', $bytes))) {
+            throw new JsonDecodingException(JsonDecodingError::INVALID_JSON);
+        }
+
+        return $this->parseDocument($bytes);
+    }
+
+    /** @return array<string, mixed>|list<mixed> */
+    private function parseDocument(string $input): array
+    {
         $position = 0;
         $elements = 0;
         $this->skipWhitespace($input, $position);

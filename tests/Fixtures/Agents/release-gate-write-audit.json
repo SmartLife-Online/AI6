@@ -485,6 +485,15 @@
             "context_sha256": "7e1ba0878355fef4f2c9ab5a8bef73580bf300c8e5e5ca22b694f1168994c0ba"
         }
     },
+    "tests/Feature/Reviews/ReviewRoundTest.php::test_an_oversized_answer_opens_a_resource_limit_request#1": {
+        "decision": "requires_service",
+        "reason": "Die reguläre Slot-/Limitauswahl vor der Approval binden; ein nachträglicher Snapshotwrite darf die freigegebene Auswahl nicht ersetzen.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $prepared['run']->id)->update(['agent_profile_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "9792742f557748a8a7a1fb31eab48ae6fa8f98a259f4964ed9840caf66de5a60"
+        }
+    },
     "tests/Feature/Reviews/ReviewRoundTest.php::test_missing_approval_reviewers_keep_their_typed_failure_code#1": {
         "decision": "external_effect",
         "reason": "Gezielte Korruption einer zuvor gültigen Snapshotbindung für den Fail-closed-Nachweis; es existiert kein erlaubter Producer für diese ungültige Snapshotform.",
@@ -527,7 +536,7 @@
         "source": {
             "target": "TicketApproval",
             "code": "\\App\\AI6\\Runs\\Models\\TicketApproval::query()->whereKey($operationId)->update(['approved_ticket_blob_sha' => $readyBlob, 'approved_control_sha' => $project->control_oid, 'intended_commit_sha' => $project->control_oid, 'saga_phase' => 'complete', 'queue_state' => 'available', 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
-            "context_sha256": "2698f569e1aa99a1bba9e331724ed6e757cf3f3b51994c34720863a4906b59d4"
+            "context_sha256": "76c17ad1281c9fb049209c03636c71f3ee619fffe0a5988101521fb83665b7a6"
         }
     },
     "tests/Feature/Runs/BuildsImplementationTurnFixture.php::preparedImplementationRun#2": {
@@ -536,7 +545,7 @@
         "source": {
             "target": "ticket_read_models",
             "code": "\\Illuminate\\Support\\Facades\\DB::table('ticket_read_models')->where('id', $readModel->id)->update(['control_operation_id' => $operation->id, 'blob_sha' => $readyBlob, 'redacted_content' => $ready, 'editor_eligible' => true, 'approval_eligible' => true, 'generated_at' => now(), 'updated_at' => now()])",
-            "context_sha256": "2698f569e1aa99a1bba9e331724ed6e757cf3f3b51994c34720863a4906b59d4"
+            "context_sha256": "76c17ad1281c9fb049209c03636c71f3ee619fffe0a5988101521fb83665b7a6"
         }
     },
     "tests/Feature/Runs/BuildsReviewOnlyRunFixture.php::crashedStep#1": {
@@ -671,7 +680,7 @@
         "source": {
             "target": "runs",
             "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $other['run']->id)->update(['prompt_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
-            "context_sha256": "0e27c47ebe5849cd951b14ea48943505b480e901494d5273c341ff07d3962326"
+            "context_sha256": "e642d0370ef0b1b23fa2b447cace99334417ca5e99464af17932218829df5d3f"
         }
     },
     "tests/Feature/Runs/ProjectQueueStartFeatureTest.php::test_auto_start_waits_for_active_run_pending_control_sync_and_project_operation_lock#1": {
@@ -906,6 +915,15 @@
             "target": "instance_receiver_requires_review",
             "code": "$session->save()",
             "context_sha256": "8b53bb939d715afbbec9badc2f0a0621e737326e8ea3c24cee825adaeb8cf9ac"
+        }
+    },
+    "tests/Feature/Runs/RunFinalizationStepTest.php::test_an_oversized_security_answer_parks_under_the_security_gate#1": {
+        "decision": "requires_service",
+        "reason": "Die reguläre Slot-/Limitauswahl vor der Approval binden; ein nachträglicher Snapshotwrite darf die freigegebene Auswahl nicht ersetzen.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $prepared['run']->id)->update(['agent_profile_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
+            "context_sha256": "62151f7589a94bfa425cf84e23c42911efd0a068b64adcdc438f2389d1c149ba"
         }
     },
     "tests/Feature/Runs/RunFinalizationStepTest.php::test_control_base_drift_parks_finalization_without_rewriting_run_branch_or_binding_candidate#1": {

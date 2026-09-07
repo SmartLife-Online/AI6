@@ -5,6 +5,8 @@ namespace Tests\Feature\Runs;
 use App\AI6\Agents\AgentAdapter;
 use App\AI6\Agents\AgentResultContext;
 use App\AI6\Agents\AgentScenario;
+use App\AI6\Agents\AgentTurnResult;
+use App\AI6\Agents\ExecutionHome;
 use App\AI6\Agents\FakeAgentAdapter;
 use App\AI6\Git\CanonicalDiffHasher;
 use App\AI6\HumanLoop\Mail\HumanRequestNotificationMail;
@@ -16,6 +18,7 @@ use App\AI6\Runs\ExecutionStepType;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Runs\Models\RunArtifact;
+use App\AI6\Runs\Models\RunEvent;
 use App\AI6\Runs\Models\RunLimitConsumption;
 use App\AI6\Runs\RunImplementation;
 use App\AI6\Runs\RunOrchestrator;
@@ -76,6 +79,7 @@ final class ImplementationTurnTest extends TicketUiTestCase
 
         self::assertSame(ExecutionJobState::WAITING, $this->executeImplement($run)->state);
         $request = HumanRequest::query()->where('run_id', $run->id)->sole();
+        self::assertSame('clarification', $request->kind, RunEvent::query()->where('run_id', $run->id)->pluck('redacted_payload')->implode("\n"));
         Mail::assertSent(HumanRequestNotificationMail::class, 1);
         Mail::assertSent(HumanRequestNotificationMail::class, function (HumanRequestNotificationMail $mail) use ($ticketId, $request): bool {
             self::assertSame(['attention-'.strtolower($ticketId).'@example.test'], array_column($mail->to, 'address'));
@@ -98,7 +102,7 @@ final class ImplementationTurnTest extends TicketUiTestCase
         )->assertRedirect()->assertSessionHasNoErrors();
         $adapter = new FakeAgentAdapter($scenario);
         $this->app->instance(FakeAgentAdapter::class, $adapter);
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         $this->app->forgetInstance(RunImplementation::class);
         $job = $this->executeImplement($run->fresh());
         self::assertSame(ExecutionJobState::SUCCEEDED, $job->state, (string) $job->failure_code);
@@ -174,6 +178,15 @@ final class ImplementationTurnTest extends TicketUiTestCase
             self::assertSame($wait, $other['run']->fresh()->wait_reason, $scenario->value);
             self::assertSame($original, (string) file_get_contents($other['worktree'].'/app/Example.php'), $scenario->value);
             self::assertSame(1, HumanRequest::query()->where('run_id', $other['run']->id)->count());
+            if ($scenario === AgentScenario::INVALID_JSON) {
+                $answers = RunArtifact::query()->where('run_id', $other['run']->id)->where('kind', 'provider_raw')->get();
+                self::assertCount(3, $answers);
+                self::assertCount(3, $answers->pluck('execution_id')->unique());
+                foreach ($answers as $answer) {
+                    self::assertSame('unknown', $answer->redacted_metadata['usage_source']);
+                    self::assertSame('invalid_json', $answer->redacted_metadata['validation_state']);
+                }
+            }
             self::assertSame(
                 $scenario === AgentScenario::HUMAN_REQUEST ? 1 : 3,
                 RunLimitConsumption::query()->where('run_id', $other['run']->id)
@@ -196,12 +209,14 @@ final class ImplementationTurnTest extends TicketUiTestCase
                 return json_encode($document, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             }
 
-            public function turn(AgentResultContext $context, string $isolatedTree, array $unreachablePaths = []): string
+            public function turn(AgentResultContext $context, ExecutionHome $home, \Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult
             {
-                return $this->result($context);
+                $heartbeat();
+
+                return new AgentTurnResult($this->result($context));
             }
         };
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         $this->app->forgetInstance(RunImplementation::class);
         $original = (string) file_get_contents($prepared['worktree'].'/app/Example.php');
         $job = $this->executeImplement($prepared['run']);
@@ -221,7 +236,7 @@ final class ImplementationTurnTest extends TicketUiTestCase
 
         $adapter = new FakeAgentAdapter(AgentScenario::NO_CHANGE_WITH_DIFF);
         $this->app->instance(FakeAgentAdapter::class, $adapter);
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         $dirty = $this->preparedImplementationRun('AI6-019-TC09-BAD', scenario: AgentScenario::NO_CHANGE_WITH_DIFF);
         $failed = $this->executeImplement($dirty['run']);
         self::assertSame(ExecutionJobState::FAILED, $failed->state);
@@ -289,7 +304,7 @@ final class ImplementationTurnTest extends TicketUiTestCase
 
         $continuation = new FakeAgentAdapter(AgentScenario::SUCCESS);
         $this->app->instance(FakeAgentAdapter::class, $continuation);
-        $this->app->instance(AgentAdapter::class, $continuation);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $continuation);
         $this->app->forgetInstance(RunImplementation::class);
         $resumed = $this->executeImplement($prepared['run']->fresh());
         self::assertSame(ExecutionJobState::SUCCEEDED, $resumed->state, (string) $resumed->failure_code);
@@ -297,8 +312,12 @@ final class ImplementationTurnTest extends TicketUiTestCase
             ->where('step_type', ExecutionStepType::IMPLEMENT->value)->count());
         self::assertSame(1, $continuation->turnCount);
         self::assertStringContainsString('fake-agent-change', (string) file_get_contents($prepared['worktree'].'/app/Example.php'));
-        self::assertSame(2, RunArtifact::query()->where('run_id', $prepared['run']->id)
+        self::assertSame(3, RunArtifact::query()->where('run_id', $prepared['run']->id)
             ->whereIn('kind', ['implementation_summary', 'provider_raw'])->count());
+        $answers = RunArtifact::query()->where('run_id', $prepared['run']->id)->where('kind', 'provider_raw')->get();
+        self::assertCount(2, $answers);
+        self::assertCount(2, $answers->pluck('execution_id')->unique());
+        self::assertSame(['unknown'], $answers->map(static fn (RunArtifact $answer): mixed => $answer->redacted_metadata['usage_source'])->unique()->values()->all());
     }
 
     /** TC-12 */
@@ -307,7 +326,8 @@ final class ImplementationTurnTest extends TicketUiTestCase
         $prepared = $this->preparedImplementationRun('AI6-019-TC12');
         $boundPrompt = (string) (($prepared['run']->prompt_snapshot ?? [])['rendered_prompts']['implementation'] ?? '');
         self::assertNotSame('', $boundPrompt);
-        $this->executeImplement($prepared['run']);
+        $job = $this->executeImplement($prepared['run']);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $job->state, RunEvent::query()->where('run_id', $prepared['run']->id)->pluck('redacted_payload')->implode("\n"));
         $adapter = $this->app->make(FakeAgentAdapter::class);
         self::assertSame($boundPrompt, $adapter->lastRenderedImplementationPrompt);
         $summary = RunArtifact::query()->where('run_id', $prepared['run']->id)

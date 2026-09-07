@@ -9,6 +9,9 @@ use App\AI6\Shared\Process\ProcessPolicyName;
 use App\AI6\Shared\Process\ProcessRequest;
 use App\AI6\Shared\Process\ProcessStartRejectedException;
 use App\AI6\Shared\Redaction\RedactionContext;
+use App\AI6\Shared\Security\SecurityMeasure;
+use App\AI6\Shared\Security\SecurityPolicy;
+use App\AI6\Shared\Security\SecurityProfile;
 use Tests\TestCase;
 
 final class DelegatingProcessIsolationBoundaryTest extends TestCase
@@ -36,7 +39,7 @@ final class DelegatingProcessIsolationBoundaryTest extends TestCase
         );
     }
 
-    public function test_agent_policy_outside_the_agent_role_uses_turn_containment(): void
+    public function test_agent_policy_outside_its_role_requires_acknowledged_reduction_before_containment(): void
     {
         config(['ai6.runtime_role' => 'worker']);
         $root = sys_get_temp_dir().DIRECTORY_SEPARATOR.'ai6-iso-'.bin2hex(random_bytes(4));
@@ -46,6 +49,21 @@ final class DelegatingProcessIsolationBoundaryTest extends TestCase
         self::assertTrue(mkdir($io, 0700, true));
 
         try {
+            $strict = $this->app->make(SecurityPolicy::class);
+            try {
+                (new DelegatingProcessIsolationBoundary)->assertIsolated(
+                    $this->request($tree, $io, ProcessPolicyName::AGENT),
+                    $this->policy(ProcessPolicyName::AGENT, $tree),
+                );
+                self::fail('The active sandbox must refuse a worker provider process.');
+            } catch (ProcessStartRejectedException $exception) {
+                self::assertSame('The agent process requires the agent supervisor role.', $exception->getMessage());
+            }
+            $states = $strict->measures();
+            $states[SecurityMeasure::REQUIRE_AGENT_SANDBOX->value] = false;
+            $reduced = new SecurityPolicy(SecurityProfile::CUSTOM, $states, true);
+            self::assertNotSame($strict->hash(), $reduced->hash());
+            $this->app->instance(SecurityPolicy::class, $reduced);
             (new DelegatingProcessIsolationBoundary)->assertIsolated(
                 $this->request($tree, $io, ProcessPolicyName::AGENT),
                 $this->policy(ProcessPolicyName::AGENT, $tree),

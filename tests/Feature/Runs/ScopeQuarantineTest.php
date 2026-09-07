@@ -4,6 +4,8 @@ namespace Tests\Feature\Runs;
 
 use App\AI6\Agents\AgentAdapter;
 use App\AI6\Agents\AgentResultContext;
+use App\AI6\Agents\AgentTurnResult;
+use App\AI6\Agents\ExecutionHome;
 use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Projects\EffectiveProjectConfiguration;
@@ -71,8 +73,10 @@ final class ScopeQuarantineTest extends TicketUiTestCase
                 ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
             }
 
-            public function turn(AgentResultContext $context, string $isolatedTree, array $unreachablePaths = []): string
+            public function turn(AgentResultContext $context, ExecutionHome $home, \Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult
             {
+                $heartbeat();
+                $isolatedTree = $home->workspace;
                 foreach ($this->writes as $path => $content) {
                     $target = rtrim($isolatedTree, '/\\').'/'.$path;
                     if ($content === null) {
@@ -87,7 +91,7 @@ final class ScopeQuarantineTest extends TicketUiTestCase
                     file_put_contents($target, $content);
                 }
 
-                return $this->result($context);
+                return new AgentTurnResult($this->result($context));
             }
         };
     }
@@ -95,7 +99,7 @@ final class ScopeQuarantineTest extends TicketUiTestCase
     private function bindAdapter(AgentAdapter $adapter): void
     {
         $this->app->forgetInstance(RunImplementation::class);
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
     }
 
     private function answerScopeRequest(Run $run, string $effect): void

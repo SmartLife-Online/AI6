@@ -16,6 +16,8 @@ final class CheckerWebIsolationArchitectureTest extends TestCase
             'ControlProcessRunner',
             'ExecutionMailbox',
             'RunCheckStep',
+            'AgentExecutionRunner',
+            'AgentExecutionProcessor',
             'dispatchOrCollect',
             'processNext',
         ];
@@ -39,13 +41,48 @@ final class CheckerWebIsolationArchitectureTest extends TestCase
         }
 
         self::assertNotEmpty($checked);
+        // The checker seam: exactly RunCheckStep reaches CheckRunner::dispatchOrCollect().
         self::assertSame(
             ['app/AI6/Runs/RunCheckStep.php'],
-            $this->applicationFilesContaining('->dispatchOrCollect('),
+            $this->applicationFilesContaining('->checks->dispatchOrCollect('),
+        );
+        // The agent-turn seam: exactly the four turn consumers reach
+        // AgentExecutionRunner::dispatchOrCollect(), as one closed list —
+        // no other class, and in particular no routed controller, may.
+        self::assertSame(
+            [
+                'app/AI6/Reviews/FindingVerificationRound.php',
+                'app/AI6/Reviews/ReviewRound.php',
+                'app/AI6/Reviews/SecurityReviewStep.php',
+                'app/AI6/Runs/RunImplementation.php',
+            ],
+            $this->applicationFilesContaining('->turns->dispatchOrCollect('),
         );
         self::assertSame(
             ['app/AI6/Shared/Process/ExecutionMailboxCommand.php'],
             $this->applicationFilesContaining('->processNext('),
+        );
+        // The two checks above are bound to the property names ->checks-> and
+        // ->turns->, so a future, non-routed consumer calling
+        // dispatchOrCollect() through a differently named property would
+        // appear in neither closed list and slip past this guard entirely.
+        // This third assertion binds the bare needle instead — the union of
+        // both call-site lists above plus the two classes that declare the
+        // method itself (their own `function dispatchOrCollect(` line also
+        // contains the needle) — so any new caller, regardless of the
+        // property name it is reached through, grows this list and turns
+        // the inventory red.
+        self::assertSame(
+            [
+                'app/AI6/Agents/AgentExecutionRunner.php',
+                'app/AI6/Checks/CheckRunner.php',
+                'app/AI6/Reviews/FindingVerificationRound.php',
+                'app/AI6/Reviews/ReviewRound.php',
+                'app/AI6/Reviews/SecurityReviewStep.php',
+                'app/AI6/Runs/RunCheckStep.php',
+                'app/AI6/Runs/RunImplementation.php',
+            ],
+            $this->applicationFilesContaining('dispatchOrCollect('),
         );
     }
 

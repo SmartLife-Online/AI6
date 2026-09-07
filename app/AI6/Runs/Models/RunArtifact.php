@@ -21,6 +21,7 @@ use Illuminate\Support\Carbon;
  * @property RunArtifactKind $kind
  * @property array<string, mixed> $redacted_metadata
  * @property string|null $digest
+ * @property string|null $execution_id
  * @property int $size_bytes
  * @property int $sequence
  * @property string|null $storage_reference

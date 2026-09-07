@@ -2,19 +2,17 @@
 
 namespace App\AI6\Reviews;
 
+use App\AI6\Agents\AgentExecutionLimitReached;
+use App\AI6\Agents\AgentExecutionRunner;
 use App\AI6\Agents\AgentResultContext;
 use App\AI6\Agents\AgentResultStatus;
 use App\AI6\Agents\AgentResultValidationException;
 use App\AI6\Agents\AgentResultValidator;
 use App\AI6\Agents\AgentRole;
-use App\AI6\Agents\CredentialProjection;
-use App\AI6\Agents\CredentialRevisionRegistry;
 use App\AI6\Agents\ExecutionHome;
-use App\AI6\Agents\ExecutionHomeManager;
-use App\AI6\Agents\FakeAgentAdapter;
-use App\AI6\Agents\InstructionProfileRegistry;
 use App\AI6\Agents\InstructionSnapshot;
 use App\AI6\Agents\InstructionSnapshotEntry;
+use App\AI6\Agents\InvalidAgentResponse;
 use App\AI6\Agents\ProviderRuntimeProfile;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Agents\SecurityReviewerProfileResolver;
@@ -36,7 +34,6 @@ use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Runs\Models\RunEvent;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\RunArtifactKind;
-use App\AI6\Runs\RunArtifactStore;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
 use App\AI6\Runs\WaitReason;
@@ -61,14 +58,10 @@ final readonly class SecurityReviewStep
         private HardenedGitRunner $git,
         private IsolatedTreeExport $exporter,
         private CheckTreeBinding $trees,
-        private ExecutionHomeManager $homes,
         private InstructionBindingVerifier $instructionBindings,
-        private InstructionProfileRegistry $instructionProfiles,
         private ProviderRuntimeProfileRegistry $runtimeProfiles,
-        private CredentialRevisionRegistry $credentialRevisions,
-        private FakeAgentAdapter $adapter,
+        private AgentExecutionRunner $turns,
         private AgentResultValidator $validator,
-        private RunArtifactStore $artifacts,
         private HumanRequestService $humanRequests,
         private WorktreeGitMetadataPaths $gitMetadataPaths,
         private SecurityReviewPrompt $securityPrompt,
@@ -131,11 +124,21 @@ final readonly class SecurityReviewStep
                 throw new ImplementationImportException($drift, 'The security instruction or runtime binding changed.');
             }
             $prompt = $this->securityPrompt->snapshot($run);
-            $slot = $this->runs->startSecurityReviewSession($run, $selection, (string) Str::uuid());
+            $slotKey = 'agent_security_slot_'.$this->turns->revision($job);
+            $savedSlot = $this->turns->intent($job)[$slotKey] ?? null;
+            $slot = is_string($savedSlot)
+                ? RunAgent::query()->where('run_id', $run->id)->where('slot_id', $savedSlot)->where('is_active', true)->firstOrFail()
+                : $this->runs->startSecurityReviewSession($run, $selection, (string) Str::uuid());
+            if (! is_string($savedSlot)) {
+                $this->turns->persist($job, [...$this->turns->intent($job), $slotKey => $slot->slot_id]);
+            }
             $bindings = $this->bindings($run, $profileId, $prompt, $instruction, $runtime);
-            $bytes = $this->invoke($run, $slot, $prompt, $instruction, $runtime, $bindings);
+            $bytes = $this->invoke($job, $run, $slot, $prompt, $instruction, $runtime, $bindings);
+            if ($bytes === null) {
+                return;
+            }
             $context = new RedactionContext((string) $run->project_id, $run->id, 'security-review');
-            $artifact = $this->artifacts->store($run, RunArtifactKind::PROVIDER_RAW, $bytes, [
+            $artifact = $this->turns->store($run, RunArtifactKind::PROVIDER_RAW, $bytes, [
                 'role' => AgentRole::SECURITY_REVIEW->value,
                 'slot_id' => $slot->slot_id,
                 'attempt' => 1,
@@ -159,7 +162,9 @@ final readonly class SecurityReviewStep
             }
             $critical = $review->findings()->where('severity', FindingSeverity::CRITICAL->value)->exists();
             $this->park($job, $run->fresh() ?? $run, 'security_result_'.$result->status->value, $profileId, $instructionHash, $critical);
-        } catch (JsonDecodingException|AgentResultValidationException|InvalidRedactionInputException) {
+        } catch (AgentExecutionLimitReached) {
+            $this->park($job, $run->fresh() ?? $run, 'security_runtime_limit', $profileId, $instructionHash);
+        } catch (InvalidAgentResponse|JsonDecodingException|AgentResultValidationException|InvalidRedactionInputException) {
             $this->park($job, $run->fresh() ?? $run, 'security_result_invalid', $profileId, $instructionHash);
         } catch (Throwable $exception) {
             $reason = $exception instanceof ImplementationImportException
@@ -176,7 +181,7 @@ final readonly class SecurityReviewStep
     }
 
     /** @param array<string, mixed> $bindings */
-    private function invoke(Run $run, RunAgent $slot, PromptSnapshot $prompt, InstructionSnapshot $instruction, ProviderRuntimeProfile $runtime, array &$bindings): string
+    private function invoke(ExecutionJob $job, Run $run, RunAgent $slot, PromptSnapshot $prompt, InstructionSnapshot $instruction, ProviderRuntimeProfile $runtime, array &$bindings): ?string
     {
         $project = $run->project()->firstOrFail();
         if (! is_string($project->project_identifier)) {
@@ -198,7 +203,6 @@ final readonly class SecurityReviewStep
         $export = $input.DIRECTORY_SEPARATOR.'candidate-export';
         $context = new RedactionContext((string) $run->project_id, $run->id, 'security-candidate-export');
         $home = null;
-        $adapterIo = null;
         try {
             $files = 0;
             $bytes = 0;
@@ -220,34 +224,35 @@ final readonly class SecurityReviewStep
                 throw new ImplementationImportException('security_workspace_binding_failed', 'The candidate export could not be bound.');
             }
             try {
-                $home = $this->homes->create(
-                    $input, $output, $slot->slot_id, $slot->session_id, $export,
-                    $this->instructionProfiles->get($slot->provider_profile), $instruction, $runtime,
-                    new CredentialProjection($slot->provider_profile, $this->credentialRevisions->revision($slot->provider_profile), []),
-                );
+                $agentContext = new AgentResultContext(AgentRole::SECURITY_REVIEW, $prompt, $instruction, $runtime, [], '', slotId: $slot->slot_id, unreachablePaths: $this->gitMetadataPaths->resolve((string) $run->worktree_path));
+                $home = $this->turns->prepare($job, $run, $slot, $agentContext, $export);
             } catch (Throwable) {
                 throw new ImplementationImportException('security_home_failed', 'The sealed security home could not be created.');
             }
-            $adapterIo = $home->root.'-io';
             try {
-                return $this->adapter->turn(
-                    new AgentResultContext(AgentRole::SECURITY_REVIEW, $prompt, $instruction, $runtime, [], '', slotId: $slot->slot_id),
-                    $home->workspace,
-                    $this->gitMetadataPaths->resolve((string) $run->worktree_path),
-                );
+                $answer = $this->turns->dispatchOrCollect($run, $job, $home, $agentContext, $this->gitMetadataPaths->resolve((string) $run->worktree_path));
+                if ($answer === null) {
+                    $this->runs->parkPollingStep($job, (string) $job->lease_owner);
+                    $home = null;
+
+                    return null;
+                }
+
+                return $answer->bytes;
+            } catch (AgentExecutionLimitReached $exception) {
+                throw $exception;
+            } catch (InvalidAgentResponse $exception) {
+                throw $exception;
             } catch (Throwable) {
                 throw new ImplementationImportException('security_provider_error', 'The local security adapter failed.');
             }
         } finally {
             if ($home instanceof ExecutionHome) {
                 try {
-                    $this->homes->destroy($home);
+                    $this->turns->destroy($home);
                 } catch (Throwable) {
                     throw new ImplementationImportException('security_home_cleanup_failed', 'The security home was not removed completely.');
                 }
-            }
-            if (is_string($adapterIo)) {
-                $this->removeTree($adapterIo);
             }
             $this->removeTree($stage);
             $this->removeTree($export);

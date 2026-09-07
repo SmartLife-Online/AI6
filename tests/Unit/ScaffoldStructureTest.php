@@ -59,6 +59,12 @@ final class ScaffoldStructureTest extends TestCase
         self::assertSame([
             'app/AI6/Agents/.gitkeep',
             'app/AI6/Agents/AgentAdapter.php',
+            'app/AI6/Agents/AgentExecutionException.php',
+            'app/AI6/Agents/AgentExecutionLimitReached.php',
+            'app/AI6/Agents/AgentExecutionProcessor.php',
+            'app/AI6/Agents/AgentExecutionRequest.php',
+            'app/AI6/Agents/AgentExecutionResultDocument.php',
+            'app/AI6/Agents/AgentExecutionRunner.php',
             'app/AI6/Agents/AgentFinding.php',
             'app/AI6/Agents/AgentInputLimits.php',
             'app/AI6/Agents/AgentProfile.php',
@@ -75,6 +81,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Agents/AgentRole.php',
             'app/AI6/Agents/AgentScenario.php',
             'app/AI6/Agents/AgentSelection.php',
+            'app/AI6/Agents/AgentTurnResult.php',
             'app/AI6/Agents/CapabilityStatus.php',
             'app/AI6/Agents/CredentialProjection.php',
             'app/AI6/Agents/CredentialProjectionException.php',
@@ -110,6 +117,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Agents/InstructionSnapshot.php',
             'app/AI6/Agents/InstructionSnapshotEntry.php',
             'app/AI6/Agents/InstructionSnapshotResolver.php',
+            'app/AI6/Agents/InvalidAgentResponse.php',
             'app/AI6/Agents/ModelProfileAllowlist.php',
             'app/AI6/Agents/ProviderRuntimeProfile.php',
             'app/AI6/Agents/ProviderRuntimeProfileRegistry.php',
@@ -949,6 +957,7 @@ final class ScaffoldStructureTest extends TestCase
             '2026_09_01_000000_add_publish_completion_contract.php',
             '2026_09_01_010000_add_project_queue_contract.php',
             '2026_09_02_000000_add_run_artifact_retention_contract.php',
+            '2026_09_07_000000_bind_provider_artifacts_to_execution.php',
         ], $migrations);
     }
 

@@ -4,6 +4,8 @@ namespace Tests\Feature\Runs;
 
 use App\AI6\Agents\AgentAdapter;
 use App\AI6\Agents\AgentResultContext;
+use App\AI6\Agents\AgentTurnResult;
+use App\AI6\Agents\ExecutionHome;
 
 /**
  * A deterministic implementation-role double that writes exactly the given paths.
@@ -44,8 +46,10 @@ final readonly class ScopedFixAdapter implements AgentAdapter
     }
 
     /** @param list<string> $unreachablePaths */
-    public function turn(AgentResultContext $context, string $isolatedTree, array $unreachablePaths = []): string
+    public function turn(AgentResultContext $context, ExecutionHome $home, \Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult
     {
+        $heartbeat();
+        $isolatedTree = $home->workspace;
         foreach ($this->writes as $path => $content) {
             $target = rtrim($isolatedTree, '/\\').'/'.$path;
             $directory = dirname($target);
@@ -55,6 +59,6 @@ final readonly class ScopedFixAdapter implements AgentAdapter
             file_put_contents($target, $content);
         }
 
-        return $this->result($context);
+        return new AgentTurnResult($this->result($context));
     }
 }

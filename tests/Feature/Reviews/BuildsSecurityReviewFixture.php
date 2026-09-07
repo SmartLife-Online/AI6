@@ -2,7 +2,9 @@
 
 namespace Tests\Feature\Reviews;
 
+use App\AI6\Agents\AgentAdapter;
 use App\AI6\Agents\AgentScenario;
+use App\AI6\Agents\FakeAgentAdapter;
 use App\AI6\Agents\InstructionCandidate;
 use App\AI6\Checks\CheckPhase;
 use App\AI6\Checks\CheckResult;
@@ -24,6 +26,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\Feature\Checks\BuildsCheckFixture;
 use Tests\Feature\Runs\BuildsFixLoopFixture;
+use Tests\Fixtures\Agents\AgentMailboxFixture;
 
 /** Drives one real publish candidate into its worker-bound security step. */
 trait BuildsSecurityReviewFixture
@@ -68,6 +71,12 @@ trait BuildsSecurityReviewFixture
             $this->app->make(RunOrchestrator::class),
             finalization: $this->app->make(RunFinalizationStep::class),
         );
+        AgentMailboxFixture::drain($finalize, function () use ($finalize): void {
+            (new ExecuteRunStep($finalize->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                finalization: $this->app->make(RunFinalizationStep::class),
+            );
+        });
         self::assertSame(ExecutionJobState::SUCCEEDED, $finalize->fresh()->state, (string) $finalize->fresh()->failure_code);
         $this->bindSecurityRepository($run->fresh(), $prepared['worktree']);
 
@@ -76,6 +85,7 @@ trait BuildsSecurityReviewFixture
 
     protected function executeSecurityReview(Run $run): ExecutionJob
     {
+        $this->app->bind(AgentAdapter::class, fn (): AgentAdapter => $this->app->make(FakeAgentAdapter::class));
         $job = ExecutionJob::query()->where('run_id', $run->id)
             ->where('step_type', ExecutionStepType::SECURITY_REVIEW->value)->sole();
         $this->app->forgetInstance(SecurityReviewStep::class);
@@ -83,6 +93,12 @@ trait BuildsSecurityReviewFixture
             $this->app->make(RunOrchestrator::class),
             securityReview: $this->app->make(SecurityReviewStep::class),
         );
+        AgentMailboxFixture::drain($job, function () use ($job): void {
+            (new ExecuteRunStep($job->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                securityReview: $this->app->make(SecurityReviewStep::class),
+            );
+        });
 
         return $job->fresh() ?? $job;
     }

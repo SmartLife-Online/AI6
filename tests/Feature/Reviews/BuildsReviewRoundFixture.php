@@ -3,6 +3,8 @@
 namespace Tests\Feature\Reviews;
 
 use App\AI6\Agents\AgentAdapter;
+use App\AI6\Agents\AgentExecutionProcessor;
+use App\AI6\Agents\AgentExecutionRunner;
 use App\AI6\Agents\AgentInputLimits;
 use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentRole;
@@ -35,6 +37,7 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\After;
 use Tests\Feature\Git\BuildsRunWorkspaceGitFixture;
 use Tests\Feature\Runs\BuildsImplementationTurnFixture;
+use Tests\Fixtures\Agents\AgentMailboxFixture;
 
 trait BuildsReviewRoundFixture
 {
@@ -160,12 +163,19 @@ trait BuildsReviewRoundFixture
             additionalPathProbes: $additionalPathProbes,
         );
         $this->app->instance(FakeAgentAdapter::class, $adapter);
-        $this->app->instance(AgentAdapter::class, $adapter);
+        // Resolve through the current FakeAgentAdapter binding rather than
+        // closing over this specific object: a later caller (e.g. a security
+        // review step reusing this same test run) may rebind
+        // FakeAgentAdapter::class again, and a closure captured here would
+        // keep resolving this stale instance regardless (AI6-047 finding).
+        $this->app->bind(AgentAdapter::class, fn (): AgentAdapter => $this->app->make(FakeAgentAdapter::class));
         foreach ([
             CredentialRevisionRegistry::class,
             ExecutionHomeManager::class,
             InstructionBindingVerifier::class,
             ReviewRound::class,
+            AgentExecutionRunner::class,
+            AgentExecutionProcessor::class,
         ] as $binding) {
             $this->app->forgetInstance($binding);
         }
@@ -181,6 +191,12 @@ trait BuildsReviewRoundFixture
             $this->app->make(RunOrchestrator::class),
             reviews: $this->app->make(ReviewRound::class),
         );
+        AgentMailboxFixture::drain($job, function () use ($job): void {
+            (new ExecuteRunStep($job->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                reviews: $this->app->make(ReviewRound::class),
+            );
+        });
 
         return $job->fresh() ?? $job;
     }

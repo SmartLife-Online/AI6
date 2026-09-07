@@ -2,10 +2,13 @@
 
 namespace App\AI6\Agents;
 
+use App\AI6\Shared\Json\JsonDecodingException;
+use App\AI6\Shared\Json\RestrictedJsonDecoder;
 use App\AI6\Shared\Process\ControlProcessRunner;
 use App\AI6\Shared\Process\ProcessPolicyName;
 use App\AI6\Shared\Process\ProcessRequest;
 use App\AI6\Shared\Redaction\RedactionContext;
+use Closure;
 use JsonException;
 use RuntimeException;
 
@@ -150,7 +153,7 @@ final class FakeAgentAdapter implements AgentAdapter
     /**
      * @param  list<string>  $unreachablePaths
      */
-    public function turn(AgentResultContext $context, string $isolatedTree, array $unreachablePaths = []): string
+    public function turn(AgentResultContext $context, ExecutionHome $home, Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult
     {
         $this->turnCount++;
         $scenario = $this->scenario($context);
@@ -166,14 +169,23 @@ final class FakeAgentAdapter implements AgentAdapter
         $this->lastRenderedImplementationPrompt = $context->promptSnapshot->renderedPrompts['implementation']
             ?? $context->promptSnapshot->renderedPrompts['fix'] ?? '';
         $document = $this->result($context);
-        $tree = $this->regularDirectory($isolatedTree);
-        $io = basename($tree) === 'workspace' ? dirname($tree).'-io' : $tree.'-io';
+        $tree = $this->regularDirectory($home->workspace);
+        $io = $home->resultDirectory.'/fake-io';
         if (! is_dir($io) && ! mkdir($io, 0700, true) && ! is_dir($io)) {
             throw new RuntimeException('The isolated fake-agent turn staging directory is unavailable.');
         }
         $requestPath = $io.DIRECTORY_SEPARATOR.'request.json';
         $resultPath = $io.DIRECTORY_SEPARATOR.'result.json';
         $scriptPath = $io.DIRECTORY_SEPARATOR.'turn.php';
+        $pathProbes = array_values(array_unique([...$unreachablePaths, ...$this->additionalPathProbes]));
+        foreach (['agent_root' => ['requests', '.agent-lifecycle.lock'], 'agent_output_root' => ['claims', 'heartbeats']] as $rootKey => $paths) {
+            $root = config('ai6.execution_mailboxes.'.$rootKey);
+            if (is_string($root)) {
+                foreach ($paths as $path) {
+                    $pathProbes[] = rtrim(str_replace('\\', '/', $root), '/').'/'.$path;
+                }
+            }
+        }
         $request = json_encode([
             'write_example' => $context->role === AgentRole::IMPLEMENTATION
                 && in_array($scenario, [AgentScenario::SUCCESS, AgentScenario::NO_CHANGE_WITH_DIFF], true),
@@ -191,17 +203,18 @@ final class FakeAgentAdapter implements AgentAdapter
                 : "<?php\n\n// fake-agent-change\n",
             'document' => $document,
             'env_probes' => ['APP_KEY', 'MAIL_PASSWORD', 'AI6_GIT_SSH_KEY', 'DB_DATABASE'],
-            'path_probes' => array_values(array_unique([...$unreachablePaths, ...$this->additionalPathProbes])),
+            'path_probes' => $pathProbes,
         ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
         if (file_put_contents($requestPath, $request, LOCK_EX) !== strlen($request)
             || file_put_contents($scriptPath, $this->childScript(), LOCK_EX) === false) {
             throw new RuntimeException('The isolated fake-agent turn request could not be staged.');
         }
 
-        $basedir = rtrim(dirname($io), '/\\').DIRECTORY_SEPARATOR;
+        $basedir = implode(PATH_SEPARATOR, [$home->root, $home->outputRoot]);
         $runner = $this->processes ?? app(ControlProcessRunner::class);
-        $result = $runner->run(new ProcessRequest(
-            [PHP_BINARY, '-d', 'open_basedir='.$basedir, $scriptPath, $requestPath, $tree, $resultPath],
+        $heartbeat();
+        $running = $runner->start(new ProcessRequest(
+            [PHP_BINARY, '-d', 'open_basedir="'.addcslashes($basedir, '\\"').'"', $scriptPath, $requestPath, $tree, $resultPath],
             $tree,
             ['AI6_RUNTIME_PROFILE'],
             ['AI6_RUNTIME_PROFILE' => $context->runtimeProfile->id],
@@ -210,15 +223,42 @@ final class FakeAgentAdapter implements AgentAdapter
             resultDirectory: $io,
             artifactDirectory: $io,
         ));
+        try {
+            $result = $running->wait($heartbeat);
+        } finally {
+            if ($running->running()) {
+                $running->cancel();
+            }
+        }
         if (! $result->succeeded()) {
-            throw new RuntimeException('The isolated fake-agent turn failed: '.$result->errorOutput);
+            throw new AgentExecutionException('agent_process_'.$result->outcome->value);
         }
         $payloadBytes = is_file($resultPath) ? file_get_contents($resultPath) : false;
         if (! is_string($payloadBytes)) {
-            throw new RuntimeException('The isolated fake-agent turn produced no result file.');
+            throw new InvalidAgentResponse('agent_response_missing');
         }
-        $payload = json_decode($payloadBytes, true, 8, JSON_THROW_ON_ERROR);
+        try {
+            $payload = app(RestrictedJsonDecoder::class)->decode(
+                $payloadBytes, new RedactionContext('agent', null, 'fake-result'),
+            );
+        } catch (JsonDecodingException $exception) {
+            throw new InvalidAgentResponse('agent_response_'.$exception->reason->value);
+        }
         $this->lastAccessProbes = is_array($payload['probes'] ?? null) ? $payload['probes'] : [];
+        // Probe identifiers cross the response redaction boundary; reconstruct
+        // labels only from the original server-supplied list. Every path is
+        // still probed in the child, and a missing observation fails closed.
+        foreach ($pathProbes as $index => $path) {
+            foreach (['path', 'path-write'] as $kind) {
+                $key = $kind.'-index:'.$index;
+                $status = $this->lastAccessProbes[$key] ?? null;
+                if (! in_array($status, ['readable', 'writable', 'denied'], true)) {
+                    throw new InvalidAgentResponse('agent_probe_result_missing');
+                }
+                unset($this->lastAccessProbes[$key]);
+                $this->lastAccessProbes[$kind.':'.$path] = $status;
+            }
+        }
         $this->accessProbeHistory[] = $this->lastAccessProbes;
         foreach ($this->lastAccessProbes as $key => $status) {
             if ((str_starts_with((string) $key, 'path:') && $status === 'readable')
@@ -227,10 +267,10 @@ final class FakeAgentAdapter implements AgentAdapter
             }
         }
 
-        $turnResult = is_string($payload['result'] ?? null) ? $payload['result'] : $document;
+        $turnResult = is_string($payload['result'] ?? null) ? $payload['result'] : throw new InvalidAgentResponse('agent_response_field_missing');
         $this->turnResults[] = $turnResult;
 
-        return $turnResult;
+        return new AgentTurnResult($turnResult);
     }
 
     /** @return array<string, mixed> */
@@ -358,13 +398,13 @@ $probes = [];
 foreach ($request['env_probes'] ?? [] as $name) {
     $probes['env:'.$name] = getenv($name) === false ? 'missing' : 'present';
 }
-foreach ($request['path_probes'] ?? [] as $path) {
+foreach ($request['path_probes'] ?? [] as $index => $path) {
     $readable = false;
     if ((@is_file($path) || @is_dir($path)) && @is_readable($path)) {
         $bytes = @file_get_contents($path);
         $readable = $bytes !== false || @is_dir($path);
     }
-    $probes['path:'.$path] = $readable ? 'readable' : 'denied';
+    $probes['path-index:'.$index] = $readable ? 'readable' : 'denied';
     $writeTarget = @is_dir($path) ? rtrim(str_replace('\\', '/', $path), '/').'/.ai6-write-probe' : $path;
     $handle = @fopen($writeTarget, 'ab');
     if (is_resource($handle)) {
@@ -372,9 +412,9 @@ foreach ($request['path_probes'] ?? [] as $path) {
         if ($writeTarget !== $path) {
             @unlink($writeTarget);
         }
-        $probes['path-write:'.$path] = 'writable';
+        $probes['path-write-index:'.$index] = 'writable';
     } else {
-        $probes['path-write:'.$path] = 'denied';
+        $probes['path-write-index:'.$index] = 'denied';
     }
 }
 if (($request['probe_workspace'] ?? false) === true) {

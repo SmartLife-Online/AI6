@@ -50,6 +50,7 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\After;
 use Symfony\Component\Process\Process;
 use Tests\Feature\Checks\BuildsCheckFixture;
+use Tests\Fixtures\Agents\AgentMailboxFixture;
 
 /**
  * A real managed SHA-256 clone plus the approved review-only run that AI6-040
@@ -414,6 +415,15 @@ trait BuildsReviewOnlyRunFixture
             reviewPrepare: $this->app->make(ReviewOnlyPrepareStep::class),
             reviewOnly: $this->app->make(ReviewOnlyRunCoordinator::class),
         );
+        AgentMailboxFixture::drain($job, function () use ($job): void {
+            (new ExecuteRunStep($job->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                checks: $this->app->make(RunCheckStep::class),
+                reviews: $this->app->make(ReviewRound::class),
+                reviewPrepare: $this->app->make(ReviewOnlyPrepareStep::class),
+                reviewOnly: $this->app->make(ReviewOnlyRunCoordinator::class),
+            );
+        });
 
         return $job->fresh() ?? $job;
     }

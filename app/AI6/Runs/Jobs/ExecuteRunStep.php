@@ -2,6 +2,7 @@
 
 namespace App\AI6\Runs\Jobs;
 
+use App\AI6\Agents\AgentExecutionRunner;
 use App\AI6\HumanLoop\HumanRequestRejected;
 use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\HumanLoop\Models\Intervention;
@@ -61,170 +62,182 @@ final class ExecuteRunStep implements ShouldQueue
         ?SecurityReviewStep $securityReview = null,
         ?PublishCompletionService $publish = null,
     ): void {
-        $job = ExecutionJob::query()->find($this->executionJobId);
-        if (! $job instanceof ExecutionJob
-            || in_array($job->state, [ExecutionJobState::SUCCEEDED, ExecutionJobState::FAILED], true)) {
-            return;
-        }
+        try {
+            $job = ExecutionJob::query()->find($this->executionJobId);
+            if (! $job instanceof ExecutionJob
+                || in_array($job->state, [ExecutionJobState::SUCCEEDED, ExecutionJobState::FAILED], true)) {
+                return;
+            }
 
-        $type = ExecutionStepType::tryFrom($job->step_type);
-        if (! $type instanceof ExecutionStepType || ! $type->hasRegisteredHandler()) {
-            return;
-        }
+            $type = ExecutionStepType::tryFrom($job->step_type);
+            if (! $type instanceof ExecutionStepType || ! $type->hasRegisteredHandler()) {
+                return;
+            }
 
-        $owner = 'worker:'.(gethostname() ?: 'unknown').':'.bin2hex(random_bytes(8));
-        $claimed = $orchestrator->claimStep($job, $owner);
-        if (! $claimed instanceof ExecutionJob) {
-            $orchestrator->failExhaustedStep($job->fresh() ?? $job);
-
-            return;
-        }
-
-        $run = Run::query()->find($claimed->run_id);
-        if (! $run instanceof Run) {
-            $orchestrator->finishStep($claimed, $owner, ExecutionJobState::FAILED, 'Der Run des Schritts ist nicht mehr vorhanden.', 'run_missing');
-
-            return;
-        }
-        if (! in_array($run->state, [RunState::QUEUED, RunState::RUNNING], true)) {
-            $this->abandon($orchestrator, $claimed, $run->id, $owner);
-
-            return;
-        }
-
-        $limits ??= app(RunLimitPolicy::class);
-        $humanRequests ??= app(HumanRequestService::class);
-        $stallFingerprints ??= app(ReviewStallFingerprint::class);
-        $exceeded = in_array($type, [
-            ExecutionStepType::IMPLEMENT,
-            ExecutionStepType::REVIEW,
-            ExecutionStepType::FIX,
-            ExecutionStepType::VERIFY,
-            ExecutionStepType::FINALIZE,
-            ExecutionStepType::SECURITY_REVIEW,
-            ExecutionStepType::PUBLISH,
-        ], true) ? $limits->runtimeExceeded($run) : null;
-        $waitReason = WaitReason::RESOURCE_LIMIT;
-        if ($exceeded === null && $type === ExecutionStepType::REVIEW) {
-            $exceeded = $limits->consume(
-                $run,
-                ImportLimit::MAX_REVIEW_ROUNDS,
-                'review-round:'.$claimed->step_number,
-            );
-            $waitReason = WaitReason::REVIEW_LIMIT;
-        }
-        if ($exceeded === null && $type === ExecutionStepType::FIX) {
-            $exceeded = $limits->consume(
-                $run,
-                ImportLimit::MAX_FIX_ROUNDS,
-                'fix-round:'.$claimed->step_number,
-            );
-            $waitReason = WaitReason::REVIEW_LIMIT;
-        }
-        if ($exceeded === null && $type === ExecutionStepType::VERIFY) {
-            $exceeded = $limits->consume(
-                $run,
-                ImportLimit::MAX_VERIFICATION_ROUNDS,
-                'verification-round:'.$claimed->step_number,
-            );
-            $waitReason = WaitReason::REVIEW_LIMIT;
-        }
-        // The stall event fires once per bound fix step: a granted resolution
-        // (additional round, reviewer switch or finding disposition) leaves an
-        // intervention on this step key, and re-evaluating the unchanged
-        // fingerprints after it would park the resumed step forever (AC-04/AC-06).
-        if ($exceeded === null && $type === ExecutionStepType::FIX
-            && $stallFingerprints->stalled($run, $claimed->step_number)
-            && ! Intervention::query()->where('bound_step_key', $claimed->idempotency_key)
-                ->whereIn('chosen_effect', ['additional_round', 'switch_reviewer', 'finding_disposition'])
-                ->exists()) {
-            $effective = $limits->effective($run)[ImportLimit::MAX_REVIEW_ROUNDS->value];
-            $exceeded = new ImportLimitResult(ImportLimit::MAX_REVIEW_ROUNDS, $effective + 1, $effective);
-            $waitReason = WaitReason::REVIEW_LIMIT;
-        }
-        if ($exceeded instanceof ImportLimitResult) {
-            if ($type === ExecutionStepType::SECURITY_REVIEW) {
-                ($securityReview ?? app(SecurityReviewStep::class))->parkForFailure($claimed, $run, 'security_runtime_limit');
+            $owner = 'worker:'.(gethostname() ?: 'unknown').':'.bin2hex(random_bytes(8));
+            $claimed = $orchestrator->claimStep($job, $owner);
+            if (! $claimed instanceof ExecutionJob) {
+                $orchestrator->failExhaustedStep($job->fresh() ?? $job);
 
                 return;
             }
-            try {
-                $humanRequests->openLimitRequest($run, $claimed, $exceeded, $waitReason);
-            } catch (HumanRequestRejected $rejected) {
-                $orchestrator->finishStep(
-                    $claimed,
-                    $owner,
-                    ExecutionJobState::FAILED,
-                    'Die Limitentscheidung konnte nicht gebunden werden.',
-                    $rejected->reason,
-                );
-                $orchestrator->failRun($run->id);
+
+            $run = Run::query()->find($claimed->run_id);
+            if (! $run instanceof Run) {
+                $orchestrator->finishStep($claimed, $owner, ExecutionJobState::FAILED, 'Der Run des Schritts ist nicht mehr vorhanden.', 'run_missing');
+
+                return;
+            }
+            if (! in_array($run->state, [RunState::QUEUED, RunState::RUNNING], true)) {
+                $this->abandon($orchestrator, $claimed, $run->id, $owner);
+
+                return;
             }
 
-            return;
+            $limits ??= app(RunLimitPolicy::class);
+            $humanRequests ??= app(HumanRequestService::class);
+            $stallFingerprints ??= app(ReviewStallFingerprint::class);
+            $exceeded = in_array($type, [
+                ExecutionStepType::IMPLEMENT,
+                ExecutionStepType::REVIEW,
+                ExecutionStepType::FIX,
+                ExecutionStepType::VERIFY,
+                ExecutionStepType::FINALIZE,
+                ExecutionStepType::SECURITY_REVIEW,
+                ExecutionStepType::PUBLISH,
+            ], true) ? $limits->runtimeExceeded($run) : null;
+            $waitReason = WaitReason::RESOURCE_LIMIT;
+            if ($exceeded === null && $type === ExecutionStepType::REVIEW) {
+                $exceeded = $limits->consume(
+                    $run,
+                    ImportLimit::MAX_REVIEW_ROUNDS,
+                    'review-round:'.$claimed->step_number,
+                );
+                $waitReason = WaitReason::REVIEW_LIMIT;
+            }
+            if ($exceeded === null && $type === ExecutionStepType::FIX) {
+                $exceeded = $limits->consume(
+                    $run,
+                    ImportLimit::MAX_FIX_ROUNDS,
+                    'fix-round:'.$claimed->step_number,
+                );
+                $waitReason = WaitReason::REVIEW_LIMIT;
+            }
+            if ($exceeded === null && $type === ExecutionStepType::VERIFY) {
+                $exceeded = $limits->consume(
+                    $run,
+                    ImportLimit::MAX_VERIFICATION_ROUNDS,
+                    'verification-round:'.$claimed->step_number,
+                );
+                $waitReason = WaitReason::REVIEW_LIMIT;
+            }
+            // The stall event fires once per bound fix step: a granted resolution
+            // (additional round, reviewer switch or finding disposition) leaves an
+            // intervention on this step key, and re-evaluating the unchanged
+            // fingerprints after it would park the resumed step forever (AC-04/AC-06).
+            if ($exceeded === null && $type === ExecutionStepType::FIX
+                && $stallFingerprints->stalled($run, $claimed->step_number)
+                && ! Intervention::query()->where('bound_step_key', $claimed->idempotency_key)
+                    ->whereIn('chosen_effect', ['additional_round', 'switch_reviewer', 'finding_disposition'])
+                    ->exists()) {
+                $effective = $limits->effective($run)[ImportLimit::MAX_REVIEW_ROUNDS->value];
+                $exceeded = new ImportLimitResult(ImportLimit::MAX_REVIEW_ROUNDS, $effective + 1, $effective);
+                $waitReason = WaitReason::REVIEW_LIMIT;
+            }
+            if ($exceeded instanceof ImportLimitResult) {
+                if ($type === ExecutionStepType::SECURITY_REVIEW) {
+                    ($securityReview ?? app(SecurityReviewStep::class))->parkForFailure($claimed, $run, 'security_runtime_limit');
+
+                    return;
+                }
+                try {
+                    $humanRequests->openLimitRequest($run, $claimed, $exceeded, $waitReason);
+                } catch (HumanRequestRejected $rejected) {
+                    $orchestrator->finishStep(
+                        $claimed,
+                        $owner,
+                        ExecutionJobState::FAILED,
+                        'Die Limitentscheidung konnte nicht gebunden werden.',
+                        $rejected->reason,
+                    );
+                    $orchestrator->failRun($run->id);
+                }
+
+                return;
+            }
+
+            if ($type === ExecutionStepType::IMPLEMENT) {
+                ($implementation ?? app(RunImplementation::class))->execute($claimed, $run, $owner);
+
+                return;
+            }
+
+            if ($type === ExecutionStepType::REVIEW_PREPARE) {
+                ($reviewPrepare ?? app(ReviewOnlyPrepareStep::class))->execute($claimed, $run, $owner);
+
+                return;
+            }
+
+            if ($type === ExecutionStepType::CHECK) {
+                ($checks ?? app(RunCheckStep::class))->execute($claimed, $run, $owner);
+
+                return;
+            }
+
+            if ($type === ExecutionStepType::REVIEW) {
+                ($reviews ?? app(ReviewRound::class))->execute($claimed, $run, $owner);
+
+                return;
+            }
+
+            if ($type === ExecutionStepType::VERIFY) {
+                ($verifications ?? app(FindingVerificationRound::class))->execute($claimed, $run, $owner);
+
+                return;
+            }
+
+            if ($type === ExecutionStepType::REPORT) {
+                ($reviewOnly ?? app(ReviewOnlyRunCoordinator::class))->execute($claimed, $run, $owner);
+
+                return;
+            }
+
+            if ($type === ExecutionStepType::FIX) {
+                ($fixes ?? app(RunFixTurn::class))->execute($claimed, $run, $owner);
+
+                return;
+            }
+
+            if ($type === ExecutionStepType::FINALIZE) {
+                ($finalization ?? app(RunFinalizationStep::class))->execute($claimed, $run, $owner);
+
+                return;
+            }
+
+            if ($type === ExecutionStepType::SECURITY_REVIEW) {
+                ($securityReview ?? app(SecurityReviewStep::class))->execute($claimed, $run, $owner);
+
+                return;
+            }
+
+            if ($type === ExecutionStepType::PUBLISH) {
+                ($publish ?? app(PublishCompletionService::class))->execute($claimed, $run, $owner);
+
+                return;
+            }
+
+            $this->preflight($orchestrator, $claimed, $run, $owner);
+        } finally {
+            $cleanupJob = ExecutionJob::query()->find($this->executionJobId);
+            if ($cleanupJob instanceof ExecutionJob) {
+                try {
+                    app(AgentExecutionRunner::class)->cleanupStoppedJob($cleanupJob);
+                } catch (\Throwable $exception) {
+                    $orchestrator->recordStepEvent($cleanupJob->run_id, $cleanupJob->step_type, ExecutionJobState::FAILED, 'agent_home_cleanup_failed', 'agent-cleanup:'.$cleanupJob->id);
+                    throw $exception;
+                }
+            }
         }
-
-        if ($type === ExecutionStepType::IMPLEMENT) {
-            ($implementation ?? app(RunImplementation::class))->execute($claimed, $run, $owner);
-
-            return;
-        }
-
-        if ($type === ExecutionStepType::REVIEW_PREPARE) {
-            ($reviewPrepare ?? app(ReviewOnlyPrepareStep::class))->execute($claimed, $run, $owner);
-
-            return;
-        }
-
-        if ($type === ExecutionStepType::CHECK) {
-            ($checks ?? app(RunCheckStep::class))->execute($claimed, $run, $owner);
-
-            return;
-        }
-
-        if ($type === ExecutionStepType::REVIEW) {
-            ($reviews ?? app(ReviewRound::class))->execute($claimed, $run, $owner);
-
-            return;
-        }
-
-        if ($type === ExecutionStepType::VERIFY) {
-            ($verifications ?? app(FindingVerificationRound::class))->execute($claimed, $run, $owner);
-
-            return;
-        }
-
-        if ($type === ExecutionStepType::REPORT) {
-            ($reviewOnly ?? app(ReviewOnlyRunCoordinator::class))->execute($claimed, $run, $owner);
-
-            return;
-        }
-
-        if ($type === ExecutionStepType::FIX) {
-            ($fixes ?? app(RunFixTurn::class))->execute($claimed, $run, $owner);
-
-            return;
-        }
-
-        if ($type === ExecutionStepType::FINALIZE) {
-            ($finalization ?? app(RunFinalizationStep::class))->execute($claimed, $run, $owner);
-
-            return;
-        }
-
-        if ($type === ExecutionStepType::SECURITY_REVIEW) {
-            ($securityReview ?? app(SecurityReviewStep::class))->execute($claimed, $run, $owner);
-
-            return;
-        }
-
-        if ($type === ExecutionStepType::PUBLISH) {
-            ($publish ?? app(PublishCompletionService::class))->execute($claimed, $run, $owner);
-
-            return;
-        }
-
-        $this->preflight($orchestrator, $claimed, $run, $owner);
     }
 
     private function preflight(RunOrchestrator $orchestrator, ExecutionJob $job, Run $run, string $owner): void

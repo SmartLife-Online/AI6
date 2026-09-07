@@ -4,6 +4,8 @@ namespace Tests\Feature\Runs;
 
 use App\AI6\Agents\AgentAdapter;
 use App\AI6\Agents\AgentResultContext;
+use App\AI6\Agents\AgentTurnResult;
+use App\AI6\Agents\ExecutionHome;
 use App\AI6\Agents\HumanRequestOption;
 use App\AI6\Agents\HumanRequestProposal;
 use App\AI6\Auth\Models\User;
@@ -80,7 +82,7 @@ final class RunCancellationFencingTest extends TicketUiTestCase
                 $this->authorization($operator, $request, RunCancellationMode::SOFT),
             );
         });
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         $this->app->forgetInstance(RunImplementation::class);
 
         $job = $this->executeImplement($run->fresh());
@@ -112,14 +114,15 @@ final class RunCancellationFencingTest extends TicketUiTestCase
                 return '{}';
             }
 
-            public function turn(AgentResultContext $context, string $isolatedTree, array $unreachablePaths = []): string
+            public function turn(AgentResultContext $context, ExecutionHome $home, Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult
             {
+                $heartbeat();
                 $this->turns++;
                 ($this->duringTurn)();
 
                 // The bytes below are the "late" provider response: they must
                 // never be validated or published once the cancellation bound.
-                return '{}';
+                return new AgentTurnResult('{}');
             }
         };
     }

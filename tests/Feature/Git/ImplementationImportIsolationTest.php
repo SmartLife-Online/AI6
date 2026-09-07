@@ -64,6 +64,42 @@ final class ImplementationImportIsolationTest extends TicketUiTestCase
         $this->removeTree($view);
     }
 
+    /**
+     * AI6-047 finding: a crash between RunImplementation::handleResult()'s
+     * importChanges() and its later persistOutcome() leaves that turn's own
+     * "already consumed" evidence (the PROVIDER_RAW artifact) unwritten, so a
+     * crash-redelivery under the same execution identity can re-enter
+     * handleResult() a second time with the same bytes and the same isolated
+     * export. partition() — not the execution-identity guard — is what
+     * actually protects the worktree in that window: it treats a path already
+     * identical to its source as nothing to import and silently skips it, so
+     * a redelivered handleResult() reports fewer actual paths than the
+     * unchanged AgentResult::changedPaths list and fails closed on
+     * reported_path_mismatch instead of reapplying or corrupting the change.
+     */
+    public function test_a_replayed_import_of_an_already_applied_change_is_silently_skipped(): void
+    {
+        $prepared = $this->preparedImplementationRun('AI6-047-REPLAY-IMPORT');
+        $isolated = $this->implementationTemp('replay-view-'.bin2hex(random_bytes(3)));
+        $view = $isolated.'/tree';
+        (new IsolatedTreeExporter)->export($prepared['worktree'], $view, true);
+        file_put_contents($view.'/app/Example.php', "<?php\n\n// first import\n");
+
+        $importer = $this->app->make(RunPatchImporter::class);
+        $planned = $importer->partition($prepared['run'], $view, ['app']);
+        self::assertContains('app/Example.php', array_map(static fn ($change): string => $change->path, $planned['in']));
+        $importer->importChanges($prepared['run'], $view, $planned['in']);
+        self::assertSame("<?php\n\n// first import\n", (string) file_get_contents($prepared['worktree'].'/app/Example.php'));
+
+        // A crash-redelivery of the same turn re-partitions the same
+        // isolated view against the worktree it has already mutated.
+        $replayed = $importer->partition($prepared['run'], $view, ['app']);
+        self::assertNotContains('app/Example.php', array_map(static fn ($change): string => $change->path, $replayed['in']));
+        self::assertNotContains('app/Example.php', array_map(static fn ($change): string => $change->path, $replayed['out']));
+
+        $this->removeTree($view);
+    }
+
     /** TC-03 */
     public function test_git_metadata_from_the_isolated_view_never_reaches_the_managed_clone(): void
     {

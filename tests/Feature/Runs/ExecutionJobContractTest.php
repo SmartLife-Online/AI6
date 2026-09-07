@@ -470,7 +470,20 @@ final class ExecutionJobContractTest extends TicketUiTestCase
         ]);
     }
 
-    /** Drain the database queue exactly the way the worker role does. */
+    /**
+     * Drain the database queue exactly the way the worker role does.
+     *
+     * Artisan::call() runs queue:work inside this very PHPUnit process, so
+     * the --memory ceiling Worker::memoryExceeded() checks is measured
+     * against this whole process's usage — everything every earlier test in
+     * a full-suite run has already allocated — not a freshly started worker
+     * container's. The shipped role never sets --memory either (it takes
+     * Laravel's own 128 MB default), so a real worker's own job-processing
+     * budget is exactly that: 128 MB on top of whatever this process already
+     * holds at the moment it starts draining. Binding the ceiling to that
+     * baseline tests the queue contract (a job leaking beyond its own
+     * genuine budget still trips it) instead of the test process's heap.
+     */
     private function workQueue(int $maxJobs = 0): void
     {
         $parameters = [
@@ -479,6 +492,7 @@ final class ExecutionJobContractTest extends TicketUiTestCase
             '--sleep' => 0,
             '--timeout' => 0,
             '--tries' => 3,
+            '--memory' => (int) ceil(memory_get_peak_usage(true) / 1024 / 1024) + 128,
         ];
         if ($maxJobs > 0) {
             $parameters['--max-jobs'] = $maxJobs;

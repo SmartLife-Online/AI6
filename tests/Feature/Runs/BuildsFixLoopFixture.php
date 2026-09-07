@@ -38,6 +38,7 @@ use Illuminate\Session\Store;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Symfony\Component\HttpFoundation\Response;
+use Tests\Fixtures\Agents\AgentMailboxFixture;
 
 /**
  * Drives the round-bound fix and re-review loop of AI6-025 over the real seams.
@@ -84,6 +85,12 @@ trait BuildsFixLoopFixture
             $this->app->make(RunOrchestrator::class),
             fixes: $this->app->make(RunFixTurn::class),
         );
+        AgentMailboxFixture::drain($job, function () use ($job): void {
+            (new ExecuteRunStep($job->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                fixes: $this->app->make(RunFixTurn::class),
+            );
+        });
 
         return $job->fresh() ?? $job;
     }
@@ -99,6 +106,12 @@ trait BuildsFixLoopFixture
             $this->app->make(RunOrchestrator::class),
             reviews: $this->app->make(ReviewRound::class),
         );
+        AgentMailboxFixture::drain($job, function () use ($job): void {
+            (new ExecuteRunStep($job->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                reviews: $this->app->make(ReviewRound::class),
+            );
+        });
 
         $review = $job->fresh() ?? $job;
         if ($review->state !== ExecutionJobState::SUCCEEDED
@@ -113,7 +126,7 @@ trait BuildsFixLoopFixture
         $originalAdapter = $this->app->make(AgentAdapter::class);
         $verificationAdapter = new FakeAgentAdapter(AgentScenario::SUCCESS);
         $this->app->instance(FakeAgentAdapter::class, $verificationAdapter);
-        $this->app->instance(AgentAdapter::class, $verificationAdapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $verificationAdapter);
         $this->app->forgetInstance(FindingVerificationRound::class);
 
         $verification = $this->stepJob($run, ExecutionStepType::VERIFY, $round);
@@ -121,13 +134,19 @@ trait BuildsFixLoopFixture
             $this->app->make(RunOrchestrator::class),
             verifications: $this->app->make(FindingVerificationRound::class),
         );
+        AgentMailboxFixture::drain($verification, function () use ($verification): void {
+            (new ExecuteRunStep($verification->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                verifications: $this->app->make(FindingVerificationRound::class),
+            );
+        });
         self::assertSame(
             $expectedVerificationState,
             $verification->fresh()?->state,
             (string) $verification->fresh()?->failure_code,
         );
 
-        $this->app->instance(AgentAdapter::class, $originalAdapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $originalAdapter);
         if ($originalAdapter instanceof FakeAgentAdapter) {
             $this->app->instance(FakeAgentAdapter::class, $originalAdapter);
         }
@@ -218,7 +237,7 @@ trait BuildsFixLoopFixture
     {
         $adapter = new FakeAgentAdapter($default, slotScenarios: $slotScenarios);
         $this->app->instance(FakeAgentAdapter::class, $adapter);
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         foreach ([
             CredentialRevisionRegistry::class,
             ExecutionHomeManager::class,
@@ -267,7 +286,7 @@ trait BuildsFixLoopFixture
     protected function scopedFixAdapter(array $writes, array $changedPaths): AgentAdapter
     {
         $adapter = new ScopedFixAdapter($writes, $changedPaths);
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         foreach ([RunImplementation::class, RunFixTurn::class] as $binding) {
             $this->app->forgetInstance($binding);
         }

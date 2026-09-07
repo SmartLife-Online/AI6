@@ -56,6 +56,7 @@ use Symfony\Component\HttpFoundation\Response;
 use Tests\Feature\Checks\BuildsCheckFixture;
 use Tests\Feature\Reviews\BuildsReviewRoundFixture;
 use Tests\Feature\Tickets\TicketUiTestCase;
+use Tests\Fixtures\Agents\AgentMailboxFixture;
 
 final class RunFinalizationStepTest extends TicketUiTestCase
 {
@@ -166,6 +167,12 @@ final class RunFinalizationStepTest extends TicketUiTestCase
             $this->app->make(RunOrchestrator::class),
             securityReview: $this->app->make(SecurityReviewStep::class),
         );
+        AgentMailboxFixture::drain($security, function () use ($security): void {
+            (new ExecuteRunStep($security->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                securityReview: $this->app->make(SecurityReviewStep::class),
+            );
+        });
 
         $request = HumanRequest::query()->where('run_id', $run->id)->where('kind', 'security_gate')->first();
         self::assertSame(
@@ -263,6 +270,12 @@ final class RunFinalizationStepTest extends TicketUiTestCase
             $this->app->make(RunOrchestrator::class),
             securityReview: $this->app->make(SecurityReviewStep::class),
         );
+        AgentMailboxFixture::drain($security, function () use ($security): void {
+            (new ExecuteRunStep($security->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                securityReview: $this->app->make(SecurityReviewStep::class),
+            );
+        });
 
         $run = $prepared['run']->fresh();
         self::assertSame(RunState::WAITING, $run->state);
@@ -378,6 +391,12 @@ final class RunFinalizationStepTest extends TicketUiTestCase
                 $this->app->make(RunOrchestrator::class),
                 securityReview: $this->app->make(SecurityReviewStep::class),
             );
+            AgentMailboxFixture::drain($security, function () use ($security): void {
+                (new ExecuteRunStep($security->id))->handle(
+                    $this->app->make(RunOrchestrator::class),
+                    securityReview: $this->app->make(SecurityReviewStep::class),
+                );
+            });
             self::assertSame(ExecutionJobState::SUCCEEDED, $security->fresh()->state, (string) $security->fresh()->failure_code);
             self::assertSame(RunPhase::PUBLISH, $run->fresh()->phase);
             self::assertFalse(ExecutionJob::query()->where('run_id', $run->id)
@@ -397,6 +416,12 @@ final class RunFinalizationStepTest extends TicketUiTestCase
             $this->app->make(RunOrchestrator::class),
             securityReview: $this->app->make(SecurityReviewStep::class),
         );
+        AgentMailboxFixture::drain($security, function () use ($security): void {
+            (new ExecuteRunStep($security->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                securityReview: $this->app->make(SecurityReviewStep::class),
+            );
+        });
         $request = HumanRequest::query()->where('run_id', $prepared['run']->id)
             ->where('kind', 'security_gate')->where('resolution_state', 'open')->sole();
         self::assertContains(SecurityGateHumanRequestBinding::RETRY_EFFECT, $request->allowed_effects);
@@ -435,6 +460,12 @@ final class RunFinalizationStepTest extends TicketUiTestCase
             $this->app->make(RunOrchestrator::class),
             securityReview: $this->app->make(SecurityReviewStep::class),
         );
+        AgentMailboxFixture::drain($security, function () use ($security): void {
+            (new ExecuteRunStep($security->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                securityReview: $this->app->make(SecurityReviewStep::class),
+            );
+        });
 
         self::assertSame(ExecutionJobState::SUCCEEDED, $security->fresh()->state, (string) $security->fresh()->failure_code);
         self::assertSame(RunPhase::PUBLISH, $prepared['run']->fresh()->phase);
@@ -456,6 +487,12 @@ final class RunFinalizationStepTest extends TicketUiTestCase
             $this->app->make(RunOrchestrator::class),
             securityReview: $this->app->make(SecurityReviewStep::class),
         );
+        AgentMailboxFixture::drain($security, function () use ($security): void {
+            (new ExecuteRunStep($security->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                securityReview: $this->app->make(SecurityReviewStep::class),
+            );
+        });
 
         $request = HumanRequest::query()->where('run_id', $prepared['run']->id)
             ->where('kind', 'security_gate')->where('resolution_state', 'open')->sole();
@@ -468,6 +505,12 @@ final class RunFinalizationStepTest extends TicketUiTestCase
             $this->app->make(RunOrchestrator::class),
             securityReview: $this->app->make(SecurityReviewStep::class),
         );
+        AgentMailboxFixture::drain($security, function () use ($security): void {
+            (new ExecuteRunStep($security->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                securityReview: $this->app->make(SecurityReviewStep::class),
+            );
+        });
 
         $run = $prepared['run']->fresh();
         self::assertSame(ExecutionJobState::SUCCEEDED, $security->fresh()->state, (string) $security->fresh()->failure_code);
@@ -504,6 +547,42 @@ final class RunFinalizationStepTest extends TicketUiTestCase
         self::assertStringContainsString('security_runtime_limit', $request->why_needed);
     }
 
+    /** AI6-047 TC-09: an answer over the artifact-size budget reaches AgentExecutionLimitReached. */
+    public function test_an_oversized_security_answer_parks_under_the_security_gate(): void
+    {
+        $prepared = $this->prepareSecurityCandidate('AI6-047-SEC-LIMIT');
+        $this->bindSecurityManagedRepository($prepared['run'], $prepared['worktree']);
+        $this->app->instance(FakeAgentAdapter::class, new FakeAgentAdapter(AgentScenario::SUCCESS));
+        $this->app->forgetInstance(SecurityReviewStep::class);
+        $snapshot = $prepared['run']->fresh()->agent_profile_snapshot;
+        $snapshot['limits']['max_artifact_bytes'] = 1;
+        DB::table('runs')->where('id', $prepared['run']->id)->update([
+            'agent_profile_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR),
+            'version' => DB::raw('version + 1'),
+        ]);
+        $security = ExecutionJob::query()->where('run_id', $prepared['run']->id)
+            ->where('step_type', ExecutionStepType::SECURITY_REVIEW->value)->sole();
+
+        (new ExecuteRunStep($security->id))->handle(
+            $this->app->make(RunOrchestrator::class),
+            securityReview: $this->app->make(SecurityReviewStep::class),
+        );
+        AgentMailboxFixture::drain($security, function () use ($security): void {
+            (new ExecuteRunStep($security->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                securityReview: $this->app->make(SecurityReviewStep::class),
+            );
+        });
+
+        self::assertSame(ExecutionJobState::WAITING, $security->fresh()->state);
+        self::assertSame(WaitReason::SECURITY_GATE, $prepared['run']->fresh()->wait_reason);
+        $request = HumanRequest::query()->where('run_id', $prepared['run']->id)
+            ->where('kind', 'security_gate')->where('resolution_state', 'open')->sole();
+        self::assertStringContainsString('security_runtime_limit', $request->why_needed);
+        self::assertFalse(ReviewResult::query()->where('run_id', $prepared['run']->id)
+            ->where('role', 'security_review')->exists());
+    }
+
     public function test_missing_security_policy_binding_parks_fail_closed_instead_of_throwing(): void
     {
         $missing = $this->prepareSecurityCandidate('AI6-028-POLICY-MISSING');
@@ -531,6 +610,12 @@ final class RunFinalizationStepTest extends TicketUiTestCase
             $this->app->make(RunOrchestrator::class),
             securityReview: $this->app->make(SecurityReviewStep::class),
         );
+        AgentMailboxFixture::drain($security, function () use ($security): void {
+            (new ExecuteRunStep($security->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                securityReview: $this->app->make(SecurityReviewStep::class),
+            );
+        });
         $request = HumanRequest::query()->where('run_id', $prepared['run']->id)
             ->where('kind', 'security_gate')->where('resolution_state', 'open')->sole();
         $actor = $this->memberWithRole($prepared['run'], ProjectRole::OPERATOR);
@@ -552,6 +637,12 @@ final class RunFinalizationStepTest extends TicketUiTestCase
             $this->app->make(RunOrchestrator::class),
             securityReview: $this->app->make(SecurityReviewStep::class),
         );
+        AgentMailboxFixture::drain($security, function () use ($security): void {
+            (new ExecuteRunStep($security->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                securityReview: $this->app->make(SecurityReviewStep::class),
+            );
+        });
 
         $run = $prepared['run']->fresh();
         self::assertSame(RunState::WAITING, $run->state);
@@ -584,6 +675,12 @@ final class RunFinalizationStepTest extends TicketUiTestCase
             $this->app->make(RunOrchestrator::class),
             securityReview: $this->app->make(SecurityReviewStep::class),
         );
+        AgentMailboxFixture::drain($job, function () use ($job): void {
+            (new ExecuteRunStep($job->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                securityReview: $this->app->make(SecurityReviewStep::class),
+            );
+        });
 
         self::assertSame(ExecutionJobState::SUCCEEDED, $job->fresh()->state);
         self::assertSame(RunPhase::PUBLISH, $prepared['run']->fresh()->phase);

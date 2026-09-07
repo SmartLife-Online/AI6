@@ -3,6 +3,8 @@
 namespace Tests\Feature\Runs;
 
 use App\AI6\Agents\AgentAdapter;
+use App\AI6\Agents\AgentExecutionProcessor;
+use App\AI6\Agents\AgentExecutionRunner;
 use App\AI6\Agents\AgentInputLimits;
 use App\AI6\Agents\AgentScenario;
 use App\AI6\Agents\FakeAgentAdapter;
@@ -43,6 +45,7 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\After;
 use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
+use Tests\Fixtures\Agents\AgentMailboxFixture;
 
 trait BuildsImplementationTurnFixture
 {
@@ -113,14 +116,17 @@ trait BuildsImplementationTurnFixture
         // the shipped process-group semantics themselves stay untouched.
         $this->app->forgetInstance(ProcessPolicyRegistry::class);
         $this->app->forgetInstance(ControlProcessRunner::class);
+        $this->app->forgetInstance(FakeAgentAdapter::class);
         $this->app->forgetInstance(RunPreflight::class);
         $this->app->forgetInstance(RunArtifactRoot::class);
         $this->app->forgetInstance(RunArtifactStore::class);
         $this->app->forgetInstance(RunImplementation::class);
+        $this->app->forgetInstance(AgentExecutionRunner::class);
+        $this->app->forgetInstance(AgentExecutionProcessor::class);
         if ($scenario instanceof AgentScenario) {
             $adapter = new FakeAgentAdapter($scenario);
             $this->app->instance(FakeAgentAdapter::class, $adapter);
-            $this->app->instance(AgentAdapter::class, $adapter);
+            $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         }
 
         $worktree = null;
@@ -271,6 +277,9 @@ trait BuildsImplementationTurnFixture
         $preflight = ExecutionJob::query()->where('run_id', $run->id)
             ->where('step_type', ExecutionStepType::PREFLIGHT->value)->firstOrFail();
         (new ExecuteRunStep($preflight->id))->handle($orchestrator);
+        AgentMailboxFixture::drain($preflight, function () use ($orchestrator, $preflight): void {
+            (new ExecuteRunStep($preflight->id))->handle($orchestrator);
+        });
         self::assertSame(ExecutionJobState::SUCCEEDED, $preflight->fresh()->state, (string) $preflight->fresh()?->failure_code);
         DB::table('jobs')->delete();
 
@@ -288,6 +297,9 @@ trait BuildsImplementationTurnFixture
         $job = ExecutionJob::query()->where('run_id', $run->id)
             ->where('step_type', ExecutionStepType::IMPLEMENT->value)->firstOrFail();
         (new ExecuteRunStep($job->id))->handle($this->app->make(RunOrchestrator::class), $this->app->make(RunImplementation::class));
+        AgentMailboxFixture::drain($job, function () use ($job): void {
+            (new ExecuteRunStep($job->id))->handle($this->app->make(RunOrchestrator::class), $this->app->make(RunImplementation::class));
+        });
 
         return $job->fresh() ?? $job;
     }
@@ -331,7 +343,7 @@ trait BuildsImplementationTurnFixture
         $this->app->forgetInstance(RunPreflight::class);
         $this->app->forgetInstance(FakeAgentAdapter::class);
         $this->app->forgetInstance(AgentAdapter::class);
-        $this->app->bind(AgentAdapter::class, FakeAgentAdapter::class);
+        $this->app->bind(AgentAdapter::class, fn (): AgentAdapter => $this->app->make(FakeAgentAdapter::class));
     }
 
     protected function initWorktreeGit(string $worktree, bool $sha256 = false): void

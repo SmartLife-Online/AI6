@@ -3,8 +3,12 @@
 namespace Tests\Feature\Reviews;
 
 use App\AI6\Agents\AgentAdapter;
+use App\AI6\Agents\AgentResultContext;
 use App\AI6\Agents\AgentScenario;
+use App\AI6\Agents\AgentTurnResult;
+use App\AI6\Agents\ExecutionHome;
 use App\AI6\Agents\FakeAgentAdapter;
+use App\AI6\Agents\InvalidAgentResponse;
 use App\AI6\Auth\Models\User;
 use App\AI6\Auth\StepUpGuard;
 use App\AI6\HumanLoop\Http\HumanRequestAnswerController;
@@ -28,12 +32,15 @@ use App\AI6\Runs\Models\RunArtifact;
 use App\AI6\Runs\RunArtifactKind;
 use App\AI6\Runs\RunArtifactRoot;
 use App\AI6\Runs\RunOrchestrator;
+use Closure;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Session\ArraySessionHandler;
 use Illuminate\Session\Store;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Tests\Feature\Tickets\TicketUiTestCase;
+use Tests\Fixtures\Agents\AgentMailboxFixture;
 
 final class FindingVerificationRoundTest extends TicketUiTestCase
 {
@@ -42,6 +49,70 @@ final class FindingVerificationRoundTest extends TicketUiTestCase
     private const STRICT_POLICY = "default-src 'self'; script-src http://localhost/assets/; style-src 'self'; "
         ."img-src 'self'; font-src 'self'; connect-src 'self'; form-action 'self'; "
         ."base-uri 'none'; object-src 'none'; frame-ancestors 'none';";
+
+    /** AI6-047 TC-09: a missing mailbox answer is invalid_json, distinct from provider_error. */
+    public function test_a_missing_mailbox_answer_is_invalid_json_and_distinct_from_provider_error(): void
+    {
+        Mail::fake();
+        config(['logging.default' => 'null']);
+        $prepared = $this->preparedReviewRun('AI6-047-VERIFY-INVALIDJSON');
+        $this->reviewAdapter([$this->reviewSlotIds[0] => AgentScenario::FINDINGS]);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReview($prepared['run'])->state);
+
+        $adapter = new class implements AgentAdapter
+        {
+            public function result(AgentResultContext $context): string
+            {
+                return '{}';
+            }
+
+            public function turn(AgentResultContext $context, ExecutionHome $home, Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult
+            {
+                $heartbeat();
+
+                throw new InvalidAgentResponse('agent_response_missing');
+            }
+        };
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
+        $this->app->forgetInstance(FindingVerificationRound::class);
+
+        $verification = $this->executeVerification($prepared['run']->fresh());
+
+        self::assertSame(ExecutionJobState::WAITING, $verification->state);
+        $result = ReviewResult::query()->where('run_id', $prepared['run']->id)
+            ->where('role', 'finding_verification')->latest('attempt')->firstOrFail();
+        self::assertSame('invalid_json', $result->invocation_outcome->value);
+        self::assertNotSame('provider_error', $result->invocation_outcome->value);
+        $request = HumanRequest::query()->where('run_id', $prepared['run']->id)->sole();
+        self::assertSame('invalid_json', $request->kind);
+    }
+
+    /** AI6-047 TC-09: an answer over the artifact-size budget reaches AgentExecutionLimitReached. */
+    public function test_an_oversized_answer_opens_a_resource_limit_request(): void
+    {
+        Mail::fake();
+        config(['logging.default' => 'null']);
+        $prepared = $this->preparedReviewRun('AI6-047-VERIFY-LIMIT');
+        $this->reviewAdapter([$this->reviewSlotIds[0] => AgentScenario::FINDINGS]);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReview($prepared['run'])->state);
+        $this->reviewAdapter([]);
+        $this->app->forgetInstance(FindingVerificationRound::class);
+        $snapshot = $prepared['run']->fresh()->agent_profile_snapshot;
+        $snapshot['limits']['max_artifact_bytes'] = 1;
+        DB::table('runs')->where('id', $prepared['run']->id)->update([
+            'agent_profile_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR),
+            'version' => DB::raw('version + 1'),
+        ]);
+
+        $verification = $this->executeVerification($prepared['run']->fresh());
+
+        self::assertSame(ExecutionJobState::WAITING, $verification->state);
+        self::assertSame('resource_limit', $prepared['run']->fresh()->wait_reason?->value);
+        self::assertTrue(HumanRequest::query()->where('run_id', $prepared['run']->id)
+            ->where('kind', 'resource_limit')->where('resolution_state', 'open')->exists());
+        self::assertSame(0, ReviewResult::query()->where('run_id', $prepared['run']->id)
+            ->where('role', 'finding_verification')->count());
+    }
 
     public function test_a_contradicting_verifier_result_is_persisted_as_advisory_evidence_only(): void
     {
@@ -66,7 +137,7 @@ final class FindingVerificationRoundTest extends TicketUiTestCase
         $original = $finding->getAttributes();
         $adapter = new FakeAgentAdapter(AgentScenario::REJECTS_FINDING);
         $this->app->instance(FakeAgentAdapter::class, $adapter);
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         $this->app->forgetInstance(FindingVerificationRound::class);
         config(['ai6.agent_profiles' => []]);
 
@@ -136,7 +207,7 @@ final class FindingVerificationRoundTest extends TicketUiTestCase
         );
         $confirmed = new FakeAgentAdapter(AgentScenario::SUCCESS);
         $this->app->instance(FakeAgentAdapter::class, $confirmed);
-        $this->app->instance(AgentAdapter::class, $confirmed);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $confirmed);
         $this->app->forgetInstance(FindingVerificationRound::class);
         self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeVerification($prepared['run']->fresh())->state);
         self::assertSame(2, ReviewResult::query()->where('run_id', $prepared['run']->id)
@@ -157,7 +228,7 @@ final class FindingVerificationRoundTest extends TicketUiTestCase
         $run = $prepared['run']->fresh();
         $adapter = new FakeAgentAdapter(AgentScenario::SUCCESS);
         $this->app->instance(FakeAgentAdapter::class, $adapter);
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         $this->app->forgetInstance(FindingVerificationRound::class);
 
         $verification = $this->executeVerification($run->fresh());
@@ -186,7 +257,7 @@ final class FindingVerificationRoundTest extends TicketUiTestCase
 
         $adapter = new FakeAgentAdapter(AgentScenario::SUCCESS);
         $this->app->instance(FakeAgentAdapter::class, $adapter);
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         $this->app->forgetInstance(FindingVerificationRound::class);
         self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeVerification($prepared['run'])->state);
 
@@ -217,7 +288,7 @@ final class FindingVerificationRoundTest extends TicketUiTestCase
 
         $adapter = new FakeAgentAdapter(AgentScenario::VERIFICATION_INCONCLUSIVE);
         $this->app->instance(FakeAgentAdapter::class, $adapter);
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         $this->app->forgetInstance(FindingVerificationRound::class);
 
         self::assertSame(ExecutionJobState::WAITING, $this->executeVerification($prepared['run'])->state);
@@ -243,7 +314,7 @@ final class FindingVerificationRoundTest extends TicketUiTestCase
 
         $adapter = new FakeAgentAdapter(AgentScenario::HUMAN_REQUEST);
         $this->app->instance(FakeAgentAdapter::class, $adapter);
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         $this->app->forgetInstance(FindingVerificationRound::class);
 
         self::assertSame(ExecutionJobState::WAITING, $this->executeVerification($prepared['run'])->state);
@@ -263,7 +334,7 @@ final class FindingVerificationRoundTest extends TicketUiTestCase
 
         $adapter = new FakeAgentAdapter(AgentScenario::INVALID_JSON);
         $this->app->instance(FakeAgentAdapter::class, $adapter);
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         $this->app->forgetInstance(FindingVerificationRound::class);
 
         $verification = $this->executeVerification($prepared['run']->fresh());
@@ -302,7 +373,7 @@ final class FindingVerificationRoundTest extends TicketUiTestCase
 
         $success = new FakeAgentAdapter(AgentScenario::SUCCESS);
         $this->app->instance(FakeAgentAdapter::class, $success);
-        $this->app->instance(AgentAdapter::class, $success);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $success);
         $this->app->forgetInstance(FindingVerificationRound::class);
         $resumed = $this->executeVerification($prepared['run']->fresh());
         self::assertSame(ExecutionJobState::SUCCEEDED, $resumed->state);
@@ -336,6 +407,12 @@ final class FindingVerificationRoundTest extends TicketUiTestCase
             $this->app->make(RunOrchestrator::class),
             verifications: $this->app->make(FindingVerificationRound::class),
         );
+        AgentMailboxFixture::drain($job, function () use ($job): void {
+            (new ExecuteRunStep($job->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                verifications: $this->app->make(FindingVerificationRound::class),
+            );
+        });
 
         return $job->fresh() ?? $job;
     }

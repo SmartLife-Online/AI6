@@ -481,9 +481,9 @@ final class FixLoopTest extends TicketUiTestCase
         $repeated = $this->executeFix($run, 1);
 
         self::assertSame($intent, (string) $repeated->intent, 'The redelivery rebound the step intent.');
-        // Without a provider-side invocation binding the answer cannot be replayed,
-        // so the repeated turn ends named instead of applying anything twice.
-        self::assertSame('failed:reported_path_mismatch', $repeated->state->value.':'.(string) $repeated->failure_code);
+        // The consumed execution identity now refuses a second provider start,
+        // before a second response could reach patch validation.
+        self::assertSame('failed:agent_execution_already_terminal', $repeated->state->value.':'.(string) $repeated->failure_code);
         // Nothing was applied a second time.
         self::assertSame($imported, (string) file_get_contents($worktree.'/app/Example.php'));
         self::assertSame($statusesBefore, FindingStatus::query()->where('run_id', $run->id)->count());

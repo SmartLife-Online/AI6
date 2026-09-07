@@ -2,7 +2,9 @@
 
 namespace App\AI6\Runs;
 
-use App\AI6\Agents\AgentAdapter;
+use App\AI6\Agents\AgentExecutionException;
+use App\AI6\Agents\AgentExecutionLimitReached;
+use App\AI6\Agents\AgentExecutionRunner;
 use App\AI6\Agents\AgentResult;
 use App\AI6\Agents\AgentResultContext;
 use App\AI6\Agents\AgentResultImporter;
@@ -10,16 +12,14 @@ use App\AI6\Agents\AgentResultStatus;
 use App\AI6\Agents\AgentResultValidationError;
 use App\AI6\Agents\AgentResultValidationException;
 use App\AI6\Agents\AgentRole;
-use App\AI6\Agents\CredentialProjection;
-use App\AI6\Agents\CredentialRevisionRegistry;
 use App\AI6\Agents\ExecutionHome;
 use App\AI6\Agents\ExecutionHomeManager;
 use App\AI6\Agents\HumanRequestOption;
 use App\AI6\Agents\HumanRequestProposal;
 use App\AI6\Agents\ImplementationDecision;
-use App\AI6\Agents\InstructionProfileRegistry;
 use App\AI6\Agents\InstructionSnapshot;
 use App\AI6\Agents\InstructionSnapshotEntry;
+use App\AI6\Agents\InvalidAgentResponse;
 use App\AI6\Agents\ProviderRuntimeProfile;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Git\CanonicalJson;
@@ -60,7 +60,7 @@ final readonly class RunImplementation
         private IsolatedTreeExporter $exporter,
         private RunPatchImporter $patches,
         private AgentResultImporter $results,
-        private AgentAdapter $adapter,
+        private AgentExecutionRunner $turns,
         private RunLimitPolicy $limits,
         private RunArtifactStore $artifacts,
         private HumanRequestService $humanRequests,
@@ -75,8 +75,6 @@ final readonly class RunImplementation
         private ReviewResultParser $reviewResults,
         private RunStepConfiguration $stepConfiguration,
         private ExecutionHomeManager $homes,
-        private InstructionProfileRegistry $instructionProfiles,
-        private CredentialRevisionRegistry $credentialRevisions,
     ) {}
 
     public function execute(ExecutionJob $job, Run $run, string $owner): void
@@ -152,6 +150,7 @@ final readonly class RunImplementation
 
         $sessionId = $slot->session_id ?? (string) Str::uuid();
         $this->orchestrator->bindImplementationSession($run, $slot->slot_id, $sessionId);
+        $slot = $slot->fresh() ?? $slot;
 
         $worktree = $run->worktree_path;
         if (! is_string($worktree) || ! is_dir($worktree) || is_link($worktree)) {
@@ -181,26 +180,9 @@ final readonly class RunImplementation
                 }
                 $export = $invocationInput.DIRECTORY_SEPARATOR.'export';
                 $this->exporter->export($worktree, $export);
-                $home = $this->homes->create(
-                    $invocationInput,
-                    $invocationOutput,
-                    $slot->slot_id,
-                    $sessionId,
-                    $export,
-                    $this->instructionProfiles->get($slot->provider_profile),
-                    $instruction,
-                    $runtime,
-                    new CredentialProjection(
-                        $slot->provider_profile,
-                        $this->credentialRevisions->revision($slot->provider_profile),
-                        [],
-                    ),
-                    writableWorkspace: true,
-                );
             } catch (Throwable $exception) {
                 throw new ImplementationImportException('implementation_home_unavailable', 'Das gebundene Execution-Home ist nicht verfügbar: '.$exception::class.'.');
             }
-            $isolated = $home->workspace;
             $instructionUpdate = $this->isInstructionUpdate($run, $instruction);
             $agentContext = new AgentResultContext(
                 AgentRole::IMPLEMENTATION,
@@ -212,18 +194,43 @@ final readonly class RunImplementation
                 $instructionUpdate,
                 $this->initialScope($run),
                 $this->expectedInstructionBlobs($instruction, $this->initialScope($run)),
+                slotId: $slot->slot_id,
                 expectedFindingIds: $findingIds,
+                unreachablePaths: $this->gitMetadataPaths->resolve($worktree),
             );
             $maximumAttempts = $this->stepConfiguration->maxAttempts;
             $bytes = '';
             $validated = null;
             $turnRevision = Intervention::query()->where('bound_step_key', $job->idempotency_key)
                 ->whereIn('chosen_effect', ['retry', 'new_turn', 'switch_profile'])->count();
-            for ($providerAttempt = 1; $providerAttempt <= $maximumAttempts; $providerAttempt++) {
+            $savedIntent = $this->turns->intent($job);
+            $firstAttempt = ($savedIntent['agent_turn_revision'] ?? null) === $turnRevision
+                ? (int) ($savedIntent['agent_provider_attempt'] ?? 1) : 1;
+            $baseContext = $agentContext;
+            for ($providerAttempt = $firstAttempt; $providerAttempt <= $maximumAttempts; $providerAttempt++) {
+                $this->turns->persist($job, [...$this->turns->intent($job),
+                    'agent_turn_revision' => $turnRevision, 'agent_provider_attempt' => $providerAttempt]);
+                $agentContext = new AgentResultContext($baseContext->role, $prompt, $instruction, $runtime,
+                    $baseContext->criterionRefs, '', $instructionUpdate, $baseContext->initialScope,
+                    $baseContext->expectedInstructionBlobs, $slot->slot_id, $providerAttempt, $findingIds, unreachablePaths: $baseContext->unreachablePaths);
                 try {
-                    $this->homes->assertWorkspaceProjection($home);
-                } catch (Throwable) {
-                    throw new ImplementationImportException('implementation_workspace_projection_rejected', 'Die Workspace-Projektion ist vor dem Providerturn nicht unverändert.');
+                    $home = $this->turns->prepare($job, $run, $slot, $agentContext, $export);
+                } catch (AgentExecutionException $exception) {
+                    throw new ImplementationImportException($exception->reason, 'Die Provider-Ausführung wurde an ihrer gespeicherten Bindung abgewiesen.');
+                } catch (Throwable $exception) {
+                    throw new ImplementationImportException('implementation_home_unavailable', 'Das gebundene Execution-Home ist nicht verfügbar: '.$exception::class.'.');
+                }
+                // Once the turn is dispatched, the writable workspace belongs to
+                // the concurrently running provider process: a tree-wide walk here
+                // can race a file it is creating or removing. The pre-turn guard
+                // therefore only runs before dispatch; restoreWorkspaceProjection()
+                // below re-asserts it once the turn has actually finished.
+                if (! $this->turns->dispatched($job, $home)) {
+                    try {
+                        $this->homes->assertWorkspaceProjection($home);
+                    } catch (Throwable) {
+                        throw new ImplementationImportException('implementation_workspace_projection_rejected', 'Die Workspace-Projektion ist vor dem Providerturn nicht unverändert.');
+                    }
                 }
                 $invocationLimit = $this->limits->consume(
                     $run,
@@ -241,9 +248,33 @@ final readonly class RunImplementation
                     return;
                 }
                 try {
-                    $bytes = $this->adapter->turn($agentContext, $isolated, $this->gitMetadataPaths->resolve($worktree));
+                    $answer = $this->turns->dispatchOrCollect($run, $job, $home, $agentContext, $this->gitMetadataPaths->resolve($worktree));
+                    if ($answer === null) {
+                        $this->orchestrator->parkPollingStep($job, $owner);
+                        $home = null;
+
+                        return;
+                    }
+                    $bytes = $answer->bytes;
+                } catch (AgentExecutionLimitReached $exception) {
+                    $this->humanRequests->openLimitRequest($run, $job, $exception->limit, WaitReason::RESOURCE_LIMIT);
+
+                    return;
+                } catch (InvalidAgentResponse) {
+                    if ($providerAttempt < $maximumAttempts) {
+                        $this->turns->destroy($home);
+                        $home = null;
+
+                        continue;
+                    }
+                    $this->humanRequests->openFailureRequest($run, $job, WaitReason::INVALID_JSON, $slot->slot_id);
+
+                    return;
                 } catch (Throwable) {
                     if ($providerAttempt < $maximumAttempts) {
+                        $this->turns->destroy($home);
+                        $home = null;
+
                         continue;
                     }
                     $this->humanRequests->openFailureRequest($run, $job, WaitReason::PROVIDER_ERROR, $slot->slot_id);
@@ -260,7 +291,13 @@ final readonly class RunImplementation
                 try {
                     $validated = $this->results->validate($bytes, $agentContext, $context);
                 } catch (JsonDecodingException|AgentResultValidationException|InvalidRedactionInputException) {
+                    if (! $this->storeRejectedAnswer($job, $run, $bytes, $context, 'invalid_json')) {
+                        return;
+                    }
                     if ($providerAttempt < $maximumAttempts) {
+                        $this->turns->destroy($home);
+                        $home = null;
+
                         continue;
                     }
                     $this->humanRequests->openFailureRequest($run, $job, WaitReason::INVALID_JSON, $slot->slot_id);
@@ -270,13 +307,18 @@ final readonly class RunImplementation
                 if ($validated->status !== AgentResultStatus::FAILED) {
                     break;
                 }
+                if (! $this->storeRejectedAnswer($job, $run, $bytes, $context, 'provider_error')) {
+                    return;
+                }
                 if ($providerAttempt === $maximumAttempts) {
                     $this->humanRequests->openFailureRequest($run, $job, WaitReason::PROVIDER_ERROR, $slot->slot_id);
 
                     return;
                 }
+                $this->turns->destroy($home);
+                $home = null;
             }
-            if (! $validated instanceof AgentResult) {
+            if (! $validated instanceof AgentResult || ! $home instanceof ExecutionHome) {
                 throw new ImplementationImportException('provider_result_missing', 'The provider result is unavailable.');
             }
             try {
@@ -284,7 +326,7 @@ final readonly class RunImplementation
             } catch (Throwable) {
                 throw new ImplementationImportException('implementation_workspace_projection_rejected', 'Die unveränderliche Workspace-Projektion wurde verändert oder kann nicht für den Import aufgelöst werden.');
             }
-            $completed = $this->handleResult($job, $run, $owner, $slot, $isolated, $bytes, $validated, $agentContext, $context, $instructionUpdate);
+            $completed = $this->handleResult($job, $run, $owner, $slot, $home->workspace, $bytes, $validated, $agentContext, $context, $instructionUpdate);
         } catch (ImplementationImportException $exception) {
             $this->failNamed($job, $run, $owner, $exception->reason, $exception->getMessage());
         } catch (HumanRequestRejected $rejected) {
@@ -307,6 +349,21 @@ final readonly class RunImplementation
                 $this->failNamed($job, $run, $owner, 'implementation_turn_failed', $exception::class.': '.$exception->getMessage());
             }
         }
+    }
+
+    private function storeRejectedAnswer(ExecutionJob $job, Run $run, string $bytes, RedactionContext $context, string $state): bool
+    {
+        $limit = $this->limits->evaluate($run, [], [['bytes' => strlen($bytes)]], strlen($bytes));
+        if ($limit instanceof ImportLimitResult) {
+            $this->humanRequests->openLimitRequest($run, $job, $limit, WaitReason::RESOURCE_LIMIT);
+
+            return false;
+        }
+        $this->turns->store($run, RunArtifactKind::PROVIDER_RAW, $bytes, [
+            'kind' => RunArtifactKind::PROVIDER_RAW->value, 'validation_state' => $state,
+        ], $context);
+
+        return true;
     }
 
     private function handleResult(
@@ -393,6 +450,9 @@ final readonly class RunImplementation
         }
 
         if ($validated->status === AgentResultStatus::NEEDS_HUMAN) {
+            $this->turns->store($run, RunArtifactKind::PROVIDER_RAW, $bytes, [
+                'kind' => RunArtifactKind::PROVIDER_RAW->value,
+            ], $context);
             $this->openHumanQuestion($run, $slot, $job, $validated);
 
             return false;
@@ -437,6 +497,14 @@ final readonly class RunImplementation
 
                 return false;
             }
+            // Bound immediately after the worktree write succeeds and before
+            // any later step that can still fail (bindActualChangedPaths()'s
+            // own optimistic-concurrency check, a crash before
+            // persistOutcome()). Without this, a redelivery under the same
+            // execution identity would find no PROVIDER_RAW artifact yet and
+            // safely-looking re-run the whole turn, importing a second,
+            // possibly divergent patch on top of the one already applied.
+            $this->turns->markImported($job, $slot, $agentContext);
         }
 
         $run = Run::query()->findOrFail($run->getKey());
@@ -703,7 +771,7 @@ final readonly class RunImplementation
             'kind' => RunArtifactKind::IMPLEMENTATION_SUMMARY->value,
             'changed_file_count' => count($changes),
         ], $context);
-        $this->artifacts->store($run, RunArtifactKind::PROVIDER_RAW, $bytes, [
+        $this->turns->store($run, RunArtifactKind::PROVIDER_RAW, $bytes, [
             'kind' => RunArtifactKind::PROVIDER_RAW->value,
         ], $context);
     }
@@ -959,13 +1027,7 @@ final readonly class RunImplementation
     /** @param  array<string, scalar>  $expected */
     private function intentMatches(string $stored, array $expected): bool
     {
-        try {
-            $decoded = json_decode($stored, true, 8, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return false;
-        }
-
-        return $decoded === $expected;
+        return $this->turns->intentMatches($stored, $expected);
     }
 
     /** @return array{string, string} */
@@ -1003,7 +1065,7 @@ final readonly class RunImplementation
         $complete = true;
         if ($home instanceof ExecutionHome) {
             try {
-                $this->homes->destroy($home);
+                $this->turns->destroy($home);
             } catch (Throwable) {
                 $complete = false;
             }

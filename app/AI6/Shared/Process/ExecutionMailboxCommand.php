@@ -2,6 +2,7 @@
 
 namespace App\AI6\Shared\Process;
 
+use App\AI6\Agents\AgentExecutionProcessor;
 use App\AI6\Checks\CheckerExecutionProcessor;
 use App\AI6\Checks\CheckerRuntimeAttestation;
 use App\AI6\Checks\CheckerRuntimeConfiguration;
@@ -46,6 +47,17 @@ final class ExecutionMailboxCommand extends Command
         do {
             $requests = glob($root.'/requests/*.json', GLOB_NOSORT);
             $this->heartbeat($heartbeatDirectory, $role, $bootId, is_array($requests) ? count($requests) : 0);
+            if ($role === ExecutionRole::AGENT) {
+                try {
+                    app(AgentExecutionProcessor::class)->processNext($bootId,
+                        function (string $_executionId) use ($heartbeatDirectory, $role, $bootId): void {
+                            $this->heartbeat($heartbeatDirectory, $role, $bootId, 0);
+                        });
+                } catch (Throwable $exception) {
+                    report($exception);
+                    $this->components->error('Agentauftrag abgewiesen oder fehlgeschlagen.');
+                }
+            }
             if ($role === ExecutionRole::CHECKER) {
                 try {
                     app(CheckerRuntimeAttestation::class)->publish($bootId);

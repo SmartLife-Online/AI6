@@ -2,19 +2,17 @@
 
 namespace App\AI6\Reviews;
 
-use App\AI6\Agents\AgentAdapter;
+use App\AI6\Agents\AgentExecutionLimitReached;
+use App\AI6\Agents\AgentExecutionRunner;
 use App\AI6\Agents\AgentResultContext;
 use App\AI6\Agents\AgentResultStatus;
 use App\AI6\Agents\AgentResultValidationException;
 use App\AI6\Agents\AgentResultValidator;
 use App\AI6\Agents\AgentRole;
-use App\AI6\Agents\CredentialProjection;
-use App\AI6\Agents\CredentialRevisionRegistry;
 use App\AI6\Agents\ExecutionHome;
-use App\AI6\Agents\ExecutionHomeManager;
-use App\AI6\Agents\InstructionProfileRegistry;
 use App\AI6\Agents\InstructionSnapshot;
 use App\AI6\Agents\InstructionSnapshotEntry;
+use App\AI6\Agents\InvalidAgentResponse;
 use App\AI6\Agents\ProviderRuntimeProfile;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Checks\CheckTreeBinding;
@@ -43,7 +41,6 @@ use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\RunArtifactKind;
-use App\AI6\Runs\RunArtifactStore;
 use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
@@ -67,14 +64,10 @@ final readonly class ReviewRound
         private ReviewCheckpointVerifier $checkpoints,
         private IsolatedTreeExport $exporter,
         private CheckTreeBinding $trees,
-        private ExecutionHomeManager $homes,
         private InstructionBindingVerifier $instructionBindings,
-        private InstructionProfileRegistry $instructionProfiles,
         private ProviderRuntimeProfileRegistry $runtimeProfiles,
-        private CredentialRevisionRegistry $credentialRevisions,
-        private AgentAdapter $adapter,
+        private AgentExecutionRunner $turns,
         private AgentResultValidator $validator,
-        private RunArtifactStore $artifacts,
         private ReviewContextPackageStore $contextPackages,
         private RunLimitPolicy $limits,
         private HumanRequestService $humanRequests,
@@ -132,10 +125,11 @@ final readonly class ReviewRound
             $maxAttempts = (int) config('ai6.run_steps.max_attempts', 3);
             while ($this->results->terminalOutcome($run, $job->step_number, $slot->slot_id) === null) {
                 $attempt = $this->results->attempt($run, $job->step_number, $slot->slot_id);
-                if ($job->step_number > 1 && $attempt === 1) {
+                if ($job->step_number > 1 && $attempt === 1 && ! isset($this->turns->intent($job)['agent_review_session_'.$slot->slot_id])) {
                     $this->orchestrator->discardReviewSession($run, $slot->slot_id);
                 }
                 $slot = $this->orchestrator->bindReviewSession($run, $slot->slot_id, (string) Str::uuid());
+                $this->turns->persist($job, [...$this->turns->intent($job), 'agent_review_session_'.$slot->slot_id => true]);
                 if ($this->invoke($job, $run, $slot, $common, $criteria, $attempt)) {
                     return;
                 }
@@ -258,38 +252,6 @@ final readonly class ReviewRound
         [$invocationInput, $invocationOutput] = $invocation;
         $export = $invocationInput.DIRECTORY_SEPARATOR.'export';
         $home = null;
-        $adapterIo = null;
-        try {
-            $this->exporter->export($run->worktree_path, $export);
-            $bindings['workspace_tree_hash'] = $this->trees->hash($export);
-            $expectedTree = $this->results->expectedWorkspaceHash($run, $job->step_number);
-            if ($expectedTree !== null && ! hash_equals($expectedTree, $bindings['workspace_tree_hash'])) {
-                throw new ImplementationImportException('review_workspace_binding_mismatch', 'Review workspaces do not bind the same tree.');
-            }
-            $home = $this->homes->create(
-                $invocationInput,
-                $invocationOutput,
-                $slot->slot_id,
-                $slot->session_id,
-                $export,
-                $this->instructionProfiles->get($slot->provider_profile),
-                $instruction,
-                $runtime,
-                new CredentialProjection(
-                    $slot->provider_profile,
-                    $this->credentialRevisions->revision($slot->provider_profile),
-                    [],
-                ),
-            );
-            $adapterIo = $home->root.'-io';
-        } catch (Throwable $exception) {
-            $reason = $exception instanceof ImplementationImportException ? $exception->reason : 'review_workspace_unavailable';
-            $this->destroy($home, $adapterIo, $export, $invocationInput, $invocationOutput);
-            $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::WORKSPACE_ERROR, $bindings, $reason);
-
-            return false;
-        }
-
         $agentContext = new AgentResultContext(
             AgentRole::QUALITY_REVIEW,
             $prompt,
@@ -300,14 +262,31 @@ final readonly class ReviewRound
             slotId: $slot->slot_id,
             attempt: $attempt,
             expectedFindingIds: $job->step_number > 1 ? $this->priorFindings->priorFindingIds($run, $job->step_number) : [],
+            unreachablePaths: $this->gitMetadataPaths->resolve($run->worktree_path),
         );
+        try {
+            $this->exporter->export($run->worktree_path, $export);
+            $bindings['workspace_tree_hash'] = $this->trees->hash($export);
+            $expectedTree = $this->results->expectedWorkspaceHash($run, $job->step_number);
+            if ($expectedTree !== null && ! hash_equals($expectedTree, $bindings['workspace_tree_hash'])) {
+                throw new ImplementationImportException('review_workspace_binding_mismatch', 'Review workspaces do not bind the same tree.');
+            }
+            $home = $this->turns->prepare($job, $run, $slot, $agentContext, $export);
+        } catch (Throwable $exception) {
+            $reason = $exception instanceof ImplementationImportException ? $exception->reason : 'review_workspace_unavailable';
+            $this->destroy($home, $export, $invocationInput, $invocationOutput);
+            $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::WORKSPACE_ERROR, $bindings, $reason);
+
+            return false;
+        }
+
         $invocationLimit = $this->limits->consume(
             $run,
             ImportLimit::MAX_AGENT_INVOCATIONS,
             implode(':', [$job->idempotency_key, $slot->slot_id, $attempt]),
         );
         if ($invocationLimit instanceof ImportLimitResult) {
-            $this->destroy($home, $adapterIo, $export, $invocationInput, $invocationOutput);
+            $this->destroy($home, $export, $invocationInput, $invocationOutput);
             try {
                 $this->humanRequests->openLimitRequest($run, $job, $invocationLimit, WaitReason::RESOURCE_LIMIT);
 
@@ -329,7 +308,7 @@ final readonly class ReviewRound
         try {
             $preparedPackage = $this->contextPackages->prepare($run, $slot, $job->step_number, $criteria, $bindings, $context);
         } catch (ReviewResultParseException $exception) {
-            $this->destroy($home, $adapterIo, $export, $invocationInput, $invocationOutput);
+            $this->destroy($home, $export, $invocationInput, $invocationOutput);
             $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::BINDING_ERROR, $bindings, $exception->reason);
 
             return false;
@@ -338,7 +317,7 @@ final readonly class ReviewRound
         // passes the one approved limit seam before anything is persisted.
         $packageLimit = $this->limits->evaluate($run, [], [['bytes' => strlen($preparedPackage['bytes'])]], 0);
         if ($packageLimit instanceof ImportLimitResult) {
-            $this->destroy($home, $adapterIo, $export, $invocationInput, $invocationOutput);
+            $this->destroy($home, $export, $invocationInput, $invocationOutput);
             try {
                 $this->humanRequests->openLimitRequest($run, $job, $packageLimit, WaitReason::RESOURCE_LIMIT);
 
@@ -349,13 +328,27 @@ final readonly class ReviewRound
                 return false;
             }
         }
-        $contextPackage = $this->contextPackages->persist($run, $preparedPackage, $context);
         try {
-            $bytes = $this->adapter->turn($agentContext, $home->workspace, [
-                ...$this->gitMetadataPaths->resolve($run->worktree_path),
-            ]);
+            $answer = $this->turns->dispatchOrCollect($run, $job, $home, $agentContext, $this->gitMetadataPaths->resolve($run->worktree_path));
+            if ($answer === null) {
+                $this->orchestrator->parkPollingStep($job, (string) $job->lease_owner);
+                $this->destroy(null, $export, $invocationInput, $invocationOutput);
+
+                return true;
+            }
+            $bytes = $answer->bytes;
+        } catch (AgentExecutionLimitReached $exception) {
+            $this->destroy($home, $export, $invocationInput, $invocationOutput);
+            $this->humanRequests->openLimitRequest($run, $job, $exception->limit, WaitReason::RESOURCE_LIMIT);
+
+            return true;
+        } catch (InvalidAgentResponse) {
+            $this->destroy($home, $export, $invocationInput, $invocationOutput);
+            $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::INVALID_JSON, $bindings, 'invalid_json');
+
+            return false;
         } catch (Throwable) {
-            $this->destroy($home, $adapterIo, $export, $invocationInput, $invocationOutput);
+            $this->destroy($home, $export, $invocationInput, $invocationOutput);
             $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::PROVIDER_ERROR, $bindings, 'provider_error');
 
             return false;
@@ -363,14 +356,12 @@ final readonly class ReviewRound
         $afterTurn = Run::query()->find($run->id);
         if (! $afterTurn instanceof Run || $afterTurn->pending_status_operation_id !== null
             || ! in_array($afterTurn->state, [RunState::QUEUED, RunState::RUNNING], true)) {
-            $this->destroy($home, $adapterIo, $export, $invocationInput, $invocationOutput);
-            if ($preparedPackage['artifact'] === null) {
-                $this->artifacts->discard($run, $contextPackage);
-            }
+            $this->destroy($home, $export, $invocationInput, $invocationOutput);
 
             return true;
         }
-        if (! $this->destroy($home, $adapterIo, $export, $invocationInput, $invocationOutput)) {
+        $contextPackage = $this->contextPackages->persist($run, $preparedPackage, $context);
+        if (! $this->destroy($home, $export, $invocationInput, $invocationOutput)) {
             $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::WORKSPACE_ERROR, $bindings, 'review_home_cleanup_failed');
 
             return false;
@@ -384,7 +375,7 @@ final readonly class ReviewRound
         }
 
         try {
-            $artifact = $this->artifacts->store($run, RunArtifactKind::PROVIDER_RAW, $bytes, [
+            $artifact = $this->turns->store($run, RunArtifactKind::PROVIDER_RAW, $bytes, [
                 'role' => AgentRole::QUALITY_REVIEW->value,
                 'slot_id' => $slot->slot_id,
                 'round_number' => $job->step_number,
@@ -775,7 +766,6 @@ final readonly class ReviewRound
 
     private function destroy(
         ?ExecutionHome $home,
-        ?string $adapterIo,
         string $export,
         string $invocationInput,
         string $invocationOutput,
@@ -783,13 +773,10 @@ final readonly class ReviewRound
         $complete = true;
         if ($home instanceof ExecutionHome) {
             try {
-                $this->homes->destroy($home);
+                $this->turns->destroy($home);
             } catch (Throwable) {
                 $complete = false;
             }
-        }
-        if (is_string($adapterIo)) {
-            $this->removeTree($adapterIo);
         }
         $this->removeTree($export);
         $this->removeTree($invocationInput);
@@ -797,7 +784,6 @@ final readonly class ReviewRound
 
         return $complete
             && (! $home instanceof ExecutionHome || (! file_exists($home->root) && ! file_exists($home->outputRoot)))
-            && (! is_string($adapterIo) || ! file_exists($adapterIo))
             && ! file_exists($export)
             && ! file_exists($invocationInput)
             && ! file_exists($invocationOutput);
@@ -823,11 +809,7 @@ final readonly class ReviewRound
     /** @param array<string, scalar> $expected */
     private function intentMatches(string $stored, array $expected): bool
     {
-        try {
-            return json_decode($stored, true, 8, JSON_THROW_ON_ERROR) === $expected;
-        } catch (\JsonException) {
-            return false;
-        }
+        return $this->turns->intentMatches($stored, $expected);
     }
 
     private function failStep(ExecutionJob $job, Run $run, string $owner, string $code): void

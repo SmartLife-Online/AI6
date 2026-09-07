@@ -9,6 +9,9 @@ use App\AI6\Shared\Process\ProcessPolicy;
 use App\AI6\Shared\Process\ProcessPolicyName;
 use App\AI6\Shared\Process\ProcessRequest;
 use App\AI6\Shared\Process\ProcessStartRejectedException;
+use App\AI6\Shared\Security\SecurityMeasure;
+use App\AI6\Shared\Security\SecurityPolicy;
+use App\AI6\Shared\Security\SecurityProfile;
 
 /**
  * Dispatch isolation by request policy: verifier in-role, containment otherwise.
@@ -43,6 +46,13 @@ final readonly class DelegatingProcessIsolationBoundary implements ProcessIsolat
         }
 
         if ($policy->name === ProcessPolicyName::AGENT) {
+            $security = app(SecurityPolicy::class);
+            if (! AgentExecutionProcessor::executing()
+                && ($security->isEnabled(SecurityMeasure::REQUIRE_AGENT_SANDBOX)
+                    || ! $security->reducedModeAcknowledged
+                    || $security->profile === SecurityProfile::STRICT)) {
+                throw new ProcessStartRejectedException('The agent process requires the agent supervisor role.');
+            }
             $this->containment->assertIsolated($request, $policy);
 
             return;

@@ -4,6 +4,8 @@ namespace Tests\Feature\Runs;
 
 use App\AI6\Agents\AgentAdapter;
 use App\AI6\Agents\AgentResultContext;
+use App\AI6\Agents\AgentTurnResult;
+use App\AI6\Agents\ExecutionHome;
 use App\AI6\Agents\FakeAgentAdapter;
 use App\AI6\Runs\RunImplementation;
 use Illuminate\Support\Facades\DB;
@@ -32,17 +34,19 @@ final class ImplementationTimelineTest extends TicketUiTestCase
                 return json_encode($document, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             }
 
-            public function turn(AgentResultContext $context, string $isolatedTree, array $unreachablePaths = []): string
+            public function turn(AgentResultContext $context, ExecutionHome $home, \Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult
             {
+                $heartbeat();
+                $isolatedTree = $home->workspace;
                 file_put_contents(
                     rtrim(str_replace('\\', '/', $isolatedTree), '/').'/app/Example.php',
                     "<?php\n\n// fake-agent-change\n",
                 );
 
-                return $this->result($context);
+                return new AgentTurnResult($this->result($context));
             }
         };
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         $this->app->forgetInstance(RunImplementation::class);
         $this->executeImplement($prepared['run']);
         // The finished implement step plans the follow-up check step, so the

@@ -2,6 +2,8 @@
 
 namespace App\AI6\Agents;
 
+use Closure;
+
 interface AgentAdapter
 {
     public function result(AgentResultContext $context): string;
@@ -11,5 +13,5 @@ interface AgentAdapter
      *
      * @param  list<string>  $unreachablePaths
      */
-    public function turn(AgentResultContext $context, string $isolatedTree, array $unreachablePaths = []): string;
+    public function turn(AgentResultContext $context, ExecutionHome $home, Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult;
 }

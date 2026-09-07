@@ -5,6 +5,8 @@ namespace Tests\Feature\Agents;
 use App\AI6\Agents\AgentAdapter;
 use App\AI6\Agents\AgentResultContext;
 use App\AI6\Agents\AgentScenario;
+use App\AI6\Agents\AgentTurnResult;
+use App\AI6\Agents\ExecutionHome;
 use App\AI6\Agents\FakeAgentAdapter;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Runs\ExecutionJobState;
@@ -152,12 +154,14 @@ final class ImplementationInstructionTest extends TicketUiTestCase
                 return json_encode($document, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             }
 
-            public function turn(AgentResultContext $context, string $isolatedTree, array $unreachablePaths = []): string
+            public function turn(AgentResultContext $context, ExecutionHome $home, \Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult
             {
-                return $this->result($context);
+                $heartbeat();
+
+                return new AgentTurnResult($this->result($context));
             }
         };
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         $this->app->forgetInstance(RunImplementation::class);
         file_put_contents($prepared['worktree'].'/AGENTS.md', "# old\n");
         $job = $this->executeImplement($prepared['run']);
@@ -194,12 +198,14 @@ final class ImplementationInstructionTest extends TicketUiTestCase
                 return json_encode($document, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             }
 
-            public function turn(AgentResultContext $context, string $isolatedTree, array $unreachablePaths = []): string
+            public function turn(AgentResultContext $context, ExecutionHome $home, \Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult
             {
-                return $this->result($context);
+                $heartbeat();
+
+                return new AgentTurnResult($this->result($context));
             }
         };
-        $this->app->instance(AgentAdapter::class, $lateAdapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $lateAdapter);
         $this->app->forgetInstance(RunImplementation::class);
         $failed = $this->executeImplement($late['run']);
         self::assertSame(ExecutionJobState::WAITING, $failed->state);

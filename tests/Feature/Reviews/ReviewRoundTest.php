@@ -2,14 +2,19 @@
 
 namespace Tests\Feature\Reviews;
 
+use App\AI6\Agents\AgentAdapter;
 use App\AI6\Agents\AgentFinding;
 use App\AI6\Agents\AgentResult;
+use App\AI6\Agents\AgentResultContext;
 use App\AI6\Agents\AgentResultStatus;
 use App\AI6\Agents\AgentRole;
 use App\AI6\Agents\AgentScenario;
+use App\AI6\Agents\AgentTurnResult;
+use App\AI6\Agents\ExecutionHome;
 use App\AI6\Agents\InstructionCandidate;
 use App\AI6\Agents\InstructionCandidateOrigin;
 use App\AI6\Agents\InstructionFileType;
+use App\AI6\Agents\InvalidAgentResponse;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Git\IsolatedTreeExport;
 use App\AI6\Git\IsolatedTreeExporter;
@@ -36,6 +41,7 @@ use App\AI6\Runs\RunState;
 use App\AI6\Runs\WaitReasonRegistry;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\RedactionMatchType;
+use Closure;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
@@ -44,6 +50,61 @@ use Tests\Feature\Tickets\TicketUiTestCase;
 final class ReviewRoundTest extends TicketUiTestCase
 {
     use BuildsReviewRoundFixture;
+
+    /** AI6-047 TC-09: a missing mailbox answer is invalid_json, distinct from provider_error. */
+    public function test_a_missing_mailbox_answer_is_invalid_json_and_distinct_from_provider_error(): void
+    {
+        Mail::fake();
+        $prepared = $this->preparedReviewRun('AI6-047-REVIEW-INVALIDJSON');
+        $adapter = new class implements AgentAdapter
+        {
+            public function result(AgentResultContext $context): string
+            {
+                return '{}';
+            }
+
+            public function turn(AgentResultContext $context, ExecutionHome $home, Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult
+            {
+                $heartbeat();
+
+                throw new InvalidAgentResponse('agent_response_missing');
+            }
+        };
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
+
+        $job = $this->executeReview($prepared['run']);
+
+        self::assertSame(ExecutionJobState::WAITING, $job->state);
+        self::assertSame('invalid_json', $prepared['run']->fresh()->wait_reason?->value);
+        $result = ReviewResult::query()->where('run_id', $prepared['run']->id)
+            ->where('slot_id', $this->reviewSlotIds[0])->latest('attempt')->firstOrFail();
+        self::assertSame(ReviewInvocationOutcome::INVALID_JSON, $result->invocation_outcome);
+        self::assertNotSame(ReviewInvocationOutcome::PROVIDER_ERROR, $result->invocation_outcome);
+        self::assertSame('invalid_json', $result->failure_code);
+    }
+
+    /** AI6-047 TC-09: an answer over the artifact-size budget reaches AgentExecutionLimitReached. */
+    public function test_an_oversized_answer_opens_a_resource_limit_request(): void
+    {
+        Mail::fake();
+        $prepared = $this->preparedReviewRun('AI6-047-REVIEW-LIMIT');
+        $this->reviewAdapter([]);
+        $snapshot = $prepared['run']->fresh()->agent_profile_snapshot;
+        $snapshot['limits']['max_artifact_bytes'] = 1;
+        DB::table('runs')->where('id', $prepared['run']->id)->update([
+            'agent_profile_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR),
+            'version' => DB::raw('version + 1'),
+        ]);
+
+        $job = $this->executeReview($prepared['run']->fresh());
+
+        self::assertSame(ExecutionJobState::WAITING, $job->state);
+        self::assertSame('resource_limit', $prepared['run']->fresh()->wait_reason?->value);
+        self::assertTrue(HumanRequest::query()->where('run_id', $prepared['run']->id)
+            ->where('kind', 'resource_limit')->where('resolution_state', 'open')->exists());
+        self::assertSame(0, ReviewResult::query()->where('run_id', $prepared['run']->id)
+            ->where('slot_id', $this->reviewSlotIds[0])->count());
+    }
 
     public function test_reviewer_switch_creates_an_approved_slot_revision_and_preserves_old_results(): void
     {

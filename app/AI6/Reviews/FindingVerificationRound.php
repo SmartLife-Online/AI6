@@ -2,22 +2,20 @@
 
 namespace App\AI6\Reviews;
 
-use App\AI6\Agents\AgentAdapter;
+use App\AI6\Agents\AgentExecutionLimitReached;
+use App\AI6\Agents\AgentExecutionRunner;
 use App\AI6\Agents\AgentResultContext;
 use App\AI6\Agents\AgentResultStatus;
 use App\AI6\Agents\AgentResultValidationException;
 use App\AI6\Agents\AgentResultValidator;
 use App\AI6\Agents\AgentRole;
-use App\AI6\Agents\CredentialProjection;
-use App\AI6\Agents\CredentialRevisionRegistry;
 use App\AI6\Agents\ExecutionHome;
-use App\AI6\Agents\ExecutionHomeManager;
 use App\AI6\Agents\FindingVerificationAssessment;
 use App\AI6\Agents\HumanRequestOption;
 use App\AI6\Agents\HumanRequestProposal;
-use App\AI6\Agents\InstructionProfileRegistry;
 use App\AI6\Agents\InstructionSnapshot;
 use App\AI6\Agents\InstructionSnapshotEntry;
+use App\AI6\Agents\InvalidAgentResponse;
 use App\AI6\Agents\ProviderRuntimeProfile;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Checks\CheckTreeBinding;
@@ -41,7 +39,6 @@ use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\RunArtifactKind;
-use App\AI6\Runs\RunArtifactStore;
 use App\AI6\Runs\RunLimitPolicy;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
@@ -50,7 +47,6 @@ use App\AI6\Shared\Json\JsonDecodingException;
 use App\AI6\Shared\Redaction\InvalidRedactionInputException;
 use App\AI6\Shared\Redaction\RedactionContext;
 use Illuminate\Support\Facades\DB;
-use JsonException;
 use Throwable;
 
 /** Executes advisory verification without changing finding effectiveness. */
@@ -60,18 +56,14 @@ final readonly class FindingVerificationRound
         private RunOrchestrator $orchestrator,
         private VerifierSlotSelector $selector,
         private ReviewResultStore $results,
-        private AgentAdapter $adapter,
+        private AgentExecutionRunner $turns,
         private AgentResultValidator $validator,
         private ReviewCheckpointVerifier $checkpoints,
         private IsolatedTreeExport $exporter,
         private CheckTreeBinding $trees,
-        private ExecutionHomeManager $homes,
-        private InstructionProfileRegistry $instructionProfiles,
         private ProviderRuntimeProfileRegistry $runtimeProfiles,
         private InstructionBindingVerifier $instructionBindings,
-        private CredentialRevisionRegistry $credentialRevisions,
         private WorktreeGitMetadataPaths $gitMetadataPaths,
-        private RunArtifactStore $artifacts,
         private VerificationContextPackageStore $contextPackages,
         private RunLimitPolicy $limits,
         private HumanRequestService $humanRequests,
@@ -134,7 +126,14 @@ final readonly class FindingVerificationRound
 
                 return;
             }
-            $slot = $this->orchestrator->materializeVerifierSlot($run, $candidate, $finding, $job->step_number);
+            $slotKey = 'agent_verifier_slot_'.hash('sha256', $finding->duplicate_group.':'.$this->turns->revision($job));
+            $savedSlot = $this->turns->intent($job)[$slotKey] ?? null;
+            $slot = is_string($savedSlot)
+                ? RunAgent::query()->where('run_id', $run->id)->where('slot_id', $savedSlot)->where('is_active', true)->firstOrFail()
+                : $this->orchestrator->materializeVerifierSlot($run, $candidate, $finding, $job->step_number);
+            if (! is_string($savedSlot)) {
+                $this->turns->persist($job, [...$this->turns->intent($job), $slotKey => $slot->slot_id]);
+            }
             $candidate = $this->candidateForSlot($pool, $slot);
             if (! $candidate instanceof VerifierCandidate) {
                 $this->fail($job, $run, $owner, 'verifier_slot_not_approval_bound');
@@ -233,7 +232,6 @@ final readonly class FindingVerificationRound
         [$input, $output] = $roots;
         $export = $input.DIRECTORY_SEPARATOR.'export';
         $home = null;
-        $io = null;
         try {
             $this->exporter->export($run->worktree_path, $export);
             $bindings['workspace_tree_hash'] = $this->trees->hash($export);
@@ -241,11 +239,6 @@ final readonly class FindingVerificationRound
             if ($expectedWorkspaceHash !== null && ! hash_equals($expectedWorkspaceHash, $bindings['workspace_tree_hash'])) {
                 throw new ImplementationImportException('review_workspace_hash_mismatch', 'The verifier workspace differs from the reviewed workspace.');
             }
-            $home = $this->homes->create($input, $output, $slot->slot_id, (string) $slot->session_id, $export,
-                $this->instructionProfiles->get($slot->provider_profile), $instruction, $runtime,
-                new CredentialProjection($slot->provider_profile, $this->credentialRevisions->revision($slot->provider_profile), []));
-            $io = $home->root.'-io';
-            $this->contextPackages->store($run, $slot, $finding, $job->step_number, $bindings, $export, $context);
             $agentContext = new AgentResultContext(
                 AgentRole::FINDING_VERIFICATION,
                 $prompt,
@@ -257,14 +250,17 @@ final readonly class FindingVerificationRound
                 attempt: $attempt,
                 expectedFindingIds: $groupVerification ? [] : [$finding->id],
                 expectedFindingGroups: [$finding->duplicate_group],
+                unreachablePaths: $this->gitMetadataPaths->resolve($run->worktree_path),
             );
+            $home = $this->turns->prepare($job, $run, $slot, $agentContext, $export);
+            $this->contextPackages->store($run, $slot, $finding, $job->step_number, $bindings, $export, $context);
             $invocationLimit = $this->limits->consume(
                 $run,
                 ImportLimit::MAX_AGENT_INVOCATIONS,
                 implode(':', [$job->idempotency_key, $slot->slot_id, $attempt]),
             );
             if ($invocationLimit instanceof ImportLimitResult) {
-                $this->destroy($home, $io, $export, $input, $output);
+                $this->destroy($home, $export, $input, $output);
                 try {
                     $this->humanRequests->openLimitRequest($run, $job, $invocationLimit, WaitReason::RESOURCE_LIMIT);
                 } catch (HumanRequestRejected $exception) {
@@ -273,19 +269,36 @@ final readonly class FindingVerificationRound
 
                 return true;
             }
-            $bytes = $this->adapter->turn($agentContext, $home->workspace, $this->gitMetadataPaths->resolve($run->worktree_path));
+            $answer = $this->turns->dispatchOrCollect($run, $job, $home, $agentContext, $this->gitMetadataPaths->resolve($run->worktree_path));
+            if ($answer === null) {
+                $this->orchestrator->parkPollingStep($job, (string) $job->lease_owner);
+                $this->destroy(null, $export, $input, $output);
+
+                return true;
+            }
+            $bytes = $answer->bytes;
         } catch (ReviewResultParseException $exception) {
-            $this->destroy($home, $io, $export, $input, $output);
+            $this->destroy($home, $export, $input, $output);
             $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::BINDING_ERROR, $bindings, $exception->reason);
 
             return false;
+        } catch (AgentExecutionLimitReached $exception) {
+            $this->destroy($home, $export, $input, $output);
+            $this->humanRequests->openLimitRequest($run, $job, $exception->limit, WaitReason::RESOURCE_LIMIT);
+
+            return true;
+        } catch (InvalidAgentResponse) {
+            $this->destroy($home, $export, $input, $output);
+            $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::INVALID_JSON, $bindings, 'invalid_json');
+
+            return false;
         } catch (Throwable) {
-            $this->destroy($home, $io, $export, $input, $output);
+            $this->destroy($home, $export, $input, $output);
             $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::PROVIDER_ERROR, $bindings, 'provider_error');
 
             return false;
         }
-        if (! $this->destroy($home, $io, $export, $input, $output)) {
+        if (! $this->destroy($home, $export, $input, $output)) {
             $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::WORKSPACE_ERROR, $bindings, 'verification_home_cleanup_failed');
 
             return false;
@@ -306,7 +319,7 @@ final readonly class FindingVerificationRound
             return true;
         }
         try {
-            $artifact = $this->artifacts->store($run, RunArtifactKind::PROVIDER_RAW, $bytes, [
+            $artifact = $this->turns->store($run, RunArtifactKind::PROVIDER_RAW, $bytes, [
                 'role' => AgentRole::FINDING_VERIFICATION->value,
                 'slot_id' => $slot->slot_id,
                 'round_number' => $job->step_number,
@@ -487,23 +500,23 @@ final readonly class FindingVerificationRound
         return [$input, $output];
     }
 
-    private function destroy(?ExecutionHome $home, ?string $io, string ...$paths): bool
+    private function destroy(?ExecutionHome $home, string ...$paths): bool
     {
         $complete = true;
         if ($home instanceof ExecutionHome) {
             try {
-                $this->homes->destroy($home);
+                $this->turns->destroy($home);
             } catch (Throwable) {
                 $complete = false;
             }
         }
-        foreach (array_filter([$io, ...$paths], 'is_string') as $path) {
+        foreach ($paths as $path) {
             $this->removeTree($path);
         }
 
         return $complete
             && (! $home instanceof ExecutionHome || (! file_exists($home->root) && ! file_exists($home->outputRoot)))
-            && ! array_filter(array_filter([$io, ...$paths], 'is_string'), 'file_exists');
+            && ! array_filter($paths, 'file_exists');
     }
 
     private function groupHasMultipleFindings(Run $run, Finding $finding): bool
@@ -548,12 +561,6 @@ final readonly class FindingVerificationRound
     /** @param array<string, scalar> $expected */
     private function intentMatches(string $stored, array $expected): bool
     {
-        try {
-            $decoded = json_decode($stored, true, 8, JSON_THROW_ON_ERROR);
-        } catch (JsonException) {
-            return false;
-        }
-
-        return $decoded === $expected;
+        return $this->turns->intentMatches($stored, $expected);
     }
 }

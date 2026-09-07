@@ -2,22 +2,74 @@
 
 namespace Tests\Feature\Reviews;
 
+use App\AI6\Agents\AgentAdapter;
+use App\AI6\Agents\AgentResultContext;
 use App\AI6\Agents\AgentRole;
 use App\AI6\Agents\AgentScenario;
+use App\AI6\Agents\AgentTurnResult;
+use App\AI6\Agents\ExecutionHome;
 use App\AI6\Agents\FakeAgentAdapter;
 use App\AI6\Agents\InstructionCandidate;
 use App\AI6\Agents\InstructionCandidateOrigin;
 use App\AI6\Agents\InstructionFileType;
+use App\AI6\Agents\InvalidAgentResponse;
 use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\HumanLoop\SecurityGateHumanRequestBinding;
+use App\AI6\Reviews\SecurityReviewStep;
+use App\AI6\Runs\ExecutionStepType;
+use App\AI6\Runs\Jobs\ExecuteRunStep;
+use App\AI6\Runs\Models\ExecutionJob;
+use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunPhase;
+use Closure;
 use Illuminate\Support\Facades\DB;
 use Tests\Feature\Tickets\TicketUiTestCase;
+use Tests\Fixtures\Agents\AgentMailboxFixture;
 
 final class SecurityReviewIsolationTest extends TicketUiTestCase
 {
     use BuildsSecurityReviewFixture;
+
+    /** A parser failure at the adapter stays a step-specific park reason, distinct from a provider error. */
+    public function test_a_missing_answer_parks_with_a_step_specific_reason_and_keeps_the_original_cause(): void
+    {
+        $prepared = $this->preparedSecurityReview('AI6-047-SECPARSE');
+        $adapter = new class implements AgentAdapter
+        {
+            public function result(AgentResultContext $context): string
+            {
+                return '{}';
+            }
+
+            public function turn(AgentResultContext $context, ExecutionHome $home, Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult
+            {
+                $heartbeat();
+
+                throw new InvalidAgentResponse('agent_response_missing');
+            }
+        };
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
+        $job = ExecutionJob::query()->where('run_id', $prepared['run']->id)
+            ->where('step_type', ExecutionStepType::SECURITY_REVIEW->value)->sole();
+        $this->app->forgetInstance(SecurityReviewStep::class);
+        (new ExecuteRunStep($job->id))->handle(
+            $this->app->make(RunOrchestrator::class),
+            securityReview: $this->app->make(SecurityReviewStep::class),
+        );
+        AgentMailboxFixture::drain($job, function () use ($job): void {
+            (new ExecuteRunStep($job->id))->handle(
+                $this->app->make(RunOrchestrator::class),
+                securityReview: $this->app->make(SecurityReviewStep::class),
+            );
+        });
+
+        self::assertSame('waiting', $job->fresh()->state->value);
+        $request = HumanRequest::query()->where('run_id', $prepared['run']->id)
+            ->where('kind', 'security_gate')->where('resolution_state', 'open')->sole();
+        self::assertStringContainsString('security_result_invalid', $request->why_needed);
+        self::assertStringNotContainsString('security_provider_error', $request->why_needed);
+    }
 
     public function test_each_retry_uses_a_fresh_session_and_home_with_only_the_bound_instruction_snapshot(): void
     {

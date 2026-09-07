@@ -28,6 +28,7 @@ final readonly class ExecutionHomeManager
         ProviderRuntimeProfile $runtimeProfile,
         CredentialProjection $credentials,
         bool $writableWorkspace = false,
+        ?AgentResultContext $turnContext = null,
     ): ExecutionHome {
         $this->assertId($slotId);
         if ($sessionId !== null) {
@@ -103,6 +104,14 @@ final readonly class ExecutionHomeManager
                 $this->makeWorkspaceWritable($home->workspace, $projection);
             }
             $this->writeImmutable($home->runtimeConfiguration, $this->canonicalJson->normalizeAndEncode($runtimeProfile->jsonSerialize())."\n");
+            if ($turnContext !== null) {
+                if ($turnContext->runtimeProfile->hash !== $runtimeProfile->hash
+                    || $turnContext->instructionSnapshot->hash !== $instructionSnapshot->hash
+                    || $turnContext->slotId !== $slotId) {
+                    throw new ExecutionHomeException('The turn context is not bound to the execution home.');
+                }
+                $this->writeImmutable(dirname($home->runtimeConfiguration).'/turn.json', $turnContext->toJson());
+            }
             foreach ($credentials->files as $target => $source) {
                 $destination = $home->authDirectory.'/'.$target;
                 $directory = dirname($destination);

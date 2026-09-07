@@ -37,8 +37,10 @@ final readonly class ProcessIsolationVerifier implements ProcessIsolationBoundar
         $inputRoot = config('ai6.execution_mailboxes.'.$policy->name->value.'_root');
         $outputRoot = config('ai6.execution_mailboxes.'.$policy->name->value.'_output_root');
         $workspaceRoot = $policy->name === ProcessPolicyName::CHECKER ? config('ai6.checks.runtime.workspace_root') : $inputRoot;
+        $writableAgentWorkspace = $policy->name === ProcessPolicyName::AGENT && is_string($outputRoot)
+            && $this->within($request->workingDirectory, $outputRoot);
         if (! is_string($inputRoot) || ! is_string($outputRoot) || ! is_string($workspaceRoot)
-            || ! $this->within($request->workingDirectory, $workspaceRoot)
+            || (! $this->within($request->workingDirectory, $workspaceRoot) && ! $writableAgentWorkspace)
             || $request->resultDirectory === null || ! $this->within($request->resultDirectory, $outputRoot)
             || $request->artifactDirectory === null || ! $this->within($request->artifactDirectory, $outputRoot)
             || realpath($inputRoot) === realpath($outputRoot)) {
@@ -53,13 +55,21 @@ final readonly class ProcessIsolationVerifier implements ProcessIsolationBoundar
         }
 
         $home = dirname((string) realpath($request->workingDirectory));
+        if ($writableAgentWorkspace) {
+            $relative = substr($home, strlen(rtrim((string) realpath($outputRoot), '/')) + 1);
+            $home = rtrim((string) realpath($inputRoot), '/').'/'.$relative;
+            if (basename($request->workingDirectory) !== 'workspace' || ! $this->within($home, $inputRoot)) {
+                throw new ProcessStartRejectedException('The writable workspace has no bound sealed home.');
+            }
+            $this->assertTree($request->workingDirectory);
+        }
         foreach ([$home.'/instructions', $home.'/home/auth', $home.'/runtime/profile.json'] as $protected) {
             if (! file_exists($protected) || is_link($protected) || is_writable($protected)) {
                 throw new ProcessStartRejectedException('The process read-only projection is not isolated.');
             }
         }
         $this->assertTree($home);
-        $this->assertInstructionBindings($home);
+        $this->assertInstructionBindings($home, $request->workingDirectory);
         $this->assertMount($inputRoot, true);
         $this->assertMount($outputRoot, false);
         $this->assertRootReadOnly();
@@ -87,7 +97,7 @@ final readonly class ProcessIsolationVerifier implements ProcessIsolationBoundar
         }
     }
 
-    private function assertInstructionBindings(string $home): void
+    private function assertInstructionBindings(string $home, string $workspace): void
     {
         $overlay = $home.'/instructions';
         $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($overlay, FilesystemIterator::SKIP_DOTS));
@@ -96,7 +106,7 @@ final readonly class ProcessIsolationVerifier implements ProcessIsolationBoundar
                 continue;
             }
             $relative = substr($entry->getPathname(), strlen($overlay) + 1);
-            $native = $home.'/workspace/'.$relative;
+            $native = $workspace.'/'.$relative;
             $overlayBytes = file_get_contents($entry->getPathname());
             $nativeBytes = file_get_contents($native);
             if (! is_string($overlayBytes) || ! is_string($nativeBytes) || ! hash_equals(hash('sha256', $overlayBytes), hash('sha256', $nativeBytes))) {

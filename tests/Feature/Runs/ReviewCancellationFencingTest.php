@@ -4,6 +4,8 @@ namespace Tests\Feature\Runs;
 
 use App\AI6\Agents\AgentAdapter;
 use App\AI6\Agents\AgentResultContext;
+use App\AI6\Agents\AgentTurnResult;
+use App\AI6\Agents\ExecutionHome;
 use App\AI6\Agents\HumanRequestOption;
 use App\AI6\Agents\HumanRequestProposal;
 use App\AI6\Auth\Models\User;
@@ -87,7 +89,7 @@ final class ReviewCancellationFencingTest extends TicketUiTestCase
                 $this->authorization($operator, $request, RunCancellationMode::SOFT),
             );
         });
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         $this->app->forgetInstance(ReviewRound::class);
 
         $artifactsBefore = RunArtifact::query()->where('run_id', $run->id)->count();
@@ -114,11 +116,12 @@ final class ReviewCancellationFencingTest extends TicketUiTestCase
                 return '{}';
             }
 
-            public function turn(AgentResultContext $context, string $isolatedTree, array $unreachablePaths = []): string
+            public function turn(AgentResultContext $context, ExecutionHome $home, Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult
             {
+                $heartbeat();
                 ($this->duringTurn)();
 
-                return '{}';
+                return new AgentTurnResult('{}');
             }
         };
     }

@@ -3,6 +3,9 @@
 namespace App\AI6\Shared;
 
 use App\AI6\Agents\AgentAdapter;
+use App\AI6\Agents\AgentExecutionException;
+use App\AI6\Agents\AgentExecutionProcessor;
+use App\AI6\Agents\AgentExecutionRunner;
 use App\AI6\Agents\AgentInputLimits;
 use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentResultImporter;
@@ -241,7 +244,14 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(AgentResultValidator::class);
         $this->app->singleton(AgentResultImporter::class);
         $this->app->singleton(FakeAgentAdapter::class);
-        $this->app->bind(AgentAdapter::class, FakeAgentAdapter::class);
+        $this->app->bind(AgentAdapter::class, static function (Application $app, array $parameters): AgentAdapter {
+            return match ($parameters['providerAlias'] ?? 'fake') {
+                'fake' => $app->make(FakeAgentAdapter::class),
+                default => throw new AgentExecutionException('agent_adapter_unavailable'),
+            };
+        });
+        $this->app->singleton(AgentExecutionRunner::class);
+        $this->app->singleton(AgentExecutionProcessor::class);
         $this->app->singleton(RunArtifactRoot::class, static fn (): RunArtifactRoot => RunArtifactRoot::fromConfiguredValues());
         $this->app->singleton(RunArtifactStore::class);
         $this->app->singleton(RunLimitPolicy::class);

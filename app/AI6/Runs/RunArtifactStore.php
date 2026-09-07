@@ -49,12 +49,12 @@ final readonly class RunArtifactStore
     /**
      * @param  array<string, mixed>  $metadata
      */
-    public function store(Run $run, RunArtifactKind $kind, string $bytes, array $metadata, RedactionContext $context): RunArtifact
+    public function store(Run $run, RunArtifactKind $kind, string $bytes, array $metadata, RedactionContext $context, ?string $executionId = null): RunArtifact
     {
         $this->redactor->assertValidInput($bytes);
         $redacted = $this->redactor->redact($bytes, $context);
 
-        return $this->persist($run, $kind, $redacted->text, $metadata, $context);
+        return $this->persist($run, $kind, $redacted->text, $metadata, $context, $executionId);
     }
 
     /** Remove an unpublished transient artifact after a fenced invocation. */
@@ -165,8 +165,15 @@ final readonly class RunArtifactStore
     }
 
     /** @param array<string, mixed> $metadata */
-    private function persist(Run $run, RunArtifactKind $kind, string $payload, array $metadata, RedactionContext $context): RunArtifact
+    private function persist(Run $run, RunArtifactKind $kind, string $payload, array $metadata, RedactionContext $context, ?string $executionId = null): RunArtifact
     {
+        if ($executionId !== null && ($kind !== RunArtifactKind::PROVIDER_RAW || preg_match('/\A[0-9a-f]{64}\z/D', $executionId) !== 1)) {
+            throw new ImplementationImportException('artifact_execution_binding_invalid', 'The provider artifact execution binding is invalid.');
+        }
+        $safeMetadata = [];
+        foreach ($metadata as $key => $value) {
+            $safeMetadata[$key] = $this->redactJsonValue($value, $context);
+        }
         $limit = $this->retention->artifactLimit($kind);
         if ($limit->exceeds(strlen($payload))) {
             throw new ImplementationImportException('artifact_retention_size_exceeded', 'The run artifact exceeds the trusted size limit of its retention category.');
@@ -176,9 +183,12 @@ final readonly class RunArtifactStore
         $existing = RunArtifact::query()
             ->where('run_id', $run->getKey())
             ->where('kind', $kind->value)
-            ->where('digest', $digest)
+            ->where('execution_id', $executionId)
+            ->when($executionId === null, static fn ($query) => $query->where('digest', $digest))
             ->first();
         if ($existing instanceof RunArtifact) {
+            $this->assertExecutionArtifact($existing, $executionId, $digest, $safeMetadata);
+
             return $existing;
         }
 
@@ -196,19 +206,12 @@ final readonly class RunArtifactStore
         if (! is_dir($directory) && ! mkdir($directory, 0700, true) && ! is_dir($directory)) {
             throw new ImplementationImportException('artifact_root_unavailable', 'The trusted run-artifact root is unavailable.');
         }
-        $filename = $kind->value.'-'.$digest.'.txt';
+        $filename = $kind->value.'-'.($executionId === null ? '' : $executionId.'-').$digest.'.txt';
         $path = $directory.DIRECTORY_SEPARATOR.$filename;
         if (file_put_contents($path, $payload, LOCK_EX) !== strlen($payload)) {
             throw new ImplementationImportException('artifact_write_failed', 'The run artifact could not be stored.');
         }
         @chmod($path, 0600);
-
-        $safeMetadata = [];
-        foreach ($metadata as $key => $value) {
-            $safeMetadata[$key] = is_string($value)
-                ? $this->redactor->redact($value, $context)->text
-                : $value;
-        }
 
         $sequence = (int) RunArtifact::query()->where('run_id', $run->getKey())->max('sequence') + 1;
         $now = Date::now();
@@ -220,6 +223,7 @@ final readonly class RunArtifactStore
                 'kind' => $kind,
                 'redacted_metadata' => $safeMetadata,
                 'digest' => $digest,
+                'execution_id' => $executionId,
                 'size_bytes' => strlen($payload),
                 'sequence' => $sequence,
                 'storage_reference' => $run->id.'/'.$filename,
@@ -233,13 +237,30 @@ final readonly class RunArtifactStore
             $created = RunArtifact::query()
                 ->where('run_id', $run->getKey())
                 ->where('kind', $kind->value)
-                ->where('digest', $digest)
+                ->where('execution_id', $executionId)
+                ->when($executionId === null, static fn ($query) => $query->where('digest', $digest))
                 ->first();
             if (! $created instanceof RunArtifact) {
                 throw new ImplementationImportException('artifact_write_failed', 'The run artifact could not be stored.');
             }
 
+            $this->assertExecutionArtifact($created, $executionId, $digest, $safeMetadata);
+
             return $created;
+        }
+    }
+
+    /** @param array<string, mixed> $metadata */
+    private function assertExecutionArtifact(RunArtifact $artifact, ?string $executionId, string $digest, array $metadata): void
+    {
+        if ($executionId === null) {
+            return;
+        }
+        if ($artifact->isDeleted()) {
+            throw new ImplementationImportException('artifact_retention_expired', 'The provider artifact was removed by retention.');
+        }
+        if ($artifact->digest !== $digest || $artifact->redacted_metadata != $metadata) {
+            throw new ImplementationImportException('artifact_execution_binding_mismatch', 'The execution already binds a different provider artifact.');
         }
     }
 

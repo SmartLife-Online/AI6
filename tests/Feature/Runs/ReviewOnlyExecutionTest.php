@@ -577,7 +577,7 @@ final class ReviewOnlyExecutionTest extends TicketUiTestCase
     {
         $adapter = new FakeAgentAdapter($scenario);
         $this->app->instance(FakeAgentAdapter::class, $adapter);
-        $this->app->instance(AgentAdapter::class, $adapter);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         foreach ([
             CredentialRevisionRegistry::class,
             ExecutionHomeManager::class,
