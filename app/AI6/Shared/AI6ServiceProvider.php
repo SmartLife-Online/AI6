@@ -10,6 +10,8 @@ use App\AI6\Agents\AgentInputLimits;
 use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentResultImporter;
 use App\AI6\Agents\AgentResultValidator;
+use App\AI6\Agents\CodexCliAdapter;
+use App\AI6\Agents\CodexCliConfiguration;
 use App\AI6\Agents\CredentialRevisionRegistry;
 use App\AI6\Agents\DelegatingProcessIsolationBoundary;
 use App\AI6\Agents\ExecutionHomeManager;
@@ -132,6 +134,7 @@ use App\AI6\Shared\Config\ConfigurationException;
 use App\AI6\Shared\Config\StrictEnumParser;
 use App\AI6\Shared\Config\StrictPositiveIntegerParser;
 use App\AI6\Shared\Doctor\CheckerRuntimeDoctorCheck;
+use App\AI6\Shared\Doctor\CodexCliDoctorCheck;
 use App\AI6\Shared\Doctor\DoctorCommand;
 use App\AI6\Shared\Doctor\RedactionKeyringDoctorCheck;
 use App\AI6\Shared\Doctor\SecurityPolicyDoctorCheck;
@@ -244,9 +247,20 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(AgentResultValidator::class);
         $this->app->singleton(AgentResultImporter::class);
         $this->app->singleton(FakeAgentAdapter::class);
+        $this->app->singleton(CodexCliConfiguration::class, static fn (): CodexCliConfiguration => CodexCliConfiguration::fromConfiguredValues());
+        $this->app->singleton(
+            CodexCliAdapter::class,
+            static fn (Application $app): CodexCliAdapter => new CodexCliAdapter(
+                $app->make(CodexCliConfiguration::class),
+                $app->make(AgentInputLimits::class),
+                $app->make(Redactor::class),
+                $app->make(RestrictedJsonDecoder::class),
+            ),
+        );
         $this->app->bind(AgentAdapter::class, static function (Application $app, array $parameters): AgentAdapter {
             return match ($parameters['providerAlias'] ?? 'fake') {
                 'fake' => $app->make(FakeAgentAdapter::class),
+                CodexCliAdapter::PROVIDER_ALIAS => $app->make(CodexCliAdapter::class),
                 default => throw new AgentExecutionException('agent_adapter_unavailable'),
             };
         });
@@ -525,6 +539,10 @@ final class AI6ServiceProvider extends ServiceProvider
                 new SecurityPolicyDoctorCheck($app->make(SecurityPolicy::class)),
                 new RedactionKeyringDoctorCheck($app->make(RedactionKeyringFactory::class)),
                 new CheckerRuntimeDoctorCheck,
+                new CodexCliDoctorCheck(
+                    $app->make(AgentProfileRegistry::class),
+                    $app->make(ProviderRuntimeProfileRegistry::class),
+                ),
             ]),
         );
 
@@ -534,6 +552,7 @@ final class AI6ServiceProvider extends ServiceProvider
         $runtimeProfiles = $this->app->make(ProviderRuntimeProfileRegistry::class);
         $instructionProfiles = $this->app->make(InstructionProfileRegistry::class);
         $this->app->make(AgentInputLimits::class);
+        $this->app->make(CodexCliConfiguration::class);
         foreach ($agentProfiles->all() as $agentProfile) {
             $runtimeProfiles->get($agentProfile->runtimeProfileId);
             $instructionProfiles->get($agentProfile->providerProfileAlias);

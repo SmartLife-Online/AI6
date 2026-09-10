@@ -33,6 +33,17 @@ final readonly class ApprovalSelection implements JsonSerializable
         if ($runType === RunType::IMPLEMENTATION && ($reviewSubjectReference !== null || $completionMode !== null)) {
             throw new \InvalidArgumentException('Eine Implementierungs-Approval darf keine Review-only-Bindung enthalten.');
         }
+        // Reviewer independence (AGT-010, AI6-033): in an implementation run no
+        // reviewer slot uses the provider profile of the implementation slot.
+        // Review-only runs are free, and the credential- and process-free test
+        // provider `fake` is the one exempt test provider.
+        if ($runType === RunType::IMPLEMENTATION && $implementation->profile->providerProfileAlias !== 'fake') {
+            foreach ($reviewers as $slot) {
+                if ($slot->providerProfile === $implementation->profile->providerProfileAlias) {
+                    throw new \InvalidArgumentException('Ein Reviewer-Slot darf im Implementierungslauf nicht das Providerprofil des Implementierungsslots verwenden.');
+                }
+            }
+        }
         if ($reviewSubjectReference !== null && (strlen($reviewSubjectReference) > 2048
             || $reviewSubjectReference === ''
             || preg_match('//u', $reviewSubjectReference) !== 1

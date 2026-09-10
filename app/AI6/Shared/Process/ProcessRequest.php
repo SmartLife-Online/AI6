@@ -24,6 +24,14 @@ final readonly class ProcessRequest
         public ?ProcessLimits $approvedLimits = null,
         public ?string $resultDirectory = null,
         public ?string $artifactDirectory = null,
+        /**
+         * Bytes handed to the child over standard input and closed afterwards.
+         * The one transport for input a single command-line argument cannot
+         * carry: on Linux MAX_ARG_STRLEN caps one argument at 128 KiB, well
+         * below the configured prompt maximum. Like every argument these bytes
+         * are data — they never become part of the argument list.
+         */
+        public ?string $standardInput = null,
     ) {
         if ($this->command === []) {
             throw new InvalidArgumentException('A control process requires a non-empty argument list.');

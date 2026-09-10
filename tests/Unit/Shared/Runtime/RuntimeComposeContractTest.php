@@ -97,6 +97,7 @@ final class RuntimeComposeContractTest extends TestCase
             ...self::RETENTION_ENVIRONMENT,
             'AI6_CONTROL_OPERATION_HEARTBEAT_SECONDS', 'AI6_CONTROL_OPERATION_LEASE_SECONDS', 'AI6_CONTROL_OPERATION_MANAGED_REF_ALLOWLIST',
             'AI6_CONTROL_OPERATION_STALE_SECONDS',
+            'AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF',
             'AI6_GIT_ALLOWED_HOSTS', 'AI6_GIT_ALLOWED_REMOTE_PATHS', 'AI6_GIT_ALLOWED_REF_PATTERNS', 'AI6_GIT_PINNED_HOST_KEYS',
             'AI6_RUNTIME_ROLE', 'APP_DEBUG', 'APP_ENV', 'APP_KEY', 'APP_NAME', 'APP_URL', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',
             'DB_CONNECTION', 'DB_DATABASE', 'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE',
@@ -115,6 +116,7 @@ final class RuntimeComposeContractTest extends TestCase
             'AI6_EFFECT_LOCK_OWNER_UID', 'AI6_MANAGED_PROJECT_ROOT', 'AI6_SSH_KEYGEN_BINARY',
             'AI6_AGENT_EXECUTION_ROOT', 'AI6_AGENT_OUTPUT_ROOT', 'AI6_CHECKER_EXECUTION_ROOT', 'AI6_CHECKER_OUTPUT_ROOT',
             'AI6_CODEX_CREDENTIAL_REVISION', 'AI6_GROK_CREDENTIAL_REVISION', 'AI6_COPILOT_CREDENTIAL_REVISION',
+            'AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF',
             'AI6_EXECUTION_DIRECTORY', 'AI6_GIT_ALLOWED_HOSTS', 'AI6_GIT_ALLOWED_REMOTE_PATHS', 'AI6_GIT_ALLOWED_REF_PATTERNS',
             'AI6_GIT_PINNED_HOST_KEYS', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE',
             'AI6_WORKER_TIMEOUT', 'APP_DEBUG', 'APP_ENV', 'APP_KEY', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',
@@ -131,7 +133,7 @@ final class RuntimeComposeContractTest extends TestCase
             'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE', 'DB_QUEUE_RETRY_AFTER',
             'DB_SYNCHRONOUS', 'LOG_CHANNEL', 'QUEUE_CONNECTION',
         ],
-        'agent' => [...self::REDACTION_ENVIRONMENT, 'AI6_AGENT_EXECUTION_ROOT', 'AI6_AGENT_OUTPUT_ROOT', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'LOG_CHANNEL'],
+        'agent' => [...self::REDACTION_ENVIRONMENT, 'AI6_AGENT_EXECUTION_ROOT', 'AI6_AGENT_OUTPUT_ROOT', 'AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF', 'AI6_CODEX_CREDENTIAL_REVISION', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'LOG_CHANNEL'],
         'checker' => [...self::REDACTION_ENVIRONMENT, 'AI6_CHECKER_EXECUTION_ROOT', 'AI6_CHECKER_OUTPUT_ROOT', 'AI6_CHECKER_WORKSPACE_ROOT', 'AI6_CHECKER_UNSHARE_BINARY', 'AI6_CHECKER_NAMESPACE_WRAPPER', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'LOG_CHANNEL'],
     ];
 
@@ -314,6 +316,31 @@ final class RuntimeComposeContractTest extends TestCase
     {
         $options = explode(',', $this->compose()['volumes']['ai6_agent_outputs']['driver_opts']['o']);
         self::assertContains('size=1073741824', $options);
+    }
+
+    /** AI6-033: binary and pin reach exactly the roles that check statically or run the provider turn; no role receives credential bytes. */
+    public function test_codex_binary_pin_and_revision_reach_exactly_app_worker_and_agent_without_credential_bytes(): void
+    {
+        $services = $this->services();
+        foreach (['app', 'worker', 'agent'] as $role) {
+            self::assertSame('${AI6_CODEX_BINARY:-/usr/local/bin/codex}', $services[$role]['environment']['AI6_CODEX_BINARY'] ?? null, $role);
+            self::assertSame('${AI6_CODEX_PINNED_VERSION:-}', $services[$role]['environment']['AI6_CODEX_PINNED_VERSION'] ?? null, $role);
+            self::assertSame('${AI6_CODEX_SANDBOX_PROOF:-}', $services[$role]['environment']['AI6_CODEX_SANDBOX_PROOF'] ?? null, $role);
+        }
+        foreach (['worker', 'agent'] as $role) {
+            self::assertSame('${AI6_CODEX_CREDENTIAL_REVISION:-}', $services[$role]['environment']['AI6_CODEX_CREDENTIAL_REVISION'] ?? null, $role);
+        }
+        foreach (['caddy', 'init', 'scheduler', 'checker'] as $role) {
+            foreach (['AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF', 'AI6_CODEX_CREDENTIAL_REVISION'] as $variable) {
+                self::assertArrayNotHasKey($variable, $services[$role]['environment'] ?? [], $role.' '.$variable);
+            }
+        }
+        self::assertArrayNotHasKey('AI6_CODEX_CREDENTIAL_REVISION', $services['app']['environment']);
+        foreach ($services as $name => $service) {
+            foreach (['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_HOME'] as $variable) {
+                self::assertArrayNotHasKey($variable, $service['environment'] ?? [], $name.' carries no credential bytes and no native home.');
+            }
+        }
     }
 
     public function test_retention_configuration_reaches_exactly_init_app_worker_and_scheduler(): void

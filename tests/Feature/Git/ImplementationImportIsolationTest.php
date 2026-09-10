@@ -227,7 +227,8 @@ final class ImplementationImportIsolationTest extends TicketUiTestCase
         }
 
         $policy = ProcessPolicyRegistry::fromConfiguredValues()->get(ProcessPolicyName::AGENT);
-        self::assertSame([PHP_BINARY], $policy->allowedExecutables);
+        // AI6-033 adds the pinned Codex binary next to the FakeAgent executable.
+        self::assertSame([PHP_BINARY, config('ai6.codex.binary')], $policy->allowedExecutables);
         self::assertTrue($policy->requiresProcessGroup);
         self::assertInstanceOf(DelegatingProcessIsolationBoundary::class, $this->app->make(ProcessIsolationBoundary::class));
 
@@ -237,7 +238,7 @@ final class ImplementationImportIsolationTest extends TicketUiTestCase
         self::assertSame(ExecutionJobState::SUCCEEDED, $job->state, (string) $job->failure_code);
         self::assertSame('denied', $adapter->lastAccessProbes['path:'.$prepared['worktree']] ?? null);
         self::assertSame('denied', $adapter->lastAccessProbes['path:'.$prepared['worktree'].'/.git'] ?? null);
-        self::assertSame([PHP_BINARY], ProcessPolicyRegistry::fromConfiguredValues()->get(ProcessPolicyName::AGENT)->allowedExecutables);
+        self::assertSame([PHP_BINARY, config('ai6.codex.binary')], ProcessPolicyRegistry::fromConfiguredValues()->get(ProcessPolicyName::AGENT)->allowedExecutables);
         self::assertInstanceOf(DelegatingProcessIsolationBoundary::class, $this->app->make(ProcessIsolationBoundary::class));
     }
 

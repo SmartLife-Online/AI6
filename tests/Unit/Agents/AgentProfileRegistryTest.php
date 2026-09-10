@@ -46,7 +46,7 @@ final class AgentProfileRegistryTest extends TestCase
             ['fake', AgentRole::IMPLEMENTATION, 'unknown-model', 'medium', AgentProfileSelectionError::COMBINATION_NOT_ALLOWED],
             ['fake', AgentRole::IMPLEMENTATION, 'fake-model', 'unknown-effort', AgentProfileSelectionError::COMBINATION_NOT_ALLOWED],
             ['grok-cli-review', AgentRole::IMPLEMENTATION, 'provider_default', 'provider_default', AgentProfileSelectionError::COMBINATION_NOT_ALLOWED],
-            ['codex-gpt-5.6-terra', AgentRole::IMPLEMENTATION, 'gpt-5.6-terra', 'medium', AgentProfileSelectionError::CAPABILITY_NOT_AVAILABLE],
+            ['codex-gpt-5.6-terra', AgentRole::IMPLEMENTATION, 'gpt-5.3-codex', 'medium', AgentProfileSelectionError::CAPABILITY_NOT_AVAILABLE],
         ];
 
         foreach ($cases as [$profile, $role, $model, $effort, $reason]) {

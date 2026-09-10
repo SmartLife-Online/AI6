@@ -72,7 +72,7 @@ final class ControlProcessRunner
         $command = DIRECTORY_SEPARATOR === '/'
             ? $this->wrapperCommand(['direct', '--', ...$payload])
             : $request->command;
-        $process = new Process($command, $request->workingDirectory, $this->environment($request), null, null);
+        $process = new Process($command, $request->workingDirectory, $this->environment($request), $request->standardInput, null);
         $process->start();
         $startedAt = $process->getStartTime();
         $processId = $process->getPid();
@@ -115,6 +115,15 @@ final class ControlProcessRunner
                 BlockedStartOutcome::CONFIGURATION_ERROR,
                 null,
                 'Blocked control process starts require a POSIX runtime.',
+            );
+        }
+
+        if ($request->standardInput !== null) {
+            // Standard input carries the release protocol of a blocked start.
+            return new BlockedProcessStartResult(
+                BlockedStartOutcome::CONFIGURATION_ERROR,
+                null,
+                'A blocked control process cannot carry standard input.',
             );
         }
 

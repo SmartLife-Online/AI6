@@ -113,10 +113,13 @@ final class ApprovalInstructionSnapshotTest extends TicketUiTestCase
         $this->app->forgetInstance(AgentProfileRegistry::class);
         $this->app->forgetInstance(ReviewerSlotFactory::class);
         $this->app->forgetInstance(ApprovalSnapshotFactory::class);
+        // The implementer now carries the codex_cli provider; a reviewer of
+        // that same provider would be refused by the AI6-033 independence
+        // invariant, so the review slot stays on the copied fake provider.
         $adapterChanged = $this->app->make(ApprovalSnapshotFactory::class)->create(
             $project,
             $readModel,
-            $this->selection(),
+            $this->selection('fake-alias'),
             $contextId,
         );
         self::assertNotSame($snapshot->agentProfileHash, $adapterChanged->agentProfileHash);
@@ -129,7 +132,7 @@ final class ApprovalInstructionSnapshotTest extends TicketUiTestCase
         ));
     }
 
-    private function selection(): ApprovalSelection
+    private function selection(string $reviewerProfile = 'fake'): ApprovalSelection
     {
         $profiles = $this->app->make(AgentProfileRegistry::class);
 
@@ -137,7 +140,7 @@ final class ApprovalInstructionSnapshotTest extends TicketUiTestCase
             $profiles->resolve('fake', AgentRole::IMPLEMENTATION, 'fake-model', 'medium'),
             $this->app->make(ReviewerSlotFactory::class)->fromArray([[
                 'id' => (string) Str::uuid(),
-                'profile' => 'fake',
+                'profile' => $reviewerProfile,
                 'model' => 'fake-model',
                 'effort' => 'high',
                 'prompt_profile' => 'security',

@@ -40,6 +40,34 @@ final class RuntimeDocumentationTest extends TestCase
             '`AI6_SECURITY_REQUIRE_AGENT_SANDBOX`',
             '`AI6-047/MG-01`',
             '`docs/AI6-047_MG-01_ABNAHMEPROTOKOLL.md`',
+            '`CodexCliAdapter`',
+            '`CodexCliDoctorCheck`',
+            '`codex exec`',
+            '`--output-schema`',
+            '`--ephemeral`',
+            '`CODEX_HOME`',
+            '`AI6_CODEX_BINARY`',
+            '`AI6_CODEX_PINNED_VERSION`',
+            'AI6_RUN_CODEX_SMOKE=1',
+            'neue `codex exec`-Invocation',
+            '`CodexCliAdapter::VERIFIED_MODELS`',
+            '`CodexCliAdapter::PERMITTED_ENABLED_FEATURES`',
+            '`codex features list`',
+            '`codex debug models`',
+            '`MAX_ARG_STRLEN`',
+            'über die Standardeingabe',
+            '`agent_codex_extension_unapproved`',
+            '`agent_codex_extension_materialized`',
+            '`agent_codex_model_unverified`',
+            '`agent_response_after_turn`',
+            '`AI6_CODEX_SANDBOX_PROOF`',
+            '`agent_codex_sandbox_unproven`',
+            '`agent_codex_sandbox_proof_invalid`',
+            'ausschließlich am dekodierten Wert',
+            'Ohne bindenden Sandboxnachweis meldet der Doctor nie',
+            'Das gilt auf beiden Ausführungswegen',
+            '`AI6-033/MG-01`',
+            '`docs/AI6-033_MG-01_ABNAHMEPROTOKOLL.md`',
             'Ausführungsnachweise',
             'JSON ist gültiges Compose-YAML',
             'Containerinterface',
@@ -105,6 +133,17 @@ final class RuntimeDocumentationTest extends TestCase
             'AI6_CONTROL_OPERATION_RECONCILER_SECONDS',
             $this->serviceRow($readme, 'scheduler'),
         );
+
+        // AI6-033: the pinned Codex transport is documented for exactly the roles that receive it.
+        foreach (['app', 'worker', 'agent'] as $service) {
+            foreach (['AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF'] as $variable) {
+                self::assertStringContainsString($variable, $this->serviceRow($readme, $service), $service.' '.$variable);
+            }
+        }
+        self::assertStringContainsString('AI6_CODEX_CREDENTIAL_REVISION', $this->serviceRow($readme, 'agent'));
+        foreach (['init', 'scheduler', 'checker'] as $service) {
+            self::assertStringNotContainsString('AI6_CODEX_BINARY', $this->serviceRow($readme, $service), $service);
+        }
 
         foreach (['Claim', 'Publish', 'key_generated', 'key_activated', 'provisioning_finalized', 'effect_staged', 'outcome_published', 'binding_finalized', 'attempt_completed'] as $phase) {
             self::assertStringContainsString($phase, $readme);

@@ -13,7 +13,12 @@ use PHPUnit\Framework\Assert;
 /** Pump the actual mailbox consumer across the explicitly permitted containment seam. */
 final class AgentMailboxFixture
 {
-    public static function drain(ExecutionJob $job, Closure $dispatch): void
+    /**
+     * @param  null|Closure(): void  $beforeClaim  Runs before each claim, e.g. to
+     *                                             place a test credential projection
+     *                                             into the staged home (AI6-033).
+     */
+    public static function drain(ExecutionJob $job, Closure $dispatch, ?Closure $beforeClaim = null): void
     {
         $boot = str_repeat('a', 32);
         for ($poll = 0; $poll < 32; $poll++) {
@@ -24,6 +29,9 @@ final class AgentMailboxFixture
                 self::stop($boot);
 
                 return;
+            }
+            if ($beforeClaim !== null) {
+                $beforeClaim();
             }
             Assert::assertTrue(app(AgentExecutionProcessor::class)->processNext($boot, static function (string $_id): void {}), 'A polling step must have one staged agent request.');
             Assert::assertFalse(app(AgentExecutionProcessor::class)->processNext($boot, static function (string $_id): void {}), 'The same request must not start a second provider turn.');

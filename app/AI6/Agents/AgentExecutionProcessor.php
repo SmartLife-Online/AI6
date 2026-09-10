@@ -94,6 +94,7 @@ final class AgentExecutionProcessor
                 || $context->instructionSnapshot->providerProfileAlias !== $request->string('provider_alias')
                 || $context->runtimeProfile->id !== $request->string('runtime_profile_id')
                 || $context->runtimeProfile->hash !== $request->string('runtime_profile_hash')
+                || $context->model !== $request->string('model') || $context->effort !== $request->string('effort')
                 || $this->revisions->revision($request->string('provider_alias')) !== $request->string('credential_revision')) {
                 throw new AgentExecutionException('agent_context_binding_invalid');
             }
@@ -118,7 +119,10 @@ final class AgentExecutionProcessor
             $state = 'ok';
             $reason = 'agent_completed';
         } catch (InvalidAgentResponse|InvalidRedactionInputException $exception) {
-            $answer = new AgentTurnResult('', $answer->usage, $answer->usageSource);
+            // Usage the turn itself reported before its answer contract broke
+            // survives as metadata; the answer bytes never do (AGT-010).
+            $reported = $exception instanceof InvalidAgentResponse ? $exception->reportedUsage : null;
+            $answer = $reported ?? new AgentTurnResult('', $answer->usage, $answer->usageSource);
             $state = 'invalid_json';
             $reason = $exception instanceof InvalidAgentResponse ? $exception->reason : 'agent_response_invalid_utf8';
         } catch (Throwable $exception) {

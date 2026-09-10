@@ -271,13 +271,16 @@ final class ExecutionHomeManagerTest extends TestCase
 
     public function test_isolation_negative_matrix_exposes_only_the_bound_snapshot_and_exported_source(): void
     {
-        foreach (['.git/hooks', '.codex/plugins', '.codex/skills', '.codex/commands', '.claude', 'nested'] as $directory) {
+        foreach (['.git/hooks', '.agents/skills/bait', '.agents/plugins', '.codex/plugins', '.codex/skills', '.codex/commands', '.claude', 'nested'] as $directory) {
             mkdir($this->root.'/export/'.$directory, 0700, true);
         }
         foreach ([
             '.git/hooks/post-checkout', '.codex/config.toml', '.codex/plugins/plugin.json', '.codex/skills/SKILL.md',
             '.codex/commands/run.md', '.claude/settings.json', '.mcp.json', 'mcp.json', '.gitconfig', '.git-credentials',
             'nested/AGENTS.md',
+            // The vendor-neutral extension root of the pinned Codex version (AI6-033).
+            '.agents/skills/bait/SKILL.md', '.agents/hooks.json', '.agents/plugins/marketplace.json',
+            'AGENTS.override.md',
         ] as $path) {
             file_put_contents($this->root.'/export/'.$path, 'host-controlled');
         }
@@ -288,8 +291,20 @@ final class ExecutionHomeManagerTest extends TestCase
         $home = $manager->create($this->root.'/inputs', $this->root.'/outputs', 'slot-matrix', null, $this->root.'/export', $profile, $snapshot, $runtime, new AuthProjection('codex_cli', 'revision-1', []));
 
         self::assertSame("bound instructions\n", file_get_contents($home->workspace.'/AGENTS.md'));
-        foreach (['.git', '.codex', '.claude', '.mcp.json', 'mcp.json', '.gitconfig', '.git-credentials', 'nested/AGENTS.md'] as $path) {
+        foreach (['.git', '.agents', '.agents/skills/bait/SKILL.md', '.agents/hooks.json', '.agents/plugins/marketplace.json',
+            '.codex', '.claude', '.mcp.json', 'mcp.json', '.gitconfig', '.git-credentials', 'nested/AGENTS.md',
+            'AGENTS.override.md'] as $path) {
             self::assertFileDoesNotExist($home->workspace.'/'.$path);
+        }
+        $manager->destroy($home);
+
+        // On a writable workspace the omitted repository bytes stay recorded as
+        // such, so the worker restores them before it computes the patch.
+        $home = $manager->create($this->root.'/inputs', $this->root.'/outputs', 'slot-matrix-writable', null, $this->root.'/export', $profile, $snapshot, $runtime, new AuthProjection('codex_cli', 'revision-1', []), writableWorkspace: true);
+        foreach (['.agents/skills/bait/SKILL.md', '.agents/hooks.json', '.agents/plugins/marketplace.json',
+            '.codex/skills/SKILL.md', 'AGENTS.override.md'] as $path) {
+            self::assertArrayHasKey($path, $home->workspaceProjection, $path);
+            self::assertNull($home->workspaceProjection[$path], $path);
         }
         self::assertFileDoesNotExist($home->home.'/.config');
         self::assertFileDoesNotExist($home->home.'/.cache');

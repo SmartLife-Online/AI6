@@ -66,6 +66,8 @@ final class AgentExecutionDocumentTest extends TestCase
             'attempt limit' => [['attempt' => 1001]],
             'noninteger deadline' => [['deadline_at' => 12.5]],
             'empty session' => [['session_id' => '']],
+            'empty model' => [['model' => '']],
+            'free effort' => [['effort' => 'high; rm -rf /']],
         ];
     }
 
@@ -156,6 +158,7 @@ final class AgentExecutionDocumentTest extends TestCase
             'context_hash' => str_repeat('b', 64), 'prompt_hash' => str_repeat('c', 64),
             'instruction_hash' => str_repeat('d', 64), 'runtime_profile_id' => 'fake-v1',
             'runtime_profile_hash' => str_repeat('e', 64), 'provider_alias' => 'fake',
+            'model' => 'fake-model', 'effort' => 'medium',
             'credential_revision' => 'test-v1', 'deadline_at' => 200,
         ]);
     }

@@ -71,7 +71,7 @@ trait BuildsReviewRoundFixture
                 [
                     'id' => $this->reviewSlotIds[1],
                     'profile' => 'codex-gpt-5.6-terra',
-                    'model' => 'gpt-5.6-terra',
+                    'model' => 'gpt-5.3-codex',
                     'effort' => 'high',
                     'prompt_profile' => 'tests',
                 ],
@@ -97,11 +97,17 @@ trait BuildsReviewRoundFixture
     ): array {
         $agentProfiles = config('ai6.agent_profiles');
         $agentProfiles['codex-gpt-5.6-terra']['capability_status'] = 'available';
-        $agentProfiles['grok-cli-review']['capability_status'] = $enableIndependentFallback ? 'available' : 'unchecked';
+        // Two independent verifier candidates, because AI6-033 narrowed the
+        // codex profile to implementation/quality_review: without a second one
+        // an authorized switch_profile has no alternative to move to.
+        foreach (['grok-cli-review', 'copilot-cli-review'] as $independent) {
+            $agentProfiles[$independent]['capability_status'] = $enableIndependentFallback ? 'available' : 'unchecked';
+        }
         config([
             'ai6.agent_profiles' => $agentProfiles,
             'ai6.credential_revisions.codex_cli' => 'test-v1',
             'ai6.credential_revisions.grok_cli' => 'test-v1',
+            'ai6.credential_revisions.github_copilot_cli' => 'test-v1',
         ]);
         foreach ([
             AgentProfileRegistry::class,

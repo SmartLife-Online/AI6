@@ -73,6 +73,7 @@ final class AgentExecutionRunner
         private readonly RestrictedJsonDecoder $json,
         private readonly Redactor $redactor,
         private readonly RunLimitPolicy $limits,
+        private readonly AgentProfileRegistry $profiles,
     ) {}
 
     public function mayExecuteHere(): bool
@@ -94,6 +95,7 @@ final class AgentExecutionRunner
         // container binding is also used by the database-free consumer.
         try {
             app()->makeWith(AgentAdapter::class, ['providerAlias' => $slot->provider_profile]);
+            $context = $this->bindSelection($slot, $context);
         } catch (AgentExecutionException $exception) {
             $this->runs->recordStepEvent($run->id, $job->step_type, ExecutionJobState::FAILED, $exception->reason);
             throw $exception;
@@ -170,8 +172,8 @@ final class AgentExecutionRunner
             // so binding.json is still on disk and the is_file($bindingPath)
             // branch above serves that redelivery instead — this check is
             // never consulted for a true crash in that window. The worktree
-            // stays safe there for a different, already-proven reason:
-            // RunPatchImporter::partition() treats a path already identical
+            // stays safe there for a different, already-proven reason: the
+            // worker's patch importer treats a path already identical
             // to its source as nothing to import, so a redelivered
             // handleResult() reports fewer actual paths than the unchanged
             // AgentResult::changedPaths list and fails closed on
@@ -195,7 +197,8 @@ final class AgentExecutionRunner
                 'home' => 'execution-'.$directoryId.'/'.basename($home->root), 'context_hash' => hash('sha256', $context->toJson()),
                 'prompt_hash' => $context->promptSnapshot->hash, 'instruction_hash' => $context->instructionSnapshot->hash,
                 'runtime_profile_id' => $context->runtimeProfile->id, 'runtime_profile_hash' => $context->runtimeProfile->hash,
-                'provider_alias' => $slot->provider_profile, 'credential_revision' => $this->revisions->revision($slot->provider_profile),
+                'provider_alias' => $slot->provider_profile, 'model' => $context->model, 'effort' => $context->effort,
+                'credential_revision' => $this->revisions->revision($slot->provider_profile),
                 'deadline_at' => time() + $this->policies->get(ProcessPolicyName::AGENT)->timeoutSeconds + 30,
             ]);
             AgentExecutionProcessor::writeDocument($input.'/projection.json', $home->workspaceProjection);
@@ -217,6 +220,13 @@ final class AgentExecutionRunner
     {
         $request = AgentExecutionRequest::fromJson(AgentExecutionProcessor::readBytes(dirname($home->root).'/binding.json'));
         try {
+            // The caller's context is the one prepare() sealed, bound to the
+            // same approved selection; anything else must not reach the direct
+            // path's adapter call nor be compared against a collected result.
+            $context = $context->withSelection($request->string('model'), $request->string('effort'));
+            if (! hash_equals($request->string('context_hash'), hash('sha256', $context->toJson()))) {
+                throw new AgentExecutionException('agent_staging_binding_invalid');
+            }
             $this->assertLease($job);
             $this->assertCurrent($run, $request);
             if ($this->mayExecuteHere()) {
@@ -225,10 +235,23 @@ final class AgentExecutionRunner
                 }
                 $this->persist($job, [...$this->intent($job), 'agent_dispatched_'.$request->string('execution_id') => true]);
                 $adapter = app()->makeWith(AgentAdapter::class, ['providerAlias' => $request->string('provider_alias')]);
-                $answer = $adapter->turn($context, $home, function () use ($run, $job, $request): void {
-                    $this->assertLease($job);
+                try {
+                    $answer = $adapter->turn($context, $home, function () use ($run, $job, $request): void {
+                        $this->assertLease($job);
+                        $this->assertCurrent($run, $request);
+                    }, $unreachablePaths);
+                } catch (InvalidAgentResponse $exception) {
+                    // A turn that ran and reported its usage before the answer
+                    // contract broke keeps those values here too, exactly as the
+                    // agent role does through its result document (AGT-010).
+                    // Currency is asserted first, so a revoked run stores nothing;
+                    // the answer bytes stay empty, so nothing can be imported.
                     $this->assertCurrent($run, $request);
-                }, $unreachablePaths);
+                    $invalid = $exception->reportedUsage ?? new AgentTurnResult('');
+                    $this->remember($run, $request, $invalid);
+                    $this->persistAnswer($run, $job, $request, $invalid, 'invalid_json', null);
+                    throw $exception;
+                }
                 $this->assertCurrent($run, $request);
                 try {
                     $this->redactor->assertValidInput($answer->bytes);
@@ -408,6 +431,25 @@ final class AgentExecutionRunner
     {
         return 'i'.Intervention::query()->where('bound_step_key', $job->idempotency_key)->count()
             .'h'.HumanRequest::query()->where('bound_step_key', $job->idempotency_key)->whereNotNull('resolved_at')->count();
+    }
+
+    /**
+     * The one place the run slot's approved model and effort enter the sealed
+     * turn identity (AGT-002): the context written to runtime/turn.json and
+     * the request bound in binding.json both carry them, and the agent-role
+     * processor compares the two again before any adapter starts. A value the
+     * allowlist no longer approves for this provider, role and slot — or a
+     * free value from project or UI — is refused here, before staging.
+     */
+    private function bindSelection(RunAgent $slot, AgentResultContext $context): AgentResultContext
+    {
+        $model = (string) $slot->model;
+        $effort = (string) $slot->effort;
+        if (! $this->profiles->supportsProviderSelection((string) $slot->provider_profile, $context->role, $model, $effort)) {
+            throw new AgentExecutionException('agent_selection_not_allowed');
+        }
+
+        return $context->withSelection($model, $effort);
     }
 
     /**

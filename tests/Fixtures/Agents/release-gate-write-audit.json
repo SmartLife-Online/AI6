@@ -1049,7 +1049,7 @@
         "source": {
             "target": "runs",
             "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $run->id)->update(['agent_profile_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
-            "context_sha256": "9d9fde1381c74038a5c32fa654536570f13fd200800a8756bf04402b4fb5dbae"
+            "context_sha256": "905941bbc85755c9d64fe67c83e3304bf6bba0271615c42b45a904d15ce69e00"
         }
     },
     "tests/Feature/Tickets/TicketUiTestCase.php::markProjectMovedOn#1": {

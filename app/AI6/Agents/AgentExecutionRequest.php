@@ -13,12 +13,12 @@ final readonly class AgentExecutionRequest
     {
         $keys = ['schema', 'execution_id', 'run_id', 'slot_id', 'session_id', 'role', 'attempt',
             'home', 'context_hash', 'prompt_hash', 'instruction_hash', 'runtime_profile_id',
-            'runtime_profile_hash', 'provider_alias', 'credential_revision', 'deadline_at'];
+            'runtime_profile_hash', 'provider_alias', 'model', 'effort', 'credential_revision', 'deadline_at'];
         if (count($fields) !== count($keys) || array_diff($keys, array_keys($fields)) !== []
             || $fields['schema'] !== 'ai6.agent-execution.v1') {
             throw new AgentExecutionException('agent_request_schema_invalid');
         }
-        foreach (['execution_id', 'run_id', 'slot_id', 'session_id', 'runtime_profile_id', 'provider_alias', 'credential_revision'] as $key) {
+        foreach (['execution_id', 'run_id', 'slot_id', 'session_id', 'runtime_profile_id', 'provider_alias', 'model', 'effort', 'credential_revision'] as $key) {
             if (! is_string($fields[$key]) || preg_match('/\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\z/D', $fields[$key]) !== 1) {
                 throw new AgentExecutionException('agent_request_identifier_invalid');
             }

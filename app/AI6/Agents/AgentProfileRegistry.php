@@ -138,6 +138,23 @@ final readonly class AgentProfileRegistry
         return isset($this->profiles[$profileId]) && $this->profiles[$profileId]->supports($role, $model, $effort);
     }
 
+    /**
+     * Whether a registered profile of this provider alias approves the
+     * role/model/effort a run slot carries (AGT-002). The worker asks this
+     * before it seals a turn, so no value that left the allowlist since the
+     * approval — and no free value from project or UI — reaches an adapter.
+     */
+    public function supportsProviderSelection(string $providerProfileAlias, AgentRole $role, string $model, string $effort): bool
+    {
+        foreach ($this->profiles as $profile) {
+            if ($profile->providerProfileAlias === $providerProfileAlias && $profile->supports($role, $model, $effort)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function supportsRoleEffort(string $profileId, AgentRole $role, string $effort): bool
     {
         if (! isset($this->profiles[$profileId])) {

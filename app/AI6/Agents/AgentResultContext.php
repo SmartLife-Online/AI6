@@ -15,6 +15,8 @@ final readonly class AgentResultContext
      * @param  list<string>  $expectedFindingIds
      * @param  list<string>  $unreachablePaths
      * @param  list<string>  $expectedFindingGroups
+     * @param  string  $model  The run slot's approved model; bound by AgentExecutionRunner before staging, '' until then.
+     * @param  string  $effort  The run slot's approved effort; bound together with the model.
      */
     public function __construct(
         public AgentRole $role,
@@ -31,7 +33,28 @@ final readonly class AgentResultContext
         public array $expectedFindingIds = [],
         public array $expectedFindingGroups = [],
         public array $unreachablePaths = [],
+        public string $model = '',
+        public string $effort = '',
     ) {}
+
+    /**
+     * Bind the approved selection of the run slot (AGT-002). A context that
+     * already carries a selection must carry exactly this one: the sealed
+     * turn.json and the staged binding.json may never disagree on it.
+     */
+    public function withSelection(string $model, string $effort): self
+    {
+        if (($this->model !== '' && $this->model !== $model) || ($this->effort !== '' && $this->effort !== $effort)) {
+            throw new AgentExecutionException('agent_selection_binding_invalid');
+        }
+
+        return new self(
+            $this->role, $this->promptSnapshot, $this->instructionSnapshot, $this->runtimeProfile,
+            $this->criterionRefs, $this->actualDiff, $this->instructionUpdate, $this->initialScope,
+            $this->expectedInstructionBlobs, $this->slotId, $this->attempt, $this->expectedFindingIds,
+            $this->expectedFindingGroups, $this->unreachablePaths, $model, $effort,
+        );
+    }
 
     public function toJson(): string
     {
@@ -51,6 +74,8 @@ final readonly class AgentResultContext
             'expected_finding_ids' => $this->expectedFindingIds,
             'expected_finding_groups' => $this->expectedFindingGroups,
             'unreachable_paths' => $this->unreachablePaths,
+            'model' => $this->model,
+            'effort' => $this->effort,
         ])."\n";
     }
 
@@ -97,6 +122,7 @@ final readonly class AgentResultContext
                 self::map($document['expected_instruction_blobs']), self::text($document['slot_id']),
                 self::number($document['attempt']), self::strings($document['expected_finding_ids']),
                 self::strings($document['expected_finding_groups']), self::strings($document['unreachable_paths']),
+                self::text($document['model']), self::text($document['effort']),
             );
             // Round-tripping through the existing snapshot value objects rejects
             // missing/extra fields and changed entry content hashes as well.

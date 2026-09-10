@@ -88,8 +88,16 @@ return [
             'agent' => [
                 'timeout_seconds' => env('AI6_AGENT_PROCESS_TIMEOUT_SECONDS', '1800'),
                 'output_limit_bytes' => env('AI6_AGENT_PROCESS_OUTPUT_LIMIT_BYTES', '10000000'),
-                'allowed_executables' => [PHP_BINARY],
-                'environment_allowlist' => ['PATH', 'HOME', 'XDG_CONFIG_HOME', 'TMPDIR', 'AI6_RUNTIME_PROFILE', 'AI6_AUTH_FILE', 'LC_ALL', 'LANG'],
+                // The FakeAgent child and the pinned Codex CLI (AI6-033) are the only agent executables.
+                // An empty AI6_CODEX_BINARY is the documented "Codex not set up" state: it locks the
+                // codex_cli profiles by name and must never enter this list, because an empty entry
+                // would make the whole agent policy unreadable and take the FakeAgent down with it.
+                'allowed_executables' => array_values(array_filter(
+                    [PHP_BINARY, env('AI6_CODEX_BINARY', '/usr/local/bin/codex')],
+                    static fn (mixed $binary): bool => is_string($binary) && $binary !== '',
+                )),
+                // CODEX_HOME points the Codex CLI at the read-only auth projection of the sealed home (AI6-033).
+                'environment_allowlist' => ['PATH', 'HOME', 'XDG_CONFIG_HOME', 'TMPDIR', 'AI6_RUNTIME_PROFILE', 'AI6_AUTH_FILE', 'CODEX_HOME', 'LC_ALL', 'LANG'],
                 'working_roots' => [
                     env('AI6_AGENT_EXECUTION_ROOT', '/var/lib/ai6/agent-executions'),
                     env('AI6_AGENT_OUTPUT_ROOT', '/var/lib/ai6/agent-outputs'),
@@ -151,6 +159,30 @@ return [
         'checker_root' => env('AI6_CHECKER_EXECUTION_ROOT', '/var/lib/ai6/checker-executions'),
         'checker_output_root' => env('AI6_CHECKER_OUTPUT_ROOT', '/var/lib/ai6/checker-outputs'),
     ],
+    /*
+     * The pinned Codex transport (AGT-010, AI6-033): the CLI binary and the
+     * exact version it must report for `--version` (without the `codex-cli `
+     * prefix). An empty pin locks every codex_cli profile by name; the
+     * adapter starts only a version it was verified against.
+     *
+     * `sandbox_proof` is the trusted assertion that the sandbox and tool-network
+     * boundaries of that exact version were observed in this runtime, in the
+     * form `<pinned version>:<platform>` (for example
+     * `0.129.0-alpha.15:linux`). The pinned CLI offers no turn-free oracle for
+     * the sandbox of a turn — `codex sandbox` needs a `[permissions]` table the
+     * sealed CODEX_HOME must not carry, `codex debug prompt-input` does not
+     * reflect `--sandbox`, and an unknown `-c` key is ignored silently — so the
+     * application cannot derive this fact and requires it to be asserted
+     * separately under its own name (plan §10.2). It is set only after the
+     * human gate AI6-033/MG-01 observed both boundaries; an empty value keeps
+     * codex_cli locked, and a version bump or a different platform invalidates
+     * it on its own.
+     */
+    'codex' => [
+        'binary' => env('AI6_CODEX_BINARY', '/usr/local/bin/codex'),
+        'pinned_version' => env('AI6_CODEX_PINNED_VERSION', ''),
+        'sandbox_proof' => env('AI6_CODEX_SANDBOX_PROOF', ''),
+    ],
     'credential_revisions' => [
         'codex_cli' => env('AI6_CODEX_CREDENTIAL_REVISION', ''),
         'grok_cli' => env('AI6_GROK_CREDENTIAL_REVISION', ''),
@@ -208,12 +240,22 @@ return [
         'max_review_answer_bytes' => 262144,
     ],
     'agent_profiles' => [
+        /*
+         * The profile id stays the one plan §15 and AI6-033 name. Model and
+         * efforts must be ones the pinned CLI proves: `gpt-5.6-terra` is not
+         * a slug of the catalog of codex-cli 0.129.0-alpha.15 and `max` is an
+         * effort none of its models carries, so both would lock this profile
+         * by name (AGT-010, CodexCliAdapter::VERIFIED_MODELS). Which verified
+         * model ships stays an instance decision.
+         */
         'codex-gpt-5.6-terra' => [
             'provider_profile' => 'codex_cli',
             'adapter' => 'codex_cli',
-            'models' => ['gpt-5.6-terra'],
-            'efforts' => ['low', 'medium', 'high', 'xhigh', 'max'],
-            'roles' => ['implementation', 'quality_review', 'finding_verification', 'security_review'],
+            'models' => ['gpt-5.3-codex'],
+            'efforts' => ['low', 'medium', 'high', 'xhigh'],
+            // AI6-033: Codex implements and reviews; verification and the
+            // security review stay with independent providers.
+            'roles' => ['implementation', 'quality_review'],
             'capability_status' => 'unchecked',
             'runtime_profile' => 'codex-cli-v1',
         ],

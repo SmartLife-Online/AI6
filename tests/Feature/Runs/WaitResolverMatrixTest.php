@@ -222,7 +222,7 @@ final class WaitResolverMatrixTest extends TicketUiTestCase
             [
                 'id' => (string) Str::uuid(),
                 'provider_profile' => 'codex-gpt-5.6-terra',
-                'model' => 'gpt-5.6-terra',
+                'model' => 'gpt-5.3-codex',
                 'effort' => 'high',
                 'prompt_profile_id' => 'tests',
             ],

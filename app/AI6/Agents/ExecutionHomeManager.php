@@ -291,8 +291,15 @@ final readonly class ExecutionHomeManager
             $relative = substr($entry->getPathname(), strlen(rtrim($source, DIRECTORY_SEPARATOR)) + 1);
             $portable = str_replace('\\', '/', $relative);
             $segments = explode('/', $portable);
-            if (array_intersect($segments, ['.git', '.codex', '.claude']) !== []
-                || in_array(basename($portable), ['AGENTS.md', '.mcp.json', 'mcp.json', '.gitconfig', '.git-credentials'], true)) {
+            // AGENTS.override.md is read by native Codex discovery in preference
+            // to AGENTS.md (AI6-033); like AGENTS.md it only ever exists as the
+            // bound snapshot, never as repository bytes. `.agents` is the
+            // vendor-neutral extension root of the pinned Codex version — it
+            // carries `skills/`, `hooks.json` and `plugins/marketplace.json` —
+            // and joins `.codex`/`.claude` as a directory a managed repository
+            // may carry but no approved runtime profile ever activates (AGT-009).
+            if (array_intersect($segments, ['.git', '.agents', '.codex', '.claude']) !== []
+                || in_array(basename($portable), ['AGENTS.md', 'AGENTS.override.md', '.mcp.json', 'mcp.json', '.gitconfig', '.git-credentials'], true)) {
                 if ($entry->isFile()) {
                     $omitted[$portable] = null;
                 }

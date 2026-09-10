@@ -466,7 +466,8 @@ final class AgentExecutionMailboxTest extends TicketUiTestCase
     {
         $cases = [];
         foreach (['execution_id', 'run_id', 'slot_id', 'session_id', 'role', 'attempt', 'home', 'context_hash',
-            'prompt_hash', 'instruction_hash', 'runtime_profile_id', 'runtime_profile_hash', 'provider_alias', 'credential_revision', 'deadline_at'] as $field) {
+            'prompt_hash', 'instruction_hash', 'runtime_profile_id', 'runtime_profile_hash', 'provider_alias', 'model', 'effort',
+            'credential_revision', 'deadline_at'] as $field) {
             $cases[$field] = [$field];
         }
 
@@ -504,14 +505,7 @@ final class AgentExecutionMailboxTest extends TicketUiTestCase
     public function test_the_acknowledged_reduced_path_keeps_invalid_utf8_distinct_from_provider_errors(): void
     {
         $prepared = $this->preparedImplementationRun('AI6-047-REDUCED');
-        $strict = $this->app->make(SecurityPolicy::class);
-        $measures = $strict->measures();
-        $measures[SecurityMeasure::REQUIRE_AGENT_SANDBOX->value] = false;
-        $reduced = new SecurityPolicy(SecurityProfile::CUSTOM, $measures, true);
-        self::assertNotSame($strict->hash(), $reduced->hash());
-        $this->app->instance(SecurityPolicy::class, $reduced);
-        $this->app->forgetInstance(AgentExecutionRunner::class);
-        $this->app->forgetInstance(RunImplementation::class);
+        $this->acknowledgeReducedMode();
         $adapter = new class implements AgentAdapter
         {
             public int $calls = 0;
@@ -542,6 +536,115 @@ final class AgentExecutionMailboxTest extends TicketUiTestCase
             self::assertSame('provider_cli', $answer->redacted_metadata['usage_source']);
         }
         self::assertSame([], glob(AgentExecutionProcessor::inputRoot().'/requests/*'));
+    }
+
+    /**
+     * A turn that reached its provider and reported usage before the answer
+     * contract broke keeps those values as a provider artifact on the direct
+     * path too — a missing and a multiple answer alike. The state stays
+     * invalid_json, the answer bytes stay empty, and nothing is imported.
+     */
+    #[DataProvider('brokenAnswerContracts')]
+    public function test_the_acknowledged_reduced_path_keeps_reported_usage_of_a_broken_answer_contract(string $reason, string $ticketId): void
+    {
+        $prepared = $this->preparedImplementationRun($ticketId);
+        $original = (string) file_get_contents($prepared['worktree'].'/app/Example.php');
+        $this->acknowledgeReducedMode();
+        $adapter = new class($reason) implements AgentAdapter
+        {
+            public int $calls = 0;
+
+            public function __construct(private readonly string $reason) {}
+
+            public function result(AgentResultContext $context): string
+            {
+                return '';
+            }
+
+            public function turn(AgentResultContext $context, ExecutionHome $home, \Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult
+            {
+                $heartbeat();
+                $this->calls++;
+
+                throw new InvalidAgentResponse($this->reason, new AgentTurnResult('', ['tokens' => 7], 'provider_cli'));
+            }
+        };
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
+
+        $job = $this->executeImplement($prepared['run']);
+
+        self::assertSame(ExecutionJobState::WAITING, $job->state);
+        self::assertSame('invalid_json', $prepared['run']->fresh()->wait_reason?->value);
+        self::assertSame(3, $adapter->calls, 'The bounded retry is unchanged.');
+        $answers = RunArtifact::query()->where('run_id', $prepared['run']->id)->where('kind', 'provider_raw')->get();
+        self::assertCount(3, $answers, 'Every failed turn has its own provider artifact.');
+        foreach ($answers as $answer) {
+            self::assertSame('invalid_json', $answer->redacted_metadata['state']);
+            self::assertSame(['tokens' => 7], $answer->redacted_metadata['usage']);
+            self::assertSame('provider_cli', $answer->redacted_metadata['usage_source']);
+            self::assertSame(0, $answer->size_bytes, 'The answer bytes never reach the artifact.');
+        }
+        self::assertSame($original, (string) file_get_contents($prepared['worktree'].'/app/Example.php'), 'No partial import.');
+        self::assertTrue(RunEvent::query()->where('run_id', $prepared['run']->id)
+            ->where('redacted_payload', 'like', $reason.'%')->exists(), 'The named failure stays visible.');
+        self::assertSame([], glob(AgentExecutionProcessor::inputRoot().'/requests/*'));
+    }
+
+    /** @return array<string, array{string, string}> */
+    public static function brokenAnswerContracts(): array
+    {
+        return [
+            'missing answer' => ['agent_response_missing', 'AI6-033-NOANSWER'],
+            'two result answers in one turn' => ['agent_response_multiple', 'AI6-033-TWOANSWERS'],
+            'answer after the turn completed' => ['agent_response_after_turn', 'AI6-033-LATEANSWER'],
+        ];
+    }
+
+    /**
+     * A turn whose failure carries no reported usage still gets its artifact,
+     * with the usage honestly unknown rather than invented.
+     */
+    public function test_the_acknowledged_reduced_path_stores_an_unknown_usage_without_a_reported_one(): void
+    {
+        $prepared = $this->preparedImplementationRun('AI6-033-REDUCED-UNKNOWN');
+        $this->acknowledgeReducedMode();
+        $adapter = new class implements AgentAdapter
+        {
+            public function result(AgentResultContext $context): string
+            {
+                return '';
+            }
+
+            public function turn(AgentResultContext $context, ExecutionHome $home, \Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult
+            {
+                $heartbeat();
+
+                throw new InvalidAgentResponse('agent_response_hull_invalid');
+            }
+        };
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
+
+        self::assertSame(ExecutionJobState::WAITING, $this->executeImplement($prepared['run'])->state);
+        $answers = RunArtifact::query()->where('run_id', $prepared['run']->id)->where('kind', 'provider_raw')->get();
+        self::assertCount(3, $answers);
+        foreach ($answers as $answer) {
+            self::assertSame('invalid_json', $answer->redacted_metadata['state']);
+            self::assertSame([], $answer->redacted_metadata['usage']);
+            self::assertSame('unknown', $answer->redacted_metadata['usage_source']);
+        }
+    }
+
+    /** The one non-strict runtime in which the direct path may execute a turn at all. */
+    private function acknowledgeReducedMode(): void
+    {
+        $strict = $this->app->make(SecurityPolicy::class);
+        $measures = $strict->measures();
+        $measures[SecurityMeasure::REQUIRE_AGENT_SANDBOX->value] = false;
+        $reduced = new SecurityPolicy(SecurityProfile::CUSTOM, $measures, true);
+        self::assertNotSame($strict->hash(), $reduced->hash());
+        $this->app->instance(SecurityPolicy::class, $reduced);
+        $this->app->forgetInstance(AgentExecutionRunner::class);
+        $this->app->forgetInstance(RunImplementation::class);
     }
 
     private function replaceEnvelopeContent(string $path, string $bytes): void
