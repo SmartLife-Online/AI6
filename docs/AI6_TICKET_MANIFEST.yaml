@@ -1,7 +1,7 @@
 schema: ai6.ticket-manifest.v1
 source: docs/AI6_IMPLEMENTATION_PLAN.md
-plan_revision: "V1.7.6"
-blueprint_count: 53
+plan_revision: "V1.7.7"
+blueprint_count: 54
 blueprints:
   - id: "AI6-001"
     title: "Laravel-Grundgerüst und Qualitätsbaseline"
@@ -372,13 +372,13 @@ blueprints:
     depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032", "AI6-046", "AI6-047"]
     requirement_refs: ["AGT-001", "AGT-002", "AGT-003", "AGT-004", "AGT-007", "AGT-009", "AGT-010", "GIT-010", "RUN-006", "SEC-005"]
   - id: "AI6-034"
-    title: "Claude-CLI-Adapter"
+    title: "Claude-Modelle über GitHub-Copilot-CLI"
     milestone: "M6"
     initial_status: "todo"
     risk: "high"
     kind: "feature"
-    depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032", "AI6-046", "AI6-047"]
-    requirement_refs: ["AGT-001", "AGT-002", "AGT-003", "AGT-004", "AGT-007", "AGT-009", "GIT-010", "RUN-006", "SEC-005"]
+    depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032", "AI6-046", "AI6-047", "AI6-042", "AI6-048"]
+    requirement_refs: ["AGT-001", "AGT-002", "AGT-003", "AGT-004", "AGT-007", "AGT-009", "AGT-010", "GIT-010", "RUN-006", "SEC-005"]
   - id: "AI6-035"
     title: "Provider-Onboarding, Credential-Setup und Capability-Doctor"
     milestone: "M6"
@@ -402,6 +402,14 @@ blueprints:
     risk: "high"
     kind: "feature"
     depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032", "AI6-047"]
+    requirement_refs: ["AGT-001", "AGT-002", "AGT-003", "AGT-004", "AGT-007", "AGT-009", "AGT-010", "GIT-010", "RUN-006", "SEC-005"]
+  - id: "AI6-048"
+    title: "Fehlenden GitHub-Copilot-CLI-Transport nachliefern"
+    milestone: "M6"
+    initial_status: "todo"
+    risk: "high"
+    kind: "fix"
+    depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032", "AI6-046", "AI6-047", "AI6-042"]
     requirement_refs: ["AGT-001", "AGT-002", "AGT-003", "AGT-004", "AGT-007", "AGT-009", "AGT-010", "GIT-010", "RUN-006", "SEC-005"]
   - id: "AI6-036"
     title: "Installation, Backup/Restore und Security-Release-Gate"

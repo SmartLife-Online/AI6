@@ -1,6 +1,8 @@
-# AI6 – Implementierungsplan V1.7.6 – Ticket-Ready, Lean & Secure
+# AI6 – Implementierungsplan V1.7.7 – Ticket-Ready, Lean & Secure
 
-**Stand:** 6. September 2026
+**Stand:** 11. September 2026
+
+**Revision V1.7.7:** Auf ausdrückliche menschliche Freigabe des Folgeauftrags aus `docs/AI6-048_FOLGEAUFTRAG_ENTSCHEIDUNGSANTRAG.md` wird der Backlog von 53 auf 54 Blueprints erweitert. `AI6-048` liefert als Korrekturauftrag den fehlenden ausführbaren GitHub-Copilot-CLI-Transport nach: Der integrierte Stand von `AI6-042` enthält nur Konfigurationsvorbereitung, obwohl sein Ticket `done` trägt. Der veröffentlichte Vertrag von `AI6-042`, seine Evidenz-IDs und sein Status werden weder verkleinert noch umgedeutet. `AI6-048` konsumiert die vorhandenen gemeinsamen Nähte und übernimmt die noch fehlende Adapter-, Doctor-, Fake- und Smoke-Lieferung ausdrücklich als eigenen Umfang. Der unveränderte versiegelte Homevertrag bleibt bindend; die in der Copilot-Entscheidungsanfrage untersuchte Session-Schreibprojektion wird nicht freigegeben. Zugleich wird `AI6-034` bei unveränderlicher ID und unverändertem Zieltext auf Claude-Modellprofile ausschließlich über `github_copilot_cli` ausgerichtet: keine Claude-CLI, keine native Claude-Discovery und keine zweite Transportlogik. Seine Abhängigkeiten erhalten `AI6-042` und `AI6-048`, seine Requirement-Refs zusätzlich `AGT-010`. `AGT-001`, die betroffenen Übersichten, §14.1, §16 und §21 werden konsistent nachgezogen. Die bereits durchgeführte Rebase-Prüfung von `AI6-034` bleibt als Evidenz erhalten; ihr offenes Gate schließt erst nach Lieferung und Prüfung des Copilot-Vertrags. Bestehende Ticketstatuswerte und AC-/TC-/MG-IDs bleiben unverändert. Die Änderung erteilt weder eine Capability-Freigabe noch eine reale Abnahme.
 
 **Revision V1.7.6:** Auf ausdrücklichen menschlichen Auftrag entfallen alle noch offenen Nachweispflichten für `AI6-046`. Der Verzicht umfasst zusätzliche automatisierte Tests, Prozess- und POSIX-Nachweise, Qualitätscheck-Nachweise sowie die bislang verlangte Schließung von `AI6-032/AC-04`; er ist weder ein bestandener Nachweis noch eine Änderung der funktionalen Sicherheitsanforderungen. `AI6-046/AC-04` wurde vom Nutzer als abgeschlossen gemeldet, ohne dass diese Revision ein eigenes Testergebnis behauptet. §12.2 und der Blueprint erhalten eine auf dieses eine Ticket begrenzte Ausnahme. Die bestehenden veröffentlichten AC-/TC-IDs bleiben zur Rückverfolgbarkeit erhalten, Ticketstatus und sonstige Approval-/Run-Metadaten bleiben unverändert. Das Release-Gate von `AI6-032` und die Nachweispflichten anderer Tickets bleiben eigenständig bestehen und sind keine Voraussetzung für die Umsetzung oder Abnahme von `AI6-046`.
 
@@ -182,7 +184,7 @@ AI6 verwaltet Git-native Softwaretickets, lässt sie menschlich prüfen und orch
 | ADR-004 | Git-native Tickets | Mehrere Entwickler und Geräte teilen Anforderungen über das Projekt-Repository. |
 | ADR-005 | Datenbank nur für Laufzeit | Kein zweiter autoritativer Ticketbestand. |
 | ADR-006 | Ein aktiver Run je Projekt | Verhindert im MVP komplexe Scope-/Worktree-Konflikte ohne verteilte Locks. |
-| ADR-007 | CLI-first-Agentenadapter | Alle Provider — Codex, Grok, Copilot und später Claude — werden über einen gemeinsamen Adaptervertrag eingebunden. |
+| ADR-007 | CLI-first-Agentenadapter | Codex, Grok und Copilot werden über einen gemeinsamen Adaptervertrag eingebunden; spätere Claude-Modellprofile verwenden ausschließlich den Copilot-Transport. |
 | ADR-008 | Neue Sitzungen je Ticket und Rolle | Kein unkontrollierter Kontextübertrag zwischen Tickets. |
 | ADR-009 | Alle Reviewer prüfen jeden neuen Checkpoint | Einfach, nachvollziehbar und ohne Primary-/Mehrheitslogik. |
 | ADR-010 | Adaptive, policygebundene Scope-Erweiterung | Reale Repositoryarchitektur darf den Ausgangsscope kontrolliert ergänzen. |
@@ -192,7 +194,7 @@ AI6 verwaltet Git-native Softwaretickets, lässt sie menschlich prüfen und orch
 | ADR-014 | Pushmodus manual oder automatic_after_gates | Unterstützt sicheren Standard und den gewünschten vollautomatischen Ablauf. |
 | ADR-015 | Progressive Ticket-Elaboration | Spätere Tickets nutzen echten Code statt spekulativer Pfade und APIs. |
 | ADR-016 | Review-only als ticket- und approvalgebundener Runmodus | Derselbe Check-/Review-/Finding-/Gate-Unterbau prüft serverseitig gebundene Stände ohne Push; freie Reviewaufträge bleiben außerhalb der Run-Grenze. |
-| ADR-017 | Erste reale Providerstufe: Codex-, Grok-Build- und GitHub-Copilot-CLI | Drei Headless-CLI-Adapter mit je genau einem gepinnten, doctor-geprüften Transport; Claude bleibt spätere Erweiterung ohne V1-Blockade. |
+| ADR-017 | Erste reale Providerstufe: Codex-, Grok-Build- und GitHub-Copilot-CLI | Drei Headless-CLI-Adapter mit je genau einem gepinnten, doctor-geprüften Transport; Claude bleibt eine spätere Modellprofilerweiterung des Copilot-Transports ohne V1-Blockade. |
 | ADR-018 | Quellenabhängige advisory Finding-Verifikation | Unabhängige Evidenzprüfung ohne Auto-Unblock; wirksame Dispositionen bleiben menschlich autorisiert und checkpointgebunden. |
 | ADR-019 | Providerturns laufen ausschließlich in der Agentrolle über die vorhandene Execution-Mailbox | Die Credentialmatrix aus §4.2 gilt nur, wenn der Providerprozess in seiner eigenen Rolle startet; Auftrag, Home, Ergebnis und Nutzungswerte laufen über die eine bestehende Mailbox- und Artefaktnaht statt über einen zweiten Pfad je Adapter. |
 
@@ -239,7 +241,7 @@ Die IDs sind stabil. Detaillierte Tickets referenzieren diese IDs unter `spec_re
 - **CFG-003** – Projektkonfiguration referenziert nur serverseitig bekannte Check- und Modellprofile und kann keine Shellstrings definieren.
 
 ### 3.5 Agenten und Ausführung
-- **AGT-001** – Codex CLI, Grok-Build-CLI, GitHub-Copilot-CLI, Claude CLI und FakeAgent verwenden denselben AgentAdapter-Vertrag.
+- **AGT-001** – Codex CLI, Grok-Build-CLI, GitHub-Copilot-CLI und FakeAgent verwenden denselben AgentAdapter-Vertrag. Claude-Modellprofile werden ausschließlich über die GitHub-Copilot-CLI angebunden; sie begründen weder einen Claude-CLI-Transport noch einen weiteren Provideralias.
 - **AGT-002** – Modell und Aufwand werden pro Implementierungs- und Reviewer-Slot aus einer Allowlist gewählt.
 - **AGT-003** – Jedes Ticket startet neue Implementierungs- und Review-Sitzungen; innerhalb eines Runs wird die jeweilige Sitzung fortgesetzt, wenn unterstützt.
 - **AGT-004** – Agentenergebnisse sind versioniertes strukturiertes JSON und werden vor jeder Wirkung schema-validiert.
@@ -337,7 +339,7 @@ app        Laravel + Blade + Livewire
         │      ├── typisierte control_operations
         │      └── blobgebundene ticket_read_models
         ├── worker     Orchestrierung, Git, SMTP; einziger Besitzer verwalteter Clones
-        ├── agent      Codex/Grok/Copilot/Claude/Fake; genau ein Providerprofil
+        ├── agent      Codex/Grok/Copilot/Fake; Claude-Modelle über Copilot; genau ein Providerprofil
         ├── checker    freigegebene Projektchecks; keine wiederverwendbaren Secrets
         └── scheduler  Recovery, Retention, Notifications
 ```
@@ -1005,7 +1007,7 @@ Nach erfolgreicher Primärauthentifizierung bleibt die Session im Pre-Auth-Zusta
 
 ### 10.4 Agenten und Checks
 
-Projektinhalt ist untrusted. Agent und Checker besitzen nur ihre exportierte Tree-Sicht ohne erreichbare Gitmetadaten und die minimal notwendige Prozessumgebung. Provider-, Git- und SMTP-Credentials werden getrennt. Codex-, Grok-, Copilot- und Claude-Home-, Config-, History- und Cachepfade werden pro Session versiegelt und getrennt; die jeweils dokumentierten nativen Discoverypfade werden entweder auf den gebundenen Instruction-Snapshot begrenzt oder fail closed blockiert (`AGT-009`, `AGT-010`). Native Provider-Instruktionsauflösung sieht ausschließlich den freigegebenen read-only Instruction-Snapshot; Host-/Parent-Autodiscovery und zur Laufzeit veränderte Instruktionsdateien sind ausgeschlossen. Das isolierte Provider-Home enthält nur die versiegelte serverseitige Runtime-Konfiguration und die kurzlebige minimale read-only Authprojektion des einen gewählten Providerprofils. Nicht mitfreigegebene Workspace-/Home-Configs, Caches, History, MCP-Server, Plugins, Skills, Hooks, Commands, Agentdefinitionen und externe Helper sind unerreichbar oder deaktiviert. Aktive Sandbox-, Workspace-, Instruction-, Credentialprojektions- und Runtime-Profil-Isolation fällt geschlossen aus. Projektkonfiguration kann keine schwächeren Flags einschleusen.
+Projektinhalt ist untrusted. Agent und Checker besitzen nur ihre exportierte Tree-Sicht ohne erreichbare Gitmetadaten und die minimal notwendige Prozessumgebung. Provider-, Git- und SMTP-Credentials werden getrennt. Codex-, Grok- und Copilot-Home-, Config-, History- und Cachepfade werden pro Session versiegelt und getrennt; Claude-Modellprofile verwenden ausschließlich die Copilot-Grenze ohne eigene Home- oder Discoveryauflösung; die jeweils dokumentierten nativen Discoverypfade werden entweder auf den gebundenen Instruction-Snapshot begrenzt oder fail closed blockiert (`AGT-009`, `AGT-010`). Native Provider-Instruktionsauflösung sieht ausschließlich den freigegebenen read-only Instruction-Snapshot; Host-/Parent-Autodiscovery und zur Laufzeit veränderte Instruktionsdateien sind ausgeschlossen. Das isolierte Provider-Home enthält nur die versiegelte serverseitige Runtime-Konfiguration und die kurzlebige minimale read-only Authprojektion des einen gewählten Providerprofils. Nicht mitfreigegebene Workspace-/Home-Configs, Caches, History, MCP-Server, Plugins, Skills, Hooks, Commands, Agentdefinitionen und externe Helper sind unerreichbar oder deaktiviert. Aktive Sandbox-, Workspace-, Instruction-, Credentialprojektions- und Runtime-Profil-Isolation fällt geschlossen aus. Projektkonfiguration kann keine schwächeren Flags einschleusen.
 
 ### 10.5 Optionaler Security-Reviewer
 
@@ -1217,7 +1219,7 @@ Erscheint eine neuere Major-, Minor- oder Patchversion einer dieser drei Laufzei
 | M3 | Human Loop und Implementierung | Fake-Implementierung kann fragen, pausieren, fortsetzen, Limits einhalten, Scope/Contract mit vollständiger Provenienz ändern und Checkpoint erzeugen. |
 | M4 | Review und Fix | Mehrere Fake-Reviewer, unveränderliche Originalfindings, effektive Dispositionen, quellenabhängige advisory Verifikation und die vollständige Fix-/Re-Review-Schleife funktionieren; ein ticket- und approvalgebundener Review-only-Lauf endet ohne Push in einem gebundenen Abschlussbericht. |
 | M5 | Finalisierung und Fake-E2E | Candidate, manuelle/externe Gates, Security-Gate, Commit, Push, Queue, alle Limits/Wartestatus und Recoverypfade funktionieren vollständig mit FakeAgent. |
-| M6 | Echte Adapter | Codex, Grok-Build und GitHub Copilot sind erst nach dem vollständigen Fake-Workflow capability-geprüft und credentialgetrennt nutzbar; Claude bleibt eine spätere, die erste Providerstufe nicht blockierende Erweiterung. |
+| M6 | Echte Adapter | Codex, Grok-Build und GitHub Copilot sind erst nach dem vollständigen Fake-Workflow capability-geprüft und credentialgetrennt nutzbar; Claude bleibt eine spätere, die erste Providerstufe nicht blockierende Modellprofilerweiterung über Copilot; die fehlende Copilot-Lieferung wird durch AI6-048 nachgeholt. |
 | M7 | Betrieb und Pilot | Fresh install, Restore, Retentionlöschung, Manifestprüfung, Migration und realer Pilot sind abgeschlossen; der Legacy-Leser ist danach abgeschaltet. |
 
 ### 14.1 Topologische Reihenfolge
@@ -1271,11 +1273,12 @@ Erscheint eine neuere Major-, Minor- oder Patchversion einer dieser drei Laufzei
 46. AI6-033 — Codex-CLI-Adapter
 47. AI6-041 — Grok-CLI-Adapter
 48. AI6-042 — GitHub-Copilot-CLI-Adapter
-49. AI6-035 — Provider-Onboarding, Credential-Setup und Capability-Doctor
-50. AI6-034 — Claude-CLI-Adapter
-51. AI6-036 — Installation, Backup/Restore und Security-Release-Gate
-52. AI6-037 — Migration des bisherigen Ticket-Prompt-Tools
-53. AI6-038 — Realer M169-Pilot und MVP-Abnahme
+49. AI6-048 — Fehlenden GitHub-Copilot-CLI-Transport nachliefern
+50. AI6-035 — Provider-Onboarding, Credential-Setup und Capability-Doctor
+51. AI6-034 — Claude-Modelle über GitHub-Copilot-CLI
+52. AI6-036 — Installation, Backup/Restore und Security-Release-Gate
+53. AI6-037 — Migration des bisherigen Ticket-Prompt-Tools
+54. AI6-038 — Realer M169-Pilot und MVP-Abnahme
 ```
 
 Die Reihenfolge ist eine gültige Topologie, aber nicht jede unabhängige Arbeit muss künstlich seriell erfolgen. Innerhalb eines Meilensteins dürfen nur Tickets parallel entwickelt werden, deren `depends_on` vollständig erfüllt ist und die nicht denselben noch instabilen Vertrag definieren.
@@ -3533,13 +3536,13 @@ Codex über den gemeinsamen Adaptervertrag mit strukturiertem Output, Sessionfor
 - Direkte OpenAI-API.
 - Providerunabhängige Orchestrierungslogik.
 
-### AI6-034 — Claude-CLI-Adapter
+### AI6-034 — Claude-Modelle über GitHub-Copilot-CLI
 
 - **Initialstatus des späteren Detailtickets:** `todo`
 - **Risiko:** `high`
 - **Kind:** `feature`
-- **Depends on:** `AI6-011`, `AI6-015`, `AI6-016`, `AI6-032`, `AI6-046`, `AI6-047`
-- **Requirement-Refs:** `AGT-001`, `AGT-002`, `AGT-003`, `AGT-004`, `AGT-007`, `AGT-009`, `GIT-010`, `RUN-006`, `SEC-005`
+- **Depends on:** `AI6-011`, `AI6-015`, `AI6-016`, `AI6-032`, `AI6-046`, `AI6-047`, `AI6-042`, `AI6-048`
+- **Requirement-Refs:** `AGT-001`, `AGT-002`, `AGT-003`, `AGT-004`, `AGT-007`, `AGT-009`, `AGT-010`, `GIT-010`, `RUN-006`, `SEC-005`
 - **Erwartete Module:** `Agents`
 
 **Ziel**
@@ -3548,40 +3551,38 @@ Claude-Modelle einschließlich aller serverseitig konfigurierten Profile, zum Be
 
 **Deliverables**
 
-- Capability-Erkennung.
-- Start und Resume.
-- Modell-/Effort-Mapping aus Profil.
-- Strukturierte Ausgabe und Fehlernormalisierung.
-- Claude-spezifische native CLAUDE-/Import-/Discoveryauflösung ausschließlich aus dem gebundenen read-only Instruction-Snapshot in der gitmetadatenfreien Tree-Sicht; Resume prüft Snapshot-/Sessionhash.
-- Claude startet mit versiegeltem serverseitigem Runtime-Profil und isoliertem Home; Repository-/Workspace-/Home-Config, MCP, Plugins, Skills, Hooks, Commands und sonstige Autoload-Helper bleiben aus, sofern sie nicht ausdrücklich serverseitig allowlisted und im freigegebenen Profilhash enthalten sind.
-- Auth wird ausschließlich als kurzlebige read-only Projektion des gewählten persistenten Credential-Stores eingebunden; der Adapter liest oder schreibt keinen übrigen persistenten Homeinhalt.
-- Providerseitige Voraufrufprüfung über den gemeinsamen Limitvertrag für Instruktionsdateien/-bytes/-Importtiefe und den tatsächlich assemblierten finalen Promptinput; Überschreitung startet weder Prozess noch partiellen stdin-Transfer.
-- Managed Sandbox-/Permission-Policy mit Fail Closed.
+- Serverseitige Claude-Modellprofile ausschließlich unter `github_copilot_cli` und dessen gebundenem Runtimeprofil; Modell-/Effortwerte werden erst nach Capability-Nachweis auswählbar. Beispiele sind keine Zusage verfügbarer Modellkennungen.
+- Die eine Copilot-Adapter-, Doctor-, Home-, Session-, Limit-, Tool- und Ergebnisnaht aus `AI6-042`, nachgeliefert durch `AI6-048`, unverändert konsumieren. Keine Claude-CLI, kein zusätzlicher Provideralias, Adapterwrapper, Prozessstart oder Credentialvertrag.
+- Nur `quality_review` sowie bei ausdrücklichem serverseitigem Rolleneintrag und Doctor-Nachweis `finding_verification`; keine Implementierung, Fixturns oder reale Security-Reviews.
+- Copilot-Snapshotdiscovery ohne native Claude-Discovery oder Imports; `CLAUDE.md`, `.claude` und andere nicht freigegebene Workspace-/Home-/Parent-Konfiguration bleiben unwirksam.
+- Getrennte AI6-Sessions und das nachgewiesene Session-/Resumeverhalten des Copilot-Transports. Kein eigener Sessionstore; ohne nachgewiesenes natives Resume wird eine neue Invocation nicht als Fortsetzung behauptet.
+- Finale Copilot-Antwort über die bestehende eindeutige Extraktion und zentrale Ergebnisvalidierung; Fehler und gemeldete Nutzungswerte ausschließlich über `AI6-047`.
+- Dokumentation und eigener realer Claude-Modell-Smoke ausschließlich über `AI6_RUN_COPILOT_SMOKE=1`, den Copilot-Pin und eine ausdrücklich bereitgestellte Testauthprojektion.
 
 **Akzeptanzvertrag**
 
-- Keine projekt-/workspace-/homeseitige `.claude`-Konfiguration, Hooks, Plugins, Skills, Commands, MCP-Server oder externe Helper werden geladen oder lockern die Policy; lässt sich dies für die eingesetzte CLI-Version nicht nachweisen, startet der Adapter nicht.
-- Jeder Reviewer besitzt getrennte Session.
-- Unsupported effort/model ist vor Runstart sichtbar.
-- Output wird identisch zum Fake/Codex-Schema validiert.
-- Host-, Parent-, Home-, Import- oder zur Laufzeit geänderte Workspace-Instruktionen wirken nur, wenn sie exakt im freigegebenen Snapshot liegen; andernfalls fällt der Adapter geschlossen aus.
-- Adapter und Resume verwenden die zentral gezählten Snapshot-/Promptbytes und können weder Projekt- noch Servermaximum durch providerinterne Imports umgehen.
-- Fremdprofilcredentials, persistentes Providerhome, Cache und History sind unerreichbar; Rotation oder Logout invalidiert die Sessionprojektion und verhindert Resume.
+- Jeder Claude-Modellturn erreicht ausschließlich den Copilot-Adapter und dessen Binary; keine Claude-CLI wird gestartet.
+- Nicht konfigurierte oder nicht nachgewiesene Modell-/Effort-/Rollenkombinationen werden vor Runstart sichtbar abgewiesen, ohne andere Profile zu sperren.
+- Versiegeltes Home, minimale read-only Authprojektion, Snapshot-, Tool- und Dateisystemgrenzen bleiben unverändert wirksam. Rotation, Logout und Bindungsdrift verhindern Start beziehungsweise Resume.
+- Genau eine finale Antwort wird zentral validiert; fehlerhafte Antworten und Providerfehler bleiben unterscheidbar und redigiert. Nutzungswerte ohne Quelle bleiben `unknown`.
+- Prompt- und Instruktionsmaxima greifen vor Prozessstart und Teiltransfer; keine Claude-Modelloption erweitert die Rechte.
+- Die Modellbeispiele, Fake-Verkabelung und statische Doctorprüfung ersetzen keine reale Copilot-Capability-Evidenz. Die menschliche Abnahme bindet Modell, Effort, Pin, Session, Snapshot-, Tool- und Credentialgrenzen an den exakten Implementierungscommit.
 
 **Mindestens zu erzeugende Testfälle**
 
-- Fake-Claude-Binary-Contracttests.
-- Resume/Sessiontrennung.
-- Sandbox-unavailable.
-- Discovery-Negativtests für Host/Parent/Home/Imports, `.claude`-/Workspace-/Home-Config, MCP, Plugins, Skills, Hooks, Commands, externe Helper, Snapshotdrift, erreichbare `.git`-Metadaten und Resume mit abweichendem Instruction-/Runtime-Profil-Hash.
-- Authprojektions-Negativtests für Fremdprofil, Persistenz-/Cache-/Historyleck, Schreibversuch, Rotation/Logout und Resume.
-- Grenz-/Eins-darüber-Tests für Instruktionsdateien, Einzel-/Gesamtbytes, Importtiefe und finalen Promptinput ohne Prozessstart oder partiellen stdin.
-- Optionaler echter Smoke-Test hinter Flag.
+- Claude-Profil-, Alias-, Modell-/Effort- und Rollenmatrix über den deterministischen Copilot-Fake; kein Claude-Binarypfad.
+- Prozessspy für unbekanntes Alias, fehlendes Home, `result()`, unerlaubte Rollen und freie Optionen.
+- Discovery-Negativtests einschließlich `CLAUDE.md`, `.claude`, Host/Parent/Home, Snapshotdrift, nicht freigegebenen Erweiterungen und Gitmetadaten.
+- Sessiontrennung, Fremdreferenz, Bindungsdrift, Credentialrevision, Rotation und Logout.
+- Zentrale Antwort-/Fehler-/Nutzungsmetadatenbindung und Cleanup nach Erfolg, Timeout und Cancel.
+- Grenz-/Eins-darüber-Tests für Instruktions- und finalen Promptinput ohne Prozessstart oder Teiltransfer.
+- Copilot-Smoke ohne Flag übersprungen, mit Flag und fehlenden Voraussetzungen fehlgeschlagen; reale Claude-Abnahme mit signiertem Protokoll.
 
 **Nicht Teil dieses Tickets**
 
-- Direkte Anthropic-API.
-- Modellspezifische Prompts.
+- Claude-CLI, direkte Anthropic-API, SDK, eigener Transport, native Claude-Discovery oder modellspezifische Prompts.
+- Nachlieferung der Copilot-Adapter-, Doctor-, Fake- und Smoke-Grundlage (`AI6-048`).
+- Neue Home-/Prozessisolation, persistenter Credential- oder Sessionstore, Onboarding, Implementierungs-/Fixturns und Security-Review.
 
 ### AI6-035 — Provider-Onboarding, Credential-Setup und Capability-Doctor
 
@@ -3598,7 +3599,7 @@ Andere Entwickler sicher durch Providerlogin, Profilprüfung und Adapterfreigabe
 
 **Deliverables**
 
-- Interaktive CLI-Kommandos für Codex-, Grok- und Copilot-Login im Agent-Prozess; das Claude-Onboarding wird bei Umsetzung von AI6-034 über denselben Vertrag ergänzt, ohne dass dieses Ticket darauf wartet.
+- Interaktive CLI-Kommandos für Codex-, Grok- und Copilot-Login im Agent-Prozess; Claude-Modellprofile aus AI6-034 verwenden denselben Copilot-Login und dieselbe Credentialquelle ohne eigenes Claude-Onboarding; dieses Ticket wartet nicht auf diese Modellprofile.
 - Persistente, getrennte Provider-Credential-Stores außerhalb jedes Execution-Home sowie pro Session ein frisches versiegeltes Home mit minimaler read-only Authprojektion für genau ein Profil.
 - Capability-Synchronisierung und Profilstatus im Panel für alle Profile der ersten Providerstufe.
 - Version-Pinning je CLI und Re-Doctor nach Upgrade; der Doctor weist je gepinnter Version den `AGT-010`-Headless-Transport sowie die nachweisbaren Sandbox-, Tool- und Autodiscovery-Grenzen des jeweiligen Adapters nach und setzt andernfalls `unavailable` oder `degraded` statt eines stillen Fallbacks.
@@ -3731,6 +3732,56 @@ Die GitHub-Copilot-CLI als zweiten unabhängigen Review-Adapter über den gemein
 - Implementierungs- oder Fixturns.
 - Verifier-Orchestrierung und Slotwahl.
 
+### AI6-048 — Fehlenden GitHub-Copilot-CLI-Transport nachliefern
+
+- **Initialstatus des späteren Detailtickets:** `todo`
+- **Risiko:** `high`
+- **Kind:** `fix`
+- **Depends on:** `AI6-011`, `AI6-015`, `AI6-016`, `AI6-032`, `AI6-046`, `AI6-047`, `AI6-042`
+- **Requirement-Refs:** `AGT-001`, `AGT-002`, `AGT-003`, `AGT-004`, `AGT-007`, `AGT-009`, `AGT-010`, `GIT-010`, `RUN-006`, `SEC-005`
+- **Erwartete Module:** `Agents`, `Shared`
+
+**Ziel**
+
+Die fehlende ausführbare GitHub-Copilot-CLI-Anbindung auf der vorhandenen Agentennaht nachliefern, damit freigegebene Reviewprofile über genau diesen Transport ausgeführt werden können.
+
+**Deliverables**
+
+- Korrektur der fehlenden Lieferung von AI6-042: genau ein neuer Copilot-Adapter mit ausführbarer Bindung von `github_copilot_cli` in der bestehenden Aliasauflösung; Fake und Codex bleiben unverändert. AI6-042 behält seinen veröffentlichten Vertrag und seine historischen Evidenz-IDs. Seine vorhandene Konfiguration wird konsumiert; die fehlenden Adapter-, Doctor-, Fake- und Smoke-Artefakte sind eigene Neuanlagen dieses Blueprints und keine angenommenen Ergebnisse eines Vorgängers.
+- Genau ein gepinnter programmatischer CLI-Prompttransport, servergebundene Modell-/Effort-/Runtimeauswahl und ein Copilot-Doctor mit getrennter statischer Prüfung und realer Capability-Evidenz. Binary-, Pin- und Credentialwerte werden aus der bereits vorbereiteten Konfiguration konsumiert; keine Versions- oder Modellfreigabe ohne Nachweis.
+- Vollständig versiegeltes `COPILOT_HOME`, minimale read-only Authprojektion, gebundene Snapshotdiscovery und bestehende Prozessisolation. Shell, Schreiben, Delegation, Memory, URL-Zugriff und MCP einschließlich GitHub-MCP bleiben geschlossen; ausschließlich freigegebene Lesetools.
+- Ausgeliefert nur `quality_review`; Verifikation ausschließlich bei ausdrücklichem serverseitigem Rolleneintrag und Doctor-Nachweis. Implementierung, Fix und Security-Review starten keinen Provider.
+- Eine eindeutige finale Antwort über die zentrale UTF-8- und Ergebnisgrenze; keine zweite JSON-Validierung oder Fehlerzuordnung. Antwortbytes und gemeldete Nutzungswerte werden über AI6-047 an den Worker übergeben.
+- AI6-Sessions je Run/Slot, zentraler Prompt-/Instruktionslimitvertrag und vorhandene Prozessgruppen-/Homebereinigung. Ohne nachgewiesene zustandsdateifreie Resume-Möglichkeit ist jeder Turn eine ausgewiesene neue Invocation.
+- Deterministisches Copilot-Testbinary, Integration über die ausgelieferte Agentmailbox und echter Smoke hinter `AI6_RUN_COPILOT_SMOKE=1`; README und ein eigenes ergebnisfreies Abnahmeprotokoll für AI6-048.
+
+**Akzeptanzvertrag**
+
+- Ein zulässiger Reviewturn erreicht über die Produktionsbindung die Copilot-CLI und beim Verbraucher eine zentral gültige Antwort. Eine Registrierung mit ausschließlicher Startverweigerung ist keine Lieferung dieses Outcomes.
+- Unbekanntes Alias, fehlendes Home, `result()`, freie Optionen, unerlaubte Rollen und Auswahl-/Runtime-/Credentialdrift starten keinen Provider. Fehlender Pin oder fehlender Capability-Nachweis sperren nur das betroffene Profil.
+- Der reale Linux-Nachweis prüft vollständig read-only Home und Sessionablage unter der tatsächlichen unprivilegierten Turnidentität mit eigens bereitgestellter Testauthprojektion. Binary, Version, Plattform, Repositorycommit, verweigerte Schreibversuche und tatsächlicher Turnabschluss sind gebunden. Erfolg, ursächlicher Schreibschutzfehler und unklarer Ausgang bleiben unterscheidbar.
+- Die untersuchte Version 1.0.83 aus der Entscheidungsanfrage ist dadurch nicht freigegeben. Capability-Evidenz und reale Abnahme sind eigene Nachweise dieses Auftrags; ihr Fehlen ist keine Erlaubnis für eine Schreibausnahme. Bei nachgewiesener Unvereinbarkeit wird vor abweichender Laufzeitimplementierung ein neuer Entscheidungsantrag gestellt; der bisher nur untersuchte Sessionmount bleibt ausgeschlossen.
+- Nicht freigegebene Host-/Parent-/Home-/Workspace-Instruktionen, insbesondere native Claude-Instruktionen, Erweiterungen, fremde Sessions, Gitmetadaten und persistente Providerdaten bleiben unwirksam oder unerreichbar. Keine GitHub-Mutationen.
+- Ungültige oder mehrdeutige Antwort wird beim Verbraucher `invalid_json`; Timeout, Cancel, Exitfehler und Ausgabelimit werden `provider_error`. Gemeldete Null bleibt Null, fehlende Nutzungswerte bleiben `unknown`; keine rohen Fehlerausgaben.
+- Promptmaximum startet, eins darüber startet weder Prozess noch Teiltransfer; Instruktionslimits greifen zentral. Rotation und Logout sperren alte Projektionen; nach terminalem Ende bleiben keine Providerprozesse und keine übernehmbaren späten Ergebnisse zurück.
+- Fake und Windowschecks ersetzen keine Linux-Isolation oder interne Tool-/Discoverywirkung der echten CLI. Ohne Smoke-Flag wird übersprungen, mit Flag und fehlenden Voraussetzungen fehlgeschlagen. Reale Abnahme bleibt bis zum signierten commitgebundenen Protokoll offen.
+
+**Mindestens zu erzeugende Testfälle**
+
+- Alias-/Produktionsbindungs-, Argument-/Environment-, Rollen-, Modell-/Effort- und Doctor-Negativmatrix mit deterministischem Copilot-Binary.
+- Home-/Auth-/Snapshot-/Discovery- und Toolgrenzen; gezielt geöffnete Testgrenzen müssen den Nachweis scheitern lassen.
+- Sessiontrennung, Fremdreferenz, Runtime-/Credentialdrift, Rotation und Logout; keine implizite letzte Session.
+- Gültige, fehlende, mehrfache, syntaktisch/fachlich ungültige und nicht UTF-8-konforme Antwort bis zum Verbraucher; Timeout, Exitcode, Cancel, Ausgabelimit und Nutzungswerte mit Quelle, Null oder fehlender Quelle.
+- Promptmaximum und Eins-darüber-Fall ohne Teiltransfer; Instruktionslimits, alle terminalen Cleanupwege und verspätete Ergebnisse über AI6-047.
+- Tatsächlicher Linux-Reviewturn mit read-only Home einschließlich Sessionablage und separat beschreibbarem Ergebnisverzeichnis; reale Tool-/Discovery-Negativprobe und menschliche Abnahme.
+
+**Nicht Teil dieses Tickets**
+
+- Claude-Modellprofile und deren Abnahme (AI6-034), Claude-CLI und zusätzliche Providertransporte.
+- Neue gemeinsame Namespace-/Mountisolation oder beschreibbare native Sessionprojektion; deren Notwendigkeit und ein möglicher Split erfordern eine gesonderte evidenzbasierte Entscheidung.
+- Zweiter ProcessRunner, zweite Mailbox, neue Orchestrierung, Tabellen, persistenter Credential-/Sessionstore oder Onboarding.
+- PR-Connector, GitHub-Mutationen, Implementierungs-/Fixturns und reale Security-Reviews.
+
 ## 15.8 M7 – Betrieb, Migration und Pilot
 
 ### AI6-036 — Installation, Backup/Restore und Security-Release-Gate
@@ -3841,7 +3892,7 @@ AI6 mit einem realen, anspruchsvollen Git-Ticket und echten CLI-Sitzungen der er
 
 - Migriertes M169 als Pilot.
 - Codex-Profil für Implementierung und Fixturns.
-- Mindestens zwei unabhängige Qualitätsreviewer über die Grok-Build-CLI und die GitHub-Copilot-CLI; optional zusätzlich ein Claude-Reviewer, sofern AI6-034 umgesetzt ist.
+- Mindestens zwei unabhängige Qualitätsreviewer über die Grok-Build-CLI und die GitHub-Copilot-CLI; optional zusätzlich ein Claude-Modellprofil über Copilot, sofern AI6-034 umgesetzt ist; ein weiteres Modell desselben Providerprofils ersetzt keinen unabhängigen Providerreviewer.
 - Zuerst ein realer Review-only-Pilotlauf auf einem gebundenen Stand mit manuell bestätigtem report-only Abschluss und Messung von Findingqualität, Laufzeit und Providerfehlern; erst danach der vollständige Implementierungsablauf.
 - Realer Review-/Verifikations-/Fix-/Security-/Pushablauf auf Testbranch.
 - Vor Candidate an letzten gültigen Checkpoint, prospektive Tree-OID und Diff-Hash gebundene autorisierte Evidenz für jedes M169-spezifische `MG-`-/`EXT-`-Gate.
@@ -3912,28 +3963,28 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `GIT-007` | `AI6-012`, `AI6-029` |
 | `GIT-008` | `AI6-009`, `AI6-013`, `AI6-029`, `AI6-039` |
 | `GIT-009` | `AI6-006C`, `AI6-006D`, `AI6-006E`, `AI6-006F`, `AI6-008`, `AI6-009` |
-| `GIT-010` | `AI6-014`, `AI6-015`, `AI6-019`, `AI6-021`, `AI6-023`, `AI6-028`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-040`, `AI6-041`, `AI6-042`, `AI6-045`, `AI6-046` |
+| `GIT-010` | `AI6-014`, `AI6-015`, `AI6-019`, `AI6-021`, `AI6-023`, `AI6-028`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-040`, `AI6-041`, `AI6-042`, `AI6-045`, `AI6-046`, `AI6-048` |
 | `GIT-011` | `AI6-040` |
 | `CFG-001` | `AI6-003`, `AI6-011` |
 | `CFG-002` | `AI6-010`, `AI6-020` |
 | `CFG-003` | `AI6-010`, `AI6-021` |
-| `AGT-001` | `AI6-011`, `AI6-016`, `AI6-033`, `AI6-034`, `AI6-038`, `AI6-041`, `AI6-042`, `AI6-047` |
-| `AGT-002` | `AI6-011`, `AI6-012`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-043` |
-| `AGT-003` | `AI6-019`, `AI6-023`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042` |
-| `AGT-004` | `AI6-016`, `AI6-019`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042`, `AI6-047` |
+| `AGT-001` | `AI6-011`, `AI6-016`, `AI6-033`, `AI6-034`, `AI6-038`, `AI6-041`, `AI6-042`, `AI6-047`, `AI6-048` |
+| `AGT-002` | `AI6-011`, `AI6-012`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-043`, `AI6-048` |
+| `AGT-003` | `AI6-019`, `AI6-023`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042`, `AI6-048` |
+| `AGT-004` | `AI6-016`, `AI6-019`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042`, `AI6-047`, `AI6-048` |
 | `AGT-005` | `AI6-016`, `AI6-032`, `AI6-040` |
 | `AGT-006` | `AI6-006A`, `AI6-015`, `AI6-045`, `AI6-047` |
-| `AGT-007` | `AI6-015`, `AI6-021`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-045`, `AI6-047` |
+| `AGT-007` | `AI6-015`, `AI6-021`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-045`, `AI6-047`, `AI6-048` |
 | `AGT-008` | `AI6-011`, `AI6-012`, `AI6-016`, `AI6-019`, `AI6-044` |
-| `AGT-009` | `AI6-011`, `AI6-012`, `AI6-015`, `AI6-016`, `AI6-019`, `AI6-020`, `AI6-023`, `AI6-028`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042`, `AI6-046` |
-| `AGT-010` | `AI6-033`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-047` |
+| `AGT-009` | `AI6-011`, `AI6-012`, `AI6-015`, `AI6-016`, `AI6-019`, `AI6-020`, `AI6-023`, `AI6-028`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042`, `AI6-046`, `AI6-048` |
+| `AGT-010` | `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-047`, `AI6-048` |
 | `AGT-011` | `AI6-044` |
 | `RUN-001` | `AI6-013`, `AI6-017`, `AI6-039` |
 | `RUN-002` | `AI6-012`, `AI6-013`, `AI6-039` |
 | `RUN-003` | `AI6-017`, `AI6-019`, `AI6-021`, `AI6-022`, `AI6-025`, `AI6-027`, `AI6-045`, `AI6-046`, `AI6-047` |
 | `RUN-004` | `AI6-006C`, `AI6-009`, `AI6-015`, `AI6-040`, `AI6-045` |
 | `RUN-005` | `AI6-006C`, `AI6-013`, `AI6-017`, `AI6-029`, `AI6-030`, `AI6-032`, `AI6-039` |
-| `RUN-006` | `AI6-011`, `AI6-012`, `AI6-015`, `AI6-019`, `AI6-020`, `AI6-026`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042`, `AI6-043` |
+| `RUN-006` | `AI6-011`, `AI6-012`, `AI6-015`, `AI6-019`, `AI6-020`, `AI6-026`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042`, `AI6-043`, `AI6-048` |
 | `RUN-007` | `AI6-013`, `AI6-020`, `AI6-022`, `AI6-027` |
 | `RUN-008` | `AI6-012`, `AI6-030` |
 | `RUN-009` | `AI6-022`, `AI6-027`, `AI6-029`, `AI6-032`, `AI6-038` |
@@ -3965,7 +4016,7 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `SEC-002` | `AI6-004`, `AI6-005A`, `AI6-006C` |
 | `SEC-003` | `AI6-005A` |
 | `SEC-004` | `AI6-003`, `AI6-004`, `AI6-005B`, `AI6-010`, `AI6-044` |
-| `SEC-005` | `AI6-015`, `AI6-021`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-045`, `AI6-046`, `AI6-047` |
+| `SEC-005` | `AI6-015`, `AI6-021`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-045`, `AI6-046`, `AI6-047`, `AI6-048` |
 | `SEC-006` | `AI6-006A` |
 | `SEC-007` | `AI6-003`, `AI6-005B`, `AI6-006F`, `AI6-021`, `AI6-031`, `AI6-044`, `AI6-045` |
 | `SEC-008` | `AI6-028`, `AI6-032` |
@@ -4062,9 +4113,9 @@ Die folgenden Punkte sind nicht blockierend; der Plan setzt diese Defaults:
 | Queue | Laravel Database Queue |
 | Frontend | Blade + Livewire + Alpine |
 | SecurityProfile | strict |
-| Erste Providerstufe | `codex_cli` (implementation, fix, eingeschränkt quality_review), `grok_cli` (quality_review, finding_verification), `github_copilot_cli` (quality_review), `fake`; Claude folgt später über `AI6-034`, ohne V1 zu blockieren |
+| Erste Providerstufe | `codex_cli` (implementation, fix, eingeschränkt quality_review), `grok_cli` (quality_review, finding_verification), `github_copilot_cli` (quality_review), `fake`; Claude-Modellprofile folgen über denselben Copilot-Transport mit `AI6-034`; `AI6-048` liefert die fehlende Copilot-Anbindung nach |
 | Implementierung | Profil `codex-gpt-5.6-terra`, Aufwand `medium` |
-| Review | zwei unabhängige Slots der ersten Providerstufe, etwa `grok-cli-review` und `copilot-cli-review`; ein Claude-Profil wie `claude-opus-5` bleibt nach Umsetzung von `AI6-034` zulässig |
+| Review | zwei unabhängige Slots der ersten Providerstufe, etwa `grok-cli-review` und `copilot-cli-review`; ein doctor-geprüftes Claude-Modellprofil bleibt nach Umsetzung von `AI6-034` über Copilot zulässig, zählt aber nicht als zusätzlicher unabhängiger Provider |
 | Verifier | advisory only, quellenabhängig: Grok für Copilot-/zulässige Codex-Findings; Grok-Findings an einen unabhängigen Copilot-/Codex-Slot oder HumanLoop; ohne unabhängiges Profil Human Request |
 | Finaler Review | deaktiviert bis nach dem Pilot; danach optionaler zusätzlicher Reviewer-Slot bei Risiko-, Release- oder Human-Triggern, kein fest verdrahteter Modellname |
 | Semantische Finding-Deduplizierung | nicht im MVP; ausschließlich exakte deterministische Duplikatgruppen |
@@ -4091,7 +4142,7 @@ Der MVP ist erreicht, wenn:
 - mehrere Reviewmodelle mit jeweils eigenem Aufwand auswählbar sind;
 - FakeAgent alle Erfolgs-, Frage-, Scope-, Contract-Amendment-, Fix-, Ressourcenlimit-, Wartestatus-, Gate-, Security- und Recoverypfade reproduzierbar abdeckt;
 - ein ticket- und approvalgebundener Review-only-Lauf einen gebundenen Stand ohne Push prüft und über die report-only Abschluss-Saga in einem gebundenen Abschlussbericht endet;
-- Codex, Grok und Copilot über denselben Adaptervertrag mit je genau einem doctor-nachgewiesenen Headless-Transport laufen; Claude bleibt optional über `AI6-034`;
+- Codex, Grok und Copilot über denselben Adaptervertrag mit je genau einem doctor-nachgewiesenen Headless-Transport laufen; Claude-Modelle bleiben optional über denselben Copilot-Transport aus `AI6-034`;
 - Findings quellenabhängig advisory verifiziert werden können, ohne dass ein Verifier ein blockierendes Finding aufhebt;
 - ein Agenten-Human-Request eine E-Mail erzeugt und mobil im Panel beantwortet wird;
 - alle Reviewer denselben Checkpoint prüfen und Codeänderungen eine vollständige Re-Review-Runde erzwingen;
@@ -4108,4 +4159,6 @@ Der MVP ist erreicht, wenn:
 
 ## 21. Kurzbegründung der Ticketanzahl
 
-53 Tickets sind für den Funktionsumfang bewusst kleiner als die bisherigen zehn Pakete, aber keine künstlichen Mikrotickets. Jeder Blueprint bildet eine reviewbare Grenze: Datenvertrag, vertikaler Benutzerfluss oder sicherheitsrelevante technische Naht. Die fünf mit V1.7.0 ergänzten Blueprints folgen demselben Schnitt: zwei für den Review-only-Modus (Statusvertrag getrennt von Quellbindung und Bedienung), zwei für die neuen Provideradapter (je CLI ein eigenständig testbarer Adapter) und einer für die providerunabhängige Verifier-Orchestrierung. `AI6-044` ergänzt als eigener manueller Benutzerfluss ausschließlich die Clipboard-Bedienung des zentralen Promptkatalogs und bleibt von Provider- und Runwirkung getrennt. `AI6-045` folgt demselben Schnitt als sicherheitsrelevante technische Naht: Die Definition eines Checks und sein rollenrichtiger Vollzug sind getrennt reviewbar, weil der Vollzug eigene Container-, Mount- und Wartezustandsverträge berührt, die die Profildefinition nicht kennt. Ein Ticket darf während der Detailerzeugung weiter gesplittet werden, aber nur über eine explizite Planrevision; ein stilles Zusammenlegen mehrerer Blueprints ist nicht zulässig.
+54 Tickets sind für den Funktionsumfang bewusst kleiner als die bisherigen zehn Pakete, aber keine künstlichen Mikrotickets. Jeder Blueprint bildet eine reviewbare Grenze: Datenvertrag, vertikaler Benutzerfluss oder sicherheitsrelevante technische Naht. Die fünf mit V1.7.0 ergänzten Blueprints folgen demselben Schnitt: zwei für den Review-only-Modus (Statusvertrag getrennt von Quellbindung und Bedienung), zwei für die neuen Provideradapter (je CLI ein eigenständig testbarer Adapter) und einer für die providerunabhängige Verifier-Orchestrierung. `AI6-044` ergänzt als eigener manueller Benutzerfluss ausschließlich die Clipboard-Bedienung des zentralen Promptkatalogs und bleibt von Provider- und Runwirkung getrennt. `AI6-045` folgt demselben Schnitt als sicherheitsrelevante technische Naht: Die Definition eines Checks und sein rollenrichtiger Vollzug sind getrennt reviewbar, weil der Vollzug eigene Container-, Mount- und Wartezustandsverträge berührt, die die Profildefinition nicht kennt. Ein Ticket darf während der Detailerzeugung weiter gesplittet werden, aber nur über eine explizite Planrevision; ein stilles Zusammenlegen mehrerer Blueprints ist nicht zulässig.
+
+`AI6-048` ist eine ausdrücklich beauftragte Nachlieferung zur fehlenden Umsetzung von `AI6-042`. Adapter, Doctor, Testdouble und Smoke beweisen gemeinsam genau eine Providergrenze und werden nicht in parallele Implementierungen aufgeteilt. Die frühere Konfigurationslieferung bleibt erhalten; eine neue gemeinsame Mount-/Namespacegrenze gehört ausdrücklich nicht zu diesem Korrekturauftrag. Claude-Modellprofile aus `AI6-034` konsumieren erst danach diese eine Copilot-Naht.
