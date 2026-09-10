@@ -117,6 +117,7 @@ final class RuntimeComposeContractTest extends TestCase
             'AI6_AGENT_EXECUTION_ROOT', 'AI6_AGENT_OUTPUT_ROOT', 'AI6_CHECKER_EXECUTION_ROOT', 'AI6_CHECKER_OUTPUT_ROOT',
             'AI6_CODEX_CREDENTIAL_REVISION', 'AI6_GROK_CREDENTIAL_REVISION', 'AI6_COPILOT_CREDENTIAL_REVISION',
             'AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF',
+            'AI6_COPILOT_BINARY', 'AI6_COPILOT_PINNED_VERSION',
             'AI6_EXECUTION_DIRECTORY', 'AI6_GIT_ALLOWED_HOSTS', 'AI6_GIT_ALLOWED_REMOTE_PATHS', 'AI6_GIT_ALLOWED_REF_PATTERNS',
             'AI6_GIT_PINNED_HOST_KEYS', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE',
             'AI6_WORKER_TIMEOUT', 'APP_DEBUG', 'APP_ENV', 'APP_KEY', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',
@@ -133,7 +134,7 @@ final class RuntimeComposeContractTest extends TestCase
             'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE', 'DB_QUEUE_RETRY_AFTER',
             'DB_SYNCHRONOUS', 'LOG_CHANNEL', 'QUEUE_CONNECTION',
         ],
-        'agent' => [...self::REDACTION_ENVIRONMENT, 'AI6_AGENT_EXECUTION_ROOT', 'AI6_AGENT_OUTPUT_ROOT', 'AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF', 'AI6_CODEX_CREDENTIAL_REVISION', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'LOG_CHANNEL'],
+        'agent' => [...self::REDACTION_ENVIRONMENT, 'AI6_AGENT_EXECUTION_ROOT', 'AI6_AGENT_OUTPUT_ROOT', 'AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF', 'AI6_CODEX_CREDENTIAL_REVISION', 'AI6_COPILOT_BINARY', 'AI6_COPILOT_PINNED_VERSION', 'AI6_COPILOT_CREDENTIAL_REVISION', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'LOG_CHANNEL'],
         'checker' => [...self::REDACTION_ENVIRONMENT, 'AI6_CHECKER_EXECUTION_ROOT', 'AI6_CHECKER_OUTPUT_ROOT', 'AI6_CHECKER_WORKSPACE_ROOT', 'AI6_CHECKER_UNSHARE_BINARY', 'AI6_CHECKER_NAMESPACE_WRAPPER', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'LOG_CHANNEL'],
     ];
 
@@ -339,6 +340,29 @@ final class RuntimeComposeContractTest extends TestCase
         foreach ($services as $name => $service) {
             foreach (['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_HOME'] as $variable) {
                 self::assertArrayNotHasKey($variable, $service['environment'] ?? [], $name.' carries no credential bytes and no native home.');
+            }
+        }
+    }
+
+    /** AI6-042: role-bound instance configuration, never native homes or credential bytes. */
+    public function test_copilot_configuration_reaches_only_the_required_roles(): void
+    {
+        foreach ($this->services() as $role => $service) {
+            $environment = $service['environment'] ?? [];
+            foreach (['AI6_COPILOT_BINARY' => '/usr/local/bin/copilot', 'AI6_COPILOT_PINNED_VERSION' => ''] as $key => $default) {
+                if (in_array($role, ['worker', 'agent'], true)) {
+                    self::assertSame('${'.$key.':-'.$default.'}', $environment[$key] ?? null, $role.' '.$key);
+                } else {
+                    self::assertArrayNotHasKey($key, $environment, $role);
+                }
+            }
+            if (in_array($role, ['worker', 'agent'], true)) {
+                self::assertSame('${AI6_COPILOT_CREDENTIAL_REVISION:-}', $environment['AI6_COPILOT_CREDENTIAL_REVISION'] ?? null, $role);
+            } else {
+                self::assertArrayNotHasKey('AI6_COPILOT_CREDENTIAL_REVISION', $environment, $role);
+            }
+            foreach (['COPILOT_HOME', 'COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN'] as $key) {
+                self::assertArrayNotHasKey($key, $environment, $role);
             }
         }
     }

@@ -6,6 +6,26 @@ use PHPUnit\Framework\TestCase;
 
 final class RuntimeDocumentationTest extends TestCase
 {
+    public function test_copilot_preparation_documents_roles_inactive_pin_and_open_gate(): void
+    {
+        $readme = file_get_contents(dirname(__DIR__, 4).'/README.md');
+        self::assertNotFalse($readme);
+        self::assertSame(1, preg_match('/^### Copilot-CLI-Vorbereitung\R(.*?)(?=^### |\z)/ms', $readme, $matches));
+
+        foreach ([
+            'Der Copilot-Adapter ist noch nicht implementiert',
+            '`github_copilot_cli` endet als `agent_adapter_unavailable`',
+            '`AI6_COPILOT_BINARY`, `AI6_COPILOT_PINNED_VERSION` und `AI6_COPILOT_CREDENTIAL_REVISION` erreichen über Compose ausschließlich `worker` und `agent`',
+            '`app` erhält die Copilot-Werte nicht, da noch kein Copilot-Doctor vorhanden ist',
+            'wird heute aber weder gelesen noch geprüft',
+            'Ein gesetzter Pin gibt keine CLI-Version frei',
+            'Das Gate `AI6-042/MG-01` bleibt offen',
+            'Der Home-Vertragsentwurf bleibt bis zu diesem Laufzeitnachweis für eine Planübernahme gesperrt',
+        ] as $statement) {
+            self::assertStringContainsString($statement, $matches[1]);
+        }
+    }
+
     public function test_readme_documents_start_roles_allowlists_versions_and_commands(): void
     {
         $readme = file_get_contents(dirname(__DIR__, 4).'/README.md');

@@ -183,6 +183,12 @@ return [
         'pinned_version' => env('AI6_CODEX_PINNED_VERSION', ''),
         'sandbox_proof' => env('AI6_CODEX_SANDBOX_PROOF', ''),
     ],
+    // AI6-042 preparation: these values have no effect until the adapter exists.
+    // No version check or CLI approval is currently derived from this pin.
+    'copilot' => [
+        'binary' => env('AI6_COPILOT_BINARY', '/usr/local/bin/copilot'),
+        'pinned_version' => env('AI6_COPILOT_PINNED_VERSION', ''),
+    ],
     'credential_revisions' => [
         'codex_cli' => env('AI6_CODEX_CREDENTIAL_REVISION', ''),
         'grok_cli' => env('AI6_GROK_CREDENTIAL_REVISION', ''),
