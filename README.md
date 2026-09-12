@@ -445,10 +445,26 @@ Der reale Linux-Reviewturn mit vollständig read-only Home ist noch offen und wi
 Der vorbereitete Smoke läuft ausschließlich unter Linux als unprivilegierter Benutzer mit einer eigens bereitgestellten Testauthprojektion, erreichbarem Modellendpunkt und einem sauberen, committed Implementierungsstand:
 
 ```bash
-AI6_RUN_COPILOT_SMOKE=1 AI6_COPILOT_BINARY=/path/to/copilot AI6_COPILOT_PINNED_VERSION=1.0.83 AI6_COPILOT_SMOKE_AUTH_FILE=/path/to/test-token php artisan test --filter=GitHubCopilotCliSmokeTest
+AI6_RUN_COPILOT_SMOKE=1 AI6_COPILOT_BINARY=/path/to/copilot AI6_COPILOT_PINNED_VERSION=1.0.83 AI6_COPILOT_SMOKE_AUTH_FILE=/path/to/test-token php artisan test --filter=test_real_linux_copilot_review_with_a_fully_read_only_native_home
 ```
 
 Mit gesetztem Flag sind fehlende Voraussetzungen Fehler; ohne Flag wird der Smoke übersprungen. Er prüft tatsächliche Schreibverweigerung an Homewurzel und Sessionablage unter derselben UID, einen zentral gültigen Review, unveränderte Eingaben und die Abweisung eines fremden Instruktionsköders. Die ausgegebene `AI6_COPILOT_SMOKE_EVIDENCE` enthält Bindungen und wertfreie Resultate, keine Tokens. Sein temporärer Capabilityeintrag dient ausschließlich dem Kandidatentest und wird niemals in die Produktkonfiguration geschrieben. Die vollständige Agentrollen-Isolation, beobachtete tatsächliche Versuche verbotener Tools, Credentialrotation und die signierte Commitabnahme bleiben MG-01. Ein grüner Fake-, Windows- oder Smoke-Lauf allein ersetzt diese Abnahme nicht.
+
+### Claude-Modelle über Copilot (AI6-034)
+
+Das zusätzliche Profil `copilot-claude-sonnet-review` bindet `claude-sonnet-4.6`, `provider_default` und ausschließlich `quality_review` an `github_copilot_cli` / `GitHubCopilotCliAdapter` / `github-copilot-cli-v1`. Es bleibt `unchecked`. Die Kennung stammt aus der [GitHub-Copilot-CLI-Referenz](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference); das ist kein Verfügbarkeitsnachweis für den Pin oder das verwendete Konto. Opus, Fabel und andere Modellbeispiele werden nicht automatisch freigegeben. Weitere Claude-Kennungen benötigen einen expliziten serverseitigen Profileintrag und einen eigenen gebundenen Capability-Nachweis. Der bestehende Transport unterstützt ausschließlich `provider_default`; ein anderer Effort wird abgewiesen, nicht still ignoriert.
+
+Jeder Claude-Aufruf läuft ausschließlich über die GitHub-Copilot-CLI. Es gibt keine Claude-CLI, keinen `claude_cli`-Alias und keine Claude-Binary-, Credential-, Home- oder Sessionkonfiguration. Die Copilot-Konfiguration, minimale read-only Authprojektion, Toolgrenzen, zentrale Limits, Antwortvalidierung und Fehlerzuordnung gelten unverändert. `CLAUDE.md` und `.claude` aktivieren keine native Discovery. Jeder Turn bleibt eine neue Invocation ohne natives Resume; die getrennten AI6-Sessions sind weiterhin maßgeblich. Implementierung, Fix und Security-Review bleiben gesperrt; Verifikation benötigt einen ausdrücklichen Rolleneintrag und separate Evidenz.
+
+Der vorhandene Copilot-Doctor prüft auch dieses Profil und gibt dessen eigene Modell-/Effort-/Rollenbindung aus. Eine GPT-Evidenz gibt kein Claude-Modell frei. Da die Evidenz die Adapterbytes bindet, erfordert diese Auswahländerung auch für bestehende Copilot-Profile einen erneuten Nachweis. Erst nach dem realen Nachweis dürfen der eigene Evidenzschlüssel und der Profilstatus durch den Betreiber freigegeben werden. Die Tests mit `FakeCopilotBinary` belegen Verkabelung und OS-Grenzen; sie belegen keine interne Claude-Modellausführung.
+
+Der reale Claude-Smoke verwendet denselben Testablauf und dieselben Copilot-Voraussetzungen. Die Modellkennung muss ausdrücklich bereitgestellt werden; `AI6_COPILOT_SMOKE_MODEL` ist ausschließlich ein Testharnesswert und wird nicht an den Providerprozess weitergereicht:
+
+```bash
+AI6_RUN_COPILOT_SMOKE=1 AI6_COPILOT_BINARY=/path/to/copilot AI6_COPILOT_PINNED_VERSION=1.0.83 AI6_COPILOT_SMOKE_AUTH_FILE=/path/to/test-token AI6_COPILOT_SMOKE_MODEL=claude-sonnet-4.6 php artisan test --filter=test_real_linux_claude_model_uses_only_the_copilot_transport
+```
+
+Ohne Flag wird auch dieser Test übersprungen; mit Flag sind fehlende Voraussetzungen Fehler. [AI6-034/MG-01](docs/AI6-034_MG-01_ABNAHMEPROTOKOLL.md) bleibt bis zur tatsächlichen Prüfung und Signatur am exakten Implementierungscommit offen. Die vollständigen Tool-, Discovery-, Session- und Credentialnachweise sowie der Ausschluss eines Claude-CLI-Prozesses gehören zu dieser Abnahme.
 
 ### Control-Operationen und Deploy-Key-Provisionierung
 
@@ -573,7 +589,7 @@ Auch der historische Unparsed-Backfill ohne `--project-config` verwendet `ticket
 
 ## Agentenprofile, Promptkatalog und Instruktionsgrenzen
 
-`config/ai6.php` enthält als einzige vertrauenswürdige Quelle die Profile `codex-gpt-5.6-terra`, `grok-cli-review`, `copilot-cli-review` und `fake`. Jedes Profil bindet genau einen Provideralias (`codex_cli`, `grok_cli`, `github_copilot_cli` oder `fake`), den Adapter, erlaubte Modelle, Efforts und Rollen sowie ein versiegeltes Runtimeprofil. Eine Auswahl wird serverseitig als vollständige Kombination geprüft. Die Zustände `unchecked` und `unavailable` bleiben sichtbar und sind nicht auswählbar; nur `available` darf aufgelöst werden. Das credential-, netzwerk- und prozessfreie Profil `fake` ist für alle vier Rollen verfügbar. Die authentifizierte Seite `/agents/profiles` zeigt den Vertrag ausschließlich lesend.
+`config/ai6.php` enthält als einzige vertrauenswürdige Quelle die Profile `codex-gpt-5.6-terra`, `grok-cli-review`, `copilot-cli-review`, `copilot-claude-sonnet-review` und `fake`. Jedes Profil bindet genau einen Provideralias (`codex_cli`, `grok_cli`, `github_copilot_cli` oder `fake`), den Adapter, erlaubte Modelle, Efforts und Rollen sowie ein versiegeltes Runtimeprofil. Eine Auswahl wird serverseitig als vollständige Kombination geprüft. Die Zustände `unchecked` und `unavailable` bleiben sichtbar und sind nicht auswählbar; nur `available` darf aufgelöst werden. Das credential-, netzwerk- und prozessfreie Profil `fake` ist für alle vier Rollen verfügbar. Die authentifizierte Seite `/agents/profiles` zeigt den Vertrag ausschließlich lesend.
 
 Alle Runtimeprofile beginnen mit deaktivierten MCP-Servern, Plugins, Skills, Hooks, Commands, Agentdefinitionen und externen Helpern. Eine Erweiterung kann ausschließlich durch eine Änderung der vertrauenswürdigen Serverkonfiguration in die abschließende Liste gelangen. Version, effektive Adapterflags, Permissions und Erweiterungslisten werden über die Domäne `AI6-PROVIDER-RUNTIME-PROFILE-V1` und die zentrale kanonische JSON-Naht mit SHA-256 gebunden.
 

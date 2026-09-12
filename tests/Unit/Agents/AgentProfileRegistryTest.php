@@ -28,9 +28,9 @@ final class AgentProfileRegistryTest extends TestCase
         $registry = $this->app->make(AgentProfileRegistry::class);
         $profiles = $registry->all();
 
-        self::assertSame(['codex-gpt-5.6-terra', 'copilot-cli-review', 'fake', 'grok-cli-review'], array_column($profiles, 'id'));
+        self::assertSame(['codex-gpt-5.6-terra', 'copilot-claude-sonnet-review', 'copilot-cli-review', 'fake', 'grok-cli-review'], array_column($profiles, 'id'));
         self::assertEqualsCanonicalizing(
-            ['codex_cli', 'grok_cli', 'github_copilot_cli', 'fake'],
+            ['codex_cli', 'grok_cli', 'github_copilot_cli', 'github_copilot_cli', 'fake'],
             array_column($profiles, 'providerProfileAlias'),
         );
         self::assertSame($profiles, $this->app->make(AgentProfileRegistry::class)->all());

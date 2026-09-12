@@ -16,7 +16,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Fixtures\Agents\BuildsCopilotHome;
 use Tests\TestCase;
 
-final class GitHubCopilotCliAdapterTest extends TestCase
+class GitHubCopilotCliAdapterTest extends TestCase
 {
     use BuildsCopilotHome;
 
@@ -48,6 +48,9 @@ final class GitHubCopilotCliAdapterTest extends TestCase
         self::assertSame($source, $result->usageSource);
         $observation = json_decode((string) file_get_contents($home->resultDirectory.'/copilot/observation.json'), true, 32, JSON_THROW_ON_ERROR);
         self::assertSame(hash('sha256', $adapter->prompt($context)), $observation['prompt_sha256']);
+        self::assertSame($context->model, $observation['argv'][array_search('--model', $observation['argv'], true) + 1]);
+        self::assertSame(array_slice($adapter->lastCommand, 1), $observation['argv']);
+        self::assertStringContainsString('/copilot-', str_replace('\\', '/', $adapter->lastCommand[0]));
         self::assertGreaterThan(0, $pulse);
         self::assertNotContains('--allow-all', $observation['argv']);
         self::assertNotContains('--resume', $observation['argv']);

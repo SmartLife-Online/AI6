@@ -19,6 +19,8 @@ final class AgentProfileViewTest extends AuthFeatureTestCase
             ->assertSee('codex-gpt-5.6-terra')
             ->assertSee('grok-cli-review')
             ->assertSee('copilot-cli-review')
+            ->assertSee('copilot-claude-sonnet-review')
+            ->assertSee('claude-sonnet-4.6')
             ->assertSee('fake')
             ->assertSee('implementation')
             ->assertSee('quality_review')

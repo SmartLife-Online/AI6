@@ -45,6 +45,13 @@ final class GitHubCopilotCliDoctorCheckTest extends TestCase
         self::assertStringContainsString('agent_copilot_capability_unproven', implode(' ', $result->details));
         $configuration = GitHubCopilotCliConfiguration::fromConfiguredValues();
         config(['ai6.copilot.capability_evidence' => [$configuration->evidenceKey(app(ProviderRuntimeProfileRegistry::class)->get('github-copilot-cli-v1'), AgentRole::QUALITY_REVIEW, 'gpt-5.4', 'provider_default')]]);
+        $partial = $check->run();
+        self::assertFalse($partial->passed);
+        self::assertStringContainsString('gebundener Laufzeitnachweis konfiguriert', $partial->details['copilot-cli-review / quality_review / gpt-5.4 / provider_default']);
+        self::assertSame('OK', $partial->details['copilot-claude-sonnet-review / quality_review / claude-sonnet-4.6 / provider_default statisch']);
+        self::assertSame('gesperrt: agent_copilot_capability_unproven', $partial->details['copilot-claude-sonnet-review / quality_review / claude-sonnet-4.6 / provider_default']);
+        config(['ai6.copilot.capability_evidence' => [...config('ai6.copilot.capability_evidence'),
+            $configuration->evidenceKey(app(ProviderRuntimeProfileRegistry::class)->get('github-copilot-cli-v1'), AgentRole::QUALITY_REVIEW, 'claude-sonnet-4.6', 'provider_default')]]);
         self::assertTrue($check->run()->passed);
         // A different binary, even with the same claimed version, invalidates the prior binding.
         config(['ai6.copilot.binary' => FakeCopilotBinary::create($this->wrappers, 'version_drift')]);

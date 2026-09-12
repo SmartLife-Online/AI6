@@ -100,8 +100,10 @@ final class GitHubCopilotCliAdapter implements AgentAdapter
             throw new AgentExecutionException('agent_copilot_role_unsupported');
         }
         self::assertRuntimeProfile($runtime);
-        // The pin's help config lists gpt-5.4. No unverified effort override or default model routing.
-        if ($model !== 'gpt-5.4' || $effort !== 'provider_default') {
+        // Model identifiers, including Claude, come from server configuration and the exact evidence key below;
+        // MG-01 supplies the real model evidence, not the transport pin alone.
+        // This transport has no effort override; never silently ignore a configured effort.
+        if ($effort !== 'provider_default') {
             throw new AgentExecutionException('agent_copilot_selection_unsupported');
         }
         $registered = false;

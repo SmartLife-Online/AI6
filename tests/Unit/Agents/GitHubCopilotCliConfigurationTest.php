@@ -39,9 +39,12 @@ final class GitHubCopilotCliConfigurationTest extends TestCase
         $binary = FakeCopilotBinary::create($this->wrappers);
         $context = $this->copilotContext();
         foreach ([['', '1.0.83', 'gpt-5.4', 'provider_default', 'agent_copilot_binary_missing'],
+            ['', '1.0.83', 'claude-sonnet-4.6', 'provider_default', 'agent_copilot_binary_missing'],
+            [$binary, '', 'claude-sonnet-4.6', 'provider_default', 'agent_copilot_pin_missing'],
+            [$binary, '1.0.84', 'claude-sonnet-4.6', 'provider_default', 'agent_copilot_transport_unsupported'],
             [$binary, '', 'gpt-5.4', 'provider_default', 'agent_copilot_pin_missing'],
             [$binary, '1.0.84', 'gpt-5.4', 'provider_default', 'agent_copilot_transport_unsupported'],
-            [$binary, '1.0.83', 'provider_default', 'provider_default', 'agent_copilot_selection_unsupported'],
+            [$binary, '1.0.83', 'provider_default', 'provider_default', 'agent_copilot_selection_unbound'],
             [$binary, '1.0.83', 'gpt-5.4', '--allow-all', 'agent_copilot_selection_unsupported']] as [$path, $pin, $model, $effort, $reason]) {
             $adapter = new GitHubCopilotCliAdapter(new GitHubCopilotCliConfiguration($path, $pin), app(AgentInputLimits::class), app(Redactor::class), app(RestrictedJsonDecoder::class), app(AgentProfileRegistry::class), app(CanonicalJson::class));
             try {
@@ -66,6 +69,29 @@ final class GitHubCopilotCliConfigurationTest extends TestCase
         $adapter->assertSelection($context->runtimeProfile, AgentRole::FINDING_VERIFICATION, $context->model, $context->effort, false);
         $this->expectExceptionMessage('agent_copilot_capability_unproven');
         $adapter->assertSelection($context->runtimeProfile, AgentRole::FINDING_VERIFICATION, $context->model, $context->effort);
+    }
+
+    public function test_model_identifiers_come_only_from_the_registry_and_exact_evidence(): void
+    {
+        $context = $this->copilotContext();
+        $model = 'server-configured-model';
+        config(['ai6.agent_profiles.copilot-cli-review.models' => [$model]]);
+        $this->app->forgetInstance(AgentProfileRegistry::class);
+        $binary = FakeCopilotBinary::create($this->wrappers);
+        $configuration = new GitHubCopilotCliConfiguration($binary, '1.0.83');
+        foreach ([false, true] as $withEvidence) {
+            $bound = new GitHubCopilotCliConfiguration($binary, '1.0.83', $withEvidence
+                ? [$configuration->evidenceKey($context->runtimeProfile, $context->role, $model, $context->effort)] : []);
+            $adapter = new GitHubCopilotCliAdapter($bound, app(AgentInputLimits::class), app(Redactor::class), app(RestrictedJsonDecoder::class), app(AgentProfileRegistry::class), app(CanonicalJson::class));
+            try {
+                $adapter->assertSelection($context->runtimeProfile, $context->role, $model, $context->effort);
+                self::assertTrue($withEvidence, 'A registered model still requires exact capability evidence.');
+            } catch (AgentExecutionException $exception) {
+                self::assertFalse($withEvidence, 'A server-configured model with exact evidence must be accepted.');
+                self::assertSame('agent_copilot_capability_unproven', $exception->reason);
+            }
+            self::assertSame([], $adapter->lastCommand);
+        }
     }
 
     /** @return list<array{string, mixed}> */

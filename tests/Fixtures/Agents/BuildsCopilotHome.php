@@ -46,12 +46,17 @@ trait BuildsCopilotHome
         file_put_contents(implode(DIRECTORY_SEPARATOR, [$this->root, 'token']), 'test-projection');
     }
 
+    protected function copilotModel(): string
+    {
+        return 'gpt-5.4';
+    }
+
     private function copilotContext(string $prompt = 'Prüfe das Beispiel.', AgentRole $role = AgentRole::QUALITY_REVIEW): AgentResultContext
     {
         $snapshot = new InstructionSnapshot('github_copilot_cli', [new InstructionSnapshotEntry('agents_md', 'repository', 10, 'AGENTS.md', str_repeat('a', 40), 'Bound instructions.', [])], str_repeat('b', 64));
 
         return new AgentResultContext($role, new PromptSnapshot('1', [], [$role->value => $prompt], str_repeat('c', 64)),
-            $snapshot, app(ProviderRuntimeProfileRegistry::class)->get('github-copilot-cli-v1'), ['AC-01'], '', slotId: 'slot-1', model: 'gpt-5.4', effort: 'provider_default');
+            $snapshot, app(ProviderRuntimeProfileRegistry::class)->get('github-copilot-cli-v1'), ['AC-01'], '', slotId: 'slot-1', model: $this->copilotModel(), effort: 'provider_default');
     }
 
     private function copilotManager(): ExecutionHomeManager
@@ -69,7 +74,7 @@ trait BuildsCopilotHome
         return $home;
     }
 
-    private function copilotAdapter(string $scenario = 'success', bool $evidence = true, ?AgentInputLimits $limits = null, ?string $binary = null): GitHubCopilotCliAdapter
+    protected function copilotAdapter(string $scenario = 'success', bool $evidence = true, ?AgentInputLimits $limits = null, ?string $binary = null): GitHubCopilotCliAdapter
     {
         $binary ??= FakeCopilotBinary::create($this->wrappers, $scenario);
         config(['ai6.process.policies.agent.allowed_executables' => [PHP_BINARY, $binary], 'ai6.process.policies.agent.working_roots' => [$this->root]]);

@@ -30,11 +30,15 @@ use Tests\Feature\Tickets\TicketUiTestCase;
 use Tests\Fixtures\Agents\AgentMailboxFixture;
 use Tests\Fixtures\Agents\FakeCopilotBinary;
 
-final class GitHubCopilotCliExecutionTest extends TicketUiTestCase
+class GitHubCopilotCliExecutionTest extends TicketUiTestCase
 {
     use BuildsReviewRoundFixture;
 
     private string $wrappers;
+
+    protected string $copilotProfile = 'copilot-cli-review';
+
+    protected string $copilotModel = 'gpt-5.4';
 
     protected function setUp(): void
     {
@@ -58,8 +62,8 @@ final class GitHubCopilotCliExecutionTest extends TicketUiTestCase
         $this->reviewSlotIds = [(string) Str::uuid(), (string) Str::uuid()];
 
         return new ApprovalSelection(app(AgentProfileRegistry::class)->resolve('fake', AgentRole::IMPLEMENTATION, 'fake-model', 'medium'),
-            app(ReviewerSlotFactory::class)->fromArray(array_map(static fn (string $id, string $promptProfile): array => [
-                'id' => $id, 'profile' => 'copilot-cli-review', 'model' => 'gpt-5.4', 'effort' => 'provider_default', 'prompt_profile' => $promptProfile,
+            app(ReviewerSlotFactory::class)->fromArray(array_map(fn (string $id, string $promptProfile): array => [
+                'id' => $id, 'profile' => $this->copilotProfile, 'model' => $this->copilotModel, 'effort' => 'provider_default', 'prompt_profile' => $promptProfile,
             ], $this->reviewSlotIds, ['tests', 'security'])), ApprovalLimits::fromConfiguredValues(config('ai6.project_config.server_defaults.limits'), app(AgentInputLimits::class)), $attentionUser?->getKey(), 'manual');
     }
 
@@ -72,7 +76,8 @@ final class GitHubCopilotCliExecutionTest extends TicketUiTestCase
         $binary = FakeCopilotBinary::create($this->wrappers, $scenario);
         $configuration = new GitHubCopilotCliConfiguration($binary, '1.0.83');
         config(['ai6.copilot.binary' => $binary, 'ai6.copilot.pinned_version' => '1.0.83',
-            'ai6.copilot.capability_evidence' => [$configuration->evidenceKey(app(ProviderRuntimeProfileRegistry::class)->get('github-copilot-cli-v1'), AgentRole::QUALITY_REVIEW, 'gpt-5.4', 'provider_default')],
+            'ai6.copilot.capability_evidence' => [$configuration->evidenceKey(app(ProviderRuntimeProfileRegistry::class)->get('github-copilot-cli-v1'), AgentRole::QUALITY_REVIEW, $this->copilotModel, 'provider_default')],
+            'ai6.agent_profiles.'.$this->copilotProfile.'.capability_status' => 'available',
             'ai6.process.policies.agent.allowed_executables' => [PHP_BINARY, $binary],
             'ai6.process.policies.agent.timeout_seconds' => $scenario === 'timeout' ? 2 : 300,
         ]);

@@ -286,6 +286,15 @@ return [
             'capability_status' => 'unchecked',
             'runtime_profile' => 'github-copilot-cli-v1',
         ],
+        'copilot-claude-sonnet-review' => [
+            'provider_profile' => 'github_copilot_cli',
+            'adapter' => 'github_copilot_cli',
+            'models' => ['claude-sonnet-4.6'],
+            'efforts' => ['provider_default'],
+            'roles' => ['quality_review'],
+            'capability_status' => 'unchecked',
+            'runtime_profile' => 'github-copilot-cli-v1',
+        ],
         'fake' => [
             'provider_profile' => 'fake',
             'adapter' => 'fake',

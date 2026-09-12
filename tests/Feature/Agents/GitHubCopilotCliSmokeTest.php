@@ -3,12 +3,17 @@
 namespace Tests\Feature\Agents;
 
 use App\AI6\Agents\AgentExecutionException;
+use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentResultValidator;
+use App\AI6\Agents\AgentRole;
+use App\AI6\Agents\GitHubCopilotCliAdapter;
 use App\AI6\Agents\GitHubCopilotCliConfiguration;
 use App\AI6\Prompts\PromptRenderer;
 use App\AI6\Prompts\PromptRenderRequest;
 use App\AI6\Prompts\PromptVariables;
 use App\AI6\Shared\Redaction\RedactionContext;
+use PHPUnit\Framework\AssertionFailedError;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
 use Tests\Fixtures\Agents\BuildsCopilotHome;
 use Tests\TestCase;
@@ -18,7 +23,69 @@ final class GitHubCopilotCliSmokeTest extends TestCase
 {
     use BuildsCopilotHome;
 
+    private string $smokeModel = 'gpt-5.4';
+
+    protected function copilotModel(): string
+    {
+        return $this->smokeModel;
+    }
+
     public function test_real_linux_copilot_review_with_a_fully_read_only_native_home(): void
+    {
+        $this->runReviewSmoke();
+    }
+
+    public function test_real_linux_claude_model_uses_only_the_copilot_transport(): void
+    {
+        if (getenv('AI6_RUN_COPILOT_SMOKE') !== '1') {
+            self::markTestSkipped('Claude-Modell-Smoke nur mit AI6_RUN_COPILOT_SMOKE=1.');
+        }
+        $this->smokeModel = (string) getenv('AI6_COPILOT_SMOKE_MODEL');
+        $this->assertClaudeSmokeSelection();
+        $this->runReviewSmoke();
+    }
+
+    private function assertClaudeSmokeSelection(): void
+    {
+        self::assertTrue(str_starts_with($this->smokeModel, 'claude-')
+            && app(AgentProfileRegistry::class)->supportsProviderSelection(
+                GitHubCopilotCliAdapter::PROVIDER_ALIAS, AgentRole::QUALITY_REVIEW, $this->smokeModel, 'provider_default',
+            ), 'AI6_COPILOT_SMOKE_MODEL muss ausdrücklich die konfigurierte Claude-Modellkennung benennen.');
+    }
+
+    /** @return array<string, array{string, string, string, string, bool}> */
+    public static function claudeSmokeSelections(): array
+    {
+        return [
+            'custom Claude profile' => ['claude-custom', 'github_copilot_cli', 'quality_review', 'provider_default', true],
+            'unconfigured Claude model' => ['claude-unconfigured', 'github_copilot_cli', 'quality_review', 'provider_default', false],
+            'configured non-Claude model' => ['gpt-custom', 'github_copilot_cli', 'quality_review', 'provider_default', false],
+            'wrong provider' => ['claude-custom', 'grok_cli', 'quality_review', 'provider_default', false],
+            'wrong role' => ['claude-custom', 'github_copilot_cli', 'finding_verification', 'provider_default', false],
+            'wrong effort' => ['claude-custom', 'github_copilot_cli', 'quality_review', 'high', false],
+        ];
+    }
+
+    #[DataProvider('claudeSmokeSelections')]
+    public function test_claude_smoke_preflight_uses_the_server_selection_instead_of_a_fixed_profile(string $model, string $provider, string $role, string $effort, bool $allowed): void
+    {
+        $profile = config('ai6.agent_profiles.copilot-claude-sonnet-review');
+        self::assertIsArray($profile);
+        $profile['provider_profile'] = $profile['adapter'] = $provider;
+        $profile['models'] = ['claude-custom', 'gpt-custom'];
+        $profile['roles'] = [$role];
+        $profile['efforts'] = [$effort];
+        config(['ai6.agent_profiles.custom-review' => $profile]);
+        $this->app->forgetInstance(AgentProfileRegistry::class);
+        $this->smokeModel = $model;
+        if (! $allowed) {
+            $this->expectException(AssertionFailedError::class);
+            $this->expectExceptionMessage('AI6_COPILOT_SMOKE_MODEL muss ausdrücklich die konfigurierte Claude-Modellkennung benennen.');
+        }
+        $this->assertClaudeSmokeSelection();
+    }
+
+    private function runReviewSmoke(): void
     {
         if (getenv('AI6_RUN_COPILOT_SMOKE') !== '1') {
             self::markTestSkipped('Realer Linux-Smoke nur mit AI6_RUN_COPILOT_SMOKE=1 und ausdrücklich bereitgestellter Testauthprojektion.');
@@ -49,7 +116,7 @@ final class GitHubCopilotCliSmokeTest extends TestCase
             self::assertNotFalse(copy($auth, implode(DIRECTORY_SEPARATOR, [$this->root, 'token'])));
             $redaction = new RedactionContext('smoke', null, 'copilot');
             $prompt = app(PromptRenderer::class)->snapshot([new PromptRenderRequest('quality_review', new PromptVariables([
-                'context' => json_encode(['ticket' => 'AI6-048-SMOKE', 'criterion_refs' => ['AC-01'],
+                'context' => json_encode(['ticket' => str_starts_with($this->smokeModel, 'claude-') ? 'AI6-034-SMOKE' : 'AI6-048-SMOKE', 'criterion_refs' => ['AC-01'],
                     'acceptance_criteria' => ['AC-01' => 'example.txt enthält exakt Original.'],
                     'reviewed_paths' => ['example.txt'],
                     'test_request' => 'Prüfe example.txt mit Lesetools. Versuche ausschließlich im synthetischen Workspace eine Datei forbidden.txt mit einem Schreibtool und mit einem Shelltool anzulegen; beide müssen verweigert werden. Keine externen Mutationen.',
