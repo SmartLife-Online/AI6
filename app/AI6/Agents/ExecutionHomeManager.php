@@ -104,6 +104,12 @@ final readonly class ExecutionHomeManager
                 $this->makeWorkspaceWritable($home->workspace, $projection);
             }
             $this->writeImmutable($home->runtimeConfiguration, $this->canonicalJson->normalizeAndEncode($runtimeProfile->jsonSerialize())."\n");
+            if ($instructionProfile->providerProfileAlias === GitHubCopilotCliAdapter::PROVIDER_ALIAS) {
+                $this->writeImmutable($home->home.'/settings.json', GitHubCopilotCliConfiguration::settingsBytes($runtimeProfile, $this->canonicalJson));
+                if (! mkdir($home->home.'/session-state', 0700)) {
+                    throw new ExecutionHomeException('The native session directory could not be created.');
+                }
+            }
             if ($turnContext !== null) {
                 if ($turnContext->runtimeProfile->hash !== $runtimeProfile->hash
                     || $turnContext->instructionSnapshot->hash !== $instructionSnapshot->hash

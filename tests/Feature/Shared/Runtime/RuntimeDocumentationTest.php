@@ -6,23 +6,40 @@ use PHPUnit\Framework\TestCase;
 
 final class RuntimeDocumentationTest extends TestCase
 {
-    public function test_copilot_preparation_documents_roles_inactive_pin_and_open_gate(): void
+    public function test_copilot_transport_documents_roles_and_separate_open_runtime_evidence(): void
     {
         $readme = file_get_contents(dirname(__DIR__, 4).'/README.md');
         self::assertNotFalse($readme);
-        self::assertSame(1, preg_match('/^### Copilot-CLI-Vorbereitung\R(.*?)(?=^### |\z)/ms', $readme, $matches));
+        self::assertSame(1, preg_match('/^### Copilot-CLI-Transport\R(.*?)(?=^### |\z)/ms', $readme, $matches));
 
         foreach ([
-            'Der Copilot-Adapter ist noch nicht implementiert',
-            '`github_copilot_cli` endet als `agent_adapter_unavailable`',
+            '`github_copilot_cli` löst den `GitHubCopilotCliAdapter` auf',
+            '`GitHubCopilotCliDoctorCheck`',
             '`AI6_COPILOT_BINARY`, `AI6_COPILOT_PINNED_VERSION` und `AI6_COPILOT_CREDENTIAL_REVISION` erreichen über Compose ausschließlich `worker` und `agent`',
-            '`app` erhält die Copilot-Werte nicht, da noch kein Copilot-Doctor vorhanden ist',
-            'wird heute aber weder gelesen noch geprüft',
+            'ausschließlich `quality_review`',
+            '`COPILOT_HOME` zeigt auf das vollständig read-only Home einschließlich `home/session-state`',
+            '`ai6.copilot.capability_evidence` bleibt standardmäßig leer',
+            '`AI6_COPILOT_CAPABILITY_EVIDENCE`',
+            'kommagetrennte Liste kleingeschriebener SHA-256-Werte',
+            'Compose-Weitergabe dieses neuen Wertes',
+            'Die ausgelieferte Argumentliste enthält deshalb kein `--no-experimental`',
+            'Der Vorfahren-Scan weist `.git` als Datei, Verzeichnis oder Symlink ab',
+            '`config.json`, `session-store.db`/`-wal`/`-shm`',
+            '`No authentication information found`',
+            'ohne Modellturn',
+            'Outcome, Exitcode und die zentral redigierte Diagnose',
+            'neue Invocation ohne natives Resume',
+            'AI6_RUN_COPILOT_SMOKE=1',
             'Ein gesetzter Pin gibt keine CLI-Version frei',
-            'Das Gate `AI6-042/MG-01` bleibt offen',
+            'ergebnisfreie Vorlage',
             'Der Home-Vertragsentwurf bleibt bis zu diesem Laufzeitnachweis für eine Planübernahme gesperrt',
         ] as $statement) {
             self::assertStringContainsString($statement, $matches[1]);
+        }
+        self::assertStringNotContainsString('`TEMP`/`TMP` vor dem Test', $matches[1]);
+        self::assertStringNotContainsString('ist noch nicht umgesetzt', $matches[1]);
+        foreach (['worker', 'agent'] as $service) {
+            self::assertStringContainsString('AI6_COPILOT_CAPABILITY_EVIDENCE', $this->serviceRow($readme, $service), $service);
         }
     }
 

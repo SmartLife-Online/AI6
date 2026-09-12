@@ -241,11 +241,7 @@ final class ControlProcessRunner
     private function environment(ProcessRequest $request): array
     {
         $current = getenv();
-        $environment = [];
-
-        foreach ($current as $name => $value) {
-            $environment[$name] = false;
-        }
+        $environment = $this->clearedEnvironment(includeLocale: false);
 
         foreach ($request->environmentAllowlist as $name) {
             if (array_key_exists($name, $request->environment)) {
@@ -472,16 +468,18 @@ final class ControlProcessRunner
     }
 
     /** @return array<string, string|false> */
-    private function clearedEnvironment(): array
+    private function clearedEnvironment(bool $includeLocale = true): array
     {
         $environment = [];
 
-        foreach (getenv() as $name => $value) {
+        foreach (getenv() + $_ENV as $name => $value) {
             $environment[$name] = false;
         }
 
-        $environment['LC_ALL'] = 'C';
-        $environment['LANG'] = 'C';
+        if ($includeLocale) {
+            $environment['LC_ALL'] = 'C';
+            $environment['LANG'] = 'C';
+        }
 
         return $environment;
     }

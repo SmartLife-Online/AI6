@@ -18,6 +18,7 @@ use App\AI6\Agents\CredentialRevisionRegistry;
 use App\AI6\Agents\ExecutionHome;
 use App\AI6\Agents\ExecutionHomeManager;
 use App\AI6\Agents\FakeAgentAdapter;
+use App\AI6\Agents\GitHubCopilotCliAdapter;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Auth\Models\User;
 use App\AI6\Projects\EffectiveProjectConfiguration;
@@ -87,7 +88,8 @@ final class CodexCliExecutionTest extends TicketUiTestCase
     {
         self::assertInstanceOf(CodexCliAdapter::class, $this->app->makeWith(AgentAdapter::class, ['providerAlias' => 'codex_cli']));
         self::assertInstanceOf(FakeAgentAdapter::class, $this->app->makeWith(AgentAdapter::class, ['providerAlias' => 'fake']));
-        foreach (['grok_cli', 'github_copilot_cli', 'not-implemented'] as $alias) {
+        self::assertInstanceOf(GitHubCopilotCliAdapter::class, $this->app->makeWith(AgentAdapter::class, ['providerAlias' => 'github_copilot_cli']));
+        foreach (['grok_cli', 'not-implemented'] as $alias) {
             try {
                 $this->app->makeWith(AgentAdapter::class, ['providerAlias' => $alias]);
                 self::fail('The alias '.$alias.' must not resolve.');

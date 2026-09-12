@@ -70,6 +70,27 @@ PHP;
         self::assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/D', $output->limitResult->hash);
     }
 
+    public function test_environment_only_values_cannot_reappear_in_children_or_signal_helpers(): void
+    {
+        $name = 'AI6_PROCESS_ENV_ONLY';
+        self::assertFalse(getenv($name));
+        self::assertArrayNotHasKey($name, $_ENV);
+        $_ENV[$name] = 'synthetic-must-not-pass';
+        try {
+            $runner = $this->runner(timeout: 5, outputLimit: 4096);
+            $result = $runner->run($this->request([
+                PHP_BINARY, '-r', 'echo getenv($argv[1]) === false ? "missing" : "present";', $name,
+            ]));
+            self::assertSame(ProcessOutcome::SUCCEEDED, $result->outcome);
+            self::assertSame('missing', $result->output);
+            $helperEnvironment = (new ReflectionMethod($runner, 'clearedEnvironment'))->invoke($runner);
+            self::assertArrayHasKey($name, $helperEnvironment);
+            self::assertFalse($helperEnvironment[$name]);
+        } finally {
+            unset($_ENV[$name]);
+        }
+    }
+
     public function test_a_running_process_can_be_cancelled_and_errors_are_centrally_redacted(): void
     {
         $runner = $this->runner(timeout: 10, outputLimit: 4096);

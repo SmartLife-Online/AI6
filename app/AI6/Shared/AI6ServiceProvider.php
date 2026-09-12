@@ -16,6 +16,8 @@ use App\AI6\Agents\CredentialRevisionRegistry;
 use App\AI6\Agents\DelegatingProcessIsolationBoundary;
 use App\AI6\Agents\ExecutionHomeManager;
 use App\AI6\Agents\FakeAgentAdapter;
+use App\AI6\Agents\GitHubCopilotCliAdapter;
+use App\AI6\Agents\GitHubCopilotCliConfiguration;
 use App\AI6\Agents\InstructionPatchChannel;
 use App\AI6\Agents\InstructionProfileRegistry;
 use App\AI6\Agents\InstructionSnapshotResolver;
@@ -136,6 +138,7 @@ use App\AI6\Shared\Config\StrictPositiveIntegerParser;
 use App\AI6\Shared\Doctor\CheckerRuntimeDoctorCheck;
 use App\AI6\Shared\Doctor\CodexCliDoctorCheck;
 use App\AI6\Shared\Doctor\DoctorCommand;
+use App\AI6\Shared\Doctor\GitHubCopilotCliDoctorCheck;
 use App\AI6\Shared\Doctor\RedactionKeyringDoctorCheck;
 use App\AI6\Shared\Doctor\SecurityPolicyDoctorCheck;
 use App\AI6\Shared\Http\HttpSecurityConfiguration;
@@ -248,6 +251,12 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(AgentResultImporter::class);
         $this->app->singleton(FakeAgentAdapter::class);
         $this->app->singleton(CodexCliConfiguration::class, static fn (): CodexCliConfiguration => CodexCliConfiguration::fromConfiguredValues());
+        $this->app->singleton(GitHubCopilotCliConfiguration::class, static fn (Application $app): GitHubCopilotCliConfiguration => GitHubCopilotCliConfiguration::fromConfiguredValues($app->make(CanonicalJson::class)));
+        $this->app->singleton(GitHubCopilotCliAdapter::class, static fn (Application $app): GitHubCopilotCliAdapter => new GitHubCopilotCliAdapter(
+            $app->make(GitHubCopilotCliConfiguration::class), $app->make(AgentInputLimits::class),
+            $app->make(Redactor::class), $app->make(RestrictedJsonDecoder::class),
+            $app->make(AgentProfileRegistry::class), $app->make(CanonicalJson::class),
+        ));
         $this->app->singleton(
             CodexCliAdapter::class,
             static fn (Application $app): CodexCliAdapter => new CodexCliAdapter(
@@ -261,6 +270,7 @@ final class AI6ServiceProvider extends ServiceProvider
             return match ($parameters['providerAlias'] ?? 'fake') {
                 'fake' => $app->make(FakeAgentAdapter::class),
                 CodexCliAdapter::PROVIDER_ALIAS => $app->make(CodexCliAdapter::class),
+                GitHubCopilotCliAdapter::PROVIDER_ALIAS => $app->make(GitHubCopilotCliAdapter::class),
                 default => throw new AgentExecutionException('agent_adapter_unavailable'),
             };
         });
@@ -539,6 +549,7 @@ final class AI6ServiceProvider extends ServiceProvider
                 new SecurityPolicyDoctorCheck($app->make(SecurityPolicy::class)),
                 new RedactionKeyringDoctorCheck($app->make(RedactionKeyringFactory::class)),
                 new CheckerRuntimeDoctorCheck,
+                new GitHubCopilotCliDoctorCheck,
                 new CodexCliDoctorCheck(
                     $app->make(AgentProfileRegistry::class),
                     $app->make(ProviderRuntimeProfileRegistry::class),
@@ -553,6 +564,7 @@ final class AI6ServiceProvider extends ServiceProvider
         $instructionProfiles = $this->app->make(InstructionProfileRegistry::class);
         $this->app->make(AgentInputLimits::class);
         $this->app->make(CodexCliConfiguration::class);
+        $this->app->make(GitHubCopilotCliConfiguration::class);
         foreach ($agentProfiles->all() as $agentProfile) {
             $runtimeProfiles->get($agentProfile->runtimeProfileId);
             $instructionProfiles->get($agentProfile->providerProfileAlias);

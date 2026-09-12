@@ -35,14 +35,17 @@ final class AgentProcessBoundaryTest extends TestCase
     public function test_agent_policy_and_real_child_environment_exclude_foreign_access(): void
     {
         $root = dirname(__DIR__, 3);
-        $forbidden = ['APP_KEY', 'DB_DATABASE', 'MAIL_PASSWORD', 'AI6_GIT_SSH_KEY', 'AI6_GIT_KNOWN_HOSTS', 'SESSION_DRIVER'];
+        $forbidden = ['APP_KEY', 'DB_DATABASE', 'MAIL_PASSWORD', 'AI6_GIT_SSH_KEY', 'AI6_GIT_KNOWN_HOSTS', 'SESSION_DRIVER', 'AI6_COPILOT_CAPABILITY_EVIDENCE'];
         $configured = ProcessPolicyRegistry::fromConfiguredValues()->get(ProcessPolicyName::AGENT);
         self::assertSame(
-            [PHP_BINARY, config('ai6.codex.binary')],
+            [PHP_BINARY, config('ai6.codex.binary'), config('ai6.copilot.binary')],
             $configured->allowedExecutables,
-            'The shipped agent policy names exactly the FakeAgent executable and the pinned Codex binary (AI6-033).',
+            'The shipped agent policy names exactly PHP and the configured Codex and Copilot binaries.',
         );
         self::assertContains('CODEX_HOME', $configured->environmentAllowlist);
+        self::assertContains('COPILOT_HOME', $configured->environmentAllowlist);
+        self::assertContains('COPILOT_CACHE_HOME', $configured->environmentAllowlist);
+        self::assertContains('COPILOT_GITHUB_TOKEN', $configured->environmentAllowlist);
         foreach ($forbidden as $name) {
             self::assertNotContains($name, $configured->environmentAllowlist);
             putenv($name.'=must-not-pass');
@@ -97,7 +100,7 @@ final class AgentProcessBoundaryTest extends TestCase
                 'ai6.codex' => $reloaded['codex'],
             ]);
             $policy = ProcessPolicyRegistry::fromConfiguredValues()->get(ProcessPolicyName::AGENT);
-            self::assertSame([PHP_BINARY], $policy->allowedExecutables, 'Only Codex is locked; the FakeAgent executable stays allowed.');
+            self::assertSame([PHP_BINARY, config('ai6.copilot.binary')], $policy->allowedExecutables, 'Only Codex is locked; PHP and Copilot stay allowed.');
             self::assertFalse(CodexCliConfiguration::fromConfiguredValues()->binaryPresent());
 
             $doctor = new CodexCliDoctorCheck(

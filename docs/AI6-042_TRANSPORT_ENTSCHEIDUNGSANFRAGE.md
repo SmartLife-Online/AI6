@@ -2,6 +2,72 @@
 
 Stand: 10. September 2026. Kein Abnahmeprotokoll, kein bestandenes Gate und keine Änderung des Ticketstatus.
 
+## Ergänzung durch AI6-048 am 11. September 2026
+
+Der nachstehende Ausgangsbefund dokumentiert den historischen Stand von AI6-042. AI6-048 ergänzt jetzt Adapter, Containerbindung, Doctor, Fake und vorbereiteten Smoke. Die Entwicklung erfolgt auf ausdrückliche Anweisung ohne vorherigen EXT-01-Lauf; den realen Linux-/Copilot-Test übernimmt der Auftraggeber nach der Entwicklung. Das ist keine behauptete Laufzeitevidenz und keine Änderung eines Gateergebnisses.
+
+Turnfreie lokale Gegenproben am bereits untersuchten Windows-Paket 1.0.83 bestätigen `--version`, die Hilfe für den programmatischen stdin-Modus, `--silent --stream off --output-format text`, getrennte Tool-Allow-/Excludelists sowie `--usage-output-file`. Das ausgelieferte Paket liest bei fehlendem `-p` den Prompt von stdin. Die Modellhilfe nennt `gpt-5.4`; ein Effortoverride wird nicht vorausgesetzt. Offizielle Referenzen: [Release v1.0.83](https://github.com/github/copilot-cli/releases/tag/v1.0.83) und [Copilot-CLI-Referenz](https://docs.github.com/en/copilot/reference/cli-command-reference). Der versionsgebundene Hilfetext und das Verhalten dieses Pakets sind maßgeblich, nicht eine spätere Veränderung der Onlinehilfe.
+
+Eine frische `settings.json` mit `disabledSkills` für `customize-cloud-agent`, `discover-resources` und `github-pr-media` bewirkte bei `plugins list --json`, dass alle drei zuvor aktivierten eingebauten Skills als `enabled: false` erschienen. Ein vorhandenes `AGENTS.md` wurde zusätzlich als Repositoryinstruktion gemeldet. Diese Gegenprobe belegt die Wirkung der nativen Materialisierung, keinen Modellturn und keine tatsächliche Toolverweigerung. Die Einstellungen entstehen zentral vor der Homeversiegelung; die native Sessionablage bleibt read-only. Es wird keine Sessionprojektion eingeführt.
+
+`GitHubCopilotCliSmokeTest` prüft mit ausdrücklichem Flag den Kandidaten in Linux unter einer unprivilegierten Identität, schreibt wertfreie Bindungsevidenz und unterscheidet Erfolg von einem zunächst unklaren Fehler. Ein allgemeiner Providerfehler wird nicht in einen bewiesenen Session-Schreibfehler umgedeutet. Für einen ursächlichen Schreibschutzbefund ist weiterhin die konkrete Diagnose erforderlich. Der Smoke wurde hier nicht mit realem Provider ausgeführt. Reale Toolversuche und vollständige Agentrollen-Isolation bleiben Teil der Abnahmevorlage `AI6-048_MG-01_ABNAHMEPROTOKOLL.md`.
+
+Die folgenden historischen Aussagen über einen fehlenden Adapter beschreiben ausschließlich den Stand vor dieser Nachlieferung. Die dortige Evidenzsperre und die bedingte Vertragsuntersuchung bleiben unverändert gültig.
+
+### Nachprüfung des Reviews am 11. September 2026
+
+Die turnfreien Gegenproben verwenden dasselbe offizielle Windows-x64-Paket 1.0.83 wie der Ausgangsbefund. Binary-SHA-256 von `copilot.exe`: `d3f3bb7b8bbf68357ad29f514a179d09f76135483d8bfb643131b8600f671ee2`; Archiv-SHA-256 weiterhin `0e07221a275fdf7e61619c53566e3a421fd646d74d8e9ca491dbbff221f22945`. Es wurden ausschließlich frische, beschreibbare synthetische Homes und Workspaces verwendet, keine Anmeldung und keine Providercredentials. Der uncommittete Adapterstand ist damit nicht als Implementierungscommit abgenommen.
+
+**Permission- und Toolnamen:** `copilot help permissions` des Pins unterscheidet verfügbare Toolnamen von Permission-Patterns. Die Kind-Liste nennt `shell`, `write`, `url` und konkrete MCP-Servernamen. `read` und `memory` sind keine definierten Permission-Kinds; `--allow-tool=read` entfällt, `--deny-tool` lautet `shell,write,url,github-mcp-server`. Die positive Toolgrenze bleibt exakt `view,glob,grep`; die Excludelist ergänzt `delegate`, `read_bash`, `write_bash`, `stop_bash`, `sql` und `fetch_copilot_cli_documentation`. Shell-/Dokumentationsnamen sind im ausgelieferten `app.js` beziehungsweise `runtime.node` referenziert; diese Namensevidenz ist kein Nachweis tatsächlicher Toolverweigerung. Eine Behauptung des Reviews wurde widerlegt: `store_memory` ist im Pin vorhanden. Die turnfreie native Funktion `memoryToolNames()` liefert `{read: 'read_memories', store: 'store_memory', vote: 'vote_memory'}`. Der bestehende Ausschluss `store_memory` bleibt deshalb erhalten. Die Nachprüfung ergänzt `read_memories` und `vote_memory` aus derselben Namensevidenz in `runtime.node`, sodass alle drei vom Pin benannten Memory-Tools explizit ausgeschlossen sind. `memory: false` und die positive Toolgrenze bleiben unabhängig davon wirksam zu prüfen.
+
+**Settings-Schreibprobe:** Beide Promptstarts bekamen dieselben Argumente, einmal mit und einmal ohne `--no-experimental`. Die folgende Liste zeigt den aktuellen Adapterstand; die Ausschlüsse `read_memories` und `vote_memory` wurden erst bei der anschließenden Nachprüfung ergänzt und waren nicht Teil dieser Schreibprobe. Der Prompt kam über stdin; beide Prozesse endeten vor einem Modellturn mit Exitcode `1` und `Error: No authentication information found.`. `experimental` blieb in beiden Dateien `false`. Die Variante mit Flag schrieb die Datei dennoch als eingerücktes JSON neu. `plugins list --json` allein zeigte diesen Schreibeffekt nicht; dort blieb der Hash in beiden Varianten gleich. Der Fehler wird deshalb ausdrücklich am programmatischen Promptstart geprüft.
+
+```text
+--no-auto-update --no-remote-export --no-ask-user --no-color
+--disable-builtin-mcps --disallow-temp-dir
+--available-tools=view,glob,grep
+--excluded-tools=bash,powershell,write,edit,create,task,skill,web_fetch,web_search,store_memory,read_memories,vote_memory,delegate,read_bash,write_bash,stop_bash,sql,fetch_copilot_cli_documentation,github-mcp-server
+--deny-tool=shell,write,url,github-mcp-server
+--model gpt-5.4 --silent --stream off --output-format text
+--log-level none --log-dir <result/copilot>
+--usage-output-file <result/copilot/usage.json>
+```
+
+Die Pfadplatzhalter waren absolute Pfade im frischen Ausgabebaum. Die ausgelieferte Argumentliste verwendet nach ausdrücklicher Freigabe die Variante ohne `--no-experimental`, inzwischen mit den beiden zusätzlich ausgeschlossenen Memory-Tools. Die versiegelte Materialisierung von `experimental: false` bleibt erhalten. Die Hashwerte dokumentieren die damalige Schreibprobe, keine erneute native Prüfung der ergänzten Liste.
+
+| Promptstart | SHA-256 vorher | SHA-256 nachher |
+| --- | --- | --- |
+| Mit `--no-experimental` | `0c1d4ee99e44542a89fbb4ccd286dce60403030078fbf69bba87e265a3d0fdb9` | `7b295a4f9f69ec55e2d93f2d3454060337b96d6aec06d6f9d31e575e30fb508c` |
+| Ohne `--no-experimental` | `0c1d4ee99e44542a89fbb4ccd286dce60403030078fbf69bba87e265a3d0fdb9` | `0c1d4ee99e44542a89fbb4ccd286dce60403030078fbf69bba87e265a3d0fdb9` |
+
+**Vor-Auth-Schreibmenge:** Der folgende Vorher-/Nachher-Bestand entstand in beiden Varianten. `<uuid>` normalisiert ausschließlich die zufällige Invocation-ID. Vorher enthielt `home/` nur `auth/`, das leere `session-state/` und die materialisierte `settings.json`.
+
+```text
+home/ nach dem Auth-Abbruch:
+  auth/
+  settings.json
+  config.json                                      neu
+  session-store.db                                 neu
+  session-store.db-wal                             neu
+  session-store.db-shm                             neu
+  session-state/<uuid>/                            neu
+    .workspace-fork.lock
+    checkpoints/index.md
+    files/
+    research/
+    rewind-file-snapshots/tracking.json
+    workspace.yaml
+  AppData/Local/Microsoft/PowerShell/telemetry.uuid  neu, Windows-Profilprobe
+```
+
+Die Probe setzte `HOME`, `USERPROFILE` und `COPILOT_HOME` auf das frische Home; `COPILOT_CACHE_HOME`, `TMPDIR`, `TEMP` und `TMP` auf getrennte Pfade im Ergebnisbaum. Nur System-/Suchpfade sowie `LANG`/`LC_ALL` kamen hinzu; `COPILOT_GITHUB_TOKEN`, `GH_TOKEN` und `GITHUB_TOKEN` waren nicht gesetzt. Der zusätzliche `AppData`-Pfad stammt aus der Windows-Profilauflösung, nicht aus einem freigegebenen AI6-Schreibziel. Auch mit unveränderter Settings-Datei erzeugt der Pin somit unzulässigen nativen Zustand. `assertHome()` verweigert die neuen Homewurzeleinträge mit `agent_copilot_home_config_unapproved` und eine gefüllte Sessionablage mit `agent_copilot_native_state_unapproved`. Eine bloße Session-Schreibprojektion würde die zusätzlichen Rootdateien nicht lösen.
+
+Die Vor-Auth-Schreibmenge unter Windows ist damit beobachtet, nicht mehr nur aus Pfadfunktionen abgeleitet. Offen unter EXT-01 bleibt die Linux-Startfrage **bei tatsächlich verweigerten Writes**: funktioniert der Reviewturn, scheitert er ursächlich am Schreibschutz oder bleibt die Ursache unklar? Dieser Befund erteilt weder eine Schreibausnahme noch eine Capabilityfreigabe. Reale Tool-/Discovery-/Credential- und Isolationsnachweise sowie MG-01 bleiben ebenfalls offen.
+
+**Fehlerevidenz:** Ein terminaler Copilot-Prozess übergibt Outcome, Exitcode und die bereits vom zentralen ProcessRunner redigierte stderr-Diagnose an `AgentExecutionException`, auch wenn die Home-Nachprüfung anschließend verweigert. Der Smoke protokolliert diese Angaben zusammen mit Diagnose-SHA-256, Promptbindung und Homevergleich vor der Bereinigung. Ein Exitcode oder der Text „permission denied“ allein setzt keinen automatischen Erfolgs- oder Schreibschutzbefund; die ursächliche Einordnung bleibt an der gebundenen Diagnose zu prüfen.
+
+**Instanzkonfiguration:** `config/ai6.php` liest `AI6_COPILOT_CAPABILITY_EVIDENCE` als kommagetrennte Liste. Leerstellen an den Eintragsrändern und leere Einträge werden am Ursprung entfernt; die bestehende strikte SHA-256-Validierung in `GitHubCopilotCliConfiguration::fromConfiguredValues()` bleibt bestehen. Die separat beantragte Weitergabe dieses neuen Wertes an ausschließlich `worker` und `agent` in `docker-compose.yml` ist nach ausdrücklicher menschlicher Freigabe umgesetzt und im Files-Scope von AI6-048 erfasst. Der neue Wert gehört nicht in das Environment eines Providerkindprozesses.
+
 ## Ergebnis und bereits umgesetzter Umfang
 
 Die ausdrücklich freigegebene Konfigurationsweitergabe ist umgesetzt: Binary, Versionspin und Credentialrevision erreichen ausschließlich Worker und Agent. Für App existiert noch kein Copilot-Doctor. `tickets/AI6-042.md` führt `docker-compose.yml` und den zugehörigen Compose-Vertragstest in `files` und im Initial Scope. Mounts und Isolationskontrollen wurden nicht verändert.
