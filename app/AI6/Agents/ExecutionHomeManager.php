@@ -95,7 +95,7 @@ final readonly class ExecutionHomeManager
                     throw new ExecutionHomeException('Isolated writable execution directory permissions could not be applied.');
                 }
             }
-            $projection = $this->copyTree($exportedTree, $home->workspace);
+            $projection = $this->copyTree($exportedTree, $home->workspace, $instructionProfile->providerProfileAlias);
             $this->materializeInstructions($home, $instructionProfile, $instructionSnapshot);
             foreach ($instructionSnapshot->entries as $entry) {
                 $projection[$entry->repositoryPath] = $entry->contentSha256;
@@ -108,6 +108,17 @@ final readonly class ExecutionHomeManager
                 $this->writeImmutable($home->home.'/settings.json', GitHubCopilotCliConfiguration::settingsBytes($runtimeProfile, $this->canonicalJson));
                 if (! mkdir($home->home.'/session-state', 0700)) {
                     throw new ExecutionHomeException('The native session directory could not be created.');
+                }
+            }
+            if ($instructionProfile->providerProfileAlias === GrokCliAdapter::PROVIDER_ALIAS) {
+                $this->writeImmutable($home->home.'/config.toml', GrokCliConfiguration::settingsBytes($runtimeProfile));
+                $this->writeImmutable($home->home.'/sandbox.toml', GrokCliConfiguration::sandboxBytes());
+                $this->writeImmutable($home->home.'/hooks-paths', '');
+                // The agent creates its private session target (0700) in the output
+                // directory when the invocation starts; no group-read permission is added.
+                if (! mkdir($home->home.'/hooks', 0700) || ! mkdir($home->resultDirectory.'/grok', 01730)
+                    || ! chmod($home->resultDirectory.'/grok', 01730)) {
+                    throw new ExecutionHomeException('The Grok invocation directories could not be created.');
                 }
             }
             if ($turnContext !== null) {
@@ -131,6 +142,21 @@ final readonly class ExecutionHomeManager
                 $this->writeImmutable($destination, $bytes);
             }
             $this->sealTree($home->root);
+            if ($instructionProfile->providerProfileAlias === GrokCliAdapter::PROVIDER_ALIAS) {
+                // Add only this server-owned link; never traverse it while sealing inputs.
+                if (! chmod($home->home, 0750)) {
+                    throw new ExecutionHomeException('The native session link could not be prepared.');
+                }
+                try {
+                    if (! symlink($home->resultDirectory.'/grok-sessions', $home->home.'/sessions')) {
+                        throw new ExecutionHomeException('The native session link could not be created.');
+                    }
+                } finally {
+                    if (! chmod($home->home, 0550)) {
+                        throw new ExecutionHomeException('The native home could not be sealed.');
+                    }
+                }
+            }
         } catch (\Throwable $exception) {
             $this->cleanupFailedCreation($home, $exception);
         }
@@ -286,7 +312,7 @@ final readonly class ExecutionHomeManager
     }
 
     /** @return array<string, null> */
-    private function copyTree(string $source, string $target): array
+    private function copyTree(string $source, string $target, string $providerAlias): array
     {
         $omitted = [];
         $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($source, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST);
@@ -304,7 +330,9 @@ final readonly class ExecutionHomeManager
             // carries `skills/`, `hooks.json` and `plugins/marketplace.json` —
             // and joins `.codex`/`.claude` as a directory a managed repository
             // may carry but no approved runtime profile ever activates (AGT-009).
-            if (array_intersect($segments, ['.git', '.agents', '.codex', '.claude']) !== []
+            if (($providerAlias === GrokCliAdapter::PROVIDER_ALIAS && (array_intersect($segments, ['.grok', '.cursor']) !== []
+                    || in_array(basename($portable), [...GrokCliConfiguration::DISCOVERY_NAMES, '.envrc'], true)))
+                || array_intersect($segments, ['.git', '.agents', '.codex', '.claude']) !== []
                 || in_array(basename($portable), ['AGENTS.md', 'AGENTS.override.md', '.mcp.json', 'mcp.json', '.gitconfig', '.git-credentials'], true)) {
                 if ($entry->isFile()) {
                     $omitted[$portable] = null;

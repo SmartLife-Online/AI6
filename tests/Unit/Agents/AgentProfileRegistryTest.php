@@ -36,6 +36,7 @@ final class AgentProfileRegistryTest extends TestCase
         self::assertSame($profiles, $this->app->make(AgentProfileRegistry::class)->all());
         self::assertSame(CapabilityStatus::UNCHECKED, $registry->get('codex-gpt-5.6-terra')->capabilityStatus);
         self::assertFalse($registry->get('codex-gpt-5.6-terra')->capabilityStatus->selectable());
+        self::assertSame([AgentRole::QUALITY_REVIEW, AgentRole::FINDING_VERIFICATION], $registry->get('grok-cli-review')->roles);
     }
 
     public function test_unknown_selection_values_and_cross_profile_combinations_fail_closed(): void

@@ -1,6 +1,8 @@
-# AI6 – Implementierungsplan V1.7.7 – Ticket-Ready, Lean & Secure
+# AI6 – Implementierungsplan V1.7.8 – Ticket-Ready, Lean & Secure
 
-**Stand:** 11. September 2026
+**Stand:** 12. September 2026
+
+**Revision V1.7.8:** Auf ausdrückliche menschliche Freigabe vom 12. September 2026 erhält ausschließlich `grok_cli` eine turnlokale Sessionumleitung nach §4.2: Ein fester serverseitiger Link führt in die frische Ergebniswurzel; Home, Auth und Instruktionen bleiben read-only. AI6-041 umfasst die erforderliche Bubblewrap-/Agent-Seccomp-Bereitstellung ohne Host-Capabilities. Andere Providerverträge, Sessionautorität, Ticketstatus und offene Abnahmegates bleiben unverändert.
 
 **Revision V1.7.7:** Auf ausdrückliche menschliche Freigabe des Folgeauftrags aus `docs/AI6-048_FOLGEAUFTRAG_ENTSCHEIDUNGSANTRAG.md` wird der Backlog von 53 auf 54 Blueprints erweitert. `AI6-048` liefert als Korrekturauftrag den fehlenden ausführbaren GitHub-Copilot-CLI-Transport nach: Der integrierte Stand von `AI6-042` enthält nur Konfigurationsvorbereitung, obwohl sein Ticket `done` trägt. Der veröffentlichte Vertrag von `AI6-042`, seine Evidenz-IDs und sein Status werden weder verkleinert noch umgedeutet. `AI6-048` konsumiert die vorhandenen gemeinsamen Nähte und übernimmt die noch fehlende Adapter-, Doctor-, Fake- und Smoke-Lieferung ausdrücklich als eigenen Umfang. Der unveränderte versiegelte Homevertrag bleibt bindend; die in der Copilot-Entscheidungsanfrage untersuchte Session-Schreibprojektion wird nicht freigegeben. Zugleich wird `AI6-034` bei unveränderlicher ID und unverändertem Zieltext auf Claude-Modellprofile ausschließlich über `github_copilot_cli` ausgerichtet: keine Claude-CLI, keine native Claude-Discovery und keine zweite Transportlogik. Seine Abhängigkeiten erhalten `AI6-042` und `AI6-048`, seine Requirement-Refs zusätzlich `AGT-010`. `AGT-001`, die betroffenen Übersichten, §14.1, §16 und §21 werden konsistent nachgezogen. Die bereits durchgeführte Rebase-Prüfung von `AI6-034` bleibt als Evidenz erhalten; ihr offenes Gate schließt erst nach Lieferung und Prüfung des Copilot-Vertrags. Bestehende Ticketstatuswerte und AC-/TC-/MG-IDs bleiben unverändert. Die Änderung erteilt weder eine Capability-Freigabe noch eine reale Abnahme.
 
@@ -363,6 +365,8 @@ Nur der Worker sieht Managed-Clone und echte Git-Worktrees. Für Agent, Checker 
 | scheduler | nein | nein | nein | ja | nein |
 
 Persistente Providercredentials und Loginzustände liegen pro Providerprofil in getrennten, nicht als Home verwendeten Credential-Stores. Für jeden Agentenslot beziehungsweise jede neue Session entsteht ein frisches versiegeltes Execution-Home. Es enthält nur die hashgebundene Runtime-Konfiguration und eine minimale read-only Authprojektion für genau das gewählte Profil; Cache, History, sonstige Home-Konfiguration, Instruktionen, Plugins und Credentials anderer Profile werden nicht übernommen. Rotation oder Logout invalidiert aktive Projektionen und Capabilities, ohne dass der Webprozess Credentialbytes liest. Nach Prozessende wird die Projektion zerstört.
+
+Für `grok_cli` gilt die ausdrücklich freigegebene Ausnahme aus AI6-041: Der Server erzeugt `home/sessions` als festen, für den Agenten unveränderbaren Link auf `resultDirectory/grok-sessions`. Nur dieses frische Ziel ist beschreibbar; reguläre Home-Inhalte einschließlich Konfiguration, Auth und Instruktionen bleiben versiegelt. Der Agent erzeugt das private Ziel mit `0700` und entfernt seine nativen Sessiondateien nach Prozessende; anschließend räumt der bestehende Home-/Output-Cleanup die übrigen Turnpfade auf. Die Sessiondateien werden nie zwischen Turns übernommen oder für Resume verwendet. Projektseitige Links bleiben verboten. Diese Ausnahme konkretisiert auch die Homegrenze aus §10.2. Die Agentrolle benötigt dafür Bubblewrap und eine eng begrenzte Seccomp-Policy für dessen eigene User-/Mount-Namespaces, ohne Host-Capabilities oder Vollzugriffs-Fallback.
 
 ### 4.3 Module
 

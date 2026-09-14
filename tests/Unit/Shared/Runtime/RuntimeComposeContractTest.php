@@ -117,7 +117,7 @@ final class RuntimeComposeContractTest extends TestCase
             'AI6_AGENT_EXECUTION_ROOT', 'AI6_AGENT_OUTPUT_ROOT', 'AI6_CHECKER_EXECUTION_ROOT', 'AI6_CHECKER_OUTPUT_ROOT',
             'AI6_CODEX_CREDENTIAL_REVISION', 'AI6_GROK_CREDENTIAL_REVISION', 'AI6_COPILOT_CREDENTIAL_REVISION',
             'AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF',
-            'AI6_COPILOT_BINARY', 'AI6_COPILOT_PINNED_VERSION', 'AI6_COPILOT_CAPABILITY_EVIDENCE',
+            'AI6_COPILOT_BINARY', 'AI6_COPILOT_PINNED_VERSION', 'AI6_COPILOT_CAPABILITY_EVIDENCE', 'AI6_GROK_BINARY', 'AI6_GROK_PINNED_VERSION', 'AI6_GROK_CAPABILITY_EVIDENCE',
             'AI6_EXECUTION_DIRECTORY', 'AI6_GIT_ALLOWED_HOSTS', 'AI6_GIT_ALLOWED_REMOTE_PATHS', 'AI6_GIT_ALLOWED_REF_PATTERNS',
             'AI6_GIT_PINNED_HOST_KEYS', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE',
             'AI6_WORKER_TIMEOUT', 'APP_DEBUG', 'APP_ENV', 'APP_KEY', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',
@@ -134,7 +134,7 @@ final class RuntimeComposeContractTest extends TestCase
             'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE', 'DB_QUEUE_RETRY_AFTER',
             'DB_SYNCHRONOUS', 'LOG_CHANNEL', 'QUEUE_CONNECTION',
         ],
-        'agent' => [...self::REDACTION_ENVIRONMENT, 'AI6_AGENT_EXECUTION_ROOT', 'AI6_AGENT_OUTPUT_ROOT', 'AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF', 'AI6_CODEX_CREDENTIAL_REVISION', 'AI6_COPILOT_BINARY', 'AI6_COPILOT_PINNED_VERSION', 'AI6_COPILOT_CAPABILITY_EVIDENCE', 'AI6_COPILOT_CREDENTIAL_REVISION', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'LOG_CHANNEL'],
+        'agent' => [...self::REDACTION_ENVIRONMENT, 'AI6_AGENT_EXECUTION_ROOT', 'AI6_AGENT_OUTPUT_ROOT', 'AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF', 'AI6_CODEX_CREDENTIAL_REVISION', 'AI6_COPILOT_BINARY', 'AI6_COPILOT_PINNED_VERSION', 'AI6_COPILOT_CAPABILITY_EVIDENCE', 'AI6_GROK_BINARY', 'AI6_GROK_PINNED_VERSION', 'AI6_GROK_CAPABILITY_EVIDENCE', 'AI6_COPILOT_CREDENTIAL_REVISION', 'AI6_GROK_CREDENTIAL_REVISION', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'LOG_CHANNEL'],
         'checker' => [...self::REDACTION_ENVIRONMENT, 'AI6_CHECKER_EXECUTION_ROOT', 'AI6_CHECKER_OUTPUT_ROOT', 'AI6_CHECKER_WORKSPACE_ROOT', 'AI6_CHECKER_UNSHARE_BINARY', 'AI6_CHECKER_NAMESPACE_WRAPPER', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'LOG_CHANNEL'],
     ];
 
@@ -265,10 +265,21 @@ final class RuntimeComposeContractTest extends TestCase
         foreach ($services as $name => $service) {
             self::assertArrayNotHasKey('cap_add', $service, $name.' must not add Linux capabilities.');
 
-            if ($name !== 'checker') {
+            if (! in_array($name, ['checker', 'agent'], true)) {
                 self::assertArrayNotHasKey('security_opt', $service, $name.' must not load the checker seccomp policy.');
             }
         }
+
+        self::assertSame(['ALL'], $services['agent']['cap_drop']);
+        self::assertSame(['no-new-privileges:true', 'seccomp=./docker/agent-seccomp-moby-29.6.1.json'], $services['agent']['security_opt']);
+        $agentPolicy = json_decode((string) file_get_contents(dirname(__DIR__, 4).'/docker/agent-seccomp-moby-29.6.1.json'), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('SCMP_ACT_ERRNO', $agentPolicy['defaultAction']);
+        $checkerPolicy = json_decode((string) file_get_contents(dirname(__DIR__, 4).'/docker/checker-seccomp-moby-29.6.1.json'), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame($checkerPolicy['syscalls'], array_slice($agentPolicy['syscalls'], 0, -2));
+        $extra = array_slice($agentPolicy['syscalls'], -2);
+        self::assertSame(['clone'], $extra[0]['names']);
+        self::assertSame([['index' => 0, 'value' => 268566545, 'op' => 'SCMP_CMP_EQ']], $extra[0]['args']);
+        self::assertSame(['pivot_root'], $extra[1]['names']);
 
         $policyBytes = file_get_contents(dirname(__DIR__, 4).'/'.substr($policyPath, 2));
         self::assertIsString($policyBytes);

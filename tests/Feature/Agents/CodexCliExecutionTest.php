@@ -19,6 +19,7 @@ use App\AI6\Agents\ExecutionHome;
 use App\AI6\Agents\ExecutionHomeManager;
 use App\AI6\Agents\FakeAgentAdapter;
 use App\AI6\Agents\GitHubCopilotCliAdapter;
+use App\AI6\Agents\GrokCliAdapter;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Auth\Models\User;
 use App\AI6\Projects\EffectiveProjectConfiguration;
@@ -83,13 +84,14 @@ final class CodexCliExecutionTest extends TicketUiTestCase
         parent::tearDown();
     }
 
-    /** TC-01: the one container binding resolves codex_cli and fake and refuses every other alias before any process. */
+    /** TC-01: the one container binding resolves installed adapters and refuses unknown aliases before any process. */
     public function test_the_container_binding_resolves_codex_and_fake_and_refuses_other_aliases(): void
     {
         self::assertInstanceOf(CodexCliAdapter::class, $this->app->makeWith(AgentAdapter::class, ['providerAlias' => 'codex_cli']));
         self::assertInstanceOf(FakeAgentAdapter::class, $this->app->makeWith(AgentAdapter::class, ['providerAlias' => 'fake']));
         self::assertInstanceOf(GitHubCopilotCliAdapter::class, $this->app->makeWith(AgentAdapter::class, ['providerAlias' => 'github_copilot_cli']));
-        foreach (['grok_cli', 'not-implemented'] as $alias) {
+        self::assertInstanceOf(GrokCliAdapter::class, $this->app->makeWith(AgentAdapter::class, ['providerAlias' => 'grok_cli']));
+        foreach (['not-implemented', 'unknown-provider'] as $alias) {
             try {
                 $this->app->makeWith(AgentAdapter::class, ['providerAlias' => $alias]);
                 self::fail('The alias '.$alias.' must not resolve.');
@@ -105,7 +107,7 @@ final class CodexCliExecutionTest extends TicketUiTestCase
         $runner = $this->app->make(AgentExecutionRunner::class);
         $runner->destroy($home);
         $slot = RunAgent::query()->where('run_id', $run->id)->where('role', 'implementation')->sole();
-        $slot->forceFill(['provider_profile' => 'grok_cli'])->save();
+        $slot->forceFill(['provider_profile' => 'not-implemented'])->save();
         try {
             $runner->prepare($this->claim($job), $run, $slot->fresh(), $context, $prepared['worktree']);
             self::fail('An unimplemented alias must not stage a home.');

@@ -6,6 +6,18 @@ use PHPUnit\Framework\TestCase;
 
 final class RuntimeDocumentationTest extends TestCase
 {
+    public function test_grok_documents_the_single_transport_and_separate_open_gate(): void
+    {
+        $readme = (string) file_get_contents(dirname(__DIR__, 4).'/README.md');
+        foreach (['### Grok-CLI-Transport', '`GrokCliAdapter`', '`GrokCliDoctorCheck`', '`--prompt-file`', '`streaming-messages-json`',
+            '`resultDirectory/grok-sessions`', 'AI6_RUN_GROK_SMOKE=1', 'AI6-041/MG-01 bleibt', 'ohne Modellturn',
+            '`AI6_GROK_CAPABILITY_EVIDENCE`', 'keine reale Modell- oder Sicherheitsabnahme', '`--verbatim`', '`--max-turns`',
+            '`--sandbox ai6-review`', '`home/sandbox.toml`', '`result.num_turns`', '`total_cost_usd == 0`', '`duration_api_ms`', 'Offene Leseschutzlücke (AC-12)',
+            'nicht auf die eigene Authprojektion begrenzt'] as $statement) {
+            self::assertStringContainsString($statement, $readme);
+        }
+    }
+
     public function test_copilot_transport_documents_roles_and_separate_open_runtime_evidence(): void
     {
         $readme = file_get_contents(dirname(__DIR__, 4).'/README.md');

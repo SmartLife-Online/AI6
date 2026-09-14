@@ -80,8 +80,8 @@ return [
                 'timeout_seconds' => env('AI6_PROCESS_TIMEOUT_SECONDS', '300'),
                 'output_limit_bytes' => env('AI6_PROCESS_OUTPUT_LIMIT_BYTES', '1048576'),
                 'allowed_executables' => ['*'],
-                'environment_allowlist' => ['PATH', 'HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_COUNT', 'GIT_TERMINAL_PROMPT', 'GIT_PAGER', 'GIT_EXTERNAL_DIFF', 'GIT_SSH', 'GIT_SSH_VARIANT', 'AI6_GIT_SSH_BINARY', 'AI6_GIT_SSH_KEY', 'AI6_GIT_KNOWN_HOSTS', 'LC_ALL', 'LANG', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT', 'TMP', 'TEMP', 'COPILOT_HOME', 'COPILOT_CACHE_HOME', 'TMPDIR'],
-                'working_roots' => [base_path(), storage_path()],
+                'environment_allowlist' => ['PATH', 'HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_COUNT', 'GIT_TERMINAL_PROMPT', 'GIT_PAGER', 'GIT_EXTERNAL_DIFF', 'GIT_SSH', 'GIT_SSH_VARIANT', 'AI6_GIT_SSH_BINARY', 'AI6_GIT_SSH_KEY', 'AI6_GIT_KNOWN_HOSTS', 'LC_ALL', 'LANG', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT', 'TMP', 'TEMP', 'COPILOT_HOME', 'COPILOT_CACHE_HOME', 'TMPDIR', 'GROK_HOME', 'GROK_DISABLE_AUTOUPDATER', 'GROK_MEMORY', 'GROK_SESSION_REGISTRY', 'GROK_SESSION_SEARCH', 'GROK_TELEMETRY_ENABLED', 'GROK_TELEMETRY_TRACE_UPLOAD', 'GROK_CODEX_SESSIONS_ENABLED', 'GROK_CLAUDE_SKILLS_ENABLED', 'GROK_CLAUDE_RULES_ENABLED', 'GROK_CLAUDE_AGENTS_ENABLED', 'GROK_CLAUDE_MCPS_ENABLED', 'GROK_CLAUDE_HOOKS_ENABLED', 'GROK_CLAUDE_SESSIONS_ENABLED', 'GROK_CURSOR_SKILLS_ENABLED', 'GROK_CURSOR_RULES_ENABLED', 'GROK_CURSOR_AGENTS_ENABLED', 'GROK_CURSOR_MCPS_ENABLED', 'GROK_CURSOR_HOOKS_ENABLED', 'GROK_CURSOR_SESSIONS_ENABLED'],
+                'working_roots' => [base_path(), storage_path(), env('AI6_AGENT_EXECUTION_ROOT', '/var/lib/ai6/agent-executions')],
                 'requires_process_group' => true,
                 'cancel_grace_milliseconds' => env('AI6_PROCESS_CANCEL_GRACE_MILLISECONDS', '2000'),
             ],
@@ -93,11 +93,11 @@ return [
                 // codex_cli profiles by name and must never enter this list, because an empty entry
                 // would make the whole agent policy unreadable and take the FakeAgent down with it.
                 'allowed_executables' => array_values(array_filter(
-                    [PHP_BINARY, env('AI6_CODEX_BINARY', '/usr/local/bin/codex'), env('AI6_COPILOT_BINARY', '/usr/local/bin/copilot')],
+                    [PHP_BINARY, env('AI6_CODEX_BINARY', '/usr/local/bin/codex'), env('AI6_COPILOT_BINARY', '/usr/local/bin/copilot'), env('AI6_GROK_BINARY', '/usr/local/bin/grok')],
                     static fn (mixed $binary): bool => is_string($binary) && $binary !== '',
                 )),
                 // CODEX_HOME points the Codex CLI at the read-only auth projection of the sealed home (AI6-033).
-                'environment_allowlist' => ['PATH', 'HOME', 'XDG_CONFIG_HOME', 'TMPDIR', 'AI6_RUNTIME_PROFILE', 'AI6_AUTH_FILE', 'CODEX_HOME', 'COPILOT_HOME', 'COPILOT_CACHE_HOME', 'COPILOT_GITHUB_TOKEN', 'LC_ALL', 'LANG'],
+                'environment_allowlist' => ['PATH', 'HOME', 'XDG_CONFIG_HOME', 'TMPDIR', 'AI6_RUNTIME_PROFILE', 'AI6_AUTH_FILE', 'CODEX_HOME', 'COPILOT_HOME', 'COPILOT_CACHE_HOME', 'COPILOT_GITHUB_TOKEN', 'LC_ALL', 'LANG', 'XAI_API_KEY', 'GROK_HOME', 'GROK_DISABLE_AUTOUPDATER', 'GROK_MEMORY', 'GROK_SESSION_REGISTRY', 'GROK_SESSION_SEARCH', 'GROK_TELEMETRY_ENABLED', 'GROK_TELEMETRY_TRACE_UPLOAD', 'GROK_CODEX_SESSIONS_ENABLED', 'GROK_CLAUDE_SKILLS_ENABLED', 'GROK_CLAUDE_RULES_ENABLED', 'GROK_CLAUDE_AGENTS_ENABLED', 'GROK_CLAUDE_MCPS_ENABLED', 'GROK_CLAUDE_HOOKS_ENABLED', 'GROK_CLAUDE_SESSIONS_ENABLED', 'GROK_CURSOR_SKILLS_ENABLED', 'GROK_CURSOR_RULES_ENABLED', 'GROK_CURSOR_AGENTS_ENABLED', 'GROK_CURSOR_MCPS_ENABLED', 'GROK_CURSOR_HOOKS_ENABLED', 'GROK_CURSOR_SESSIONS_ENABLED'],
                 'working_roots' => [
                     env('AI6_AGENT_EXECUTION_ROOT', '/var/lib/ai6/agent-executions'),
                     env('AI6_AGENT_OUTPUT_ROOT', '/var/lib/ai6/agent-outputs'),
@@ -192,6 +192,11 @@ return [
             static fn (string $value): bool => $value !== '',
         )),
     ],
+    'grok' => [
+        'binary' => env('AI6_GROK_BINARY', '/usr/local/bin/grok'),
+        'pinned_version' => env('AI6_GROK_PINNED_VERSION', ''),
+        'capability_evidence' => array_values(array_filter(array_map('trim', explode(',', env('AI6_GROK_CAPABILITY_EVIDENCE', ''))), static fn (string $entry): bool => $entry !== '')),
+    ],
     'credential_revisions' => [
         'codex_cli' => env('AI6_CODEX_CREDENTIAL_REVISION', ''),
         'grok_cli' => env('AI6_GROK_CREDENTIAL_REVISION', ''),
@@ -273,7 +278,7 @@ return [
             'adapter' => 'grok_cli',
             'models' => ['provider_default'],
             'efforts' => ['provider_default'],
-            'roles' => ['quality_review', 'finding_verification', 'security_review'],
+            'roles' => ['quality_review', 'finding_verification'],
             'capability_status' => 'unchecked',
             'runtime_profile' => 'grok-cli-v1',
         ],

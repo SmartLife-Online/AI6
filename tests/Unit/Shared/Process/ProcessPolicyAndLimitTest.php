@@ -88,11 +88,12 @@ final class ProcessPolicyAndLimitTest extends TestCase
         if (DIRECTORY_SEPARATOR !== '/' || ! function_exists('proc_open')) {
             self::markTestSkipped('The real process-group PID limit proof requires Linux.');
         }
+        // The PID limit counts the isolated process group, so this proof must actually create one.
         $limits = new ProcessLimits(5, 4096, 1, 10, 1024, 10);
-        self::assertSame(ProcessOutcome::SUCCEEDED, $this->runner($limits, true)->run($this->request('usleep(200000);'))->outcome);
+        self::assertSame(ProcessOutcome::SUCCEEDED, $this->runner($limits, true, processGroup: true)->run($this->request('usleep(200000);'))->outcome);
 
         $code = '$child=proc_open([PHP_BINARY,"-r","usleep(3000000);"],[], $pipes); usleep(3000000);';
-        $result = $this->runner($limits, true)->run($this->request($code));
+        $result = $this->runner($limits, true, processGroup: true)->run($this->request($code));
         self::assertSame(ProcessLimit::PROCESS_COUNT, $result->limitResult->limit);
         self::assertSame(1, $result->limitResult->maximum);
         self::assertGreaterThan(1, $result->limitResult->observed);
@@ -149,10 +150,10 @@ final class ProcessPolicyAndLimitTest extends TestCase
         }
     }
 
-    private function runner(ProcessLimits $limits, bool $isolated): ControlProcessRunner
+    private function runner(ProcessLimits $limits, bool $isolated, bool $processGroup = false): ControlProcessRunner
     {
-        $configuration = new ProcessConfiguration(10, 4096, 10, 2, dirname(__DIR__, 4).'/app/AI6/Shared/Process/control-process-wrapper.sh', '/bin/sh', null, null, $this->root.'/locks', 1, 10, 0);
-        $policy = new ProcessPolicy(ProcessPolicyName::AGENT, 10, 4096, [PHP_BINARY], [], [$this->root], false, 10);
+        $configuration = new ProcessConfiguration(10, 4096, 10, 2, dirname(__DIR__, 4).'/app/AI6/Shared/Process/control-process-wrapper.sh', '/bin/sh', $processGroup ? '/usr/bin/setsid' : null, $processGroup ? '/usr/bin/kill' : null, $this->root.'/locks', 1, 10, 0);
+        $policy = new ProcessPolicy(ProcessPolicyName::AGENT, 10, 4096, [PHP_BINARY], [], [$this->root], $processGroup, 10);
         $control = new ProcessPolicy(ProcessPolicyName::CONTROL, 10, 4096, [PHP_BINARY], [], [$this->root], false, 10);
         $checker = new ProcessPolicy(ProcessPolicyName::CHECKER, 10, 4096, [PHP_BINARY], [], [$this->root], false, 10);
         $registry = new ProcessPolicyRegistry(['control' => $control, 'agent' => $policy, 'checker' => $checker], $limits);

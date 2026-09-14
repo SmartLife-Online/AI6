@@ -32,15 +32,24 @@ use Tests\TestCase;
 
 final class AgentProcessBoundaryTest extends TestCase
 {
+    public function test_shipped_control_roots_include_exactly_the_doctor_staging_root(): void
+    {
+        $expected = [base_path(), storage_path(), config('ai6.execution_mailboxes.agent_root')];
+        self::assertSame($expected, config('ai6.process.policies.control.working_roots'));
+        // Pin the shipped baseline independently of optional managed-project roots.
+        config(['ai6.control_operations.managed_root' => '']);
+        self::assertSame($expected, ProcessPolicyRegistry::fromConfiguredValues()->get(ProcessPolicyName::CONTROL)->workingRoots);
+    }
+
     public function test_agent_policy_and_real_child_environment_exclude_foreign_access(): void
     {
         $root = dirname(__DIR__, 3);
         $forbidden = ['APP_KEY', 'DB_DATABASE', 'MAIL_PASSWORD', 'AI6_GIT_SSH_KEY', 'AI6_GIT_KNOWN_HOSTS', 'SESSION_DRIVER', 'AI6_COPILOT_CAPABILITY_EVIDENCE'];
         $configured = ProcessPolicyRegistry::fromConfiguredValues()->get(ProcessPolicyName::AGENT);
         self::assertSame(
-            [PHP_BINARY, config('ai6.codex.binary'), config('ai6.copilot.binary')],
+            [PHP_BINARY, config('ai6.codex.binary'), config('ai6.copilot.binary'), config('ai6.grok.binary')],
             $configured->allowedExecutables,
-            'The shipped agent policy names exactly PHP and the configured Codex and Copilot binaries.',
+            'The shipped agent policy names exactly PHP and the configured provider binaries.',
         );
         self::assertContains('CODEX_HOME', $configured->environmentAllowlist);
         self::assertContains('COPILOT_HOME', $configured->environmentAllowlist);
@@ -100,7 +109,7 @@ final class AgentProcessBoundaryTest extends TestCase
                 'ai6.codex' => $reloaded['codex'],
             ]);
             $policy = ProcessPolicyRegistry::fromConfiguredValues()->get(ProcessPolicyName::AGENT);
-            self::assertSame([PHP_BINARY, config('ai6.copilot.binary')], $policy->allowedExecutables, 'Only Codex is locked; PHP and Copilot stay allowed.');
+            self::assertSame([PHP_BINARY, config('ai6.copilot.binary'), config('ai6.grok.binary')], $policy->allowedExecutables, 'Only Codex is locked; other configured providers stay allowed.');
             self::assertFalse(CodexCliConfiguration::fromConfiguredValues()->binaryPresent());
 
             $doctor = new CodexCliDoctorCheck(

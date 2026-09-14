@@ -18,6 +18,8 @@ use App\AI6\Agents\ExecutionHomeManager;
 use App\AI6\Agents\FakeAgentAdapter;
 use App\AI6\Agents\GitHubCopilotCliAdapter;
 use App\AI6\Agents\GitHubCopilotCliConfiguration;
+use App\AI6\Agents\GrokCliAdapter;
+use App\AI6\Agents\GrokCliConfiguration;
 use App\AI6\Agents\InstructionPatchChannel;
 use App\AI6\Agents\InstructionProfileRegistry;
 use App\AI6\Agents\InstructionSnapshotResolver;
@@ -139,6 +141,7 @@ use App\AI6\Shared\Doctor\CheckerRuntimeDoctorCheck;
 use App\AI6\Shared\Doctor\CodexCliDoctorCheck;
 use App\AI6\Shared\Doctor\DoctorCommand;
 use App\AI6\Shared\Doctor\GitHubCopilotCliDoctorCheck;
+use App\AI6\Shared\Doctor\GrokCliDoctorCheck;
 use App\AI6\Shared\Doctor\RedactionKeyringDoctorCheck;
 use App\AI6\Shared\Doctor\SecurityPolicyDoctorCheck;
 use App\AI6\Shared\Http\HttpSecurityConfiguration;
@@ -257,6 +260,12 @@ final class AI6ServiceProvider extends ServiceProvider
             $app->make(Redactor::class), $app->make(RestrictedJsonDecoder::class),
             $app->make(AgentProfileRegistry::class), $app->make(CanonicalJson::class),
         ));
+        $this->app->singleton(GrokCliConfiguration::class, static fn (Application $app): GrokCliConfiguration => GrokCliConfiguration::fromConfiguredValues($app->make(CanonicalJson::class)));
+        $this->app->singleton(GrokCliAdapter::class, static fn (Application $app): GrokCliAdapter => new GrokCliAdapter(
+            $app->make(GrokCliConfiguration::class), $app->make(AgentInputLimits::class),
+            $app->make(Redactor::class), $app->make(RestrictedJsonDecoder::class),
+            $app->make(AgentProfileRegistry::class),
+        ));
         $this->app->singleton(
             CodexCliAdapter::class,
             static fn (Application $app): CodexCliAdapter => new CodexCliAdapter(
@@ -271,6 +280,7 @@ final class AI6ServiceProvider extends ServiceProvider
                 'fake' => $app->make(FakeAgentAdapter::class),
                 CodexCliAdapter::PROVIDER_ALIAS => $app->make(CodexCliAdapter::class),
                 GitHubCopilotCliAdapter::PROVIDER_ALIAS => $app->make(GitHubCopilotCliAdapter::class),
+                GrokCliAdapter::PROVIDER_ALIAS => $app->make(GrokCliAdapter::class),
                 default => throw new AgentExecutionException('agent_adapter_unavailable'),
             };
         });
@@ -550,6 +560,7 @@ final class AI6ServiceProvider extends ServiceProvider
                 new RedactionKeyringDoctorCheck($app->make(RedactionKeyringFactory::class)),
                 new CheckerRuntimeDoctorCheck,
                 new GitHubCopilotCliDoctorCheck,
+                new GrokCliDoctorCheck,
                 new CodexCliDoctorCheck(
                     $app->make(AgentProfileRegistry::class),
                     $app->make(ProviderRuntimeProfileRegistry::class),
@@ -565,6 +576,7 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->make(AgentInputLimits::class);
         $this->app->make(CodexCliConfiguration::class);
         $this->app->make(GitHubCopilotCliConfiguration::class);
+        $this->app->make(GrokCliConfiguration::class);
         foreach ($agentProfiles->all() as $agentProfile) {
             $runtimeProfiles->get($agentProfile->runtimeProfileId);
             $instructionProfiles->get($agentProfile->providerProfileAlias);

@@ -8,13 +8,16 @@ use App\AI6\Agents\CredentialRevisionRegistry as AuthRevisionRegistry;
 use App\AI6\Agents\ExecutionHome;
 use App\AI6\Agents\ExecutionHomeException;
 use App\AI6\Agents\ExecutionHomeManager;
+use App\AI6\Agents\GrokCliConfiguration;
 use App\AI6\Agents\InstructionDiscovery;
 use App\AI6\Agents\InstructionPatchChannel;
 use App\AI6\Agents\InstructionPatchException;
+use App\AI6\Agents\InstructionProfileRegistry;
 use App\AI6\Agents\InstructionResolutionProfile;
 use App\AI6\Agents\InstructionSnapshot;
 use App\AI6\Agents\InstructionSnapshotEntry;
 use App\AI6\Agents\ProviderRuntimeProfile;
+use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Git\CanonicalJson;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\RedactionFingerprintGenerator;
@@ -352,6 +355,50 @@ final class ExecutionHomeManagerTest extends TestCase
         }
 
         $manager->destroy($home);
+    }
+
+    public function test_grok_projects_only_bound_inputs_and_a_fixed_private_output_link(): void
+    {
+        if (PHP_OS_FAMILY !== 'Linux') {
+            self::markTestSkipped('Requires Linux symbolic links.');
+        }
+        mkdir($this->root.'/export/.grok');
+        file_put_contents($this->root.'/export/.grok/config.toml', 'untrusted');
+        file_put_contents($this->root.'/export/.envrc', 'untrusted');
+        mkdir($this->root.'/export/.github/workflows', 0700, true);
+        file_put_contents($this->root.'/export/.github/workflows/ci.yml', 'workflow evidence');
+        file_put_contents($this->root.'/export/GROK.md', 'ordinary evidence');
+        mkdir($this->root.'/export/sub', 0700, true);
+        foreach (['Agents.md', 'AGENT.md', 'CLAUDE.md', 'Claude.md', 'CLAUDE.local.md'] as $name) {
+            file_put_contents($this->root.'/export/'.$name, 'untrusted');
+            file_put_contents($this->root.'/export/sub/'.$name, 'untrusted');
+        }
+        $manager = new ExecutionHomeManager(new CanonicalJson, new AuthRevisionRegistry(['grok_cli' => 'revision-1']));
+        $home = $manager->create($this->root.'/inputs', $this->root.'/outputs', 'grok-slot', null, $this->root.'/export',
+            app(InstructionProfileRegistry::class)->get('grok_cli'),
+            new InstructionSnapshot('grok_cli', [], str_repeat('b', 64)),
+            app(ProviderRuntimeProfileRegistry::class)->get('grok-cli-v1'),
+            new AuthProjection('grok_cli', 'revision-1', []));
+        self::assertTrue(is_link($home->home.'/sessions'));
+        self::assertSame(GrokCliConfiguration::sandboxBytes(), file_get_contents($home->home.'/sandbox.toml'));
+        self::assertSame(0, fileperms($home->home.'/sandbox.toml') & 0222);
+        self::assertSame($home->resultDirectory.'/grok-sessions', readlink($home->home.'/sessions'));
+        self::assertDirectoryDoesNotExist($home->resultDirectory.'/grok-sessions');
+        self::assertDirectoryDoesNotExist($home->workspace.'/.grok');
+        self::assertFileDoesNotExist($home->workspace.'/.envrc');
+        self::assertSame('workflow evidence', file_get_contents($home->workspace.'/.github/workflows/ci.yml'));
+        self::assertSame('ordinary evidence', file_get_contents($home->workspace.'/GROK.md'));
+        foreach (['Agents.md', 'AGENT.md', 'CLAUDE.md', 'Claude.md', 'CLAUDE.local.md'] as $name) {
+            self::assertFileDoesNotExist($home->workspace.'/'.$name);
+            self::assertFileDoesNotExist($home->workspace.'/sub/'.$name);
+        }
+        self::assertFileExists($home->workspace.'/source.php');
+        if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+            self::assertFalse(@file_put_contents($home->home.'/forbidden', 'x'));
+        }
+        $manager->destroy($home);
+        self::assertDirectoryDoesNotExist($home->root);
+        self::assertDirectoryDoesNotExist($home->outputRoot);
     }
 
     private function manager(string $revision = 'revision-1'): ExecutionHomeManager

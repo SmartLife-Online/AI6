@@ -42,7 +42,7 @@ RUN set -eux; \
     saved_apt_mark="$(apt-mark showmanual)"; \
     apt-get update; \
     apt-get install -y --no-install-recommends curl libicu-dev libonig-dev $PHPIZE_DEPS; \
-    apt-get install -y --no-install-recommends git openssh-client procps util-linux; \
+    apt-get install -y --no-install-recommends git openssh-client procps util-linux bubblewrap; \
     curl --fail --location --retry 3 \
         --output /tmp/sqlite.tar.gz \
         "https://sqlite.org/2026/sqlite-autoconf-${SQLITE_ARCHIVE_VERSION}.tar.gz"; \
@@ -63,7 +63,7 @@ RUN set -eux; \
     apt-mark auto '.*' > /dev/null; \
     if [ -n "${saved_apt_mark}" ]; then apt-mark manual ${saved_apt_mark}; fi; \
     apt-mark manual curl libicu72 libonig5; \
-    apt-mark manual git openssh-client procps util-linux; \
+    apt-mark manual git openssh-client procps util-linux bubblewrap; \
     apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
     rm -rf /var/lib/apt/lists/* /tmp/sqlite /tmp/sqlite.tar.gz; \
     curl --version > /dev/null; \
