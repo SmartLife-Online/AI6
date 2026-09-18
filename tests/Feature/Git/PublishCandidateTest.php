@@ -790,6 +790,13 @@ final class PublishCandidateTest extends TicketUiTestCase
         if ($entryMode === '160000') {
             self::assertTrue(unlink($repository.'/a.txt'));
         }
+        if ($entryMode === '120000' && PHP_OS_FAMILY === 'Linux') {
+            // update-index changes only the index. Materialize the committed
+            // link so the provenance check, rather than worktree drift, runs.
+            $this->runWorkspaceGit(['checkout-index', '--force', '--', 'a.txt'], $repository);
+            self::assertTrue(is_link($repository.'/a.txt'));
+            self::assertSame($content, readlink($repository.'/a.txt'));
+        }
 
         foreach ([RunTreeService::class, CandidateProvenancePreflight::class, PublishCandidateService::class] as $service) {
             $this->app->forgetInstance($service);

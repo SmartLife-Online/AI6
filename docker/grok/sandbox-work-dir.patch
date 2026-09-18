@@ -1,0 +1,104 @@
+--- a/crates/codegen/xai-grok-sandbox/src/paths.rs
++++ b/crates/codegen/xai-grok-sandbox/src/paths.rs
+@@ -7,6 +7,63 @@
+ /// Grok state directory (`$GROK_HOME` or `~/.grok`).
+ pub(crate) fn grok_home() -> PathBuf {
+     xai_grok_config::grok_home()
++}
++
++// AI6 modification: keep transient bwrap files outside the sealed Grok home.
++// This changes storage only; mount verification and kernel enforcement remain intact.
++#[cfg(target_os = "linux")]
++pub(crate) fn sandbox_work_dir() -> Result<PathBuf, String> {
++    match std::env::var_os("GROK_SANDBOX_WORK_DIR") {
++        None => Ok(grok_home()),
++        Some(value) => checked_sandbox_work_dir(Path::new(&value), &grok_home()),
++    }
++}
++
++#[cfg(target_os = "linux")]
++fn checked_sandbox_work_dir(path: &Path, home: &Path) -> Result<PathBuf, String> {
++    use std::os::unix::fs::MetadataExt;
++    let invalid = || "GROK_SANDBOX_WORK_DIR must be a canonical, private, owned directory outside GROK_HOME".to_string();
++    let meta = std::fs::symlink_metadata(path).map_err(|_| invalid())?;
++    let canonical = path.canonicalize().map_err(|_| invalid())?;
++    let canonical_home = home.canonicalize().map_err(|_| invalid())?;
++    if !path.is_absolute() || !meta.is_dir() || canonical != path
++        || canonical.starts_with(canonical_home) || meta.mode() & 0o7777 != 0o700
++        // SAFETY: geteuid has no preconditions and only reads the process identity.
++        || meta.uid() != unsafe { libc::geteuid() }
++    {
++        return Err(invalid());
++    }
++    Ok(canonical)
++}
++
++#[cfg(all(test, target_os = "linux"))]
++mod ai6_sandbox_work_dir_tests {
++    use super::checked_sandbox_work_dir;
++    use std::os::unix::fs::{PermissionsExt, symlink};
++
++    #[test]
++    fn scratch_is_private_and_separate_from_the_read_only_home() {
++        let root = std::env::temp_dir().join(format!("ai6-sandbox-work-dir-{}", std::process::id()));
++        std::fs::create_dir(&root).unwrap();
++        let root = root.canonicalize().unwrap();
++        let home = root.join("home");
++        let scratch = root.join("scratch");
++        std::fs::create_dir(&home).unwrap();
++        std::fs::create_dir(&scratch).unwrap();
++        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o500)).unwrap();
++        std::fs::set_permissions(&scratch, std::fs::Permissions::from_mode(0o700)).unwrap();
++        assert_eq!(checked_sandbox_work_dir(&scratch, &home).unwrap(), scratch);
++        assert!(checked_sandbox_work_dir(&home, &home).is_err());
++        assert!(checked_sandbox_work_dir(&root.join("missing"), &home).is_err());
++        assert!(checked_sandbox_work_dir(std::path::Path::new("relative"), &home).is_err());
++        let alias = root.join("alias");
++        symlink(&scratch, &alias).unwrap();
++        assert!(checked_sandbox_work_dir(&alias, &home).is_err());
++        std::fs::set_permissions(&scratch, std::fs::Permissions::from_mode(0o770)).unwrap();
++        assert!(checked_sandbox_work_dir(&scratch, &home).is_err());
++        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).unwrap();
++        std::fs::remove_dir_all(&root).unwrap();
++    }
+ }
+ 
+ /// On-disk JSONL audit log under the sessions directory.
+--- a/crates/codegen/xai-grok-sandbox/src/lib.rs
++++ b/crates/codegen/xai-grok-sandbox/src/lib.rs
+@@ -388,13 +388,13 @@
+     std::fs::set_permissions(path, perms).ok()?;
+     Some(())
+ }
+-/// Zero-permission placeholder (file or dir) under `grok_home` used by bwrap bind-over. The placeholder name is suffixed
++/// AI6 modification: zero-permission placeholder under the validated sandbox work directory used by bwrap bind-over. The placeholder name is suffixed
+ /// with the current PID so concurrent grok processes don't race each other's create/remove/chmod on a shared path. A lost
+ /// race could yield `None`, silently dropping the bind and failing open.
+ #[cfg(all(feature = "enforce", target_os = "linux"))]
+ fn bwrap_blocked_placeholder(name: &str, want_dir: bool) -> Option<PathBuf> {
+     use std::fs::OpenOptions;
+-    let path = paths::grok_home().join(format!("{name}.{}", std::process::id()));
++    let path = paths::sandbox_work_dir().ok()?.join(format!("{name}.{}", std::process::id()));
+     if let Some(parent) = path.parent() {
+         std::fs::create_dir_all(parent).ok()?;
+     }
+--- a/crates/codegen/xai-grok-sandbox/src/read_deny_verify.rs
++++ b/crates/codegen/xai-grok-sandbox/src/read_deny_verify.rs
+@@ -56,7 +56,7 @@
+ /// The re-exec must not proceed without it: the inner verification requires the read-only sentinel mount unconditionally.
+ #[cfg(target_os = "linux")]
+ pub(crate) fn ensure_bwrap_sentinel_dir() -> Result<PathBuf, String> {
+-    let parent = crate::paths::grok_home();
++    let parent = crate::paths::sandbox_work_dir()?;
+     std::fs::create_dir_all(&parent)
+         .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
+     ensure_sentinel_dir_under(&parent)
+@@ -104,7 +104,7 @@
+ /// symlink, so this opens the writable parent and the child relative to it with `O_NOFOLLOW`.
+ #[cfg(all(feature = "enforce", target_os = "linux"))]
+ pub(crate) fn verify_bwrap_sentinel() -> Result<(), String> {
+-    verify_sentinel_under(&crate::paths::grok_home())
++    verify_sentinel_under(&crate::paths::sandbox_work_dir()?)
+ }
+ 
+ #[cfg(all(feature = "enforce", target_os = "linux"))]

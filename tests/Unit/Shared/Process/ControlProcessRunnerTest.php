@@ -14,8 +14,8 @@ use App\AI6\Shared\Redaction\RedactionKeyring;
 use App\AI6\Shared\Redaction\RedactionPolicy;
 use App\AI6\Shared\Redaction\RedactionRuleSet;
 use App\AI6\Shared\Redaction\Redactor;
-use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
+use Tests\TestCase;
 
 final class ControlProcessRunnerTest extends TestCase
 {
@@ -68,6 +68,18 @@ PHP;
         self::assertSame(64, $output->limitResult->maximum);
         self::assertGreaterThan(64, $output->limitResult->observed);
         self::assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/D', $output->limitResult->hash);
+    }
+
+    public function test_the_posix_wrapper_does_not_add_environment_variables(): void
+    {
+        if (PHP_OS_FAMILY !== 'Linux') {
+            self::markTestSkipped('The POSIX wrapper environment requires Linux.');
+        }
+        $result = $this->runner(timeout: 5, outputLimit: 4096)->run($this->request([
+            PHP_BINARY, '-r', 'echo json_encode(array_keys(getenv()));',
+        ]));
+        self::assertSame(ProcessOutcome::SUCCEEDED, $result->outcome);
+        self::assertSame([], json_decode($result->output, true, 8, JSON_THROW_ON_ERROR));
     }
 
     public function test_environment_only_values_cannot_reappear_in_children_or_signal_helpers(): void

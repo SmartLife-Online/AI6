@@ -36,6 +36,11 @@ class GitHubCopilotCliExecutionTest extends TicketUiTestCase
 
     private string $wrappers;
 
+    protected function usesNativeProviderMailbox(): bool
+    {
+        return true;
+    }
+
     protected string $copilotProfile = 'copilot-cli-review';
 
     protected string $copilotModel = 'gpt-5.4';
@@ -59,6 +64,7 @@ class GitHubCopilotCliExecutionTest extends TicketUiTestCase
 
     protected function approvalSelection(?User $attentionUser = null): ApprovalSelection
     {
+        $this->seedProviderReports();
         $this->reviewSlotIds = [(string) Str::uuid(), (string) Str::uuid()];
 
         return new ApprovalSelection(app(AgentProfileRegistry::class)->resolve('fake', AgentRole::IMPLEMENTATION, 'fake-model', 'medium'),
@@ -92,17 +98,13 @@ class GitHubCopilotCliExecutionTest extends TicketUiTestCase
             (new ExecuteRunStep($job->id))->handle(app(RunOrchestrator::class), reviews: app(ReviewRound::class));
         };
         $dispatch();
-        AgentMailboxFixture::drain($job, $dispatch, static function () use ($scenario): void {
-            // Test-only insertion at the future AI6-035 projection point, before the mailbox claim.
-            if ($scenario === 'missing_auth') {
-                return;
-            }
+        AgentMailboxFixture::drain($job, $dispatch, function () use ($scenario): void {
             foreach (glob(AgentExecutionProcessor::inputRoot().'/execution-*/*/home/auth', GLOB_ONLYDIR) ?: [] as $directory) {
-                chmod($directory, 0700);
-                $projection = implode(DIRECTORY_SEPARATOR, [$directory, 'token']);
-                file_put_contents($projection, 'test-projection');
-                chmod($projection, 0440);
-                chmod($directory, 0550);
+                self::assertSame(['.', '..'], scandir($directory), 'The worker received no credentials.');
+            }
+            $auth = $this->onboardingRoot.'/store/github_copilot_cli/token';
+            if ($scenario === 'missing_auth' && is_file($auth)) {
+                unlink($auth);
             }
         });
         $results = ReviewResult::query()->where('run_id', $prepared['run']->id)->get();

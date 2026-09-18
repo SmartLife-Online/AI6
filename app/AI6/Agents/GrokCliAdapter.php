@@ -134,7 +134,7 @@ final class GrokCliAdapter implements AgentAdapter
             throw new AgentExecutionException('agent_grok_selection_unsupported');
         }
         $registered = false;
-        foreach ($this->profiles->all() as $profile) {
+        foreach ($this->profiles->configured() as $profile) {
             if ($profile->providerProfileAlias === self::PROVIDER_ALIAS && $profile->runtimeProfileId === $runtime->id
                 && in_array($role, $profile->roles, true) && in_array($model, $profile->models, true) && in_array($effort, $profile->efforts, true)) {
                 $registered = true;

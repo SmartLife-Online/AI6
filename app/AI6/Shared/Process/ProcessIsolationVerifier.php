@@ -68,7 +68,7 @@ final readonly class ProcessIsolationVerifier implements ProcessIsolationBoundar
                 throw new ProcessStartRejectedException('The process read-only projection is not isolated.');
             }
         }
-        $this->assertTree($home);
+        $this->assertTree($home, $request->resultDirectory.'/grok-sessions');
         $this->assertInstructionBindings($home, $request->workingDirectory);
         $this->assertMount($inputRoot, true);
         $this->assertMount($outputRoot, false);
@@ -76,11 +76,15 @@ final readonly class ProcessIsolationVerifier implements ProcessIsolationBoundar
 
     }
 
-    private function assertTree(string $home): void
+    private function assertTree(string $home, ?string $sessionTarget = null): void
     {
         $forbidden = ['.git', '.codex', '.claude', '.mcp.json', 'mcp.json'];
         $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($home, FilesystemIterator::SKIP_DOTS));
         foreach ($iterator as $entry) {
+            if ($sessionTarget !== null && $entry->getPathname() === $home.'/home/sessions' && $entry->isLink()
+                && readlink($entry->getPathname()) === $sessionTarget && is_dir($sessionTarget) && ! is_link($sessionTarget)) {
+                continue;
+            }
             if ($entry->isLink() || in_array($entry->getFilename(), $forbidden, true)) {
                 throw new ProcessStartRejectedException('The process tree contains a forbidden discovery or Git path.');
             }

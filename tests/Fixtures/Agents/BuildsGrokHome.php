@@ -72,9 +72,15 @@ trait BuildsGrokHome
 
     private function grokHome(AgentResultContext $context): ExecutionHome
     {
-        $home = $this->grokManager()->create($this->root.'/inputs', $this->root.'/outputs', $context->slotId, 'session', $this->root.'/export',
-            app(InstructionProfileRegistry::class)->get('grok_cli'), $context->instructionSnapshot, $context->runtimeProfile,
-            new CredentialProjection('grok_cli', 'test-v1', ['token' => implode(DIRECTORY_SEPARATOR, [$this->root, 'token'])]), turnContext: $context);
+        $role = config('ai6.runtime_role');
+        config(['ai6.runtime_role' => 'agent']);
+        try {
+            $home = $this->grokManager()->create($this->root.'/inputs', $this->root.'/outputs', $context->slotId, 'session', $this->root.'/export',
+                app(InstructionProfileRegistry::class)->get('grok_cli'), $context->instructionSnapshot, $context->runtimeProfile,
+                new CredentialProjection('grok_cli', 'test-v1', ['token' => implode(DIRECTORY_SEPARATOR, [$this->root, 'token'])]), turnContext: $context);
+        } finally {
+            config(['ai6.runtime_role' => $role]);
+        }
         $this->grokHomes[] = $home;
 
         return $home;

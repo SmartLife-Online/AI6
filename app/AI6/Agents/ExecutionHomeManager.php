@@ -3,6 +3,8 @@
 namespace App\AI6\Agents;
 
 use App\AI6\Git\CanonicalJson;
+use App\AI6\Shared\Process\AgentProcessScope;
+use App\AI6\Shared\Process\ControlProcessRunner;
 use FilesystemIterator;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
@@ -17,6 +19,53 @@ final readonly class ExecutionHomeManager
         private ?AgentInputLimits $inputLimits = null,
     ) {}
 
+    /** @template T
+     * @param  \Closure(ExecutionHome): T  $operation
+     * @return T
+     */
+    public function withAgentCredentials(ExecutionHome $home, string $alias, string $generation, \Closure $operation): mixed
+    {
+        return app(ProviderCredentialStore::class)->withProjection($home, $alias, $generation, $operation);
+    }
+
+    /** Central, credential-free native probe preparation in agent-private storage.
+     * @template T
+     *
+     * @param  \Closure(ExecutionHome, InstructionSnapshot): T  $operation
+     * @return T
+     */
+    public function withProbeHome(string $alias, string $runtimeId, \Closure $operation): mixed
+    {
+        ProviderOnboarding::assertAgent();
+        ProviderOnboarding::filename($alias);
+        $directory = ProviderOnboarding::path('private_root').'/probe-'.bin2hex(random_bytes(16));
+        if (! mkdir($directory, 0700)) {
+            throw new ExecutionHomeException('The private probe directory is unavailable.');
+        }
+        try {
+            foreach (['inputs', 'outputs', 'export'] as $name) {
+                if (! mkdir($directory.'/'.$name, 0700)) {
+                    throw new ExecutionHomeException('The private probe directory is unavailable.');
+                }
+            }
+            $manager = new self($this->canonicalJson, new CredentialRevisionRegistry([$alias => 'doctor']), $this->runtimeProfiles, $this->instructionProfiles, $this->inputLimits);
+            $snapshot = new InstructionSnapshot($alias, [], hash('sha256', 'provider-doctor'));
+            $home = $manager->create($directory.'/inputs', $directory.'/outputs', 'doctor', null, $directory.'/export',
+                app(InstructionProfileRegistry::class)->get($alias), $snapshot,
+                app(ProviderRuntimeProfileRegistry::class)->get($runtimeId), new CredentialProjection($alias, 'doctor', []));
+
+            $boot = app(ProviderCapabilityReport::class)->boot();
+
+            return app(ControlProcessRunner::class)->withinAgentScope(
+                new AgentProcessScope([$home->root], [$home->outputRoot],
+                    fn () => app(ProviderCapabilityPublisher::class)->pulse($boot)),
+                fn () => $operation($home, $snapshot),
+            );
+        } finally {
+            app(ProviderCredentialStore::class)->cleanup($directory);
+        }
+    }
+
     public function create(
         string $executionRoot,
         string $outputRoot,
@@ -30,6 +79,9 @@ final readonly class ExecutionHomeManager
         bool $writableWorkspace = false,
         ?AgentResultContext $turnContext = null,
     ): ExecutionHome {
+        if ($credentials->files !== []) {
+            ProviderOnboarding::assertAgent();
+        }
         $this->assertId($slotId);
         if ($sessionId !== null) {
             $this->assertId($sessionId);

@@ -44,7 +44,7 @@ final readonly class GitHubCopilotCliConfiguration
     public function evidenceKey(ProviderRuntimeProfile $runtime, AgentRole $role, string $model, string $effort): string
     {
         return hash('sha256', "ai6.copilot-capability.v1\0".$this->canonicalJson->normalizeAndEncode([
-            'version' => $this->pinnedVersion, 'binary_sha256' => $this->binaryPresent() ? hash_file('sha256', $this->binary) : null,
+            'version' => $this->pinnedVersion, 'binary_sha256' => $this->binaryPresent() ? app(ProviderBinaryDigest::class)->sha256($this->binary) : null,
             'platform' => PHP_OS_FAMILY, 'runtime_hash' => $runtime->hash,
             'role' => $role->value, 'model' => $model, 'effort' => $effort,
             'transport_sha256' => hash_file('sha256', __DIR__.'/GitHubCopilotCliAdapter.php'),

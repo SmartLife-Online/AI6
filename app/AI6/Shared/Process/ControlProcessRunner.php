@@ -12,6 +12,29 @@ use Throwable;
 
 final class ControlProcessRunner
 {
+    private ?AgentProcessScope $agentScope = null;
+
+    /**
+     * Apply one supervisor-created view to every native probe and turn it starts.
+     *
+     * @template T
+     *
+     * @param  Closure(): T  $operation
+     * @return T
+     */
+    public function withinAgentScope(AgentProcessScope $scope, Closure $operation): mixed
+    {
+        if ($this->agentScope !== null || config('ai6.runtime_role') !== ExecutionRole::AGENT->value) {
+            throw new ProcessStartRejectedException('The provider supervisor scope is invalid.');
+        }
+        $this->agentScope = $scope;
+        try {
+            return $operation();
+        } finally {
+            $this->agentScope = null;
+        }
+    }
+
     private const READY_PREFIX = '__AI6_PROCESS_READY_V1__:';
 
     private const RELEASED_PREFIX = '__AI6_PROCESS_RELEASED_V1__:';
@@ -52,8 +75,15 @@ final class ControlProcessRunner
     /** @throws RuntimeException */
     public function start(ProcessRequest $request): RunningControlProcess
     {
+        if (config('ai6.runtime_role') === ExecutionRole::AGENT->value && $this->agentScope === null
+            && in_array($request->command[0], [config('ai6.codex.binary'), config('ai6.grok.binary'), config('ai6.copilot.binary')], true)) {
+            throw new ProcessStartRejectedException('The provider supervisor scope is missing.');
+        }
         [$timeout, $outputLimit, $cancelGrace, $limits] = $this->resolvePolicy($request);
         $payload = $request->command;
+        if ($this->agentScope !== null) {
+            $payload = $this->agentScope->command($request);
+        }
         if (DIRECTORY_SEPARATOR === '/' && $request->policy === ProcessPolicyName::CHECKER
             && config('ai6.runtime_role') === ExecutionRole::CHECKER->value) {
             $unshare = config('ai6.checks.runtime.unshare_binary');
@@ -95,11 +125,15 @@ final class ControlProcessRunner
             limits: $limits,
             resultDirectory: $request->resultDirectory,
             artifactDirectory: $request->artifactDirectory,
+            supervisorHeartbeat: $this->agentScope?->heartbeat,
         );
     }
 
     public function startBlocked(ProcessRequest $request, string $lockName): BlockedProcessStartResult
     {
+        if ($this->agentScope !== null || config('ai6.runtime_role') === ExecutionRole::AGENT->value) {
+            return new BlockedProcessStartResult(BlockedStartOutcome::CONFIGURATION_ERROR, null, 'Blocked provider starts are not supported.');
+        }
         try {
             [$timeout, $outputLimit, $cancelGrace, $limits] = $this->resolvePolicy($request);
         } catch (ProcessStartRejectedException $exception) {

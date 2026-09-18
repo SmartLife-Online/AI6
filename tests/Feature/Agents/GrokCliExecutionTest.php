@@ -7,10 +7,7 @@ use App\AI6\Agents\AgentExecutionProcessor;
 use App\AI6\Agents\AgentExecutionRunner;
 use App\AI6\Agents\AgentInputLimits;
 use App\AI6\Agents\AgentProfileRegistry;
-use App\AI6\Agents\AgentResultContext;
 use App\AI6\Agents\AgentRole;
-use App\AI6\Agents\AgentTurnResult;
-use App\AI6\Agents\ExecutionHome;
 use App\AI6\Agents\GrokCliAdapter;
 use App\AI6\Agents\GrokCliConfiguration;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
@@ -43,6 +40,11 @@ class GrokCliExecutionTest extends TicketUiTestCase
 
     private string $wrappers;
 
+    protected function usesNativeProviderMailbox(): bool
+    {
+        return true;
+    }
+
     protected string $grokProfile = 'grok-cli-review';
 
     protected string $grokModel = 'provider_default';
@@ -74,6 +76,7 @@ class GrokCliExecutionTest extends TicketUiTestCase
 
     protected function approvalSelection(?User $attentionUser = null): ApprovalSelection
     {
+        $this->seedProviderReports();
         $this->reviewSlotIds = [(string) Str::uuid(), (string) Str::uuid()];
 
         return new ApprovalSelection(app(AgentProfileRegistry::class)->resolve('fake', AgentRole::IMPLEMENTATION, 'fake-model', 'medium'),
@@ -114,53 +117,34 @@ class GrokCliExecutionTest extends TicketUiTestCase
             $measures[SecurityMeasure::REQUIRE_AGENT_SANDBOX->value] = false;
             $this->app->instance(SecurityPolicy::class, new SecurityPolicy(SecurityProfile::CUSTOM, $measures, true));
             $this->app->forgetInstance(AgentExecutionRunner::class);
-            // Only the missing AI6-035 test credential projection is injected here.
-            // Parsing, dispatch, errors and artifact storage still execute production code.
-            $native = app(GrokCliAdapter::class);
-            $projected = new class($native) implements AgentAdapter
-            {
-                public function __construct(private readonly GrokCliAdapter $native) {}
 
-                public function result(AgentResultContext $context): string
-                {
-                    return $this->native->result($context);
-                }
-
-                public function turn(AgentResultContext $context, ExecutionHome $home, \Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult
-                {
-                    chmod($home->authDirectory, 0700);
-                    $projection = implode(DIRECTORY_SEPARATOR, [$home->authDirectory, 'token']);
-                    file_put_contents($projection, 'test-projection');
-                    chmod($projection, 0440);
-                    chmod($home->authDirectory, 0550);
-
-                    return $this->native->turn($context, $home, $heartbeat, $unreachablePaths);
-                }
-            };
-            $this->app->bind(AgentAdapter::class, static fn ($app, array $parameters): AgentAdapter => ($parameters['providerAlias'] ?? 'fake') === 'grok_cli' ? $projected : $production($app, $parameters));
         }
         $job = ExecutionJob::query()->where('run_id', $prepared['run']->id)->where('step_type', 'review')->sole();
         $dispatch = function () use ($job): void {
             (new ExecuteRunStep($job->id))->handle(app(RunOrchestrator::class), reviews: app(ReviewRound::class));
         };
         $dispatch();
-        AgentMailboxFixture::drain($job, $dispatch, static function () use ($scenario): void {
-            // Test-only insertion at the future AI6-035 projection point, before the mailbox claim.
-            if ($scenario === 'missing_auth') {
-                return;
-            }
+        if ($direct) {
+            self::assertSame(ExecutionJobState::WAITING, $job->refresh()->state);
+            self::assertSame('provider_error', $prepared['run']->fresh()->wait_reason?->value);
+            self::assertSame([], glob(AgentExecutionProcessor::inputRoot().'/requests/*'));
+            self::assertSame([], app(GrokCliAdapter::class)->lastCommand);
+
+            return;
+        }
+        AgentMailboxFixture::drain($job, $dispatch, function () use ($scenario): void {
             foreach (glob(AgentExecutionProcessor::inputRoot().'/execution-*/*/home/auth', GLOB_ONLYDIR) ?: [] as $directory) {
-                chmod($directory, 0700);
-                $projection = implode(DIRECTORY_SEPARATOR, [$directory, 'token']);
-                file_put_contents($projection, 'test-projection');
-                chmod($projection, 0440);
-                chmod($directory, 0550);
+                self::assertSame(['.', '..'], scandir($directory), 'The worker received no credentials.');
+            }
+            $auth = $this->onboardingRoot.'/store/grok_cli/token';
+            if ($scenario === 'missing_auth' && is_file($auth)) {
+                unlink($auth);
             }
         });
         $results = ReviewResult::query()->where('run_id', $prepared['run']->id)->get();
         self::assertNotEmpty($results, (string) $job->refresh()->failure_code);
         if ($state === 'ok') {
-            self::assertSame(ExecutionJobState::SUCCEEDED, $job->refresh()->state);
+            self::assertSame(ExecutionJobState::SUCCEEDED, $job->refresh()->state, json_encode([$job->failure_code, $results->pluck('failure_code')->all(), RunArtifact::query()->where('run_id', $prepared['run']->id)->where('kind', 'provider_raw')->pluck('redacted_metadata')->all()], JSON_THROW_ON_ERROR));
             self::assertCount(2, $results);
             self::assertSame([ReviewInvocationOutcome::VALID_RESULT], $results->pluck('invocation_outcome')->unique()->values()->all());
             self::assertCount(2, $results->pluck('session_id')->unique());
@@ -194,9 +178,7 @@ class GrokCliExecutionTest extends TicketUiTestCase
             if (in_array($scenario, ['success', 'invalid_json', 'cleanup_invalid', 'max_turns'], true)) {
                 self::assertSame(2, $artifact->redacted_metadata['usage']['num_turns']);
             }
-            if (! $direct) {
-                self::assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/D', (string) $artifact->execution_id);
-            }
+            self::assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/D', (string) $artifact->execution_id);
         }
         if ($scenario === 'foreign_schema') {
             self::assertSame(['invalid_json'], $results->pluck('invocation_outcome')->map(static fn (ReviewInvocationOutcome $outcome): string => $outcome->value)->unique()->values()->all());

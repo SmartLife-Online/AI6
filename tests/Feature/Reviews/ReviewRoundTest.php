@@ -3,6 +3,7 @@
 namespace Tests\Feature\Reviews;
 
 use App\AI6\Agents\AgentAdapter;
+use App\AI6\Agents\AgentExecutionProcessor;
 use App\AI6\Agents\AgentFinding;
 use App\AI6\Agents\AgentResult;
 use App\AI6\Agents\AgentResultContext;
@@ -15,6 +16,8 @@ use App\AI6\Agents\InstructionCandidate;
 use App\AI6\Agents\InstructionCandidateOrigin;
 use App\AI6\Agents\InstructionFileType;
 use App\AI6\Agents\InvalidAgentResponse;
+use App\AI6\Agents\ProviderCapabilityReport;
+use App\AI6\Agents\ProviderCredentialStore;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Git\IsolatedTreeExport;
 use App\AI6\Git\IsolatedTreeExporter;
@@ -35,6 +38,7 @@ use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\InstructionBindingVerifier;
 use App\AI6\Runs\InstructionCandidateSource;
 use App\AI6\Runs\Jobs\ExecuteRunStep;
+use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
@@ -50,6 +54,34 @@ use Tests\Feature\Tickets\TicketUiTestCase;
 final class ReviewRoundTest extends TicketUiTestCase
 {
     use BuildsReviewRoundFixture;
+
+    public function test_expired_reviewer_evidence_parks_and_resumes_without_a_workspace_error(): void
+    {
+        $prepared = $this->preparedReviewRun('AI6-035-REVIEW-RECHECK');
+        $run = $prepared['run'];
+        $this->reviewAdapter([]);
+        $job = ExecutionJob::query()->where('run_id', $run->id)->where('step_type', 'review')->sole();
+        $dispatch = fn () => (new ExecuteRunStep($job->id))->handle(app(RunOrchestrator::class), reviews: app(ReviewRound::class));
+        $dispatch();
+        self::assertTrue(app(AgentExecutionProcessor::class)->processNext(str_repeat('a', 32), static function (): void {}));
+        $document = app(ProviderCapabilityReport::class)->read('codex_cli');
+        self::assertNotNull($document);
+        config(['ai6.runtime_role' => 'agent']);
+        $store = app(ProviderCredentialStore::class);
+        $store->locked(fn () => $store->publish('codex_cli', $document['generation'], $document['rows'], time() - 301, $document['boot_id']));
+        config(['ai6.runtime_role' => 'worker']);
+        self::assertTrue(app(RunOrchestrator::class)->resumeStep($job->fresh()));
+        $dispatch();
+        self::assertSame(ExecutionJobState::WAITING, $job->refresh()->state);
+        self::assertSame(RunState::RUNNING, $run->fresh()->state);
+        self::assertSame(0, $job->attempts);
+        self::assertSame([], glob(AgentExecutionProcessor::inputRoot().'/requests/*.json'));
+        self::assertFalse(ReviewResult::query()->where('run_id', $run->id)->where('invocation_outcome', 'workspace_error')->exists());
+        $this->seedProviderReports();
+        self::assertTrue(app(RunOrchestrator::class)->resumeStep($job));
+        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReview($run)->state);
+        self::assertSame(2, ReviewResult::query()->where('run_id', $run->id)->where('invocation_outcome', 'valid_result')->count());
+    }
 
     /** AI6-047 TC-09: a missing mailbox answer is invalid_json, distinct from provider_error. */
     public function test_a_missing_mailbox_answer_is_invalid_json_and_distinct_from_provider_error(): void

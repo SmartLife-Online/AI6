@@ -2,6 +2,7 @@
 
 namespace App\AI6\Reviews;
 
+use App\AI6\Agents\AgentCapabilityPending;
 use App\AI6\Agents\AgentExecutionLimitReached;
 use App\AI6\Agents\AgentExecutionRunner;
 use App\AI6\Agents\AgentResultContext;
@@ -226,6 +227,10 @@ final readonly class SecurityReviewStep
             try {
                 $agentContext = new AgentResultContext(AgentRole::SECURITY_REVIEW, $prompt, $instruction, $runtime, [], '', slotId: $slot->slot_id, unreachablePaths: $this->gitMetadataPaths->resolve((string) $run->worktree_path));
                 $home = $this->turns->prepare($job, $run, $slot, $agentContext, $export);
+            } catch (AgentCapabilityPending) {
+                $this->runs->parkPollingStep($job, (string) $job->lease_owner);
+
+                return null;
             } catch (Throwable) {
                 throw new ImplementationImportException('security_home_failed', 'The sealed security home could not be created.');
             }

@@ -8,8 +8,33 @@ $scenario = $argv[1] ?? 'success';
 $arguments = array_slice($argv, 2);
 $home = (string) getenv('GROK_HOME');
 $result = (string) getenv('TMPDIR');
-if ($arguments === ['--no-auto-update', '--version']) {
+if ($arguments === ['--no-auto-update', '--version'] || $arguments === ['--version']) {
     echo $scenario === 'version_drift' ? "grok 1.0.6 (foreign)\n" : "grok 1.0.5 (5115b46bc9)\n";
+    exit(0);
+}
+if ($arguments === ['models']) {
+    if (getenv('XAI_API_KEY') !== 'synthetic-grok-token' || getenv('HOME') !== $home || $home !== $result) {
+        exit(16);
+    }
+    echo "Default model: grok-fixture\n\nAvailable models:\n  * grok-fixture (default)\n";
+    if ($scenario === 'models_offline') {
+        exit(0);
+    }
+    $cache = ['fetched_at' => gmdate('Y-m-d\TH:i:s\Z'), 'grok_version' => '1.0.5', 'auth_method' => 'api_key',
+        'origin' => 'https://api.x.ai/v1/models', 'models' => ['grok-fixture' => ['info' => [
+            'id' => 'grok-fixture', 'model' => 'grok-fixture', 'supported_in_api' => true, 'hidden' => false,
+        ]]]];
+    match ($scenario) {
+        'models_foreign_origin' => $cache['origin'] = 'https://example.invalid/models',
+        'models_foreign_auth' => $cache['auth_method'] = 'oauth',
+        'models_foreign_version' => $cache['grok_version'] = '1.0.6',
+        'models_old' => $cache['fetched_at'] = '2000-01-01T00:00:00Z',
+        'models_future' => $cache['fetched_at'] = '2099-01-01T00:00:00Z',
+        'models_missing_default' => $cache['models'] = [],
+        'models_disabled' => $cache['models']['grok-fixture']['info']['supported_in_api'] = false,
+        default => null,
+    };
+    file_put_contents($home.'/models_cache.json', $scenario === 'models_invalid' ? '{' : json_encode($cache, JSON_THROW_ON_ERROR));
     exit(0);
 }
 if (in_array('inspect', $arguments, true)) {

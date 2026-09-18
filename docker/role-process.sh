@@ -22,6 +22,14 @@ umask 0077
 boot_id="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
 printf '%s\n' "$boot_id" > "$expected_directory/boot-id"
 
+if [ "$role" = agent ]; then
+    presence=/var/lib/ai6/provider-presence
+    test -d "$presence" && test ! -L "$presence"
+    printf '%s\n' "$boot_id" > "$presence/boot-id.tmp"
+    chmod 0644 "$presence/boot-id.tmp"
+    mv "$presence/boot-id.tmp" "$presence/boot-id"
+fi
+
 case "$role" in
     worker)
         worker_timeout="${AI6_WORKER_TIMEOUT:-60}"

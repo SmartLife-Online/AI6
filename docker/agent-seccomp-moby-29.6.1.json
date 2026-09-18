@@ -895,6 +895,12 @@
       "comment": "AI6-041: bwrap creates exactly a user and mount namespace (SIGCHLD). No host capabilities."
     },
     {
+      "names": ["clone"],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [{"index": 0, "value": 1006764049, "op": "SCMP_CMP_EQ"}],
+      "comment": "AI6-035: measured bwrap user/mount/PID/IPC/UTS namespaces with SIGCHLD. No host capabilities."
+    },
+    {
       "names": [
         "pivot_root"
       ],

@@ -4,6 +4,7 @@ namespace App\AI6\Agents;
 
 use App\AI6\Git\CanonicalJson;
 use App\AI6\Shared\Config\ConfigurationException;
+use App\AI6\Shared\Process\AgentProcessScope;
 
 final readonly class GrokCliConfiguration
 {
@@ -47,10 +48,11 @@ final readonly class GrokCliConfiguration
     public function evidenceKey(ProviderRuntimeProfile $runtime, AgentRole $role, string $model, string $effort): string
     {
         return hash('sha256', "ai6.grok-capability.v1\0".$this->canonicalJson->normalizeAndEncode([
-            'version' => $this->pinnedVersion, 'binary_sha256' => $this->binaryPresent() ? hash_file('sha256', $this->binary) : null,
+            'version' => $this->pinnedVersion, 'binary_sha256' => $this->binaryPresent() ? app(ProviderBinaryDigest::class)->sha256($this->binary) : null,
             'platform' => PHP_OS_FAMILY, 'runtime_hash' => $runtime->hash,
             'role' => $role->value, 'model' => $model, 'effort' => $effort,
             'transport_sha256' => hash_file('sha256', __DIR__.'/GrokCliAdapter.php'),
+            'configuration_sha256' => hash_file('sha256', __FILE__),
             'home_manager_sha256' => hash_file('sha256', __DIR__.'/ExecutionHomeManager.php'),
             'sandbox_sha256' => hash_file('sha256', base_path('docker/agent-seccomp-moby-29.6.1.json')),
             'sandbox_profile_sha256' => hash('sha256', self::sandboxBytes()),
@@ -77,6 +79,11 @@ final readonly class GrokCliConfiguration
             throw new ConfigurationException('Configuration key ai6.execution_mailboxes.agent_root is invalid for Grok sandbox.');
         }
         $deny = [$root.'/execution-*/*/home/auth', $root.'/execution-*/*/runtime'];
+        $private = ProviderOnboarding::path('private_root');
+        if (preg_match('/[\x00-\x1f*?\[\]{}]/', $private) === 1) {
+            throw new ConfigurationException('Configuration key ai6.provider_onboarding.private_root is invalid for Grok sandbox.');
+        }
+        $deny = [...$deny, $private.'/projection-*', $private.'/probe-*/inputs/*/home/auth', $private.'/probe-*/inputs/*/runtime'];
 
         return "[profiles.ai6-review]\nextends = \"strict\"\nrestrict_network = true\ndeny = "
             .json_encode($deny, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)."\n";
@@ -104,6 +111,7 @@ final readonly class GrokCliConfiguration
     public static function environment(ExecutionHome $home): array
     {
         $environment = ['HOME' => $home->home, 'GROK_HOME' => $home->home, 'PATH' => '/usr/bin:/bin',
+            'GROK_SANDBOX_WORK_DIR' => AgentProcessScope::SANDBOX_WORK_DIRECTORY,
             'TMPDIR' => $home->resultDirectory, 'LC_ALL' => 'C.UTF-8', 'LANG' => 'C.UTF-8',
             'GROK_DISABLE_AUTOUPDATER' => '1', 'GROK_MEMORY' => '0', 'GROK_SESSION_REGISTRY' => '0',
             'GROK_SESSION_SEARCH' => '0', 'GROK_TELEMETRY_ENABLED' => '0', 'GROK_TELEMETRY_TRACE_UPLOAD' => '0'];

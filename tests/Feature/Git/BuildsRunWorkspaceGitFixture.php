@@ -162,7 +162,9 @@ trait BuildsRunWorkspaceGitFixture
                 continue;
             }
             $child = $path.'/'.$entry;
-            @chmod($child, is_dir($child) && ! is_link($child) ? 0700 : 0600);
+            if (! is_link($child)) {
+                @chmod($child, is_dir($child) ? 0700 : 0600);
+            }
             if (is_dir($child) && ! is_link($child)) {
                 $this->removeRunWorkspaceTree($child);
             } else {

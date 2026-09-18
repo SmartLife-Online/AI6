@@ -126,7 +126,8 @@ final class SecurityBootstrapTest extends TestCase
 
         $developmentEnvironment['AI6_SECURITY_ACKNOWLEDGE_REDUCED_MODE'] = 'true';
         $acknowledged = $this->process([PHP_BINARY, 'artisan', 'ai6:doctor'], $developmentEnvironment);
-        self::assertSame(0, $acknowledged->getExitCode(), $acknowledged->getErrorOutput());
+        self::assertSame(0, $this->process([PHP_BINARY, 'artisan', 'about'], $developmentEnvironment)->getExitCode());
+        $this->assertOnlyProviderEvidenceIsMissing($acknowledged);
         self::assertStringContainsString('Profil: development', $acknowledged->getOutput());
         self::assertStringContainsString(
             'Maßnahme '.SecurityMeasure::REQUIRE_HTTPS_OR_PRIVATE_ACCESS->value.': deaktiviert',
@@ -192,7 +193,8 @@ PHP,
         ], JSON_THROW_ON_ERROR);
         $explicit = $this->process([PHP_BINARY, 'artisan', 'ai6:doctor'], $environment);
 
-        self::assertSame(0, $explicit->getExitCode(), $explicit->getErrorOutput());
+        self::assertSame(0, $this->process([PHP_BINARY, 'artisan', 'about'], $environment)->getExitCode());
+        $this->assertOnlyProviderEvidenceIsMissing($explicit);
         self::assertStringContainsString('Schlüsselquelle: expliziter Schlüsselring', $explicit->getOutput());
     }
 
@@ -336,6 +338,20 @@ PHP,
         self::assertIsString($compact);
 
         return $compact;
+    }
+
+    private function assertOnlyProviderEvidenceIsMissing(Process $doctor): void
+    {
+        // Successful security bootstrap does not manufacture provider reports.
+        // AI6-035 requires the aggregate Doctor to fail when those are absent.
+        self::assertSame(1, $doctor->getExitCode(), $doctor->getOutput().$doctor->getErrorOutput());
+        self::assertSame('', $doctor->getErrorOutput());
+        foreach (['SecurityPolicy: OK', 'Redaction-Schlüsselring: OK', 'Checker-Laufzeit: OK',
+            'GitHub-Copilot-CLI: FEHLER', 'Grok-CLI: FEHLER', 'Codex-CLI: FEHLER'] as $line) {
+            self::assertStringContainsString($line, $doctor->getOutput());
+        }
+        self::assertSame(3, substr_count($doctor->getOutput(), ': FEHLER'));
+        self::assertSame(4, substr_count($doctor->getOutput(), 'unavailable · Aktueller, vollständig gebundener Agentbericht fehlt.'));
     }
 
     private function withoutAnsi(string $output): string

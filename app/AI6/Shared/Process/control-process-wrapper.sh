@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 
+# The shell synthesizes this exported variable even in an empty environment.
+# It is not part of any process policy's positive environment allowlist.
+unset PWD
+
 mode=${1:-}
 shift || true
 

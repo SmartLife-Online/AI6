@@ -51,7 +51,9 @@ final class DoctorCommandTest extends TestCase
         $exitCode = Artisan::call('ai6:doctor');
         $output = Artisan::output();
 
-        self::assertSame(0, $exitCode, $output);
+        self::assertSame(1, $exitCode, $output);
+        self::assertStringContainsString('Codex-CLI: FEHLER', $output);
+        self::assertStringContainsString('Aktueller, vollständig gebundener Agentbericht fehlt.', $output);
         self::assertStringContainsString('SecurityPolicy: OK', $output);
         self::assertStringContainsString('Profil: strict', $output);
         self::assertMatchesRegularExpression('/Policyhash: [0-9a-f]{64}/', $output);
@@ -80,7 +82,9 @@ final class DoctorCommandTest extends TestCase
         $exitCode = Artisan::call('ai6:doctor');
         $output = Artisan::output();
 
-        self::assertSame(0, $exitCode, $output);
+        self::assertSame(1, $exitCode, $output);
+        self::assertStringContainsString('Codex-CLI: FEHLER', $output);
+        self::assertStringContainsString('Aktueller, vollständig gebundener Agentbericht fehlt.', $output);
         self::assertStringContainsString(
             'Schlüsselquelle: APP_KEY-Fallback (nur lokal; nicht rotationsstabil)',
             $output,

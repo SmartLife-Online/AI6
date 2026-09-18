@@ -8,6 +8,9 @@ use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentRole;
 use App\AI6\Agents\CodexCliAdapter;
 use App\AI6\Agents\CodexCliConfiguration;
+use App\AI6\Agents\ExecutionHome;
+use App\AI6\Agents\ProviderCapabilityReport;
+use App\AI6\Agents\ProviderOnboarding;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Shared\Config\ConfigurationException;
 use App\AI6\Shared\Process\ControlProcessRunner;
@@ -45,6 +48,12 @@ final readonly class CodexCliDoctorCheck implements DoctorCheck
 
     public function run(): DoctorCheckResult
     {
+        return app(ProviderCapabilityReport::class)->doctor('codex_cli');
+    }
+
+    public function probeCombination(ExecutionHome $home): DoctorCheckResult
+    {
+        ProviderOnboarding::assertAgent();
         try {
             $configuration = $this->configuration ?? CodexCliConfiguration::fromConfiguredValues();
         } catch (ConfigurationException) {
@@ -85,7 +94,7 @@ final readonly class CodexCliDoctorCheck implements DoctorCheck
 
             return new DoctorCheckResult(false, $details);
         }
-        $evidence = $this->versionEvidence($configuration);
+        $evidence = $this->versionEvidence($configuration, $home);
         if ($evidence !== null) {
             $details['Reale CLI-Evidenz'] = 'FEHLER ('.$evidence.')';
             $details['Fehler'] = $evidence;
@@ -93,7 +102,7 @@ final readonly class CodexCliDoctorCheck implements DoctorCheck
             return new DoctorCheckResult(false, $details);
         }
         $details['Reale CLI-Evidenz'] = $configuration->expectedVersionLine().' (gleich Pin)';
-        $surface = $this->featureSurfaceEvidence($configuration);
+        $surface = $this->featureSurfaceEvidence($configuration, $home);
         if ($surface !== null) {
             $details['Schutznachweis'] = 'FEHLER ('.$surface.')';
             $details['Fehler'] = $surface;
@@ -181,14 +190,14 @@ final readonly class CodexCliDoctorCheck implements DoctorCheck
     }
 
     /** One `--version` probe under the control policy; provider output is never echoed. */
-    private function versionEvidence(CodexCliConfiguration $configuration): ?string
+    private function versionEvidence(CodexCliConfiguration $configuration, ExecutionHome $home): ?string
     {
         $processes = $this->processes ?? app(ControlProcessRunner::class);
         $result = $processes->run(new ProcessRequest(
             [$configuration->binary, '--version'],
-            storage_path(),
-            ['PATH'],
-            [],
+            $home->workspace,
+            ['PATH', 'HOME', 'CODEX_HOME', 'TMPDIR'],
+            ['PATH' => '/usr/bin:/bin', 'HOME' => $home->home, 'CODEX_HOME' => $home->authDirectory, 'TMPDIR' => $home->resultDirectory],
             new RedactionContext('doctor', null, 'codex-cli-version'),
             timeoutSeconds: self::VERSION_PROBE_TIMEOUT_SECONDS,
         ));
@@ -207,7 +216,7 @@ final readonly class CodexCliDoctorCheck implements DoctorCheck
      * surface naming it — an extension without a switch included — locks this
      * provider by name.
      */
-    private function featureSurfaceEvidence(CodexCliConfiguration $configuration): ?string
+    private function featureSurfaceEvidence(CodexCliConfiguration $configuration, ExecutionHome $home): ?string
     {
         $command = [$configuration->binary, 'features', 'list'];
         foreach (CodexCliAdapter::DISABLED_FEATURES as $feature) {
@@ -217,9 +226,9 @@ final readonly class CodexCliDoctorCheck implements DoctorCheck
         $processes = $this->processes ?? app(ControlProcessRunner::class);
         $result = $processes->run(new ProcessRequest(
             $command,
-            storage_path(),
-            ['PATH'],
-            [],
+            $home->workspace,
+            ['PATH', 'HOME', 'CODEX_HOME', 'TMPDIR'],
+            ['PATH' => '/usr/bin:/bin', 'HOME' => $home->home, 'CODEX_HOME' => $home->authDirectory, 'TMPDIR' => $home->resultDirectory],
             new RedactionContext('doctor', null, 'codex-cli-features'),
             timeoutSeconds: self::VERSION_PROBE_TIMEOUT_SECONDS,
         ));
@@ -272,7 +281,7 @@ final readonly class CodexCliDoctorCheck implements DoctorCheck
     private function codexProfiles(): array
     {
         return array_values(array_filter(
-            $this->profiles->all(),
+            $this->profiles->configured(),
             static fn (AgentProfile $profile): bool => $profile->providerProfileAlias === CodexCliAdapter::PROVIDER_ALIAS,
         ));
     }

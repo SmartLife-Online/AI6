@@ -42,7 +42,7 @@ final class ProcessArchitectureTest extends TestCase
         return $result;
     }
 
-    public function test_locks_exist_only_at_the_effect_and_agent_lifecycle_boundaries(): void
+    public function test_locks_exist_only_at_the_effect_agent_lifecycle_and_credential_boundaries(): void
     {
         $root = dirname(__DIR__, 4).'/app';
         $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root));
@@ -69,6 +69,8 @@ final class ProcessArchitectureTest extends TestCase
         self::assertSame([
             str_replace('\\', '/', $root.'/AI6/Agents/AgentExecutionProcessor.php'),
             str_replace('\\', '/', $root.'/AI6/Agents/AgentExecutionProcessor.php'),
+            str_replace('\\', '/', $root.'/AI6/Agents/ProviderCredentialStore.php'),
+            str_replace('\\', '/', $root.'/AI6/Agents/ProviderCredentialStore.php'),
             str_replace('\\', '/', $root.'/AI6/Shared/Process/EffectLock.php'),
             str_replace('\\', '/', $root.'/AI6/Shared/Process/control-process-wrapper.sh'),
         ], $matches);

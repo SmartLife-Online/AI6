@@ -3,6 +3,8 @@
 namespace App\AI6\Shared\Process;
 
 use App\AI6\Agents\AgentExecutionProcessor;
+use App\AI6\Agents\ProviderCapabilityPublisher;
+use App\AI6\Agents\ProviderCredentialStore;
 use App\AI6\Checks\CheckerExecutionProcessor;
 use App\AI6\Checks\CheckerRuntimeAttestation;
 use App\AI6\Checks\CheckerRuntimeConfiguration;
@@ -44,14 +46,41 @@ final class ExecutionMailboxCommand extends Command
             return self::FAILURE;
         }
 
+        $providerReady = false;
+        if ($role === ExecutionRole::AGENT) {
+            try {
+                app(ProviderCredentialStore::class)->recover();
+                $providerReady = true;
+            } catch (Throwable $exception) {
+                report($exception);
+                $this->components->error('Providerzustand nicht bereinigt; reale Provider bleiben gesperrt.');
+            }
+        }
+
         do {
             $requests = glob($root.'/requests/*.json', GLOB_NOSORT);
             $this->heartbeat($heartbeatDirectory, $role, $bootId, is_array($requests) ? count($requests) : 0);
             if ($role === ExecutionRole::AGENT) {
+                if ($providerReady) {
+                    try {
+                        app(ProviderCapabilityPublisher::class)->pulse($bootId);
+                        app(ProviderCapabilityPublisher::class)->due(fn () => $this->heartbeat($heartbeatDirectory, $role, $bootId, 0));
+                    } catch (Throwable $exception) {
+                        report($exception);
+                        $this->components->error('Providerbericht derzeit nicht verfügbar.');
+                    }
+                }
                 try {
                     app(AgentExecutionProcessor::class)->processNext($bootId,
-                        function (string $_executionId) use ($heartbeatDirectory, $role, $bootId): void {
+                        function (string $_executionId) use ($heartbeatDirectory, $role, $bootId, $providerReady): void {
                             $this->heartbeat($heartbeatDirectory, $role, $bootId, 0);
+                            if ($providerReady) {
+                                try {
+                                    app(ProviderCapabilityPublisher::class)->pulse($bootId);
+                                } catch (Throwable $exception) {
+                                    report($exception);
+                                }
+                            }
                         });
                 } catch (Throwable $exception) {
                     report($exception);

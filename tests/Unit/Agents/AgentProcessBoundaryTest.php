@@ -34,7 +34,7 @@ final class AgentProcessBoundaryTest extends TestCase
 {
     public function test_shipped_control_roots_include_exactly_the_doctor_staging_root(): void
     {
-        $expected = [base_path(), storage_path(), config('ai6.execution_mailboxes.agent_root')];
+        $expected = [base_path(), storage_path(), config('ai6.execution_mailboxes.agent_root'), config('ai6.provider_onboarding.private_root')];
         self::assertSame($expected, config('ai6.process.policies.control.working_roots'));
         // Pin the shipped baseline independently of optional managed-project roots.
         config(['ai6.control_operations.managed_root' => '']);
@@ -44,6 +44,8 @@ final class AgentProcessBoundaryTest extends TestCase
     public function test_agent_policy_and_real_child_environment_exclude_foreign_access(): void
     {
         $root = dirname(__DIR__, 3);
+        $output = $root.'/storage/framework/testing/agent-environment-'.bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($output, 0700));
         $forbidden = ['APP_KEY', 'DB_DATABASE', 'MAIL_PASSWORD', 'AI6_GIT_SSH_KEY', 'AI6_GIT_KNOWN_HOSTS', 'SESSION_DRIVER', 'AI6_COPILOT_CAPABILITY_EVIDENCE'];
         $configured = ProcessPolicyRegistry::fromConfiguredValues()->get(ProcessPolicyName::AGENT);
         self::assertSame(
@@ -80,8 +82,8 @@ final class AgentProcessBoundaryTest extends TestCase
                 ['AI6_RUNTIME_PROFILE' => 'codex-cli-v1'],
                 new RedactionContext('project-1', 'run-1', 'agent-environment'),
                 policy: ProcessPolicyName::AGENT,
-                resultDirectory: $root.'/storage/framework/testing',
-                artifactDirectory: $root.'/storage/framework/testing',
+                resultDirectory: $output,
+                artifactDirectory: $output,
             ));
             self::assertTrue($result->succeeded(), $result->errorOutput);
             self::assertSame(array_fill(0, count($forbidden), 'missing'), json_decode($result->output, true, 8, JSON_THROW_ON_ERROR));
@@ -89,6 +91,7 @@ final class AgentProcessBoundaryTest extends TestCase
             foreach ($forbidden as $name) {
                 putenv($name);
             }
+            self::assertTrue(rmdir($output));
         }
     }
 
@@ -118,8 +121,8 @@ final class AgentProcessBoundaryTest extends TestCase
                 $this->app->make(ControlProcessRunner::class),
             );
             $result = $doctor->run();
-            self::assertTrue($result->passed);
-            self::assertSame('nicht eingerichtet; Profile von codex_cli gesperrt', $result->details['Zustand']);
+            self::assertFalse($result->passed);
+            self::assertStringContainsString('unavailable', $result->details['codex-gpt-5.6-terra']);
 
             $fake = $this->app->makeWith(AgentAdapter::class, ['providerAlias' => 'fake']);
             self::assertInstanceOf(FakeAgentAdapter::class, $fake);

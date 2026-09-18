@@ -41,8 +41,9 @@ final class FakeCodexBinary
         $name = 'codex-'.preg_replace('/[^a-z0-9_-]/', '-', $scenario).'-'.bin2hex(random_bytes(3));
         if (DIRECTORY_SEPARATOR === '/') {
             $path = $directory.'/'.$name;
-            $script = "#!/bin/sh\nexec ".escapeshellarg(PHP_BINARY).' '.escapeshellarg($fixture).' '
-                .escapeshellarg('--scenario='.$scenario).' '.escapeshellarg('--version-string='.$versionLine)." -- \"\$@\"\n";
+            $source = (string) file_get_contents($fixture);
+            $source = str_replace('declare(strict_types=1);', 'declare(strict_types=1);'."\n".'$_SERVER["argv"] = [$argv[0], '.var_export('--scenario='.$scenario, true).', '.var_export('--version-string='.$versionLine, true).', "--", ...array_slice($argv, 1)];', $source);
+            $script = '#!'.PHP_BINARY."\n".$source;
             Assert::assertNotFalse(file_put_contents($path, $script));
             Assert::assertTrue(chmod($path, 0755));
 

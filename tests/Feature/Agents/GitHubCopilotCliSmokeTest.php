@@ -16,12 +16,14 @@ use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
 use Tests\Fixtures\Agents\BuildsCopilotHome;
+use Tests\Fixtures\Agents\BuildsProviderOnboarding;
 use Tests\TestCase;
 
 /** Opt-in real transport proof. Full agent-role isolation and actual forbidden-tool attempts remain MG-01. */
 final class GitHubCopilotCliSmokeTest extends TestCase
 {
     use BuildsCopilotHome;
+    use BuildsProviderOnboarding;
 
     private string $smokeModel = 'gpt-5.4';
 
@@ -75,8 +77,11 @@ final class GitHubCopilotCliSmokeTest extends TestCase
         $profile['models'] = ['claude-custom', 'gpt-custom'];
         $profile['roles'] = [$role];
         $profile['efforts'] = [$effort];
+        $profile['capability_status'] = 'available';
+        $profile['runtime_profile'] = $provider === 'grok_cli' ? 'grok-cli-v1' : 'github-copilot-cli-v1';
         config(['ai6.agent_profiles.custom-review' => $profile]);
         $this->app->forgetInstance(AgentProfileRegistry::class);
+        $this->seedProviderReports();
         $this->smokeModel = $model;
         if (! $allowed) {
             $this->expectException(AssertionFailedError::class);

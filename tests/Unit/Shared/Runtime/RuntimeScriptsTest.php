@@ -2,6 +2,9 @@
 
 namespace Tests\Unit\Shared\Runtime;
 
+use App\AI6\Agents\CodexCliAdapter;
+use App\AI6\Agents\GitHubCopilotCliConfiguration;
+use App\AI6\Agents\GrokCliConfiguration;
 use PHPUnit\Framework\TestCase;
 
 final class RuntimeScriptsTest extends TestCase
@@ -155,9 +158,49 @@ final class RuntimeScriptsTest extends TestCase
         self::assertArrayNotHasKey('environment', $agent);
     }
 
+    public function test_provider_provisioning_and_boot_presence_are_explicit_and_credential_free(): void
+    {
+        $entrypoint = $this->read('docker/entrypoint.sh');
+        $start = strpos($entrypoint, '        for provider_directory');
+        $end = strpos($entrypoint, '        managed_root=');
+        self::assertIsInt($start);
+        self::assertIsInt($end);
+        $provisioning = substr($entrypoint, $start, $end - $start);
+        self::assertStringContainsString('chown 10002:10001 "$provider_directory"', $provisioning);
+        self::assertStringContainsString('chmod 0700 /var/lib/ai6/provider-store', $provisioning);
+        self::assertStringContainsString('chmod 0755 /var/lib/ai6/provider-reports /var/lib/ai6/provider-presence', $provisioning);
+        self::assertDoesNotMatchRegularExpression('/\b(?:cat|cp|find|php|curl|login)\b/', $provisioning);
+        self::assertStringNotContainsString('auth.json', $provisioning);
+        self::assertStringNotContainsString('/token', $provisioning);
+        $role = $this->read('docker/role-process.sh');
+        self::assertStringContainsString('boot_id="$(od -An -N16 -tx1 /dev/urandom', $role);
+        self::assertStringContainsString('presence=/var/lib/ai6/provider-presence', $role);
+        self::assertStringContainsString('printf \'%s\n\' "$boot_id" > "$presence/boot-id.tmp"', $role);
+        self::assertStringContainsString('chmod 0644 "$presence/boot-id.tmp"', $role);
+        self::assertStringContainsString('mv "$presence/boot-id.tmp" "$presence/boot-id"', $role);
+    }
+
     public function test_image_and_sqlite_sources_are_pinned_and_code_runs_unprivileged(): void
     {
         $dockerfile = $this->read('Dockerfile');
+
+        foreach ([
+            ['https://github.com/openai/codex/releases/download/rust-v0.129.0-alpha.15/codex-x86_64-unknown-linux-musl.tar.gz', 'cbac890b22472413320625ff3dd47e78fac2c684df82dd55f8502c1a2b6455fa', '/tmp/ai6-codex.tar.gz'],
+            ['https://x.ai/cli/grok-1.0.5-linux-x86_64', '9ba87444e1819e8f6104adbbf4676a870c204380aa5c3e1c38a926c4ea677238', '/tmp/ai6-grok'],
+            ['https://github.com/github/copilot-cli/releases/download/v1.0.83/copilot-linux-x64.tar.gz', 'ffbe1c429664b8a05efed67ecdb467123e40fcaa3c6c14ef9a98ba74da4687b7', '/tmp/ai6-copilot.tar.gz'],
+        ] as [$url, $digest, $archive]) {
+            self::assertStringContainsString($url.';', $dockerfile);
+            self::assertStringContainsString("echo '".$digest.'  '.$archive."' | sha256sum --check --strict;", $dockerfile);
+        }
+        foreach (['codex', 'grok', 'copilot'] as $binary) {
+            self::assertMatchesRegularExpression('~install -m 0755 /tmp/[^;]+ /usr/local/bin/'.$binary.';~', $dockerfile);
+        }
+        self::assertStringNotContainsString('grok-build', $dockerfile);
+        self::assertSame(['0.129.0-alpha.15'], CodexCliAdapter::VERIFIED_TRANSPORT_VERSIONS);
+        self::assertSame('1.0.5', GrokCliConfiguration::TRANSPORT_VERSION);
+        self::assertSame('grok 1.0.5 (5115b46bc9)', GrokCliConfiguration::VERSION_OUTPUT);
+        self::assertSame('1.0.83', GitHubCopilotCliConfiguration::TRANSPORT_VERSION);
+        self::assertDoesNotMatchRegularExpression('~(?:curl[^\n]*\|\s*(?:ba)?sh|/latest/|npm\s+install|(?:codex|grok|copilot)\s+(?:update|upgrade))~', $dockerfile);
 
         self::assertStringContainsString('php:8.5.5-apache-bookworm@sha256:e340b45a', $dockerfile);
         self::assertStringContainsString('composer:2.10.1@sha256:7725eb45', $dockerfile);

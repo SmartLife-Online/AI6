@@ -447,6 +447,7 @@ final class CodexCliAdapterTest extends TestCase
         $forged = new ProviderRuntimeProfile($this->runtime->id, $this->runtime->version, [], $this->runtime->permissions, $this->runtime->extensions, str_repeat('9', 64));
         $this->expectException(ExecutionHomeException::class);
         $this->expectExceptionMessage('The provider runtime profile is not server-bound.');
+        config(['ai6.runtime_role' => 'agent']);
         $manager->create($this->root.'/inputs', $this->root.'/outputs', 'slot-1', 'session-drift', $this->root.'/export',
             $this->instructionProfile(), $this->snapshot, $forged, $this->projection());
     }
@@ -594,6 +595,7 @@ final class CodexCliAdapterTest extends TestCase
         $manager = new ExecutionHomeManager(new CanonicalJson, new CredentialRevisionRegistry(['codex_cli' => 'revision-1']), null, null, new AgentInputLimits(16, 16, 1048576, 8, 2097152));
         $this->expectException(ExecutionHomeException::class);
         $this->expectExceptionMessage('The instruction snapshot exceeds its configured per-file limit.');
+        config(['ai6.runtime_role' => 'agent']);
         $manager->create($this->root.'/inputs', $this->root.'/outputs', 'slot-1', 'session-limit', $this->root.'/export',
             $this->instructionProfile(), $oversized, $this->runtime, $this->projection());
     }
@@ -829,9 +831,15 @@ final class CodexCliAdapterTest extends TestCase
 
     private function home(AgentRole $role, ?AgentResultContext $context = null, string $session = 'session-1'): ExecutionHome
     {
-        $home = $this->manager()->create($this->root.'/inputs', $this->root.'/outputs', 'slot-1', $session, $this->root.'/export',
-            $this->instructionProfile(), $this->snapshot, $this->runtime, $this->projection(),
-            writableWorkspace: $role === AgentRole::IMPLEMENTATION, turnContext: $context);
+        $runtimeRole = config('ai6.runtime_role');
+        config(['ai6.runtime_role' => 'agent']);
+        try {
+            $home = $this->manager()->create($this->root.'/inputs', $this->root.'/outputs', 'slot-1', $session, $this->root.'/export',
+                $this->instructionProfile(), $this->snapshot, $this->runtime, $this->projection(),
+                writableWorkspace: $role === AgentRole::IMPLEMENTATION, turnContext: $context);
+        } finally {
+            config(['ai6.runtime_role' => $runtimeRole]);
+        }
         $this->homes[] = $home;
 
         return $home;

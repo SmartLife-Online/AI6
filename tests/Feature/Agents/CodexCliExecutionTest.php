@@ -3,6 +3,7 @@
 namespace Tests\Feature\Agents;
 
 use App\AI6\Agents\AgentAdapter;
+use App\AI6\Agents\AgentCapabilityPending;
 use App\AI6\Agents\AgentExecutionException;
 use App\AI6\Agents\AgentExecutionProcessor;
 use App\AI6\Agents\AgentExecutionRequest;
@@ -20,6 +21,9 @@ use App\AI6\Agents\ExecutionHomeManager;
 use App\AI6\Agents\FakeAgentAdapter;
 use App\AI6\Agents\GitHubCopilotCliAdapter;
 use App\AI6\Agents\GrokCliAdapter;
+use App\AI6\Agents\ProviderCapabilityPublisher;
+use App\AI6\Agents\ProviderCapabilityReport;
+use App\AI6\Agents\ProviderCredentialStore;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Auth\Models\User;
 use App\AI6\Projects\EffectiveProjectConfiguration;
@@ -39,6 +43,7 @@ use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunAgent;
 use App\AI6\Runs\Models\RunArtifact;
 use App\AI6\Runs\Models\RunEvent;
+use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\RunImplementation;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunState;
@@ -50,21 +55,28 @@ use Tests\Feature\Reviews\BuildsReviewRoundFixture;
 use Tests\Feature\Tickets\TicketUiTestCase;
 use Tests\Fixtures\Agents\AgentMailboxFixture;
 use Tests\Fixtures\Agents\FakeCodexBinary;
+use Tests\Fixtures\Agents\NativeProviderMailbox;
 
 /**
  * The Codex transport over the one AI6-047 seam: staging, mailbox, agent
  * consumer, result, worker import and cleanup, with the fake CLI as the
  * pinned binary (TC-01, TC-06, TC-07, TC-09, TC-10, TC-12, TC-13).
  *
- * The credential projection of a codex_cli slot is empty until the store of
- * AI6-035 exists; these tests place a test projection into the staged home
- * before the agent consumer claims it, exactly where that store will write.
+ * The worker supplies no auth bytes. The agent consumes its synthetic store
+ * through the production AI6-035 projection and namespace boundary.
  */
 final class CodexCliExecutionTest extends TicketUiTestCase
 {
     use BuildsReviewRoundFixture;
 
     private string $wrappers;
+
+    private bool $nativeMailbox = true;
+
+    protected function usesNativeProviderMailbox(): bool
+    {
+        return $this->nativeMailbox;
+    }
 
     private bool $codexImplementer = false;
 
@@ -143,6 +155,278 @@ final class CodexCliExecutionTest extends TicketUiTestCase
         self::assertSame('medium', $slot->effort, 'The approved effort of the run slot reaches the command line.');
         self::assertSame([], $this->directoryEntries(AgentExecutionProcessor::inputRoot()));
         self::assertSame([], $this->directoryEntries(AgentExecutionProcessor::outputRoot()));
+    }
+
+    public function test_report_expiry_during_a_turn_preserves_the_result_and_worker_patch_import(): void
+    {
+        Mail::fake();
+        $prepared = $this->preparedCodexRun('AI6-035-EXPIRED-TURN');
+        config(['ai6.fixture.expire_provider_report' => true]);
+        $job = $this->executeCodexImplement($prepared['run']);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $job->state, (string) $job->failure_code);
+        self::assertSame("<?php\n\n// fake-codex-change\n", file_get_contents($prepared['worktree'].'/app/Example.php'));
+        self::assertNull(app(ProviderCapabilityReport::class)->read('codex_cli'));
+        self::assertFalse(app(AgentProfileRegistry::class)->get('codex-gpt-5.6-terra')->capabilityStatus->selectable());
+        self::assertSame('ok', RunArtifact::query()->where('run_id', $prepared['run']->id)->where('kind', 'provider_raw')->sole()->redacted_metadata['state']);
+    }
+
+    public function test_an_existing_staging_survives_report_expiry_but_new_staging_waits(): void
+    {
+        $this->nativeMailbox = false;
+        $prepared = $this->preparedCodexRun('AI6-035-EXPIRED-STAGING');
+        [$run, $job, , $home, $context] = $this->stage($prepared['run']);
+        $slot = RunAgent::query()->where('run_id', $run->id)->where('role', 'implementation')->sole();
+        $reports = app(ProviderCapabilityReport::class);
+        $document = $reports->read('codex_cli');
+        self::assertNotNull($document);
+        $role = config('ai6.runtime_role');
+        config(['ai6.runtime_role' => 'agent']);
+        try {
+            $store = app(ProviderCredentialStore::class);
+            $store->locked(fn () => $store->publish('codex_cli', $document['generation'], $document['rows'], time() - 301, $document['boot_id']));
+        } finally {
+            config(['ai6.runtime_role' => $role]);
+        }
+        self::assertNull($reports->read('codex_cli'));
+        $runner = app(AgentExecutionRunner::class);
+        $claimed = $this->claim($job);
+        self::assertSame($home->root, $runner->prepare($claimed, $run, $slot, $context, $prepared['worktree'])->root);
+        $runner->destroy($home);
+        $this->expectException(AgentCapabilityPending::class);
+        $runner->prepare($claimed, $run, $slot, $context, $prepared['worktree']);
+    }
+
+    public function test_expired_start_evidence_parks_without_consuming_an_attempt_and_resumes_after_recheck(): void
+    {
+        $this->nativeMailbox = false;
+        $prepared = $this->preparedCodexRun('AI6-035-STAGING-RECHECK');
+        $this->expireCodexReport();
+        $run = $prepared['run'];
+        $job = ExecutionJob::query()->where('run_id', $run->id)->where('step_type', 'implement')->sole();
+        $dispatch = fn () => (new ExecuteRunStep($job->id))->handle(app(RunOrchestrator::class), app(RunImplementation::class));
+        $dispatch();
+        self::assertSame(ExecutionJobState::WAITING, $job->refresh()->state);
+        self::assertSame(RunState::RUNNING, $run->fresh()->state);
+        self::assertSame(0, $job->attempts);
+        self::assertSame([], glob(AgentExecutionProcessor::inputRoot().'/execution-*/binding.json'));
+        $intent = $job->intent;
+        self::assertTrue(app(RunOrchestrator::class)->resumeStep($job));
+        $dispatch();
+        self::assertSame($intent, $job->refresh()->intent, 'Polling must preserve the generation and deadline.');
+        $this->seedProviderReports();
+        self::assertTrue(app(RunOrchestrator::class)->resumeStep($job));
+        $dispatch();
+        self::assertSame(ExecutionJobState::WAITING, $job->refresh()->state);
+        self::assertSame(0, $job->attempts);
+        self::assertCount(1, glob(AgentExecutionProcessor::inputRoot().'/execution-*/binding.json'));
+    }
+
+    public function test_an_undispatched_home_waits_for_presence_without_recreating_its_binding(): void
+    {
+        $this->nativeMailbox = false;
+        $prepared = $this->preparedCodexRun('AI6-035-UNDISPATCHED');
+        [$run, $job, , $dispatched, $context] = $this->stage($prepared['run']);
+        $runner = app(AgentExecutionRunner::class);
+        $slot = RunAgent::query()->where('run_id', $run->id)->where('role', 'implementation')->sole();
+        $claimed = $this->claim($job);
+        $next = new AgentResultContext($context->role, $context->promptSnapshot, $context->instructionSnapshot,
+            $context->runtimeProfile, $context->criterionRefs, $context->actualDiff, $context->instructionUpdate,
+            $context->initialScope, $context->expectedInstructionBlobs, $context->slotId, $context->attempt + 1,
+            $context->expectedFindingIds, $context->expectedFindingGroups, $context->unreachablePaths);
+        $home = $runner->prepare($claimed, $run, $slot, $next, $dispatched->workspace);
+        self::assertFalse($runner->dispatched($claimed, $home));
+        $before = file_get_contents(dirname($home->root).'/binding.json');
+        file_put_contents($this->onboardingRoot.'/presence/heartbeat.json', json_encode([
+            'boot_id' => str_repeat('a', 32), 'recorded_at' => time() - 60,
+        ], JSON_THROW_ON_ERROR));
+        try {
+            $runner->prepare($claimed, $run, $slot, $next, $dispatched->workspace);
+            self::fail('An undispatched home must wait for fresh presence.');
+        } catch (AgentCapabilityPending) {
+            self::assertSame($before, file_get_contents(dirname($home->root).'/binding.json'));
+        }
+        config(['ai6.runtime_role' => 'agent']);
+        app(ProviderCapabilityPublisher::class)->pulse(str_repeat('a', 32));
+        config(['ai6.runtime_role' => 'worker']);
+        $resumed = $runner->prepare($claimed, $run, $slot, $next, $dispatched->workspace);
+        self::assertDirectoryExists($resumed->root);
+        self::assertSame(realpath($home->root), realpath($resumed->root));
+        self::assertSame($before, file_get_contents(dirname($resumed->root).'/binding.json'));
+        $runner->destroy($home);
+        $runner->destroy($dispatched);
+    }
+
+    /** @return list<array{string}> */
+    public static function stagingPresenceChanges(): array
+    {
+        return [['restart'], ['expired_presence'], ['legacy_boot']];
+    }
+
+    #[DataProvider('stagingPresenceChanges')]
+    public function test_pending_staging_survives_presence_expiry_and_agent_restart(string $change): void
+    {
+        $this->nativeMailbox = false;
+        $prepared = $this->preparedCodexRun('AI6-035-STAGING-PRESENCE');
+        $this->expireCodexReport();
+        $run = $prepared['run'];
+        $job = ExecutionJob::query()->where('run_id', $run->id)->where('step_type', 'implement')->sole();
+        $dispatch = fn () => (new ExecuteRunStep($job->id))->handle(app(RunOrchestrator::class), app(RunImplementation::class));
+        $dispatch();
+        self::assertSame(ExecutionJobState::WAITING, $job->refresh()->state);
+        $runner = app(AgentExecutionRunner::class);
+        $intent = $runner->intent($job);
+        $generationKey = array_find(array_keys($intent), static fn (string $key): bool => str_ends_with($key, '_generation'));
+        self::assertNotNull($generationKey);
+        $bootKey = substr($generationKey, 0, -strlen('_generation')).'_boot';
+        self::assertArrayNotHasKey($bootKey, $intent);
+        if ($change === 'legacy_boot') {
+            $job->forceFill(['intent' => json_encode([...$intent, $bootKey => str_repeat('a', 32)], JSON_THROW_ON_ERROR)])->save();
+        }
+        $document = app(ProviderCapabilityReport::class)->read('codex_cli', false);
+        self::assertNotNull($document);
+        $boot = $change === 'expired_presence' ? $document['boot_id'] : bin2hex(random_bytes(16));
+        file_put_contents($this->onboardingRoot.'/presence/boot-id', $boot);
+        file_put_contents($this->onboardingRoot.'/presence/heartbeat.json', json_encode([
+            'boot_id' => $document['boot_id'], 'recorded_at' => time() - 60,
+        ], JSON_THROW_ON_ERROR));
+        // Refresh the report first: presence alone must keep staging pending.
+        config(['ai6.runtime_role' => 'agent']);
+        $store = app(ProviderCredentialStore::class);
+        $store->locked(fn () => $store->publish('codex_cli', $document['generation'], $document['rows'], time(), $document['boot_id']));
+        config(['ai6.runtime_role' => 'worker']);
+        self::assertTrue(app(RunOrchestrator::class)->resumeStep($job->fresh()));
+        $dispatch();
+        self::assertSame(ExecutionJobState::WAITING, $job->refresh()->state);
+        self::assertSame($intent, $runner->intent($job));
+        self::assertSame([], glob(AgentExecutionProcessor::inputRoot().'/execution-*/binding.json'));
+        config(['ai6.runtime_role' => 'agent']);
+        app(ProviderCapabilityPublisher::class)->pulse($boot);
+        config(['ai6.runtime_role' => 'worker']);
+        if ($boot !== $document['boot_id']) {
+            // Current presence with the preceding boot's report still waits.
+            self::assertTrue(app(RunOrchestrator::class)->resumeStep($job));
+            $dispatch();
+            self::assertSame(ExecutionJobState::WAITING, $job->refresh()->state);
+            self::assertSame($intent, $runner->intent($job));
+            self::assertSame([], glob(AgentExecutionProcessor::inputRoot().'/execution-*/binding.json'));
+        }
+        config(['ai6.runtime_role' => 'agent']);
+        $store->locked(fn () => $store->publish('codex_cli', $document['generation'], $document['rows'], time(), $boot));
+        config(['ai6.runtime_role' => 'worker']);
+        self::assertTrue(app(RunOrchestrator::class)->resumeStep($job));
+        $dispatch();
+        self::assertSame(RunState::RUNNING, $run->fresh()->state);
+        self::assertSame(0, $job->refresh()->attempts);
+        self::assertCount(1, glob(AgentExecutionProcessor::inputRoot().'/execution-*/binding.json'));
+        foreach ($intent as $key => $value) {
+            self::assertSame($value, $runner->intent($job)[$key]);
+        }
+        self::assertArrayNotHasKey($bootKey, $runner->intent($job));
+    }
+
+    /** @return list<array{string}> */
+    public static function stagingWaitFailures(): array
+    {
+        return [['revocation'], ['channel'], ['deadline'], ['missing_presence'], ['invalid_presence']];
+    }
+
+    #[DataProvider('stagingWaitFailures')]
+    public function test_staging_wait_remains_bounded_by_revocation_channel_and_deadline(string $failure): void
+    {
+        $this->nativeMailbox = false;
+        $prepared = $this->preparedCodexRun('AI6-035-STAGING-FAILURE');
+        $this->expireCodexReport();
+        $run = $prepared['run'];
+        $job = ExecutionJob::query()->where('run_id', $run->id)->where('step_type', 'implement')->sole();
+        $dispatch = fn () => (new ExecuteRunStep($job->id))->handle(app(RunOrchestrator::class), app(RunImplementation::class));
+        $dispatch();
+        self::assertSame(ExecutionJobState::WAITING, $job->refresh()->state);
+        if ($failure === 'channel') {
+            unlink($this->onboardingRoot.'/reports/codex_cli.json');
+        } elseif ($failure === 'revocation') {
+            config(['ai6.runtime_role' => 'agent']);
+            app(ProviderCredentialStore::class)->replace('codex_cli', null);
+            config(['ai6.runtime_role' => 'worker']);
+        } elseif ($failure === 'missing_presence') {
+            unlink($this->onboardingRoot.'/presence/heartbeat.json');
+        } elseif ($failure === 'invalid_presence') {
+            file_put_contents($this->onboardingRoot.'/presence/heartbeat.json', '{}');
+        } else {
+            $intent = app(AgentExecutionRunner::class)->intent($job);
+            foreach ($intent as $key => $binding) {
+                if (str_starts_with($key, 'agent_staging_') && str_ends_with($key, '_deadline')) {
+                    $intent[$key] = time() - 1;
+                }
+            }
+            $job->forceFill(['intent' => json_encode($intent, JSON_THROW_ON_ERROR)])->save();
+        }
+        if (in_array($failure, ['revocation', 'deadline'], true)) {
+            file_put_contents($this->onboardingRoot.'/presence/heartbeat.json', json_encode([
+                'boot_id' => str_repeat('a', 32), 'recorded_at' => time() - 60,
+            ], JSON_THROW_ON_ERROR));
+        }
+        self::assertTrue(app(RunOrchestrator::class)->resumeStep($job));
+        $dispatch();
+        self::assertSame(RunState::FAILED, $run->fresh()->state);
+        self::assertSame(match ($failure) {
+            'revocation' => 'agent_credential_revision_changed',
+            'channel', 'missing_presence', 'invalid_presence' => 'agent_capability_channel_unavailable',
+            default => 'agent_execution_deadline_exceeded',
+        }, $job->refresh()->failure_code);
+        self::assertSame([], glob(AgentExecutionProcessor::inputRoot().'/execution-*/binding.json'));
+    }
+
+    public function test_expired_evidence_at_claim_runs_one_native_probe_before_starting(): void
+    {
+        $prepared = $this->preparedCodexRun('AI6-035-CLAIM-RECHECK');
+        [$run, $job, , $home, $context] = $this->stage($prepared['run']);
+        $this->expireCodexReport();
+        self::assertTrue(NativeProviderMailbox::processNext());
+        self::assertSame(1, NativeProviderMailbox::$capabilityProbes);
+        self::assertNotNull(app(ProviderCapabilityReport::class)->read('codex_cli'));
+        self::assertNotNull(app(AgentExecutionRunner::class)->dispatchOrCollect($run, $this->claim($job), $home, $context));
+        app(AgentExecutionRunner::class)->destroy($home);
+    }
+
+    public function test_a_fresh_negative_recheck_at_claim_never_starts_the_provider(): void
+    {
+        $this->nativeMailbox = false;
+        $prepared = $this->preparedCodexRun('AI6-035-CLAIM-NEGATIVE');
+        [$run, $job, , $home, $context] = $this->stage($prepared['run']);
+        $document = app(ProviderCapabilityReport::class)->read('codex_cli');
+        self::assertNotNull($document);
+        $rows = array_map(static fn (array $row): array => [...$row, 'status' => 'degraded', 'reason' => 'probe'], $document['rows']);
+        config(['ai6.runtime_role' => 'agent']);
+        $store = app(ProviderCredentialStore::class);
+        $store->locked(fn () => $store->publish('codex_cli', $document['generation'], $rows, time(), $document['boot_id']));
+        $adapter = new FakeAgentAdapter(AgentScenario::SUCCESS);
+        $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
+        self::assertTrue(app(AgentExecutionProcessor::class)->processNext(str_repeat('a', 32), static function (): void {}));
+        self::assertSame(0, $adapter->turnCount);
+        config(['ai6.runtime_role' => 'worker']);
+        try {
+            app(AgentExecutionRunner::class)->dispatchOrCollect($run, $this->claim($job), $home, $context);
+            self::fail('A negative recheck must not release the turn.');
+        } catch (AgentExecutionException $exception) {
+            self::assertSame('agent_selection_not_allowed', $exception->reason);
+        } finally {
+            app(AgentExecutionRunner::class)->destroy($home);
+        }
+    }
+
+    private function expireCodexReport(): void
+    {
+        $reports = app(ProviderCapabilityReport::class);
+        $document = $reports->read('codex_cli');
+        self::assertNotNull($document);
+        $role = config('ai6.runtime_role');
+        config(['ai6.runtime_role' => 'agent']);
+        try {
+            $store = app(ProviderCredentialStore::class);
+            $store->locked(fn () => $store->publish('codex_cli', $document['generation'], $document['rows'], time() - 301, $document['boot_id']));
+        } finally {
+            config(['ai6.runtime_role' => $role]);
+        }
     }
 
     /** TC-07 over the seam: a codex reviewer slot runs read-only next to the fake slot with its own session and home. */
@@ -297,8 +581,9 @@ final class CodexCliExecutionTest extends TicketUiTestCase
         [$run, $job, , $home, $context] = $this->stage($prepared['run']);
         $this->projectTestAuth();
         if ($case === 'credential') {
-            config(['ai6.credential_revisions.codex_cli' => 'rotated-revision']);
-            $this->app->forgetInstance(CredentialRevisionRegistry::class);
+            config(['ai6.runtime_role' => 'agent']);
+            app(ProviderCredentialStore::class)->replace('codex_cli', null);
+            config(['ai6.runtime_role' => 'worker']);
         } else {
             $profiles = config('ai6.provider_runtime_profiles');
             $profiles['codex-cli-v1']['version']++;
@@ -308,7 +593,9 @@ final class CodexCliExecutionTest extends TicketUiTestCase
         $this->app->forgetInstance(AgentExecutionProcessor::class);
         $this->app->forgetInstance(AgentExecutionRunner::class);
 
+        config(['ai6.runtime_role' => 'agent']);
         self::assertTrue($this->app->make(AgentExecutionProcessor::class)->processNext(str_repeat('a', 32), static function (): void {}));
+        config(['ai6.runtime_role' => 'worker']);
         self::assertSame([], $this->app->make(CodexCliAdapter::class)->lastCommand, 'The agent consumer refused the drifted binding before the adapter.');
         self::assertNull(FakeCodexBinary::observation($home->resultDirectory));
         $runner = $this->app->make(AgentExecutionRunner::class);
@@ -359,8 +646,45 @@ final class CodexCliExecutionTest extends TicketUiTestCase
     /** @var array<string, mixed>|null */
     private ?array $lastObservation = null;
 
+    #[DataProvider('withdrawalPhases')]
+    public function test_a_booted_worker_refuses_start_and_resume_after_report_withdrawal(bool $staged): void
+    {
+        Mail::fake();
+        $prepared = $this->preparedCodexRun('AI6-035-WITHDRAW-'.($staged ? 'RESUME' : 'START'));
+        $run = $prepared['run'];
+        $runner = app(AgentExecutionRunner::class);
+        $orchestrator = app(RunOrchestrator::class);
+        if ($staged) {
+            [, $job] = $this->stage($run);
+            self::assertTrue($orchestrator->resumeStep($job));
+        } else {
+            $job = ExecutionJob::query()->where('run_id', $run->id)->where('step_type', 'implement')->sole();
+        }
+        $approval = TicketApproval::query()->findOrFail($run->ticket_approval_id);
+        $before = $approval->getAttributes();
+        $original = file_get_contents($prepared['worktree'].'/app/Example.php');
+        unlink($this->onboardingRoot.'/reports/codex_cli.json');
+        (new ExecuteRunStep($job->id))->handle($orchestrator, app(RunImplementation::class));
+        self::assertSame($runner, app(AgentExecutionRunner::class));
+        self::assertSame(ExecutionJobState::FAILED, $job->refresh()->state);
+        self::assertSame('agent_selection_not_allowed', $job->failure_code);
+        self::assertSame(RunState::FAILED, $run->refresh()->state);
+        self::assertSame([], app(CodexCliAdapter::class)->lastCommand);
+        self::assertSame(0, RunArtifact::query()->where('run_id', $run->id)->where('kind', 'provider_raw')->count());
+        self::assertSame($original, file_get_contents($prepared['worktree'].'/app/Example.php'));
+        self::assertSame($before, $approval->refresh()->getAttributes());
+        self::assertSame([], glob(AgentExecutionProcessor::inputRoot().'/execution-*/binding.json'));
+    }
+
+    /** @return array<string, array{bool}> */
+    public static function withdrawalPhases(): array
+    {
+        return ['first start' => [false], 'resume staged turn' => [true]];
+    }
+
     protected function approvalSelection(?User $attentionUser = null): ApprovalSelection
     {
+        $this->seedProviderReports();
         $profiles = $this->app->make(AgentProfileRegistry::class);
         $this->reviewSlotIds = [(string) Str::uuid(), (string) Str::uuid()];
         $limits = ApprovalLimits::fromConfiguredValues(config('ai6.project_config.server_defaults.limits'), $this->app->make(AgentInputLimits::class));
@@ -444,7 +768,13 @@ final class CodexCliExecutionTest extends TicketUiTestCase
         AgentMailboxFixture::drain($job, function () use ($job): void {
             $this->captureObservation();
             (new ExecuteRunStep($job->id))->handle($this->app->make(RunOrchestrator::class), $this->app->make(RunImplementation::class));
-        }, $projectAuth ? $this->projectTestAuth(...) : null);
+        }, function () use ($projectAuth): void {
+            $this->projectTestAuth();
+            $auth = $this->onboardingRoot.'/store/codex_cli/auth.json';
+            if (! $projectAuth && is_file($auth)) {
+                unlink($auth);
+            }
+        });
 
         return $job->fresh() ?? $job;
     }
@@ -461,17 +791,11 @@ final class CodexCliExecutionTest extends TicketUiTestCase
         return $job->fresh() ?? $job;
     }
 
-    /** Place the test credential projection where the AI6-035 store will write it. */
+    /** The worker's staged home stays empty; only the agent owns the store. */
     private function projectTestAuth(): void
     {
         foreach (glob(AgentExecutionProcessor::inputRoot().'/execution-*/*/home/auth', GLOB_ONLYDIR) ?: [] as $directory) {
-            if (is_file($directory.'/auth.json')) {
-                continue;
-            }
-            self::assertTrue(chmod($directory, 0700));
-            self::assertNotFalse(file_put_contents($directory.'/auth.json', '{"OPENAI_API_KEY":"test-projection"}'));
-            self::assertTrue(chmod($directory.'/auth.json', 0440));
-            self::assertTrue(chmod($directory, 0550));
+            self::assertSame(['.', '..'], scandir($directory));
         }
     }
 

@@ -23,9 +23,12 @@ use App\AI6\Shared\Redaction\RedactionContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Feature\Tickets\TicketUiTestCase;
+use Tests\Fixtures\Agents\BuildsProviderOnboarding;
 
 final class ApprovalInstructionSnapshotTest extends TicketUiTestCase
 {
+    use BuildsProviderOnboarding;
+
     public function test_instruction_order_hashes_adapter_and_runtime_changes_are_approval_bound(): void
     {
         $administrator = $this->createUser(['is_global_admin' => true]);
@@ -105,12 +108,14 @@ final class ApprovalInstructionSnapshotTest extends TicketUiTestCase
 
         $fakeAlias = config('ai6.agent_profiles.fake');
         self::assertIsArray($fakeAlias);
+        $codex = config('ai6.agent_profiles')['codex-gpt-5.6-terra'];
+        $codex['capability_status'] = 'available';
         config([
             'ai6.agent_profiles.fake-alias' => $fakeAlias,
-            'ai6.agent_profiles.fake.provider_profile' => 'codex_cli',
-            'ai6.agent_profiles.fake.adapter' => 'codex_cli',
+            'ai6.agent_profiles.fake' => $codex,
         ]);
         $this->app->forgetInstance(AgentProfileRegistry::class);
+        $this->seedProviderReports();
         $this->app->forgetInstance(ReviewerSlotFactory::class);
         $this->app->forgetInstance(ApprovalSnapshotFactory::class);
         // The implementer now carries the codex_cli provider; a reviewer of
@@ -119,7 +124,7 @@ final class ApprovalInstructionSnapshotTest extends TicketUiTestCase
         $adapterChanged = $this->app->make(ApprovalSnapshotFactory::class)->create(
             $project,
             $readModel,
-            $this->selection('fake-alias'),
+            $this->selection('fake-alias', 'gpt-5.3-codex'),
             $contextId,
         );
         self::assertNotSame($snapshot->agentProfileHash, $adapterChanged->agentProfileHash);
@@ -132,12 +137,12 @@ final class ApprovalInstructionSnapshotTest extends TicketUiTestCase
         ));
     }
 
-    private function selection(string $reviewerProfile = 'fake'): ApprovalSelection
+    private function selection(string $reviewerProfile = 'fake', string $implementationModel = 'fake-model'): ApprovalSelection
     {
         $profiles = $this->app->make(AgentProfileRegistry::class);
 
         return new ApprovalSelection(
-            $profiles->resolve('fake', AgentRole::IMPLEMENTATION, 'fake-model', 'medium'),
+            $profiles->resolve('fake', AgentRole::IMPLEMENTATION, $implementationModel, 'medium'),
             $this->app->make(ReviewerSlotFactory::class)->fromArray([[
                 'id' => (string) Str::uuid(),
                 'profile' => $reviewerProfile,

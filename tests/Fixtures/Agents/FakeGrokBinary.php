@@ -15,7 +15,9 @@ final class FakeGrokBinary
         $fixture = str_replace('\\', '/', __DIR__.'/fake-grok.php');
         $path = $directory.'/grok-'.bin2hex(random_bytes(5));
         if (DIRECTORY_SEPARATOR === '/') {
-            $script = "#!/bin/sh\nexec ".escapeshellarg(PHP_BINARY).' '.escapeshellarg($fixture).' '.escapeshellarg($scenario)." \"\$@\"\n";
+            $source = (string) file_get_contents($fixture);
+            $source = preg_replace('/^<\?php/', '<?php'."\n".'$argv = [$argv[0], '.var_export($scenario, true).', ...array_slice($argv, 1)];', $source, 1);
+            $script = '#!'.PHP_BINARY."\n".$source;
         } else {
             $path .= '.cmd';
             $script = "@echo off\r\n\"".PHP_BINARY.'" "'.$fixture.'" "'.$scenario."\" %*\r\n";

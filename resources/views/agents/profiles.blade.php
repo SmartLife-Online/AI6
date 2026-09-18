@@ -15,7 +15,13 @@
                 <dt>Adapter</dt>
                 <dd>{{ $profile->adapterId }}</dd>
                 <dt>Capability-Status</dt>
-                <dd>{{ $profile->capabilityStatus->value }}</dd>
+                <dd>{{ $diagnoses[$profile->id]['status'] === 'ready' ? 'available' : ($profile->capabilityStatus->value === 'unchecked' ? 'unchecked' : 'unavailable') }}</dd>
+                <dt>Diagnose</dt>
+                <dd>{{ $diagnoses[$profile->id]['status'] }}</dd>
+                <dt>Grund</dt>
+                <dd>{{ $diagnosticReasons[$diagnoses[$profile->id]['reason']] }}</dd>
+                <dt>CLI-Version</dt>
+                <dd>{{ $diagnoses[$profile->id]['version'] ?: 'Kein aktueller Nachweis' }}</dd>
                 <dt>Runtime-Profil</dt>
                 <dd>{{ $profile->runtimeProfileId }} (Version {{ $runtimeProfiles->get($profile->runtimeProfileId)->version }})</dd>
                 <dt>Rollen</dt>

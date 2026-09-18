@@ -64,7 +64,7 @@ final class GitHubCopilotCliAdapter implements AgentAdapter
         if (file_exists($scratch) || is_link($scratch) || ! mkdir($scratch, 0700) || ! mkdir($scratch.'/tmp', 0700)) {
             throw new AgentExecutionException('agent_copilot_invocation_not_fresh');
         }
-        $environment = ['HOME' => $home->home, 'COPILOT_HOME' => $home->home, 'COPILOT_CACHE_HOME' => $scratch.'/cache', 'TMPDIR' => $scratch.'/tmp', 'LC_ALL' => 'C.UTF-8', 'LANG' => 'C.UTF-8'];
+        $environment = ['COPILOT_AUTO_UPDATE' => 'false', 'HOME' => $home->home, 'COPILOT_HOME' => $home->home, 'COPILOT_CACHE_HOME' => $scratch.'/cache', 'TMPDIR' => $scratch.'/tmp', 'LC_ALL' => 'C.UTF-8', 'LANG' => 'C.UTF-8'];
         $heartbeat();
         $this->probe($home, $context->instructionSnapshot, $environment, $heartbeat);
         $token = trim(AgentExecutionProcessor::readBytes(implode(DIRECTORY_SEPARATOR, [$home->authDirectory, 'token']), 65536));
@@ -107,7 +107,7 @@ final class GitHubCopilotCliAdapter implements AgentAdapter
             throw new AgentExecutionException('agent_copilot_selection_unsupported');
         }
         $registered = false;
-        foreach ($this->profiles->all() as $profile) {
+        foreach ($this->profiles->configured() as $profile) {
             if ($profile->providerProfileAlias === self::PROVIDER_ALIAS && $profile->runtimeProfileId === $runtime->id
                 && in_array($role, $profile->roles, true) && in_array($model, $profile->models, true) && in_array($effort, $profile->efforts, true)) {
                 $registered = true;

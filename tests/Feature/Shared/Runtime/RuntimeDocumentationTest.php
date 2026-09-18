@@ -27,7 +27,7 @@ final class RuntimeDocumentationTest extends TestCase
         foreach ([
             '`github_copilot_cli` löst den `GitHubCopilotCliAdapter` auf',
             '`GitHubCopilotCliDoctorCheck`',
-            '`AI6_COPILOT_BINARY`, `AI6_COPILOT_PINNED_VERSION` und `AI6_COPILOT_CREDENTIAL_REVISION` erreichen über Compose ausschließlich `worker` und `agent`',
+            '`AI6_COPILOT_BINARY`, `AI6_COPILOT_PINNED_VERSION` und die öffentliche Laufzeitevidenz erreichen über Compose `app`, `worker` und `agent`',
             'ausschließlich `quality_review`',
             '`COPILOT_HOME` zeigt auf das vollständig read-only Home einschließlich `home/session-state`',
             '`ai6.copilot.capability_evidence` bleibt standardmäßig leer',
@@ -114,7 +114,7 @@ final class RuntimeDocumentationTest extends TestCase
             '`agent_codex_sandbox_proof_invalid`',
             'ausschließlich am dekodierten Wert',
             'Ohne bindenden Sandboxnachweis meldet der Doctor nie',
-            'Das gilt auf beiden Ausführungswegen',
+            'Für reale Provider gilt ausschließlich die Agentrolle',
             '`AI6-033/MG-01`',
             '`docs/AI6-033_MG-01_ABNAHMEPROTOKOLL.md`',
             'Ausführungsnachweise',
@@ -184,13 +184,23 @@ final class RuntimeDocumentationTest extends TestCase
         );
 
         // AI6-033: the pinned Codex transport is documented for exactly the roles that receive it.
-        foreach (['app', 'worker', 'agent'] as $service) {
+        foreach (['app', 'worker', 'scheduler', 'agent'] as $service) {
             foreach (['AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF'] as $variable) {
                 self::assertStringContainsString($variable, $this->serviceRow($readme, $service), $service.' '.$variable);
             }
         }
-        self::assertStringContainsString('AI6_CODEX_CREDENTIAL_REVISION', $this->serviceRow($readme, 'agent'));
-        foreach (['init', 'scheduler', 'checker'] as $service) {
+        self::assertStringNotContainsString('AI6_CODEX_CREDENTIAL_REVISION', $this->serviceRow($readme, 'agent'));
+        self::assertStringContainsString('ai6_provider_store', $this->serviceRow($readme, 'agent'));
+        foreach (['AI6_COPILOT_BINARY', 'AI6_COPILOT_PINNED_VERSION', 'AI6_COPILOT_CAPABILITY_EVIDENCE',
+            'AI6_GROK_BINARY', 'AI6_GROK_PINNED_VERSION', 'AI6_GROK_CAPABILITY_EVIDENCE',
+            'ai6_provider_reports', 'ai6_provider_presence', 'read-only', 'kein Storemount'] as $binding) {
+            self::assertStringContainsString($binding, $this->serviceRow($readme, 'scheduler'));
+        }
+        self::assertStringContainsString('Recheckintervall höchstens 240 Sekunden', $readme);
+        self::assertStringNotContainsString('mindestens 240 Sekunden', $readme);
+        self::assertStringNotContainsString('Generation und Prüfzeitpunkt bei der Queue-Neubewertung', $readme);
+        self::assertStringContainsString('Alias, Generation und Zeilen', $readme);
+        foreach (['init', 'checker'] as $service) {
             self::assertStringNotContainsString('AI6_CODEX_BINARY', $this->serviceRow($readme, $service), $service);
         }
 

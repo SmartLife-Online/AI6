@@ -2,7 +2,13 @@
 
 namespace Tests\Fixtures\Agents;
 
+use App\AI6\Agents\AgentAdapter;
 use App\AI6\Agents\AgentExecutionProcessor;
+use App\AI6\Agents\AgentExecutionRequest;
+use App\AI6\Agents\CodexCliAdapter;
+use App\AI6\Agents\GitHubCopilotCliAdapter;
+use App\AI6\Agents\GrokCliAdapter;
+use App\AI6\Agents\ProviderCapabilityPublisher;
 use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\RunOrchestrator;
@@ -33,7 +39,18 @@ final class AgentMailboxFixture
             if ($beforeClaim !== null) {
                 $beforeClaim();
             }
-            Assert::assertTrue(app(AgentExecutionProcessor::class)->processNext($boot, static function (string $_id): void {}), 'A polling step must have one staged agent request.');
+            $requests = glob(AgentExecutionProcessor::inputRoot().'/requests/*.json');
+            Assert::assertIsArray($requests);
+            Assert::assertCount(1, $requests);
+            $envelope = json_decode(AgentExecutionProcessor::readBytes($requests[0]), true, 32, JSON_THROW_ON_ERROR);
+            $request = AgentExecutionRequest::fromJson(base64_decode($envelope['content_base64'], true));
+            $adapter = app()->makeWith(AgentAdapter::class, ['providerAlias' => $request->string('provider_alias')]);
+            if ($adapter instanceof CodexCliAdapter || $adapter instanceof GrokCliAdapter || $adapter instanceof GitHubCopilotCliAdapter || $adapter instanceof MissingAnswerAdapter) {
+                Assert::assertTrue(NativeProviderMailbox::processNext($adapter instanceof MissingAnswerAdapter));
+            } else {
+                self::pulseProviderSupervisor($boot);
+                Assert::assertTrue(app(AgentExecutionProcessor::class)->processNext($boot, static fn (string $_id) => self::pulseProviderSupervisor($boot)), 'A polling step must have one staged agent request.');
+            }
             Assert::assertFalse(app(AgentExecutionProcessor::class)->processNext($boot, static function (string $_id): void {}), 'The same request must not start a second provider turn.');
             Assert::assertTrue(app(RunOrchestrator::class)->resumeStep($current));
             $dispatch();
@@ -64,6 +81,23 @@ final class AgentMailboxFixture
                 Assert::assertSame(['.', '..'], scandir($directory), 'The supervisor left transport data behind: '.$directory);
                 Assert::assertTrue(rmdir($directory));
             }
+        }
+    }
+
+    private static function pulseProviderSupervisor(string $boot): void
+    {
+        $root = config('ai6.provider_onboarding.presence_root');
+        if (! is_string($root) || ! is_file($root.'/boot-id')) {
+            return;
+        }
+        // Mirror the live supervisor during in-process fake turns. This renews
+        // presence only; it never republishes capability rows or generations.
+        $role = config('ai6.runtime_role');
+        config(['ai6.runtime_role' => 'agent']);
+        try {
+            app(ProviderCapabilityPublisher::class)->pulse($boot);
+        } finally {
+            config(['ai6.runtime_role' => $role]);
         }
     }
 }

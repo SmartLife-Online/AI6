@@ -3,12 +3,11 @@
 namespace Tests\Feature\Reviews;
 
 use App\AI6\Agents\AgentAdapter;
-use App\AI6\Agents\AgentResultContext;
+use App\AI6\Agents\AgentExecutionProcessor;
 use App\AI6\Agents\AgentScenario;
-use App\AI6\Agents\AgentTurnResult;
-use App\AI6\Agents\ExecutionHome;
 use App\AI6\Agents\FakeAgentAdapter;
-use App\AI6\Agents\InvalidAgentResponse;
+use App\AI6\Agents\ProviderCapabilityReport;
+use App\AI6\Agents\ProviderCredentialStore;
 use App\AI6\Auth\Models\User;
 use App\AI6\Auth\StepUpGuard;
 use App\AI6\HumanLoop\Http\HumanRequestAnswerController;
@@ -32,7 +31,6 @@ use App\AI6\Runs\Models\RunArtifact;
 use App\AI6\Runs\RunArtifactKind;
 use App\AI6\Runs\RunArtifactRoot;
 use App\AI6\Runs\RunOrchestrator;
-use Closure;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Session\ArraySessionHandler;
@@ -41,38 +39,64 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Tests\Feature\Tickets\TicketUiTestCase;
 use Tests\Fixtures\Agents\AgentMailboxFixture;
+use Tests\Fixtures\Agents\MissingAnswerAdapter;
 
 final class FindingVerificationRoundTest extends TicketUiTestCase
 {
     use BuildsReviewRoundFixture;
 
+    private bool $nativeMissingAnswer = false;
+
+    protected function usesNativeProviderMailbox(): bool
+    {
+        return $this->nativeMissingAnswer;
+    }
+
     private const STRICT_POLICY = "default-src 'self'; script-src http://localhost/assets/; style-src 'self'; "
         ."img-src 'self'; font-src 'self'; connect-src 'self'; form-action 'self'; "
         ."base-uri 'none'; object-src 'none'; frame-ancestors 'none';";
 
+    public function test_expired_verifier_evidence_parks_without_recording_a_failed_attempt(): void
+    {
+        // This orchestration proof uses the fixture's Copilot verifier on every
+        // OS; Grok's independent session-link tests remain Linux-only.
+        config(['ai6.agent_profiles.grok-cli-review.roles' => ['quality_review']]);
+        $prepared = $this->preparedReviewRun('AI6-035-VERIFY-RECHECK');
+        $run = $prepared['run'];
+        $this->reviewAdapter([$this->reviewSlotIds[0] => AgentScenario::FINDINGS]);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReview($run)->state);
+        $document = app(ProviderCapabilityReport::class)->read('github_copilot_cli');
+        self::assertNotNull($document);
+        config(['ai6.runtime_role' => 'agent']);
+        $store = app(ProviderCredentialStore::class);
+        $store->locked(fn () => $store->publish('github_copilot_cli', $document['generation'], $document['rows'], time() - 301, $document['boot_id']));
+        config(['ai6.runtime_role' => 'worker']);
+        $job = ExecutionJob::query()->where('run_id', $run->id)->where('step_type', 'verify')->sole();
+        (new ExecuteRunStep($job->id))->handle(app(RunOrchestrator::class), verifications: app(FindingVerificationRound::class));
+        self::assertSame(ExecutionJobState::WAITING, $job->refresh()->state);
+        self::assertSame(0, $job->attempts);
+        self::assertSame([], glob(AgentExecutionProcessor::inputRoot().'/requests/*.json'));
+        self::assertSame(0, ReviewResult::query()->where('run_id', $run->id)->where('role', 'finding_verification')->count());
+        $this->seedProviderReports();
+        self::assertTrue(app(RunOrchestrator::class)->resumeStep($job));
+        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeVerification($run)->state);
+        self::assertSame('valid_result', ReviewResult::query()->where('run_id', $run->id)->where('role', 'finding_verification')->sole()->invocation_outcome->value);
+    }
+
     /** AI6-047 TC-09: a missing mailbox answer is invalid_json, distinct from provider_error. */
     public function test_a_missing_mailbox_answer_is_invalid_json_and_distinct_from_provider_error(): void
     {
+        if (PHP_OS_FAMILY !== 'Linux') {
+            self::markTestSkipped('The agent credential boundary requires real Linux namespaces.');
+        }
+        $this->nativeMissingAnswer = true;
         Mail::fake();
         config(['logging.default' => 'null']);
         $prepared = $this->preparedReviewRun('AI6-047-VERIFY-INVALIDJSON');
         $this->reviewAdapter([$this->reviewSlotIds[0] => AgentScenario::FINDINGS]);
         self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReview($prepared['run'])->state);
 
-        $adapter = new class implements AgentAdapter
-        {
-            public function result(AgentResultContext $context): string
-            {
-                return '{}';
-            }
-
-            public function turn(AgentResultContext $context, ExecutionHome $home, Closure $heartbeat, array $unreachablePaths = []): AgentTurnResult
-            {
-                $heartbeat();
-
-                throw new InvalidAgentResponse('agent_response_missing');
-            }
-        };
+        $adapter = new MissingAnswerAdapter;
         $this->app->bind(AgentAdapter::class, static fn (): AgentAdapter => $adapter);
         $this->app->forgetInstance(FindingVerificationRound::class);
 
@@ -116,6 +140,9 @@ final class FindingVerificationRoundTest extends TicketUiTestCase
 
     public function test_a_contradicting_verifier_result_is_persisted_as_advisory_evidence_only(): void
     {
+        if (PHP_OS_FAMILY !== 'Linux') {
+            self::markTestSkipped('Grok session links require the Linux runtime.');
+        }
         Mail::fake();
         config(['logging.default' => 'null']);
         $prepared = $this->preparedReviewRun('AI6-043-ADVISORY');
@@ -326,6 +353,9 @@ final class FindingVerificationRoundTest extends TicketUiTestCase
 
     public function test_invalid_verifier_schema_uses_the_bounded_retry_and_existing_human_request_path(): void
     {
+        if (PHP_OS_FAMILY !== 'Linux') {
+            self::markTestSkipped('Grok session links require the Linux runtime.');
+        }
         Mail::fake();
         config(['logging.default' => 'null']);
         $prepared = $this->preparedReviewRun('AI6-043-INVALID-SCHEMA');

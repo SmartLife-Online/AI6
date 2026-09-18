@@ -4,10 +4,12 @@ namespace Tests\Unit\Agents;
 
 use App\AI6\Agents\AgentExecutionException;
 use App\AI6\Agents\AgentRole;
+use App\AI6\Agents\ExecutionHome;
 use App\AI6\Agents\GrokCliAdapter;
 use App\AI6\Agents\GrokCliConfiguration;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Shared\Config\ConfigurationException;
+use App\AI6\Shared\Process\AgentProcessScope;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -49,10 +51,24 @@ final class GrokCliConfigurationTest extends TestCase
         self::assertNotSame($key, $configuration->evidenceKey($runtime, AgentRole::QUALITY_REVIEW, 'provider_default', 'provider_default'));
     }
 
-    public function test_sandbox_bytes_bind_only_the_two_sensitive_staging_subtrees(): void
+    public function test_sandbox_work_directory_is_server_fixed_and_separate_from_home_and_results(): void
+    {
+        $home = new ExecutionHome('/inputs/turn', '/outputs/turn', '/inputs/turn/workspace', '/inputs/turn/home',
+            '/inputs/turn/instructions', '/inputs/turn/runtime/profile.json', '/private/projection/auth',
+            '/outputs/turn/result', '/outputs/turn/artifacts', '/outputs/turn/patch');
+        $environment = GrokCliConfiguration::environment($home);
+        self::assertSame('/tmp/ai6-provider-sandbox', $environment['GROK_SANDBOX_WORK_DIR']);
+        self::assertSame(AgentProcessScope::SANDBOX_WORK_DIRECTORY, $environment['GROK_SANDBOX_WORK_DIR']);
+        self::assertSame($home->home, $environment['HOME']);
+        self::assertSame($home->home, $environment['GROK_HOME']);
+        self::assertSame($home->resultDirectory, $environment['TMPDIR']);
+        self::assertArrayNotHasKey('__GROK_INSIDE_BWRAP', $environment);
+    }
+
+    public function test_sandbox_bytes_bind_staging_and_private_auth_and_runtime_subtrees(): void
     {
         config(['ai6.execution_mailboxes.agent_root' => '/var/lib/ai6/agent-executions']);
-        self::assertSame("[profiles.ai6-review]\nextends = \"strict\"\nrestrict_network = true\ndeny = [\"/var/lib/ai6/agent-executions/execution-*/*/home/auth\",\"/var/lib/ai6/agent-executions/execution-*/*/runtime\"]\n", GrokCliConfiguration::sandboxBytes());
+        self::assertSame("[profiles.ai6-review]\nextends = \"strict\"\nrestrict_network = true\ndeny = [\"/var/lib/ai6/agent-executions/execution-*/*/home/auth\",\"/var/lib/ai6/agent-executions/execution-*/*/runtime\",\"/run/ai6/provider-private/projection-*\",\"/run/ai6/provider-private/probe-*/inputs/*/home/auth\",\"/run/ai6/provider-private/probe-*/inputs/*/runtime\"]\n", GrokCliConfiguration::sandboxBytes());
     }
 
     /** @return list<array{mixed}> */

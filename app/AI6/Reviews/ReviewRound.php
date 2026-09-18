@@ -2,6 +2,7 @@
 
 namespace App\AI6\Reviews;
 
+use App\AI6\Agents\AgentCapabilityPending;
 use App\AI6\Agents\AgentExecutionLimitReached;
 use App\AI6\Agents\AgentExecutionRunner;
 use App\AI6\Agents\AgentResultContext;
@@ -272,6 +273,11 @@ final readonly class ReviewRound
                 throw new ImplementationImportException('review_workspace_binding_mismatch', 'Review workspaces do not bind the same tree.');
             }
             $home = $this->turns->prepare($job, $run, $slot, $agentContext, $export);
+        } catch (AgentCapabilityPending) {
+            $this->orchestrator->parkPollingStep($job, (string) $job->lease_owner);
+            $this->destroy(null, $export, $invocationInput, $invocationOutput);
+
+            return true;
         } catch (Throwable $exception) {
             $reason = $exception instanceof ImplementationImportException ? $exception->reason : 'review_workspace_unavailable';
             $this->destroy($home, $export, $invocationInput, $invocationOutput);

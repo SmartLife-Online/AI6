@@ -7,9 +7,11 @@ use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentRole;
 use App\AI6\Auth\Models\User;
 use App\AI6\Git\Actions\QueueTicketMutation;
+use App\AI6\Git\ControlOperationConflict;
 use App\AI6\Git\ControlOperationPhase;
 use App\AI6\Git\ControlOperationRuntimeIdentity;
 use App\AI6\Git\ControlOperationState;
+use App\AI6\Git\ControlOperationType;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\ControlOperationResult;
 use App\AI6\Git\ProjectOperationLease;
@@ -18,6 +20,7 @@ use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Projects\ProjectRole;
 use App\AI6\Reviews\ReviewerSlotFactory;
+use App\AI6\Runs\ApprovalClaimStarter;
 use App\AI6\Runs\ApprovalFreshness;
 use App\AI6\Runs\ApprovalLimits;
 use App\AI6\Runs\ApprovalQueue;
@@ -35,9 +38,44 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Feature\Tickets\TicketUiTestCase;
+use Tests\Fixtures\Agents\BuildsProviderOnboarding;
 
 final class ApprovalEligibilityFeatureTest extends TicketUiTestCase
 {
+    use BuildsProviderOnboarding;
+
+    public function test_a_booted_worker_rejects_report_withdrawal_without_replacing_the_approval(): void
+    {
+        $profiles = config('ai6.agent_profiles');
+        self::assertIsArray($profiles);
+        $profiles['codex-gpt-5.6-terra']['capability_status'] = 'available';
+        config(['ai6.runtime_role' => 'worker', 'ai6.codex.binary' => '', 'ai6.agent_profiles' => $profiles]);
+        $this->app->forgetInstance(AgentProfileRegistry::class);
+        $this->seedProviderReports();
+        $fixture = $this->completedApproval('E6', implementation: 'codex-gpt-5.6-terra');
+        self::assertSame([], $this->evaluate($fixture['approval']));
+        $before = $fixture['approval']->getAttributes();
+        $registry = app(AgentProfileRegistry::class);
+        $eligibility = app(QueueEligibility::class);
+        $starter = app(ApprovalClaimStarter::class);
+        unlink($this->onboardingRoot.'/reports/codex_cli.json');
+        self::assertFalse($registry->supportsProviderSelection('codex_cli', AgentRole::IMPLEMENTATION, 'gpt-5.3-codex', 'medium'));
+        self::assertContains('provider_capability_unavailable', $this->evaluate($fixture['approval']));
+        self::assertContains('provider_capability_unavailable', $eligibility->decide($fixture['approval'], $fixture['project'])['reasons']);
+        try {
+            $starter->start($fixture['administrator'], $fixture['project'], $fixture['approval']->id, (string) Str::uuid());
+            self::fail('The booted worker claimed an approval after capability withdrawal.');
+        } catch (ControlOperationConflict $exception) {
+            self::assertStringContainsString('provider_capability_unavailable', $exception->getMessage());
+        }
+        self::assertSame(0, ControlOperation::query()->where('operation_type', ControlOperationType::RUN_START)->count());
+        self::assertNull($fixture['project']->refresh()->active_run_id);
+        self::assertNull($fixture['project']->operation_lock_operation_id);
+        self::assertSame($registry, app(AgentProfileRegistry::class));
+        self::assertSame($before, $fixture['approval']->refresh()->getAttributes());
+        self::assertSame(1, TicketApproval::query()->count());
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -170,7 +208,7 @@ final class ApprovalEligibilityFeatureTest extends TicketUiTestCase
      *   ready_content: string
      * }
      */
-    private function completedApproval(string $ticketId, string $dependsOn = '[]', ?string $dependencyStatus = null): array
+    private function completedApproval(string $ticketId, string $dependsOn = '[]', ?string $dependencyStatus = null, string $implementation = 'fake'): array
     {
         $administrator = $this->createUser(['is_global_admin' => true]);
         $approver = $this->createUser();
@@ -198,7 +236,7 @@ final class ApprovalEligibilityFeatureTest extends TicketUiTestCase
             $todoContent,
             ['blob_sha' => $todoBlob],
         );
-        $selection = $this->selection();
+        $selection = $this->selection($implementation);
         $operationId = (string) Str::uuid();
         $snapshot = $this->app->make(ApprovalSnapshotFactory::class)->create(
             $project,
@@ -279,12 +317,12 @@ final class ApprovalEligibilityFeatureTest extends TicketUiTestCase
         return is_array($evaluation->reasons) ? $evaluation->reasons : [];
     }
 
-    private function selection(): ApprovalSelection
+    private function selection(string $implementation = 'fake'): ApprovalSelection
     {
         $profiles = $this->app->make(AgentProfileRegistry::class);
 
         return new ApprovalSelection(
-            $profiles->resolve('fake', AgentRole::IMPLEMENTATION, 'fake-model', 'medium'),
+            $profiles->resolve($implementation, AgentRole::IMPLEMENTATION, $implementation === 'fake' ? 'fake-model' : 'gpt-5.3-codex', 'medium'),
             $this->app->make(ReviewerSlotFactory::class)->fromArray([[
                 'id' => (string) Str::uuid(),
                 'profile' => 'fake',

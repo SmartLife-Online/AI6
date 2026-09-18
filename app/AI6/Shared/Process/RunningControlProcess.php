@@ -31,6 +31,8 @@ final class RunningControlProcess
         private readonly ?ProcessLimits $limits = null,
         private readonly ?string $resultDirectory = null,
         private readonly ?string $artifactDirectory = null,
+        /** @var null|Closure(): void */
+        private readonly ?Closure $supervisorHeartbeat = null,
     ) {}
 
     public function running(): bool
@@ -66,8 +68,10 @@ final class RunningControlProcess
         $this->terminate();
     }
 
-    /** @param null|Closure(): void $heartbeat */
-    public function wait(?Closure $heartbeat = null, int $heartbeatSeconds = 1): ProcessResult
+    /** @param null|Closure(): void $heartbeat
+     * @param  null|Closure(string): void  $observe
+     */
+    public function wait(?Closure $heartbeat = null, int $heartbeatSeconds = 1, ?Closure $observe = null): ProcessResult
     {
         if ($heartbeatSeconds < 1) {
             throw new \InvalidArgumentException('The process heartbeat interval must be positive.');
@@ -90,6 +94,19 @@ final class RunningControlProcess
                 break;
             }
 
+            if ($observe !== null) {
+                $visible = $this->process->getOutput().$this->process->getErrorOutput();
+                $lastNewline = strrpos($visible, "\n");
+                if ($lastNewline !== false) {
+                    try {
+                        $observe($this->redactor->redact(substr($visible, 0, $lastNewline + 1), $this->redactionContext)->text);
+                    } catch (Throwable $exception) {
+                        $this->cancel();
+                        throw $exception;
+                    }
+                }
+            }
+
             if ($this->limits !== null && microtime(true) >= $nextResourceCheck) {
                 $resourceLimit = $this->resourceLimitResult();
                 if ($resourceLimit !== null) {
@@ -107,8 +124,18 @@ final class RunningControlProcess
                 break;
             }
 
-            if ($heartbeat !== null && microtime(true) >= $nextHeartbeat) {
-                $heartbeat();
+            if (($heartbeat !== null || $this->supervisorHeartbeat !== null) && microtime(true) >= $nextHeartbeat) {
+                try {
+                    if ($this->supervisorHeartbeat !== null) {
+                        ($this->supervisorHeartbeat)();
+                    }
+                    if ($heartbeat !== null) {
+                        $heartbeat();
+                    }
+                } catch (Throwable $exception) {
+                    $this->cancel();
+                    throw $exception;
+                }
                 $nextHeartbeat = microtime(true) + $heartbeatSeconds;
             }
 

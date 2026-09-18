@@ -1,5 +1,6 @@
 <?php
 
+use App\AI6\Agents\Console\ProviderCommand;
 use App\AI6\Auth\CannotRemoveLastAdministrator;
 use App\AI6\Auth\Console\CreateAdministratorCommand;
 use App\AI6\Auth\Console\ReissueRecoveryCodesCommand;
@@ -44,6 +45,7 @@ return Application::configure(basePath: dirname(__DIR__))
         },
     )
     ->withCommands([
+        ProviderCommand::class,
         CreateAdministratorCommand::class,
         ReissueRecoveryCodesCommand::class,
         DoctorCommand::class,

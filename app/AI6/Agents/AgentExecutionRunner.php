@@ -95,7 +95,7 @@ final class AgentExecutionRunner
         // container binding is also used by the database-free consumer.
         try {
             app()->makeWith(AgentAdapter::class, ['providerAlias' => $slot->provider_profile]);
-            $context = $this->bindSelection($slot, $context);
+            $context = $context->withSelection((string) $slot->model, (string) $slot->effort);
         } catch (AgentExecutionException $exception) {
             $this->runs->recordStepEvent($run->id, $job->step_type, ExecutionJobState::FAILED, $exception->reason);
             throw $exception;
@@ -121,8 +121,25 @@ final class AgentExecutionRunner
                 || $request->string('session_id') !== $slot->session_id) {
                 throw new AgentExecutionException('agent_staging_binding_invalid');
             }
+            if (! isset($this->intent($job)['agent_dispatched_'.$executionId])) {
+                if ($this->revisions->revision((string) $slot->provider_profile, false) !== $request->string('credential_revision')) {
+                    throw new AgentExecutionException('agent_credential_revision_changed');
+                }
+                $this->stagingRevision($job, $slot, $executionId);
+            }
 
             return $this->workerHome($request);
+        }
+        // A bound turn retains its approved selection while its answer is
+        // collected. Fresh capability evidence gates only a new staging.
+        $revision = $this->stagingRevision($job, $slot, $executionId);
+        try {
+            $context = $this->bindSelection($slot, $context);
+        } catch (AgentExecutionException $exception) {
+            // Expiry can race the initial check. It is still a polling outcome.
+            $this->stagingRevision($job, $slot, $executionId);
+            $this->runs->recordStepEvent($run->id, $job->step_type, ExecutionJobState::FAILED, $exception->reason);
+            throw $exception;
         }
         if (file_exists($input) || is_link($input) || file_exists($output) || is_link($output)) {
             throw new AgentExecutionException('agent_staging_incomplete');
@@ -188,8 +205,9 @@ final class AgentExecutionRunner
         try {
             $home = $this->homes->create($input, $output, $slot->slot_id, $slot->session_id, $source,
                 $this->instructions->get($slot->provider_profile), $context->instructionSnapshot, $context->runtimeProfile,
-                new CredentialProjection($slot->provider_profile, $this->revisions->revision($slot->provider_profile), []),
+                new CredentialProjection($slot->provider_profile, $revision, []),
                 writableWorkspace: $writable, turnContext: $context);
+            $this->stagingRevision($job, $slot, $executionId);
             $request = new AgentExecutionRequest([
                 'schema' => 'ai6.agent-execution.v1', 'execution_id' => $executionId, 'run_id' => $run->id,
                 'slot_id' => $slot->slot_id, 'session_id' => (string) $slot->session_id,
@@ -198,7 +216,7 @@ final class AgentExecutionRunner
                 'prompt_hash' => $context->promptSnapshot->hash, 'instruction_hash' => $context->instructionSnapshot->hash,
                 'runtime_profile_id' => $context->runtimeProfile->id, 'runtime_profile_hash' => $context->runtimeProfile->hash,
                 'provider_alias' => $slot->provider_profile, 'model' => $context->model, 'effort' => $context->effort,
-                'credential_revision' => $this->revisions->revision($slot->provider_profile),
+                'credential_revision' => $revision,
                 'deadline_at' => time() + $this->policies->get(ProcessPolicyName::AGENT)->timeoutSeconds + 30,
             ]);
             AgentExecutionProcessor::writeDocument($input.'/projection.json', $home->workspaceProjection);
@@ -230,6 +248,9 @@ final class AgentExecutionRunner
             $this->assertLease($job);
             $this->assertCurrent($run, $request);
             if ($this->mayExecuteHere()) {
+                if ($request->string('provider_alias') !== 'fake') {
+                    throw new AgentExecutionException('agent_provider_requires_mailbox');
+                }
                 if (isset($this->intent($job)['agent_dispatched_'.$request->string('execution_id')])) {
                     throw new AgentExecutionException('agent_execution_already_started');
                 }
@@ -452,6 +473,57 @@ final class AgentExecutionRunner
         return $context->withSelection($model, $effort);
     }
 
+    private function stagingRevision(ExecutionJob $job, RunAgent $slot, string $executionId): string
+    {
+        $alias = (string) $slot->provider_profile;
+        if ($alias === 'fake') {
+            return $this->revisions->revision($alias);
+        }
+        $reports = app(ProviderCapabilityReport::class);
+        $document = $reports->read($alias, false);
+        if ($document === null) {
+            throw new AgentExecutionException('agent_capability_channel_unavailable');
+        }
+        $key = 'agent_staging_'.$executionId;
+        $intent = $this->intent($job);
+        if (! isset($intent[$key.'_generation'])) {
+            $intent = [...$intent, $key.'_generation' => $document['generation'],
+                $key.'_deadline' => time() + $this->policies->get(ProcessPolicyName::AGENT)->timeoutSeconds + 30];
+            $this->persist($job, $intent);
+        }
+        if (! is_int($intent[$key.'_deadline'] ?? null)) {
+            throw new AgentExecutionException('agent_staging_binding_invalid');
+        }
+        if ($intent[$key.'_generation'] !== $document['generation']) {
+            throw new AgentExecutionException('agent_credential_revision_changed');
+        }
+        if (time() >= $intent[$key.'_deadline']) {
+            throw new AgentExecutionException('agent_execution_deadline_exceeded');
+        }
+        // Discard the former pre-dispatch boot binding on a resumed intent.
+        // Only the claim binds a turn to the supervisor that actually starts it.
+        if (array_key_exists($key.'_boot', $intent)) {
+            unset($intent[$key.'_boot']);
+            $this->persist($job, $intent);
+        }
+        try {
+            $reports->boot(false);
+        } catch (Throwable) {
+            throw new AgentExecutionException('agent_capability_channel_unavailable');
+        }
+        try {
+            $boot = $reports->boot();
+        } catch (CredentialProjectionException) {
+            throw new AgentCapabilityPending;
+        }
+        if ($document['boot_id'] !== $boot
+            || $document['checked_at'] < time() - ProviderOnboarding::seconds('max_age_seconds')) {
+            throw new AgentCapabilityPending;
+        }
+
+        return $document['generation'];
+    }
+
     /**
      * The one place the execution identity's own intent key is derived, so
      * prepare() and markImported() can never drift onto two different
@@ -549,7 +621,7 @@ final class AgentExecutionRunner
         try {
             $decoded = $this->json->decode($stored, new RedactionContext('worker', null, 'step-intent'));
             foreach (array_keys($decoded) as $key) {
-                if (is_string($key) && preg_match('/\Aagent_(?:execution_[0-9a-f]{64}|dispatched_[0-9a-f]{64}|imported_[0-9a-f]{64}|verifier_slot_[0-9a-f]{64}|security_slot_i[0-9]+h[0-9]+|review_session_[a-zA-Z0-9_-]+|turn_revision|provider_attempt)\z/D', $key) === 1
+                if (is_string($key) && preg_match('/\Aagent_(?:execution_[0-9a-f]{64}|staging_[0-9a-f]{64}_(?:generation|boot|deadline)|dispatched_[0-9a-f]{64}|imported_[0-9a-f]{64}|verifier_slot_[0-9a-f]{64}|security_slot_i[0-9]+h[0-9]+|review_session_[a-zA-Z0-9_-]+|turn_revision|provider_attempt)\z/D', $key) === 1
                     && is_scalar($decoded[$key])) {
                     unset($decoded[$key]);
                 }
@@ -571,7 +643,7 @@ final class AgentExecutionRunner
         if ($request->integer('deadline_at') <= time()) {
             throw new AgentExecutionException('agent_execution_deadline_exceeded');
         }
-        if ($this->revisions->revision($request->string('provider_alias')) !== $request->string('credential_revision')) {
+        if ($this->revisions->revision($request->string('provider_alias'), false) !== $request->string('credential_revision')) {
             throw new AgentExecutionException('agent_credential_revision_changed');
         }
         $profile = app(ProviderRuntimeProfileRegistry::class)->get($request->string('runtime_profile_id'));

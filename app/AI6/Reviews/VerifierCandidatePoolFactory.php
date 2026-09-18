@@ -3,6 +3,7 @@
 namespace App\AI6\Reviews;
 
 use App\AI6\Agents\AgentProfileRegistry;
+use App\AI6\Agents\AgentProfileSelectionException;
 use App\AI6\Agents\AgentRole;
 
 final readonly class VerifierCandidatePoolFactory
@@ -16,8 +17,14 @@ final readonly class VerifierCandidatePoolFactory
         foreach ($this->profiles->all() as $profile) {
             foreach ($profile->models as $model) {
                 foreach ($profile->efforts as $effort) {
-                    if (! $this->profiles->supportsCombination($profile->id, AgentRole::FINDING_VERIFICATION, $model, $effort)
+                    if (! $this->profiles->supportsProviderSelection($profile->providerProfileAlias, AgentRole::FINDING_VERIFICATION, $model, $effort)
                         || ! $profile->capabilityStatus->selectable()) {
+                        continue;
+                    }
+                    try {
+                        $this->profiles->resolve($profile->id, AgentRole::FINDING_VERIFICATION, $model, $effort);
+                    } catch (AgentProfileSelectionException) {
+                        // Another profile of the same alias cannot supply this tuple's evidence.
                         continue;
                     }
                     $key = hash('sha256', implode("\0", [$profile->id, $model, $effort]));

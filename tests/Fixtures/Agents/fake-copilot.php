@@ -9,6 +9,42 @@ $arguments = array_slice($argv, 2);
 $nativeHome = (string) getenv('COPILOT_HOME');
 $temporary = (string) getenv('TMPDIR');
 $scratch = dirname($temporary);
+if ($arguments === ['--headless', '--stdio', '--no-auto-update', '--no-auto-login', '--log-level', 'none']) {
+    $wire = (string) stream_get_contents(STDIN);
+    $parts = explode("\r\n\r\n", $wire, 2);
+    $request = isset($parts[1]) ? json_decode($parts[1], true, 16, JSON_THROW_ON_ERROR) : [];
+    if (($request['method'] ?? null) !== 'models.list' || ($request['params']['gitHubToken'] ?? null) !== 'synthetic-copilot-token'
+        || $parts[0] !== 'Content-Length: '.strlen($parts[1])) {
+        exit(9);
+    }
+    $response = ['jsonrpc' => '2.0', 'id' => 1, 'result' => ['models' => [
+        ['id' => 'gpt-5.4', 'policy' => ['state' => $scenario === 'model_disabled' ? 'disabled' : 'enabled']],
+        ['id' => 'claude-sonnet-4.6', 'policy' => ['state' => 'disabled']],
+    ]]];
+    if ($scenario === 'models_offline') {
+        $response = ['jsonrpc' => '2.0', 'id' => 1, 'error' => ['code' => -32603, 'message' => 'No account model evidence.']];
+    } elseif ($scenario === 'models_wrong_id') {
+        $response['id'] = 2;
+    } elseif ($scenario === 'models_duplicate') {
+        $response['result']['models'][] = $response['result']['models'][0];
+    }
+    $body = json_encode($response, JSON_THROW_ON_ERROR);
+    $wire = 'Content-Length: '.strlen($body)."\r\n\r\n".$body;
+    echo $scenario === 'models_truncated' ? substr($wire, 0, -1) : $wire;
+    if ($scenario === 'models_multiple') {
+        echo $wire;
+    }
+    exit(0);
+}
+if ($arguments === ['login', '--with-token']) {
+    $input = trim((string) stream_get_contents(STDIN));
+    if ($scenario === 'login_fail' || $input !== 'synthetic-copilot-token') {
+        exit(9);
+    }
+    file_put_contents($nativeHome.'/login-history', 'private-login-bait');
+    echo 'Provider returned token='.$input."\n";
+    exit(0);
+}
 if ($arguments === ['--version']) {
     echo $scenario === 'version_drift' ? "GitHub Copilot CLI 1.0.84.\n" : "GitHub Copilot CLI 1.0.83.\n";
     exit(0);

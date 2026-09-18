@@ -2,6 +2,7 @@
 
 namespace App\AI6\Runs;
 
+use App\AI6\Agents\AgentCapabilityPending;
 use App\AI6\Agents\AgentExecutionException;
 use App\AI6\Agents\AgentExecutionLimitReached;
 use App\AI6\Agents\AgentExecutionRunner;
@@ -215,6 +216,10 @@ final readonly class RunImplementation
                     $baseContext->expectedInstructionBlobs, $slot->slot_id, $providerAttempt, $findingIds, unreachablePaths: $baseContext->unreachablePaths);
                 try {
                     $home = $this->turns->prepare($job, $run, $slot, $agentContext, $export);
+                } catch (AgentCapabilityPending) {
+                    $this->orchestrator->parkPollingStep($job, $owner);
+
+                    return;
                 } catch (AgentExecutionException $exception) {
                     throw new ImplementationImportException($exception->reason, 'Die Provider-Ausführung wurde an ihrer gespeicherten Bindung abgewiesen.');
                 } catch (Throwable $exception) {

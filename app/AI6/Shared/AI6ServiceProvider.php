@@ -24,6 +24,8 @@ use App\AI6\Agents\InstructionPatchChannel;
 use App\AI6\Agents\InstructionProfileRegistry;
 use App\AI6\Agents\InstructionSnapshotResolver;
 use App\AI6\Agents\ModelProfileAllowlist;
+use App\AI6\Agents\ProviderBinaryDigest;
+use App\AI6\Agents\ProviderCapabilityPublisher;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Agents\SecurityReviewerProfileResolver;
 use App\AI6\Auth\AuthenticationHmac;
@@ -306,6 +308,8 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(FindingVerificationRound::class);
         $this->app->singleton(ReviewStallFingerprint::class);
         $this->app->singleton(CredentialRevisionRegistry::class, static fn (): CredentialRevisionRegistry => CredentialRevisionRegistry::fromConfiguredValues());
+        $this->app->singleton(ProviderCapabilityPublisher::class);
+        $this->app->singleton(ProviderBinaryDigest::class);
         $this->app->singleton(
             ExecutionHomeManager::class,
             static fn (Application $app): ExecutionHomeManager => new ExecutionHomeManager(
@@ -577,7 +581,7 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->make(CodexCliConfiguration::class);
         $this->app->make(GitHubCopilotCliConfiguration::class);
         $this->app->make(GrokCliConfiguration::class);
-        foreach ($agentProfiles->all() as $agentProfile) {
+        foreach ($agentProfiles->configured() as $agentProfile) {
             $runtimeProfiles->get($agentProfile->runtimeProfileId);
             $instructionProfiles->get($agentProfile->providerProfileAlias);
         }

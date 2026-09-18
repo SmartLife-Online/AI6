@@ -14,17 +14,21 @@ use App\AI6\Shared\Config\StrictPositiveIntegerParser;
 use App\AI6\Shared\Doctor\CodexCliDoctorCheck;
 use App\AI6\Shared\Process\ControlProcessRunner;
 use Illuminate\Support\Facades\Artisan;
+use Tests\Fixtures\Agents\BuildsProviderOnboarding;
 use Tests\Fixtures\Agents\FakeCodexBinary;
 use Tests\TestCase;
 
 /** TC-03: the capability doctor of the pinned Codex transport. */
 final class CodexCliDoctorCheckTest extends TestCase
 {
+    use BuildsProviderOnboarding;
+
     private string $root;
 
     protected function setUp(): void
     {
         parent::setUp();
+        $this->createOnboardingFixture();
         $this->root = str_replace('\\', '/', base_path('storage/framework/testing')).'/ai6-codex-doctor-'.bin2hex(random_bytes(6));
         mkdir($this->root, 0700, true);
     }
@@ -35,12 +39,13 @@ final class CodexCliDoctorCheckTest extends TestCase
             unlink($file);
         }
         rmdir($this->root);
+        $this->destroyOnboardingFixture();
         parent::tearDown();
     }
 
     public function test_an_instance_without_binary_and_pin_is_not_set_up_and_locks_only_the_codex_profiles(): void
     {
-        $result = $this->check(new CodexCliConfiguration($this->root.'/absent', '', FakeCodexBinary::sandboxProof()))->run();
+        $result = $this->probeProvider($this->check(new CodexCliConfiguration($this->root.'/absent', '', FakeCodexBinary::sandboxProof())));
         self::assertTrue($result->passed);
         self::assertSame('nicht eingerichtet; Profile von codex_cli gesperrt', $result->details['Zustand']);
         self::assertSame('nicht erbracht', $result->details['Reale CLI-Evidenz']);
@@ -63,7 +68,7 @@ final class CodexCliDoctorCheckTest extends TestCase
             'codex_runtime_profile_unsupported' => [new CodexCliConfiguration($binary, FakeCodexBinary::PINNED_VERSION, FakeCodexBinary::sandboxProof()), null, ['permissions' => ['network' => true, 'workspace' => 'read_only']]],
         ];
         foreach ($cases as $reason => [$configuration, $profileOverride, $runtimeOverride]) {
-            $result = $this->check($configuration, $profileOverride, $runtimeOverride)->run();
+            $result = $this->probeProvider($this->check($configuration, $profileOverride, $runtimeOverride));
             self::assertFalse($result->passed, $reason);
             self::assertSame($reason, $result->details['Fehler'], $reason);
             self::assertSame('FEHLER ('.$reason.')', $result->details['Statische Prüfung'], $reason);
@@ -73,7 +78,7 @@ final class CodexCliDoctorCheckTest extends TestCase
 
     public function test_real_cli_evidence_is_shown_separately_and_version_drift_fails(): void
     {
-        $verified = $this->check(new CodexCliConfiguration(FakeCodexBinary::create($this->root), FakeCodexBinary::PINNED_VERSION, FakeCodexBinary::sandboxProof()))->run();
+        $verified = $this->probeProvider($this->check(new CodexCliConfiguration(FakeCodexBinary::create($this->root), FakeCodexBinary::PINNED_VERSION, FakeCodexBinary::sandboxProof())));
         self::assertTrue($verified->passed, json_encode($verified->details, JSON_UNESCAPED_UNICODE));
         self::assertSame('OK', $verified->details['Statische Prüfung']);
         self::assertSame(FakeCodexBinary::VERSION_LINE.' (gleich Pin)', $verified->details['Reale CLI-Evidenz']);
@@ -86,13 +91,13 @@ final class CodexCliDoctorCheckTest extends TestCase
         self::assertSame('11 Schalter aus, 16 ohne Schalter erlaubt (codex features list, ohne Turn)', $verified->details['Schutznachweis']);
         self::assertSame('gebunden an '.FakeCodexBinary::sandboxProof().' (AI6-033/MG-01)', $verified->details['Sandbox- und Toolnetznachweis']);
 
-        $drift = $this->check(new CodexCliConfiguration(FakeCodexBinary::create($this->root, versionLine: 'codex-cli 0.130.0'), FakeCodexBinary::PINNED_VERSION, FakeCodexBinary::sandboxProof()))->run();
+        $drift = $this->probeProvider($this->check(new CodexCliConfiguration(FakeCodexBinary::create($this->root, versionLine: 'codex-cli 0.130.0'), FakeCodexBinary::PINNED_VERSION, FakeCodexBinary::sandboxProof())));
         self::assertFalse($drift->passed);
         self::assertSame('OK', $drift->details['Statische Prüfung']);
         self::assertSame('FEHLER (codex_version_drift)', $drift->details['Reale CLI-Evidenz']);
         self::assertStringNotContainsString('0.130.0', implode(' ', $drift->details), 'Provider output is never echoed.');
 
-        $failed = $this->check(new CodexCliConfiguration(FakeCodexBinary::create($this->root, 'version_probe_fails'), FakeCodexBinary::PINNED_VERSION, FakeCodexBinary::sandboxProof()))->run();
+        $failed = $this->probeProvider($this->check(new CodexCliConfiguration(FakeCodexBinary::create($this->root, 'version_probe_fails'), FakeCodexBinary::PINNED_VERSION, FakeCodexBinary::sandboxProof())));
         self::assertFalse($failed->passed);
         self::assertSame('FEHLER (codex_version_probe_failed)', $failed->details['Reale CLI-Evidenz']);
     }
@@ -113,7 +118,7 @@ final class CodexCliDoctorCheckTest extends TestCase
             ['feature_probe_fails', 'codex_feature_probe_failed'],
         ];
         foreach ($cases as [$scenario, $reason]) {
-            $result = $this->check(new CodexCliConfiguration(FakeCodexBinary::create($this->root, $scenario), FakeCodexBinary::PINNED_VERSION, FakeCodexBinary::sandboxProof()))->run();
+            $result = $this->probeProvider($this->check(new CodexCliConfiguration(FakeCodexBinary::create($this->root, $scenario), FakeCodexBinary::PINNED_VERSION, FakeCodexBinary::sandboxProof())));
             self::assertFalse($result->passed, $scenario);
             self::assertSame('OK', $result->details['Statische Prüfung'], $scenario);
             self::assertSame(FakeCodexBinary::VERSION_LINE.' (gleich Pin)', $result->details['Reale CLI-Evidenz'], $scenario);
@@ -139,7 +144,7 @@ final class CodexCliDoctorCheckTest extends TestCase
             [FakeCodexBinary::PINNED_VERSION.':'.($platform === 'linux' ? 'windows' : 'linux'), 'codex_sandbox_proof_invalid'],
         ];
         foreach ($cases as [$proof, $reason]) {
-            $result = $this->check(new CodexCliConfiguration($binary, FakeCodexBinary::PINNED_VERSION, $proof))->run();
+            $result = $this->probeProvider($this->check(new CodexCliConfiguration($binary, FakeCodexBinary::PINNED_VERSION, $proof)));
             self::assertFalse($result->passed, $reason);
             self::assertSame('OK', $result->details['Statische Prüfung'], $reason);
             self::assertStringStartsWith(FakeCodexBinary::VERSION_LINE, $result->details['Reale CLI-Evidenz'], $reason);
@@ -157,11 +162,11 @@ final class CodexCliDoctorCheckTest extends TestCase
             'ai6.codex.pinned_version' => FakeCodexBinary::PINNED_VERSION,
             'ai6.codex.sandbox_proof' => 'proven',
         ]);
-        $result = (new CodexCliDoctorCheck(
+        $result = $this->probeProvider(new CodexCliDoctorCheck(
             $this->app->make(AgentProfileRegistry::class),
             $this->app->make(ProviderRuntimeProfileRegistry::class),
             $this->app->make(ControlProcessRunner::class),
-        ))->run();
+        ));
         self::assertFalse($result->passed);
         self::assertSame('codex_configuration_invalid', $result->details['Fehler']);
     }
@@ -175,29 +180,13 @@ final class CodexCliDoctorCheckTest extends TestCase
         ]);
         $exitCode = Artisan::call('ai6:doctor');
         $output = Artisan::output();
-        self::assertStringContainsString('Codex-CLI: OK', $output);
-        self::assertStringContainsString('Statische Prüfung: OK', $output);
-        self::assertStringContainsString('Reale CLI-Evidenz: '.FakeCodexBinary::VERSION_LINE.' (gleich Pin)', $output);
-        self::assertStringContainsString('Sandbox- und Toolnetznachweis: gebunden an '.FakeCodexBinary::sandboxProof(), $output);
-        self::assertStringContainsString('Profilzustand: startbar', $output);
-
-        // The shipped instance asserts nothing, so the provider stays locked.
-        config(['ai6.codex.sandbox_proof' => '']);
-        Artisan::call('ai6:doctor');
-        $unproven = Artisan::output();
-        self::assertStringContainsString('Fehler: codex_sandbox_unproven', $unproven);
-        self::assertStringNotContainsString('Profilzustand: startbar', $unproven);
-        config(['ai6.codex.sandbox_proof' => FakeCodexBinary::sandboxProof()]);
-
-        config(['ai6.codex.binary' => $this->root.'/absent']);
-        $failing = Artisan::call('ai6:doctor');
-        $failingOutput = Artisan::output();
-        self::assertSame(1, $failing);
-        self::assertStringContainsString('Codex-CLI: FEHLER', $failingOutput);
-        self::assertStringContainsString('Fehler: codex_binary_missing', $failingOutput);
-        // The rest of the doctor is untouched by the locked provider.
-        self::assertStringContainsString('SecurityPolicy: OK', $failingOutput);
-        self::assertSame($exitCode === 0, str_contains($output, 'Checker-Laufzeit: OK'));
+        self::assertSame(1, $exitCode);
+        self::assertStringContainsString('Codex-CLI: FEHLER', $output);
+        self::assertStringContainsString('Aktueller, vollständig gebundener Agentbericht fehlt.', $output);
+        self::assertStringNotContainsString('Reale CLI-Evidenz:', $output);
+        self::assertStringNotContainsString('Profilzustand: startbar', $output);
+        self::assertStringContainsString('SecurityPolicy: OK', $output);
+        self::assertTrue(app(AgentProfileRegistry::class)->get('fake')->capabilityStatus->selectable());
     }
 
     /**

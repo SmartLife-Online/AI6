@@ -2,6 +2,7 @@
 
 namespace App\AI6\Reviews;
 
+use App\AI6\Agents\AgentCapabilityPending;
 use App\AI6\Agents\AgentExecutionLimitReached;
 use App\AI6\Agents\AgentExecutionRunner;
 use App\AI6\Agents\AgentResultContext;
@@ -277,6 +278,11 @@ final readonly class FindingVerificationRound
                 return true;
             }
             $bytes = $answer->bytes;
+        } catch (AgentCapabilityPending) {
+            $this->orchestrator->parkPollingStep($job, (string) $job->lease_owner);
+            $this->destroy(null, $export, $input, $output);
+
+            return true;
         } catch (ReviewResultParseException $exception) {
             $this->destroy($home, $export, $input, $output);
             $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::BINDING_ERROR, $bindings, $exception->reason);

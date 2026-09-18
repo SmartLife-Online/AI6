@@ -5,6 +5,13 @@ role="${1:-}"
 
 case "$role" in
     init)
+        for provider_directory in /var/lib/ai6/provider-store /var/lib/ai6/provider-reports /var/lib/ai6/provider-presence; do
+            test ! -L "$provider_directory"
+            mkdir -p "$provider_directory"
+            chown 10002:10001 "$provider_directory"
+        done
+        chmod 0700 /var/lib/ai6/provider-store
+        chmod 0755 /var/lib/ai6/provider-reports /var/lib/ai6/provider-presence
         managed_root="${AI6_MANAGED_PROJECT_ROOT:-/var/lib/ai6/managed}"
         effect_lock_directory="${AI6_EFFECT_LOCK_DIRECTORY:-/var/lib/ai6/managed/effect-locks}"
         effect_lock_count="${AI6_EFFECT_LOCK_OBJECT_COUNT:-64}"

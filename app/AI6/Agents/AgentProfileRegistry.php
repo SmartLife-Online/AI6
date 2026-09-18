@@ -18,18 +18,35 @@ final readonly class AgentProfileRegistry
     /** @var array<string, AgentProfile> */
     private array $profiles;
 
-    /** @param array<string, AgentProfile> $profiles */
-    private function __construct(array $profiles)
+    /** Immutable DTOs, not cached evidence. Each resolution still reads the report.
+     * @var array<string, array<string, AgentProfile>>
+     */
+    private array $statusProjections;
+
+    /** @param array<string, AgentProfile> $profiles
+     * @param  null|\Closure(): ProviderCapabilityReport  $reports
+     */
+    private function __construct(array $profiles, private ?\Closure $reports = null)
     {
         ksort($profiles, SORT_STRING);
         $this->profiles = $profiles;
+        $projections = [];
+        foreach ($profiles as $profile) {
+            foreach (CapabilityStatus::cases() as $status) {
+                $projections[$profile->id][$status->value] = new AgentProfile($profile->id, $profile->providerProfileAlias,
+                    $profile->adapterId, $profile->models, $profile->efforts, $profile->roles, $status, $profile->runtimeProfileId);
+            }
+        }
+        $this->statusProjections = $projections;
     }
 
     public static function fromConfiguredValues(StrictEnumParser $enumParser): self
     {
         $configured = config('ai6.agent_profiles');
 
-        return self::fromArray(is_array($configured) ? $configured : [], $enumParser);
+        $parsed = self::fromArray(is_array($configured) ? $configured : [], $enumParser);
+
+        return new self($parsed->profiles, static fn (): ProviderCapabilityReport => app(ProviderCapabilityReport::class));
     }
 
     /** @param array<array-key, mixed> $configured */
@@ -100,7 +117,44 @@ final readonly class AgentProfileRegistry
     /** @return list<AgentProfile> */
     public function all(): array
     {
+        return array_map(fn (AgentProfile $profile): AgentProfile => $this->get($profile->id), $this->configured());
+    }
+
+    /** Static allowlist only, for native probes before readiness (AGT-010).
+     * @return list<AgentProfile>
+     */
+    public function configured(): array
+    {
         return array_values($this->profiles);
+    }
+
+    /**
+     * The existing queue scheduler serializes this registry for its trusted
+     * binding fingerprint. Include current DTOs, never the lazy resolver.
+     *
+     * @return array{profiles: list<AgentProfile>, reports: array<string, mixed>}
+     */
+    public function __serialize(): array
+    {
+        $reports = [];
+        if ($this->reports !== null) {
+            foreach (self::PROVIDER_PROFILE_ALIASES as $alias) {
+                if ($alias !== 'fake') {
+                    $document = ($this->reports)()->read($alias);
+                    // Liveness metadata is not a capability change. Expired or
+                    // invalid evidence still becomes null and schedules reevaluation.
+                    $reports[$alias] = $document === null ? null : array_intersect_key($document, array_flip(['alias', 'generation', 'rows']));
+                }
+            }
+        }
+
+        return ['profiles' => $this->all(), 'reports' => $reports];
+    }
+
+    /** @param array<string, mixed> $data */
+    public function __unserialize(array $data): void
+    {
+        throw new \LogicException('Agent profiles must be rebuilt from trusted configuration.');
     }
 
     /** @return list<string> */
@@ -129,8 +183,15 @@ final readonly class AgentProfileRegistry
 
     public function get(string $profileId): AgentProfile
     {
-        return $this->profiles[$profileId]
+        $profile = $this->profiles[$profileId]
             ?? throw new AgentProfileSelectionException(AgentProfileSelectionError::PROFILE_UNKNOWN);
+        if ($this->reports === null || $profile->providerProfileAlias === 'fake') {
+            return $profile;
+        }
+        $status = ($this->reports)()->diagnosis($profile)['status'] === 'ready' ? CapabilityStatus::AVAILABLE
+            : ($profile->capabilityStatus === CapabilityStatus::UNCHECKED ? CapabilityStatus::UNCHECKED : CapabilityStatus::UNAVAILABLE);
+
+        return $this->statusProjections[$profile->id][$status->value];
     }
 
     public function supportsCombination(string $profileId, AgentRole $role, string $model, string $effort): bool
@@ -147,7 +208,8 @@ final readonly class AgentProfileRegistry
     public function supportsProviderSelection(string $providerProfileAlias, AgentRole $role, string $model, string $effort): bool
     {
         foreach ($this->profiles as $profile) {
-            if ($profile->providerProfileAlias === $providerProfileAlias && $profile->supports($role, $model, $effort)) {
+            if ($profile->providerProfileAlias === $providerProfileAlias && $profile->supports($role, $model, $effort)
+                && ($this->reports === null || ($this->reports)()->diagnosis($profile, $role, $model, $effort)['status'] === 'ready')) {
                 return true;
             }
         }
@@ -171,7 +233,8 @@ final readonly class AgentProfileRegistry
         if (! $profile->supports($role, $model, $effort)) {
             throw new AgentProfileSelectionException(AgentProfileSelectionError::COMBINATION_NOT_ALLOWED);
         }
-        if (! $profile->capabilityStatus->selectable()) {
+        if (! $profile->capabilityStatus->selectable()
+            || ($this->reports !== null && ($this->reports)()->diagnosis($profile, $role, $model, $effort)['status'] !== 'ready')) {
             throw new AgentProfileSelectionException(AgentProfileSelectionError::CAPABILITY_NOT_AVAILABLE);
         }
 

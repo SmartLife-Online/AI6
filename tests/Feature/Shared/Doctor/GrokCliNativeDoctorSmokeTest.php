@@ -2,12 +2,16 @@
 
 namespace Tests\Feature\Shared\Doctor;
 
+use App\AI6\Agents\AgentRole;
 use App\AI6\Shared\Doctor\GrokCliDoctorCheck;
 use Illuminate\Filesystem\Filesystem;
+use Tests\Fixtures\Agents\BuildsProviderOnboarding;
 use Tests\TestCase;
 
 final class GrokCliNativeDoctorSmokeTest extends TestCase
 {
+    use BuildsProviderOnboarding;
+
     public function test_native_credential_free_doctor_reaches_the_real_sandbox_blocker(): void
     {
         $binary = getenv('AI6_GROK_BINARY');
@@ -27,9 +31,10 @@ final class GrokCliNativeDoctorSmokeTest extends TestCase
         config(['ai6.execution_mailboxes.agent_root' => $root.'/inputs', 'ai6.execution_mailboxes.agent_output_root' => $root.'/outputs',
             'ai6.process.wrapper_script' => $root.'/wrapper.sh', 'ai6.process.policies.control.working_roots' => [$root],
             'ai6.grok.binary' => $binary, 'ai6.grok.pinned_version' => '1.0.5', 'ai6.grok.capability_evidence' => []]);
+        $this->createOnboardingFixture();
         try {
             // Doctor invokes the production probe() and probeSandbox(), with no auth projection.
-            $result = (new GrokCliDoctorCheck)->run();
+            $result = (new GrokCliDoctorCheck)->probeCombination('grok-cli-review', AgentRole::QUALITY_REVIEW, 'provider_default', 'provider_default');
             self::assertFalse($result->passed);
             self::assertStringContainsString('agent_grok_sandbox_unprepared', implode(' ', $result->details));
             self::assertStringNotContainsString('agent_grok_surface_drift', implode(' ', $result->details));

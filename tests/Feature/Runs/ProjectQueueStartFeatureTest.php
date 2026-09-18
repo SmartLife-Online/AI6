@@ -19,6 +19,7 @@ use App\AI6\Runs\ApprovalSnapshotVerifier;
 use App\AI6\Runs\InstructionCandidateSource;
 use App\AI6\Runs\Jobs\EvaluateTicketApproval;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\Models\RunEvent;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\QueueAutoStarter;
 use App\AI6\Runs\QueueEligibility;
@@ -26,7 +27,9 @@ use App\AI6\Runs\QueueReevaluation;
 use App\AI6\Runs\RunState;
 use App\AI6\Shared\Redaction\RedactionContext;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\DeadlockException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\Feature\Tickets\TicketUiTestCase;
 
@@ -393,6 +396,11 @@ final class ProjectQueueStartFeatureTest extends TicketUiTestCase
         self::assertTrue(mkdir($barrier, 0700));
         DB::disconnect('sqlite');
         DB::purge('sqlite');
+        // A cached DatabaseQueue retains its old Connection after DB::purge.
+        // The children must not open a second PDO while their claim owns the
+        // write transaction on the new connection.
+        $this->app->forgetInstance('queue');
+        Queue::clearResolvedInstance('queue');
         $children = [];
         foreach ([1, 2] as $index) {
             $pid = pcntl_fork();
@@ -447,6 +455,33 @@ final class ProjectQueueStartFeatureTest extends TicketUiTestCase
                 rmdir($barrier);
             }
         }
+    }
+
+    public function test_a_database_deadlock_in_follow_up_preserves_existing_run_and_approval_bindings(): void
+    {
+        $fixture = $this->completedApproval('QUEUE-DEADLOCK-1');
+        $run = $this->finalizedRun($fixture);
+        $runBefore = $run->fresh()->getRawOriginal();
+        $approvalBefore = $fixture['approval']->fresh()->getRawOriginal();
+        $projectBefore = $fixture['project']->fresh()->getRawOriginal();
+        $operationsBefore = ControlOperation::query()->count();
+        $conflicts = 0;
+        DB::connection()->beforeExecuting(static function (string $query) use (&$conflicts): void {
+            if ($conflicts < 3 && str_contains($query, '"projects"')) {
+                $conflicts++;
+                throw new DeadlockException('Synthetic nested transaction conflict.');
+            }
+        });
+
+        self::assertNull($this->app->make(QueueAutoStarter::class)->afterCompletion($fixture['project'], $run));
+        self::assertSame(3, $conflicts);
+        self::assertSame($runBefore, $run->fresh()->getRawOriginal());
+        self::assertSame($approvalBefore, $fixture['approval']->fresh()->getRawOriginal());
+        self::assertSame($projectBefore, $fixture['project']->fresh()->getRawOriginal());
+        self::assertSame($operationsBefore, ControlOperation::query()->count());
+        $event = RunEvent::query()->where('event_key', 'queue-auto-start-rejected:'.$run->id.':DeadlockException')->sole();
+        self::assertSame('queue_auto_start_rejected', $event->event_type);
+        self::assertSame('Der automatische Folgestart wurde benannt abgewiesen: DeadlockException.', $event->redacted_payload);
     }
 
     private function forgetConfigurationBindings(): void

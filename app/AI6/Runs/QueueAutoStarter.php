@@ -12,8 +12,11 @@ use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunEvent;
 use App\AI6\Shared\Config\ConfigurationException;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\ConcurrencyErrorDetector;
+use Illuminate\Database\DeadlockException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Throwable;
@@ -29,12 +32,24 @@ final readonly class QueueAutoStarter
 
     public function afterCompletion(Project $project, Run $completedRun): ?ControlOperation
     {
-        try {
-            return $this->attempt($project, $completedRun);
-        } catch (ApprovalQueueConflict|RunTransitionConflict|ConfigurationException|ModelNotFoundException|QueryException $exception) {
-            $this->recordRejection($project, $completedRun, $exception);
+        for ($attempt = 0; ; $attempt++) {
+            try {
+                return $this->attempt($project, $completedRun);
+            } catch (ApprovalQueueConflict|RunTransitionConflict|ConfigurationException|ModelNotFoundException|QueryException|DeadlockException $exception) {
+                // Retry only after the competing transaction rolled back. A
+                // rejection event written immediately could invalidate the
+                // other claimant's SQLite snapshot and make both starts lose.
+                if ($attempt < 2 && DB::transactionLevel() === 0
+                    && ($exception instanceof DeadlockException
+                        || ($exception instanceof QueryException && (new ConcurrencyErrorDetector)->causedByConcurrencyError($exception)))) {
+                    usleep(50_000 * ($attempt + 1));
 
-            return null;
+                    continue;
+                }
+                $this->recordRejection($project, $completedRun, $exception);
+
+                return null;
+            }
         }
     }
 

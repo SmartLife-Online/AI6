@@ -70,6 +70,31 @@ RUN set -eux; \
     for executable in /usr/bin/git /usr/bin/ssh /usr/bin/ssh-keygen /usr/bin/flock /usr/bin/stat /usr/bin/setsid /usr/bin/kill /usr/bin/unshare /usr/bin/mount /usr/bin/find /usr/bin/setpriv /usr/bin/dash; do test -x "$executable"; test ! -L "$executable"; done; \
     php -r 'foreach (["intl", "mbstring", "openssl"] as $extension) { if (! extension_loaded($extension)) { fwrite(STDERR, "Required PHP extension is missing.\n"); exit(1); } }'
 
+# AGT-010: native transport pins and immutable download integrity. No installer
+# execution, floating release, package-manager wrapper, or runtime self-update.
+RUN set -eux; \
+    test "$(dpkg --print-architecture)" = amd64; \
+    curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' \
+        --output /tmp/ai6-codex.tar.gz \
+        https://github.com/openai/codex/releases/download/rust-v0.129.0-alpha.15/codex-x86_64-unknown-linux-musl.tar.gz; \
+    echo 'cbac890b22472413320625ff3dd47e78fac2c684df82dd55f8502c1a2b6455fa  /tmp/ai6-codex.tar.gz' | sha256sum --check --strict; \
+    curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' \
+        --output /tmp/ai6-copilot.tar.gz \
+        https://github.com/github/copilot-cli/releases/download/v1.0.83/copilot-linux-x64.tar.gz; \
+    echo 'ffbe1c429664b8a05efed67ecdb467123e40fcaa3c6c14ef9a98ba74da4687b7  /tmp/ai6-copilot.tar.gz' | sha256sum --check --strict; \
+    curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' \
+        --output /tmp/ai6-grok \
+        https://x.ai/cli/grok-1.0.5-linux-x86_64; \
+    echo '9ba87444e1819e8f6104adbbf4676a870c204380aa5c3e1c38a926c4ea677238  /tmp/ai6-grok' | sha256sum --check --strict; \
+    install -m 0755 /tmp/ai6-grok /usr/local/bin/grok; \
+    mkdir /tmp/ai6-cli; \
+    tar -xzf /tmp/ai6-codex.tar.gz -C /tmp/ai6-cli codex-x86_64-unknown-linux-musl; \
+    tar -xzf /tmp/ai6-copilot.tar.gz -C /tmp/ai6-cli copilot; \
+    install -m 0755 /tmp/ai6-cli/codex-x86_64-unknown-linux-musl /usr/local/bin/codex; \
+    install -m 0755 /tmp/ai6-cli/copilot /usr/local/bin/copilot; \
+    rm -rf /tmp/ai6-cli /tmp/ai6-codex.tar.gz /tmp/ai6-copilot.tar.gz /tmp/ai6-grok
+
+
 FROM runtime AS vendor
 
 COPY --from=composer /usr/bin/composer /usr/local/bin/composer

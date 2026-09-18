@@ -69,6 +69,9 @@ final class AgentExecutionProcessor
                     throw new AgentExecutionException('agent_execution_terminal');
                 }
                 $this->assertBoot($bootId);
+                if ($this->revisions->revision($request->string('provider_alias'), false) !== $request->string('credential_revision')) {
+                    throw new AgentExecutionException('agent_credential_revision_changed');
+                }
                 $heartbeat($request->string('execution_id'));
                 $this->publishBoot($bootId);
                 self::writeDocument(self::outputRoot().'/heartbeats/'.$request->string('execution_id').'.json', [
@@ -81,6 +84,16 @@ final class AgentExecutionProcessor
         $state = 'provider_error';
         $reason = 'agent_provider_error';
         try {
+            $alias = $request->string('provider_alias');
+            if ($alias !== 'fake') {
+                $reports = app(ProviderCapabilityReport::class);
+                $document = $reports->read($alias, false);
+                if ($document !== null && $document['generation'] === $request->string('credential_revision')
+                    && $document['boot_id'] === $reports->boot()
+                    && $document['checked_at'] < time() - ProviderOnboarding::seconds('max_age_seconds')) {
+                    app(ProviderCapabilityPublisher::class)->recheck($alias, $pulse);
+                }
+            }
             $bytes = self::readBytes($contextPath, $this->policies->get(ProcessPolicyName::AGENT)->outputLimitBytes);
             $this->redactor->assertValidInput($bytes);
             if (! hash_equals($request->string('context_hash'), hash('sha256', $bytes))) {
@@ -98,6 +111,9 @@ final class AgentExecutionProcessor
                 || $this->revisions->revision($request->string('provider_alias')) !== $request->string('credential_revision')) {
                 throw new AgentExecutionException('agent_context_binding_invalid');
             }
+            if (! app(AgentProfileRegistry::class)->supportsProviderSelection($alias, $context->role, $context->model, $context->effort)) {
+                throw new AgentExecutionException('agent_selection_not_allowed');
+            }
             $profile = app(RestrictedJsonDecoder::class)->decode(self::readBytes($home->runtimeConfiguration, 1048576), new RedactionContext('agent', null, 'runtime-profile'));
             $expectedProfile = app(RestrictedJsonDecoder::class)->decode(json_encode($context->runtimeProfile, JSON_THROW_ON_ERROR), new RedactionContext('agent', null, 'runtime-profile'));
             if ($profile != $expectedProfile) {
@@ -107,7 +123,16 @@ final class AgentExecutionProcessor
             $pulse();
             self::$executing = true;
             try {
-                $answer = $adapter->turn($context, $home, $pulse, $context->unreachablePaths);
+                if ($adapter instanceof FakeAgentAdapter || $request->string('provider_alias') === 'fake') {
+                    $answer = $adapter->turn($context, $home, $pulse, $context->unreachablePaths);
+                } else {
+                    $answer = app(ExecutionHomeManager::class)->withAgentCredentials($home, $request->string('provider_alias'),
+                        $request->string('credential_revision'), function (ExecutionHome $projected) use ($adapter, $context, $pulse): AgentTurnResult {
+                            $pulse();
+
+                            return $adapter->turn($context, $projected, $pulse, $context->unreachablePaths);
+                        });
+                }
             } finally {
                 self::$executing = false;
             }
@@ -145,6 +170,9 @@ final class AgentExecutionProcessor
                 return;
             }
             $this->assertBoot($bootId);
+            if ($this->revisions->revision($request->string('provider_alias'), false) !== $request->string('credential_revision')) {
+                return;
+            }
             $answerPath = $home->resultDirectory.'/answer.txt';
             if (is_link($answerPath) || file_exists($answerPath)
                 || file_put_contents($answerPath, $answer->bytes, LOCK_EX) !== strlen($answer->bytes)

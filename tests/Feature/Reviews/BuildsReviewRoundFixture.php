@@ -38,10 +38,12 @@ use PHPUnit\Framework\Attributes\After;
 use Tests\Feature\Git\BuildsRunWorkspaceGitFixture;
 use Tests\Feature\Runs\BuildsImplementationTurnFixture;
 use Tests\Fixtures\Agents\AgentMailboxFixture;
+use Tests\Fixtures\Agents\BuildsProviderOnboarding;
 
 trait BuildsReviewRoundFixture
 {
     use BuildsImplementationTurnFixture;
+    use BuildsProviderOnboarding;
     use BuildsRunWorkspaceGitFixture;
 
     /** @var list<string> */
@@ -55,6 +57,7 @@ trait BuildsReviewRoundFixture
 
     protected function approvalSelection(?User $attentionUser = null): ApprovalSelection
     {
+        $this->seedProviderReports();
         $profiles = $this->app->make(AgentProfileRegistry::class);
         $this->reviewSlotIds = [(string) Str::uuid(), (string) Str::uuid()];
 

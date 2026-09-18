@@ -98,6 +98,7 @@ final class RuntimeComposeContractTest extends TestCase
             'AI6_CONTROL_OPERATION_HEARTBEAT_SECONDS', 'AI6_CONTROL_OPERATION_LEASE_SECONDS', 'AI6_CONTROL_OPERATION_MANAGED_REF_ALLOWLIST',
             'AI6_CONTROL_OPERATION_STALE_SECONDS',
             'AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF',
+            'AI6_COPILOT_BINARY', 'AI6_COPILOT_PINNED_VERSION', 'AI6_COPILOT_CAPABILITY_EVIDENCE', 'AI6_GROK_BINARY', 'AI6_GROK_PINNED_VERSION', 'AI6_GROK_CAPABILITY_EVIDENCE',
             'AI6_GIT_ALLOWED_HOSTS', 'AI6_GIT_ALLOWED_REMOTE_PATHS', 'AI6_GIT_ALLOWED_REF_PATTERNS', 'AI6_GIT_PINNED_HOST_KEYS',
             'AI6_RUNTIME_ROLE', 'APP_DEBUG', 'APP_ENV', 'APP_KEY', 'APP_NAME', 'APP_URL', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',
             'DB_CONNECTION', 'DB_DATABASE', 'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE',
@@ -115,7 +116,6 @@ final class RuntimeComposeContractTest extends TestCase
             'AI6_DEPLOY_KEY_ROOT', 'AI6_EFFECT_LOCK_DIRECTORY', 'AI6_EFFECT_LOCK_OBJECT_COUNT',
             'AI6_EFFECT_LOCK_OWNER_UID', 'AI6_MANAGED_PROJECT_ROOT', 'AI6_SSH_KEYGEN_BINARY',
             'AI6_AGENT_EXECUTION_ROOT', 'AI6_AGENT_OUTPUT_ROOT', 'AI6_CHECKER_EXECUTION_ROOT', 'AI6_CHECKER_OUTPUT_ROOT',
-            'AI6_CODEX_CREDENTIAL_REVISION', 'AI6_GROK_CREDENTIAL_REVISION', 'AI6_COPILOT_CREDENTIAL_REVISION',
             'AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF',
             'AI6_COPILOT_BINARY', 'AI6_COPILOT_PINNED_VERSION', 'AI6_COPILOT_CAPABILITY_EVIDENCE', 'AI6_GROK_BINARY', 'AI6_GROK_PINNED_VERSION', 'AI6_GROK_CAPABILITY_EVIDENCE',
             'AI6_EXECUTION_DIRECTORY', 'AI6_GIT_ALLOWED_HOSTS', 'AI6_GIT_ALLOWED_REMOTE_PATHS', 'AI6_GIT_ALLOWED_REF_PATTERNS',
@@ -125,6 +125,9 @@ final class RuntimeComposeContractTest extends TestCase
             'DB_QUEUE_RETRY_AFTER', 'DB_SYNCHRONOUS', 'LOG_CHANNEL', 'QUEUE_CONNECTION',
         ],
         'scheduler' => [
+            'AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF',
+            'AI6_COPILOT_BINARY', 'AI6_COPILOT_PINNED_VERSION', 'AI6_COPILOT_CAPABILITY_EVIDENCE',
+            'AI6_GROK_BINARY', 'AI6_GROK_PINNED_VERSION', 'AI6_GROK_CAPABILITY_EVIDENCE',
             ...self::SECURITY_ENVIRONMENT,
             ...self::REDACTION_ENVIRONMENT,
             ...self::RETENTION_ENVIRONMENT,
@@ -134,7 +137,7 @@ final class RuntimeComposeContractTest extends TestCase
             'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE', 'DB_QUEUE_RETRY_AFTER',
             'DB_SYNCHRONOUS', 'LOG_CHANNEL', 'QUEUE_CONNECTION',
         ],
-        'agent' => [...self::REDACTION_ENVIRONMENT, 'AI6_AGENT_EXECUTION_ROOT', 'AI6_AGENT_OUTPUT_ROOT', 'AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF', 'AI6_CODEX_CREDENTIAL_REVISION', 'AI6_COPILOT_BINARY', 'AI6_COPILOT_PINNED_VERSION', 'AI6_COPILOT_CAPABILITY_EVIDENCE', 'AI6_GROK_BINARY', 'AI6_GROK_PINNED_VERSION', 'AI6_GROK_CAPABILITY_EVIDENCE', 'AI6_COPILOT_CREDENTIAL_REVISION', 'AI6_GROK_CREDENTIAL_REVISION', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'LOG_CHANNEL'],
+        'agent' => [...self::REDACTION_ENVIRONMENT, 'AI6_AGENT_EXECUTION_ROOT', 'AI6_AGENT_OUTPUT_ROOT', 'AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF', 'AI6_COPILOT_BINARY', 'AI6_COPILOT_PINNED_VERSION', 'AI6_COPILOT_CAPABILITY_EVIDENCE', 'AI6_GROK_BINARY', 'AI6_GROK_PINNED_VERSION', 'AI6_GROK_CAPABILITY_EVIDENCE', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'LOG_CHANNEL'],
         'checker' => [...self::REDACTION_ENVIRONMENT, 'AI6_CHECKER_EXECUTION_ROOT', 'AI6_CHECKER_OUTPUT_ROOT', 'AI6_CHECKER_WORKSPACE_ROOT', 'AI6_CHECKER_UNSHARE_BINARY', 'AI6_CHECKER_NAMESPACE_WRAPPER', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_INTERVAL', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE', 'LOG_CHANNEL'],
     ];
 
@@ -142,18 +145,25 @@ final class RuntimeComposeContractTest extends TestCase
     private const MOUNT_ALLOWLIST = [
         'caddy' => ['bind:./deploy/Caddyfile:/etc/caddy/Caddyfile:ro'],
         'init' => [
+            'volume:ai6_provider_reports:/var/lib/ai6/provider-reports:rw',
+            'volume:ai6_provider_presence:/var/lib/ai6/provider-presence:rw',
+            'volume:ai6_provider_store:/var/lib/ai6/provider-store:rw',
             'tmpfs::/tmp:rw',
             'volume:ai6_database:/var/lib/ai6/database:rw',
             'volume:ai6_managed:/var/lib/ai6/managed:rw',
             'volume:ai6_storage:/opt/ai6/storage:rw',
         ],
         'app' => [
+            'volume:ai6_provider_reports:/var/lib/ai6/provider-reports:ro',
+            'volume:ai6_provider_presence:/var/lib/ai6/provider-presence:ro',
             'tmpfs::/tmp:rw',
             'volume:ai6_database:/var/lib/ai6/database:rw',
             'volume:ai6_executions:/var/lib/ai6/executions:ro',
             'volume:ai6_storage:/opt/ai6/storage:rw',
         ],
         'worker' => [
+            'volume:ai6_provider_reports:/var/lib/ai6/provider-reports:ro',
+            'volume:ai6_provider_presence:/var/lib/ai6/provider-presence:ro',
             'tmpfs::/run/ai6/heartbeat/worker:rw',
             'tmpfs::/tmp:rw',
             'volume:ai6_database:/var/lib/ai6/database:rw',
@@ -166,12 +176,18 @@ final class RuntimeComposeContractTest extends TestCase
             'volume:ai6_storage:/opt/ai6/storage:rw',
         ],
         'scheduler' => [
+            'volume:ai6_provider_reports:/var/lib/ai6/provider-reports:ro',
+            'volume:ai6_provider_presence:/var/lib/ai6/provider-presence:ro',
             'tmpfs::/run/ai6/heartbeat/scheduler:rw',
             'tmpfs::/tmp:rw',
             'volume:ai6_database:/var/lib/ai6/database:rw',
             'volume:ai6_storage:/opt/ai6/storage:rw',
         ],
         'agent' => [
+            'volume:ai6_provider_reports:/var/lib/ai6/provider-reports:rw',
+            'volume:ai6_provider_presence:/var/lib/ai6/provider-presence:rw',
+            'volume:ai6_provider_store:/var/lib/ai6/provider-store:rw',
+            'volume:ai6_provider_private:/run/ai6/provider-private:rw',
             'tmpfs::/run/ai6/heartbeat/agent:rw',
             'tmpfs::/tmp:rw',
             'volume:ai6_agent_executions:/var/lib/ai6/agent-executions:ro',
@@ -275,11 +291,13 @@ final class RuntimeComposeContractTest extends TestCase
         $agentPolicy = json_decode((string) file_get_contents(dirname(__DIR__, 4).'/docker/agent-seccomp-moby-29.6.1.json'), true, 512, JSON_THROW_ON_ERROR);
         self::assertSame('SCMP_ACT_ERRNO', $agentPolicy['defaultAction']);
         $checkerPolicy = json_decode((string) file_get_contents(dirname(__DIR__, 4).'/docker/checker-seccomp-moby-29.6.1.json'), true, 512, JSON_THROW_ON_ERROR);
-        self::assertSame($checkerPolicy['syscalls'], array_slice($agentPolicy['syscalls'], 0, -2));
-        $extra = array_slice($agentPolicy['syscalls'], -2);
+        self::assertSame($checkerPolicy['syscalls'], array_slice($agentPolicy['syscalls'], 0, -3));
+        $extra = array_slice($agentPolicy['syscalls'], -3);
         self::assertSame(['clone'], $extra[0]['names']);
         self::assertSame([['index' => 0, 'value' => 268566545, 'op' => 'SCMP_CMP_EQ']], $extra[0]['args']);
-        self::assertSame(['pivot_root'], $extra[1]['names']);
+        self::assertSame(['clone'], $extra[1]['names']);
+        self::assertSame([['index' => 0, 'value' => 1006764049, 'op' => 'SCMP_CMP_EQ']], $extra[1]['args']);
+        self::assertSame(['pivot_root'], $extra[2]['names']);
 
         $policyBytes = file_get_contents(dirname(__DIR__, 4).'/'.substr($policyPath, 2));
         self::assertIsString($policyBytes);
@@ -328,21 +346,29 @@ final class RuntimeComposeContractTest extends TestCase
     {
         $options = explode(',', $this->compose()['volumes']['ai6_agent_outputs']['driver_opts']['o']);
         self::assertContains('size=1073741824', $options);
+        $private = $this->compose()['volumes']['ai6_provider_private']['driver_opts'];
+        self::assertSame('tmpfs', $private['type']);
+        self::assertSame('tmpfs', $private['device']);
+        foreach (['uid=10002', 'gid=10001', 'mode=0700', 'nosuid', 'nodev', 'noexec', 'size=67108864'] as $option) {
+            self::assertContains($option, explode(',', $private['o']));
+        }
     }
 
     /** AI6-033: binary and pin reach exactly the roles that check statically or run the provider turn; no role receives credential bytes. */
     public function test_codex_binary_pin_and_revision_reach_exactly_app_worker_and_agent_without_credential_bytes(): void
     {
         $services = $this->services();
-        foreach (['app', 'worker', 'agent'] as $role) {
+        foreach (['app', 'worker', 'scheduler', 'agent'] as $role) {
             self::assertSame('${AI6_CODEX_BINARY:-/usr/local/bin/codex}', $services[$role]['environment']['AI6_CODEX_BINARY'] ?? null, $role);
-            self::assertSame('${AI6_CODEX_PINNED_VERSION:-}', $services[$role]['environment']['AI6_CODEX_PINNED_VERSION'] ?? null, $role);
+            self::assertSame('${AI6_CODEX_PINNED_VERSION:-0.129.0-alpha.15}', $services[$role]['environment']['AI6_CODEX_PINNED_VERSION'] ?? null, $role);
             self::assertSame('${AI6_CODEX_SANDBOX_PROOF:-}', $services[$role]['environment']['AI6_CODEX_SANDBOX_PROOF'] ?? null, $role);
         }
-        foreach (['worker', 'agent'] as $role) {
-            self::assertSame('${AI6_CODEX_CREDENTIAL_REVISION:-}', $services[$role]['environment']['AI6_CODEX_CREDENTIAL_REVISION'] ?? null, $role);
+        foreach ($services as $role => $service) {
+            foreach (['CODEX', 'GROK', 'COPILOT'] as $provider) {
+                self::assertArrayNotHasKey('AI6_'.$provider.'_CREDENTIAL_REVISION', $service['environment'] ?? [], $role);
+            }
         }
-        foreach (['caddy', 'init', 'scheduler', 'checker'] as $role) {
+        foreach (['caddy', 'init', 'checker'] as $role) {
             foreach (['AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF', 'AI6_CODEX_CREDENTIAL_REVISION'] as $variable) {
                 self::assertArrayNotHasKey($variable, $services[$role]['environment'] ?? [], $role.' '.$variable);
             }
@@ -360,18 +386,14 @@ final class RuntimeComposeContractTest extends TestCase
     {
         foreach ($this->services() as $role => $service) {
             $environment = $service['environment'] ?? [];
-            foreach (['AI6_COPILOT_BINARY' => '/usr/local/bin/copilot', 'AI6_COPILOT_PINNED_VERSION' => '', 'AI6_COPILOT_CAPABILITY_EVIDENCE' => ''] as $key => $default) {
-                if (in_array($role, ['worker', 'agent'], true)) {
+            foreach (['AI6_COPILOT_BINARY' => '/usr/local/bin/copilot', 'AI6_COPILOT_PINNED_VERSION' => '1.0.83', 'AI6_COPILOT_CAPABILITY_EVIDENCE' => ''] as $key => $default) {
+                if (in_array($role, ['app', 'worker', 'scheduler', 'agent'], true)) {
                     self::assertSame('${'.$key.':-'.$default.'}', $environment[$key] ?? null, $role.' '.$key);
                 } else {
                     self::assertArrayNotHasKey($key, $environment, $role);
                 }
             }
-            if (in_array($role, ['worker', 'agent'], true)) {
-                self::assertSame('${AI6_COPILOT_CREDENTIAL_REVISION:-}', $environment['AI6_COPILOT_CREDENTIAL_REVISION'] ?? null, $role);
-            } else {
-                self::assertArrayNotHasKey('AI6_COPILOT_CREDENTIAL_REVISION', $environment, $role);
-            }
+            self::assertArrayNotHasKey('AI6_COPILOT_CREDENTIAL_REVISION', $environment, $role);
             foreach (['COPILOT_HOME', 'COPILOT_CACHE_HOME', 'COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN'] as $key) {
                 self::assertArrayNotHasKey($key, $environment, $role);
             }
@@ -513,7 +535,7 @@ final class RuntimeComposeContractTest extends TestCase
     public function test_heartbeat_mounts_are_private_tmpfs_and_persistent_targets_are_named_volumes(): void
     {
         $compose = $this->compose();
-        self::assertSame(['ai6_agent_executions', 'ai6_agent_outputs', 'ai6_checker_executions', 'ai6_checker_outputs', 'ai6_checker_workspace', 'ai6_database', 'ai6_executions', 'ai6_managed', 'ai6_storage'], $this->sortedKeys($compose['volumes'] ?? []));
+        self::assertSame(['ai6_agent_executions', 'ai6_agent_outputs', 'ai6_checker_executions', 'ai6_checker_outputs', 'ai6_checker_workspace', 'ai6_database', 'ai6_executions', 'ai6_managed', 'ai6_provider_presence', 'ai6_provider_private', 'ai6_provider_reports', 'ai6_provider_store', 'ai6_storage'], $this->sortedKeys($compose['volumes'] ?? []));
 
         foreach (['worker', 'scheduler', 'agent', 'checker'] as $role) {
             $heartbeatMounts = array_values(array_filter(

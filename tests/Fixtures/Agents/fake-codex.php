@@ -30,6 +30,33 @@ while ($arguments !== [] && $arguments[0] !== '--') {
     }
 }
 array_shift($arguments);
+if (($arguments[0] ?? null) === 'login') {
+    if (($arguments[1] ?? null) === 'status') {
+        if (! is_file(getenv('CODEX_HOME').'/auth.json')) {
+            exit(1);
+        }
+        fwrite(STDERR, "Logged in using ChatGPT\n");
+        exit(0);
+    }
+    echo "Synthetic device code: ABCD-12345\n";
+    if ($scenario === 'login_fail') {
+        exit(9);
+    }
+    if ($scenario === 'login_cancel') {
+        sleep(60);
+    }
+    file_put_contents(getenv('CODEX_HOME').'/auth.json', '{"tokens":{"access_token":"synthetic-codex-token"}}');
+    file_put_contents(getenv('CODEX_HOME').'/history.json', 'private-login-bait');
+    exit(0);
+}
+if ($arguments === ['debug', 'models']) {
+    $models = ['models' => [['slug' => 'gpt-5.3-codex', 'supported_reasoning_levels' => [['effort' => 'medium']]]]];
+    if ($scenario !== 'models_offline') {
+        file_put_contents(getenv('CODEX_HOME').'/models_cache.json', json_encode($models));
+    }
+    echo json_encode($models);
+    exit(0);
+}
 
 if ($arguments === ['--version']) {
     if ($scenario === 'version_probe_fails') {

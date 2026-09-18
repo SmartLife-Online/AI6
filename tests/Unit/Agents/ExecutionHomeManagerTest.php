@@ -50,6 +50,7 @@ final class ExecutionHomeManagerTest extends TestCase
 
     public function test_it_materializes_only_bound_snapshot_runtime_and_profile_auth_then_destroys_home(): void
     {
+        config(['ai6.runtime_role' => 'agent']);
         $manager = $this->manager();
         [$profile, $snapshot, $runtime] = $this->bindings();
         $projection = new AuthProjection('codex_cli', 'revision-1', ['auth.json' => $this->root.'/auth.json']);
@@ -69,6 +70,15 @@ final class ExecutionHomeManagerTest extends TestCase
 
         $manager->destroy($home);
         self::assertDirectoryDoesNotExist($home->root);
+    }
+
+    public function test_worker_cannot_materialize_nonempty_credentials(): void
+    {
+        config(['ai6.runtime_role' => 'worker']);
+        [$profile, $snapshot, $runtime] = $this->bindings();
+        $projection = new AuthProjection('codex_cli', 'revision-1', ['auth.json' => $this->root.'/auth.json']);
+        $this->expectException(AuthProjectionException::class);
+        $this->manager()->create($this->root.'/inputs', $this->root.'/outputs', 'slot-1', null, $this->root.'/export', $profile, $snapshot, $runtime, $projection);
     }
 
     public function test_writable_workspace_restores_projection_bytes_without_discarding_regular_changes(): void

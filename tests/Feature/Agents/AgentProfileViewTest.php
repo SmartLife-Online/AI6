@@ -2,11 +2,33 @@
 
 namespace Tests\Feature\Agents;
 
+use App\AI6\Agents\AgentProfileRegistry;
+use App\AI6\Agents\ProviderCapabilityReport;
 use Illuminate\Routing\Route;
 use Tests\Feature\Auth\AuthFeatureTestCase;
+use Tests\Fixtures\Agents\BuildsProviderOnboarding;
 
 final class AgentProfileViewTest extends AuthFeatureTestCase
 {
+    use BuildsProviderOnboarding;
+
+    public function test_current_report_diagnosis_is_visible_without_generation_or_credentials(): void
+    {
+        config(['ai6.agent_profiles.copilot-cli-review.capability_status' => 'available', 'ai6.copilot.binary' => '']);
+        $this->app->forgetInstance(AgentProfileRegistry::class);
+        $this->seedProviderReports();
+        $generation = app(ProviderCapabilityReport::class)->generation('github_copilot_cli');
+        $user = $this->createUser();
+        $this->actingAs($user)->get('/agents/profiles')->assertOk()
+            ->assertSee('ready')->assertSee('1.0.83')
+            ->assertSee('Installation, Anmeldung und Laufzeitnachweis geprüft.')
+            ->assertDontSee($generation)->assertDontSee('test-projection');
+        unlink($this->onboardingRoot.'/reports/github_copilot_cli.json');
+        $this->actingAs($user)->get('/agents/profiles')->assertOk()
+            ->assertSee('Aktueller, vollständig gebundener Agentbericht fehlt.')
+            ->assertDontSee($generation)->assertDontSee('test-projection');
+    }
+
     public function test_guest_is_redirected_and_completed_user_sees_read_only_profiles(): void
     {
         $this->get('/agents/profiles')->assertRedirect(route('login'));
