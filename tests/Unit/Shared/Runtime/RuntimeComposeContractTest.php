@@ -494,6 +494,7 @@ final class RuntimeComposeContractTest extends TestCase
         $compose = $this->compose();
         $services = $this->services();
         $expected = [
+            'APP_URL' => '${AI6_APP_URL:-http://localhost:${AI6_HTTP_PORT:-8080}}',
             'AI6_HTTP_SESSION_SAME_SITE' => '${AI6_HTTP_SESSION_SAME_SITE:-lax}',
             'AI6_HTTP_TRUSTED_HOSTS' => '${AI6_HTTP_TRUSTED_HOSTS:-localhost,127.0.0.1,::1}',
             'AI6_HTTP_TRUSTED_PROXIES' => '${AI6_HTTP_TRUSTED_PROXIES:-172.30.61.2}',

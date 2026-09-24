@@ -1,6 +1,8 @@
-# AI6 – Implementierungsplan V1.7.8 – Ticket-Ready, Lean & Secure
+# AI6 – Implementierungsplan V1.7.9 – Ticket-Ready, Lean & Secure
 
 **Stand:** 12. September 2026
+
+**Revision V1.7.9:** Auf ausdrückliche menschliche Entscheidung vom 19. September 2026, nach dem Review der M7-Entwürfe in `docs/AI6_M7_TICKET_REVIEW.md`, wächst der Backlog von 54 auf 56 Blueprints. Erstens wird `AI6-036` nach §13.2 und §13.7 gesplittet: Er behält seine ID und den Teil Installation, Zugang, Doctor-Optionen und -Prüfungen, Manifestprüfung in Doctor und Release-Gate sowie Upgrade- und Härtungsdokumentation; der neue Teil erhält die nächste nie vergebene ID `AI6-049` mit Backup, Restore, Rotation, Retention-Wiederauferstehungsnachweis und Disaster-Recovery-Dokumentation. Die Requirement-Refs werden verteilt, nicht dupliziert: `OPS-001`, `OPS-003`, `OPS-006` und `PROD-002` bleiben bei `AI6-036`, `SEC-010` und `SEC-011` gehen an `AI6-049`; beide Teile sind unabhängig voneinander umsetzbar, und `AI6-038` hängt zusätzlich von `AI6-049` ab. Der unterstützte Betriebsfall von `AI6-049` ist ausdrücklich begrenzt: Sicherung und Wiederherstellung einer ruhenden Instanz auf demselben Software- und Schemastand; die privaten Deploy-Keys gehören zum Backup, weil ein bereits provisioniertes Projekt keinen Recoverypfad besitzt. Zweitens entsteht `AI6-050`: Der Securityreview des Publish-Kandidaten nach `REV-008`/`SEC-008` ist im integrierten Stand nur mit dem FakeAgent ausführbar — `SecurityReviewStep` verweigert jeden realen Adapter, und kein Profil der ersten Providerstufe trägt die Rolle `security_review` —, sodass ein strict betriebener Pilot seine aktive Maßnahme nicht erfüllen könnte. `AI6-050` führt den Schritt über die vorhandene Providerturn-Übergabe mit einem Copilot-Profil aus, ohne zweiten Adapter, Prompt oder Resolver; `AI6-038` hängt zusätzlich davon ab. Requirement-Texte, veröffentlichte `AC-`/`TC-`/`MG-`/`EXT-`-IDs, Meilensteinzuschnitte, Ticketstatus und alle übrigen Blueprintverträge bleiben unverändert; §14.1, §16 und §21 werden nachgezogen.
 
 **Revision V1.7.8:** Auf ausdrückliche menschliche Freigabe vom 12. September 2026 erhält ausschließlich `grok_cli` eine turnlokale Sessionumleitung nach §4.2: Ein fester serverseitiger Link führt in die frische Ergebniswurzel; Home, Auth und Instruktionen bleiben read-only. AI6-041 umfasst die erforderliche Bubblewrap-/Agent-Seccomp-Bereitstellung ohne Host-Capabilities. Andere Providerverträge, Sessionautorität, Ticketstatus und offene Abnahmegates bleiben unverändert.
 
@@ -1280,9 +1282,11 @@ Erscheint eine neuere Major-, Minor- oder Patchversion einer dieser drei Laufzei
 49. AI6-048 — Fehlenden GitHub-Copilot-CLI-Transport nachliefern
 50. AI6-035 — Provider-Onboarding, Credential-Setup und Capability-Doctor
 51. AI6-034 — Claude-Modelle über GitHub-Copilot-CLI
-52. AI6-036 — Installation, Backup/Restore und Security-Release-Gate
-53. AI6-037 — Migration des bisherigen Ticket-Prompt-Tools
-54. AI6-038 — Realer M169-Pilot und MVP-Abnahme
+52. AI6-050 — Realer LLM-Securityreview über die GitHub-Copilot-CLI
+53. AI6-036 — Installation, Doctor und Security-Release-Gate
+54. AI6-049 — Backup, Restore, Rotation und Disaster Recovery
+55. AI6-037 — Migration des bisherigen Ticket-Prompt-Tools
+56. AI6-038 — Realer M169-Pilot und MVP-Abnahme
 ```
 
 Die Reihenfolge ist eine gültige Topologie, aber nicht jede unabhängige Arbeit muss künstlich seriell erfolgen. Innerhalb eines Meilensteins dürfen nur Tickets parallel entwickelt werden, deren `depends_on` vollständig erfüllt ist und die nicht denselben noch instabilen Vertrag definieren.
@@ -3354,7 +3358,7 @@ Den gesamten Run auf Smartphone und Laptop nachvollziehbar machen, ohne Rohlogs 
 
 - WebSockets/SSE.
 - Vollständige Rohprovidertranskripte als Default.
-- Backup/Restore und der Nachweis gegen Wiederauferstehung gelöschter Rohdaten; beides folgt in AI6-036.
+- Backup/Restore und der Nachweis gegen Wiederauferstehung gelöschter Rohdaten; beides folgt in AI6-049.
 
 ### AI6-032 — Vollständiger FakeAgent-End-to-End- und Recovery-Test
 
@@ -3786,15 +3790,58 @@ Die fehlende ausführbare GitHub-Copilot-CLI-Anbindung auf der vorhandenen Agent
 - Zweiter ProcessRunner, zweite Mailbox, neue Orchestrierung, Tabellen, persistenter Credential-/Sessionstore oder Onboarding.
 - PR-Connector, GitHub-Mutationen, Implementierungs-/Fixturns und reale Security-Reviews.
 
+### AI6-050 — Realer LLM-Securityreview über die GitHub-Copilot-CLI
+
+- **Initialstatus des späteren Detailtickets:** `todo`
+- **Risiko:** `high`
+- **Kind:** `feature`
+- **Depends on:** `AI6-028`, `AI6-042`, `AI6-047`, `AI6-048`
+- **Requirement-Refs:** `REV-008`, `SEC-008`, `AGT-001`, `AGT-010`
+- **Erwartete Module:** `Reviews`, `Agents`, `Shared`
+
+**Ziel**
+
+Den LLM-Securityreview des Publish-Kandidaten mit einem realen, doctor-nachgewiesenen Copilot-Profil ausführen, damit das strict-Profil seine aktive Maßnahme ohne FakeAgent erfüllt.
+
+**Deliverables**
+
+- Aufhebung der Fake-only-Sperre in SecurityReviewStep für Profile mit Rolle security_review, deren Capability der Doctor nachgewiesen hat.
+- Rolle security_review an einem Copilot-Profil; der Securityreviewer ist nie das Implementierungsprofil desselben Runs.
+- Ausführung über die vorhandene Providerturn-Übergabe der Agentrolle mit read-only Candidate-Workspace; bestehender Security-Prompt, bestehendes Ergebnisschema, bestehender security_gate-Resolver.
+- FakeAgent bleibt das Testdouble aller vier Ergebnisse; realer Nachweis als Smoke hinter explizitem Flag.
+
+**Akzeptanzvertrag**
+
+- Der Schritt läuft mit dem konfigurierten Copilot-Profil auf dem exakten Candidate und liefert ein schema-validiertes clear/security_findings/needs_human/inconclusive.
+- Provider-, Schema- oder Sandboxfehler lassen das aktive Gate geschlossen ausfallen.
+- Approval-, Candidate-, Instruction-Snapshot- und Policyhash-Bindung aus AI6-028 bleiben unverändert wirksam.
+- Der strict-Doctor meldet für ein konfiguriertes reales Profil keinen Fake-Securityreview mehr.
+- Kein zweiter Adapter, kein zweiter Prompt, kein zweiter Resolver.
+
+**Mindestens zu erzeugende Testfälle**
+
+- Fake-Regression aller vier Ergebnisse und des Approval-Mismatch.
+- Realer Copilot-Securitysmoke hinter Flag.
+- Doctor-Rollenprüfung für das Securityprofil.
+
+**Nicht Teil dieses Tickets**
+
+- Codex oder Grok als Securityreviewer.
+- Änderungen an Gatesemantik, Override oder Resolverregister.
+
+**Manuelle/externe Gates**
+
+- Menschliche Bestätigung eines realen Securityreviews auf einem gebundenen Candidate.
+
 ## 15.8 M7 – Betrieb, Migration und Pilot
 
-### AI6-036 — Installation, Backup/Restore und Security-Release-Gate
+### AI6-036 — Installation, Doctor und Security-Release-Gate
 
 - **Initialstatus des späteren Detailtickets:** `todo`
 - **Risiko:** `high`
 - **Kind:** `chore`
-- **Depends on:** `AI6-002`, `AI6-003`, `AI6-005A`, `AI6-005B`, `AI6-015`, `AI6-035`, `AI6-029`, `AI6-031`, `AI6-032`
-- **Requirement-Refs:** `OPS-001`, `OPS-003`, `OPS-006`, `SEC-010`, `SEC-011`, `PROD-002`
+- **Depends on:** `AI6-002`, `AI6-003`, `AI6-005B`, `AI6-015`, `AI6-032`, `AI6-035`
+- **Requirement-Refs:** `OPS-001`, `OPS-003`, `OPS-006`, `PROD-002`
 - **Erwartete Module:** `Shared`, `Auth`, `Projects`
 
 **Ziel**
@@ -3804,28 +3851,22 @@ AI6 für andere Entwickler reproduzierbar installierbar und im strict-Serverprof
 **Deliverables**
 
 - ai6:install-Assistent und .env.example.
-- VPN-/HTTPS-Referenz sowie eingeschränkter SSH-Tunnel.
-- Backup/Restore für SQLite, APP_KEY, Projektmetadaten und verschlüsselte Artefakte.
-- ai6:doctor --security --all-processes --require-strict.
-- Doctor-/Releaseprüfung für aktuellen deterministischen Ticketmanifestexport ohne Drift.
-- Retention, tatsächliche Löschung, Tombstones, Rotation, Upgrade und Disaster-Recovery-Dokumentation.
-- Rootless-/Hardening-Empfehlungen ohne Plattformzwang.
+- VPN-/HTTPS-Referenz sowie eingeschränkter SSH-Tunnel; eine Instanz besitzt genau eine WebAuthn-Origin.
+- ai6:doctor --security --all-processes --require-strict mit rollenbewussten Mail-, Git-, Retention- und Manifestprüfungen; Präsenz gilt nur als Lebendigkeit, nicht beobachtbare Rollen werden als ungeprüft ausgewiesen.
+- Doctor-/Releaseprüfung für aktuellen deterministischen Ticketmanifestexport ohne Drift; das Release-Gate läuft im Linux-Checkout, der Doctor im Container.
+- Upgrade-Dokumentation und Rootless-/Hardening-Empfehlungen ohne Plattformzwang.
 
 **Akzeptanzvertrag**
 
 - Frische Linux-Installation folgt dokumentiertem Pfad.
-- Restore erhält entschlüsselbare Daten und widerruft offene Sessions/Challenges.
-- Strict-Doctor blockiert defekte aktive Kontrollen.
+- Strict-Doctor blockiert defekte aktive Kontrollen; ein nur als Fake vorhandener Securityreview ist außerhalb von local/testing eine solche Kontrolle.
 - Strict-Doctor und Release-Gate blockieren ein fehlendes oder vom Plan abweichendes Ticketmanifest.
-- Backup/Restore lässt abgelaufene und bereits gelöschte Rohlogs, Provideroutputs und Artefaktbytes nicht wiederauferstehen; Retention wird nach Restore idempotent fortgesetzt.
 - Custom/development sind sichtbar und dokumentiert.
 - Keine geheimen Schlüssel landen im Repository.
 
 **Mindestens zu erzeugende Testfälle**
 
 - Fresh-install-Smoke.
-- Backup/Restore mit anschließender Rotation.
-- Backup/Restore vor und nach Retentionablauf einschließlich Tombstone und verweigertem Download.
 - Manifestgenerierung und Release-Drifttest.
 - Mail/Git/Provider/Sandbox/Checker-Doctor.
 - SSH-/VPN-Zugriffstest.
@@ -3835,6 +3876,53 @@ AI6 für andere Entwickler reproduzierbar installierbar und im strict-Serverprof
 - Kubernetes.
 - Vault-/HSM-Pflicht.
 - Öffentlicher SaaS-Betrieb.
+- Backup, Restore, Rotation und Disaster Recovery (AI6-049).
+- Ein realer Securityreview-Adapter (AI6-050).
+
+### AI6-049 — Backup, Restore, Rotation und Disaster Recovery
+
+- **Initialstatus des späteren Detailtickets:** `todo`
+- **Risiko:** `high`
+- **Kind:** `chore`
+- **Depends on:** `AI6-002`, `AI6-005A`, `AI6-029`, `AI6-031`
+- **Requirement-Refs:** `SEC-010`, `SEC-011`
+- **Erwartete Module:** `Shared`, `Auth`, `Runs`
+
+**Ziel**
+
+Eine ruhende AI6-Instanz auf demselben Software- und Schemastand sichern und wiederherstellen, ohne dass Schlüssel im Backup liegen, Sessions weiterleben oder abgelaufene Rohdaten zurückkehren.
+
+**Deliverables**
+
+- ai6:backup und ai6:restore für ein Verzeichnis mit Manifest: SQLite-Snapshot, Runartefakte, private Deploy-Keys und known_hosts; kein Archivformat.
+- Betriebsfall ausdrücklich begrenzt: gestoppte dauerhafte Rollen, einmaliger Container, keine aktiven Runs oder offenen Control Operations, gleicher Migrationsstand.
+- Restore prüft Manifest, Prüfsummen, Pfade, Snapshotintegrität, Migrationsstand, Entschlüsselbarkeit der TOTP-Geheimnisse und Schlüsselring-Key-IDs vor der ersten Änderung; die Umschaltung hält die vorherigen Daten benannt vor, statt Atomarität über mehrere Bäume zu behaupten.
+- Sessionwiderruf, einmaliger Retention-Sweep und Wiederanlaufprüfung nach Restore.
+- APP_KEY-Rotation über APP_PREVIOUS_KEYS, Schlüsselring-Rotation, Wiederherstellungstabelle und Disaster-Recovery-Dokumentation; .env ist das getrennt zu sichernde Schlüsselpaket.
+
+**Akzeptanzvertrag**
+
+- Restore erhält entschlüsselbare Daten und widerruft offene Sessions/Challenges.
+- Backup/Restore lässt abgelaufene und bereits gelöschte Rohlogs, Provideroutputs und Artefaktbytes nicht wiederauferstehen; Retention wird nach Restore idempotent fortgesetzt.
+- Ein nicht ruhender Zustand, ein manipuliertes Backup oder ein abweichender Stand wird benannt abgewiesen, ohne Teilwirkung.
+- Ein unvollständiger Restore bleibt sichtbar unvollständig; der Betrieb startet nicht unbemerkt.
+- Keine geheimen Schlüssel landen im Repository oder im Backup.
+
+**Mindestens zu erzeugende Testfälle**
+
+- Backup/Restore mit anschließender Rotation.
+- Backup/Restore vor und nach Retentionablauf einschließlich Tombstone und verweigertem Download.
+- Restore-Abweisungsmatrix und unvollständige Umschaltung.
+
+**Nicht Teil dieses Tickets**
+
+- Online-Sicherung bei laufenden Rollen, Sicherung aktiver Runs, Restore auf einen anderen Stand.
+- Backup-Transport, Backup-Scheduling und Verschlüsselung des Backupverzeichnisses.
+- Recovery bereits provisionierter Projekte ohne Deploy-Key.
+
+**Manuelle/externe Gates**
+
+- Restore auf einer frischen Instanz ohne die ursprünglichen Volumes mit beobachtetem Sessionwiderruf, fortgesetzter Retention und funktionierendem Git-Zugriff.
 
 ### AI6-037 — Migration des bisherigen Ticket-Prompt-Tools
 
@@ -3884,7 +3972,7 @@ Bestehende Ticketdateien und Promptinhalte verlustfrei in die neue Git-native St
 - **Initialstatus des späteren Detailtickets:** `todo`
 - **Risiko:** `high`
 - **Kind:** `spike`
-- **Depends on:** `AI6-032`, `AI6-035`, `AI6-036`, `AI6-037`
+- **Depends on:** `AI6-032`, `AI6-035`, `AI6-036`, `AI6-037`, `AI6-049`, `AI6-050`
 - **Requirement-Refs:** `PROD-001`, `AGT-001`, `RUN-010`, `REV-001`, `HUM-002`, `RUN-009`, `OPS-005`
 - **Erwartete Module:** `Auth`, `Projects`, `Tickets`, `Runs`, `Agents`, `Reviews`, `HumanLoop`, `Git`, `Checks`, `Prompts`, `Shared`
 
@@ -3972,7 +4060,7 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `CFG-001` | `AI6-003`, `AI6-011` |
 | `CFG-002` | `AI6-010`, `AI6-020` |
 | `CFG-003` | `AI6-010`, `AI6-021` |
-| `AGT-001` | `AI6-011`, `AI6-016`, `AI6-033`, `AI6-034`, `AI6-038`, `AI6-041`, `AI6-042`, `AI6-047`, `AI6-048` |
+| `AGT-001` | `AI6-011`, `AI6-016`, `AI6-033`, `AI6-034`, `AI6-038`, `AI6-041`, `AI6-042`, `AI6-047`, `AI6-048`, `AI6-050` |
 | `AGT-002` | `AI6-011`, `AI6-012`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-043`, `AI6-048` |
 | `AGT-003` | `AI6-019`, `AI6-023`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042`, `AI6-048` |
 | `AGT-004` | `AI6-016`, `AI6-019`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042`, `AI6-047`, `AI6-048` |
@@ -3981,7 +4069,7 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `AGT-007` | `AI6-015`, `AI6-021`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-045`, `AI6-047`, `AI6-048` |
 | `AGT-008` | `AI6-011`, `AI6-012`, `AI6-016`, `AI6-019`, `AI6-044` |
 | `AGT-009` | `AI6-011`, `AI6-012`, `AI6-015`, `AI6-016`, `AI6-019`, `AI6-020`, `AI6-023`, `AI6-028`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042`, `AI6-046`, `AI6-048` |
-| `AGT-010` | `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-047`, `AI6-048` |
+| `AGT-010` | `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-047`, `AI6-048`, `AI6-050` |
 | `AGT-011` | `AI6-044` |
 | `RUN-001` | `AI6-013`, `AI6-017`, `AI6-039` |
 | `RUN-002` | `AI6-012`, `AI6-013`, `AI6-039` |
@@ -4000,7 +4088,7 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `REV-005` | `AI6-020`, `AI6-025`, `AI6-032` |
 | `REV-006` | `AI6-024`, `AI6-025`, `AI6-043` |
 | `REV-007` | `AI6-026` |
-| `REV-008` | `AI6-027`, `AI6-028` |
+| `REV-008` | `AI6-027`, `AI6-028`, `AI6-050` |
 | `REV-009` | `AI6-024` |
 | `REV-010` | `AI6-043` |
 | `REV-011` | `AI6-011`, `AI6-012`, `AI6-040`, `AI6-043` |
@@ -4023,10 +4111,10 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `SEC-005` | `AI6-015`, `AI6-021`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-045`, `AI6-046`, `AI6-047`, `AI6-048` |
 | `SEC-006` | `AI6-006A` |
 | `SEC-007` | `AI6-003`, `AI6-005B`, `AI6-006F`, `AI6-021`, `AI6-031`, `AI6-044`, `AI6-045` |
-| `SEC-008` | `AI6-028`, `AI6-032` |
+| `SEC-008` | `AI6-028`, `AI6-032`, `AI6-050` |
 | `SEC-009` | `AI6-027`, `AI6-028` |
-| `SEC-010` | `AI6-036` |
-| `SEC-011` | `AI6-031`, `AI6-036`, `AI6-040` |
+| `SEC-010` | `AI6-049` |
+| `SEC-011` | `AI6-031`, `AI6-040`, `AI6-049` |
 | `OPS-001` | `AI6-002`, `AI6-036` |
 | `OPS-002` | `AI6-002` |
 | `OPS-003` | `AI6-003`, `AI6-035`, `AI6-036`, `AI6-045` |
@@ -4163,6 +4251,8 @@ Der MVP ist erreicht, wenn:
 
 ## 21. Kurzbegründung der Ticketanzahl
 
-54 Tickets sind für den Funktionsumfang bewusst kleiner als die bisherigen zehn Pakete, aber keine künstlichen Mikrotickets. Jeder Blueprint bildet eine reviewbare Grenze: Datenvertrag, vertikaler Benutzerfluss oder sicherheitsrelevante technische Naht. Die fünf mit V1.7.0 ergänzten Blueprints folgen demselben Schnitt: zwei für den Review-only-Modus (Statusvertrag getrennt von Quellbindung und Bedienung), zwei für die neuen Provideradapter (je CLI ein eigenständig testbarer Adapter) und einer für die providerunabhängige Verifier-Orchestrierung. `AI6-044` ergänzt als eigener manueller Benutzerfluss ausschließlich die Clipboard-Bedienung des zentralen Promptkatalogs und bleibt von Provider- und Runwirkung getrennt. `AI6-045` folgt demselben Schnitt als sicherheitsrelevante technische Naht: Die Definition eines Checks und sein rollenrichtiger Vollzug sind getrennt reviewbar, weil der Vollzug eigene Container-, Mount- und Wartezustandsverträge berührt, die die Profildefinition nicht kennt. Ein Ticket darf während der Detailerzeugung weiter gesplittet werden, aber nur über eine explizite Planrevision; ein stilles Zusammenlegen mehrerer Blueprints ist nicht zulässig.
+56 Tickets sind für den Funktionsumfang bewusst kleiner als die bisherigen zehn Pakete, aber keine künstlichen Mikrotickets. Jeder Blueprint bildet eine reviewbare Grenze: Datenvertrag, vertikaler Benutzerfluss oder sicherheitsrelevante technische Naht. Die fünf mit V1.7.0 ergänzten Blueprints folgen demselben Schnitt: zwei für den Review-only-Modus (Statusvertrag getrennt von Quellbindung und Bedienung), zwei für die neuen Provideradapter (je CLI ein eigenständig testbarer Adapter) und einer für die providerunabhängige Verifier-Orchestrierung. `AI6-044` ergänzt als eigener manueller Benutzerfluss ausschließlich die Clipboard-Bedienung des zentralen Promptkatalogs und bleibt von Provider- und Runwirkung getrennt. `AI6-045` folgt demselben Schnitt als sicherheitsrelevante technische Naht: Die Definition eines Checks und sein rollenrichtiger Vollzug sind getrennt reviewbar, weil der Vollzug eigene Container-, Mount- und Wartezustandsverträge berührt, die die Profildefinition nicht kennt. Ein Ticket darf während der Detailerzeugung weiter gesplittet werden, aber nur über eine explizite Planrevision; ein stilles Zusammenlegen mehrerer Blueprints ist nicht zulässig.
 
 `AI6-048` ist eine ausdrücklich beauftragte Nachlieferung zur fehlenden Umsetzung von `AI6-042`. Adapter, Doctor, Testdouble und Smoke beweisen gemeinsam genau eine Providergrenze und werden nicht in parallele Implementierungen aufgeteilt. Die frühere Konfigurationslieferung bleibt erhalten; eine neue gemeinsame Mount-/Namespacegrenze gehört ausdrücklich nicht zu diesem Korrekturauftrag. Claude-Modellprofile aus `AI6-034` konsumieren erst danach diese eine Copilot-Naht.
+
+`AI6-049` trennt nach §13.2 Backup, Restore und Disaster Recovery von Installation und Doctor in `AI6-036`: Beide Teile sind unabhängig auslieferbar, zurückrollbar und testbar und berühren keine gemeinsame instabile Naht. `AI6-050` schließt die Lücke zwischen dem Fake-gebundenen Securitygate aus `AI6-028` und der ersten Providerstufe über genau die eine bestehende Copilot-Naht; ohne ihn könnte ein strict betriebener Pilot die aktive Maßnahme nur mit dem FakeAgent erfüllen.

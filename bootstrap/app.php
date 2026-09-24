@@ -12,6 +12,7 @@ use App\AI6\Git\ControlOperationRecoveryRequired;
 use App\AI6\Runs\Console\FakeAgentReleaseGateCommand;
 use App\AI6\Shared\Config\ConfigurationException;
 use App\AI6\Shared\Doctor\DoctorCommand;
+use App\AI6\Shared\Doctor\InstallCommand;
 use App\AI6\Shared\Http\BlockPersistentLoginCookies;
 use App\AI6\Shared\Http\ContentSecurityPolicy;
 use App\AI6\Shared\Http\EnforceHttpsOrPrivateAccess;
@@ -49,6 +50,7 @@ return Application::configure(basePath: dirname(__DIR__))
         CreateAdministratorCommand::class,
         ReissueRecoveryCodesCommand::class,
         DoctorCommand::class,
+        InstallCommand::class,
         RuntimeHealthCommand::class,
         RuntimeSelfTestCommand::class,
         ReprojectUnparsedTicketsCommand::class,

@@ -1,7 +1,7 @@
 schema: ai6.ticket-manifest.v1
 source: docs/AI6_IMPLEMENTATION_PLAN.md
-plan_revision: "V1.7.8"
-blueprint_count: 54
+plan_revision: "V1.7.9"
+blueprint_count: 56
 blueprints:
   - id: "AI6-001"
     title: "Laravel-Grundgerüst und Qualitätsbaseline"
@@ -411,14 +411,30 @@ blueprints:
     kind: "fix"
     depends_on: ["AI6-011", "AI6-015", "AI6-016", "AI6-032", "AI6-046", "AI6-047", "AI6-042"]
     requirement_refs: ["AGT-001", "AGT-002", "AGT-003", "AGT-004", "AGT-007", "AGT-009", "AGT-010", "GIT-010", "RUN-006", "SEC-005"]
+  - id: "AI6-050"
+    title: "Realer LLM-Securityreview über die GitHub-Copilot-CLI"
+    milestone: "M6"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-028", "AI6-042", "AI6-047", "AI6-048"]
+    requirement_refs: ["REV-008", "SEC-008", "AGT-001", "AGT-010"]
   - id: "AI6-036"
-    title: "Installation, Backup/Restore und Security-Release-Gate"
+    title: "Installation, Doctor und Security-Release-Gate"
     milestone: "M7"
     initial_status: "todo"
     risk: "high"
     kind: "chore"
-    depends_on: ["AI6-002", "AI6-003", "AI6-005A", "AI6-005B", "AI6-015", "AI6-035", "AI6-029", "AI6-031", "AI6-032"]
-    requirement_refs: ["OPS-001", "OPS-003", "OPS-006", "SEC-010", "SEC-011", "PROD-002"]
+    depends_on: ["AI6-002", "AI6-003", "AI6-005B", "AI6-015", "AI6-032", "AI6-035"]
+    requirement_refs: ["OPS-001", "OPS-003", "OPS-006", "PROD-002"]
+  - id: "AI6-049"
+    title: "Backup, Restore, Rotation und Disaster Recovery"
+    milestone: "M7"
+    initial_status: "todo"
+    risk: "high"
+    kind: "chore"
+    depends_on: ["AI6-002", "AI6-005A", "AI6-029", "AI6-031"]
+    requirement_refs: ["SEC-010", "SEC-011"]
   - id: "AI6-037"
     title: "Migration des bisherigen Ticket-Prompt-Tools"
     milestone: "M7"
@@ -433,5 +449,5 @@ blueprints:
     initial_status: "todo"
     risk: "high"
     kind: "spike"
-    depends_on: ["AI6-032", "AI6-035", "AI6-036", "AI6-037"]
+    depends_on: ["AI6-032", "AI6-035", "AI6-036", "AI6-037", "AI6-049", "AI6-050"]
     requirement_refs: ["PROD-001", "AGT-001", "RUN-010", "REV-001", "HUM-002", "RUN-009", "OPS-005"]

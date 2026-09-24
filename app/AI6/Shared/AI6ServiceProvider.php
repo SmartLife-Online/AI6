@@ -142,10 +142,16 @@ use App\AI6\Shared\Config\StrictPositiveIntegerParser;
 use App\AI6\Shared\Doctor\CheckerRuntimeDoctorCheck;
 use App\AI6\Shared\Doctor\CodexCliDoctorCheck;
 use App\AI6\Shared\Doctor\DoctorCommand;
+use App\AI6\Shared\Doctor\GitDoctorCheck;
 use App\AI6\Shared\Doctor\GitHubCopilotCliDoctorCheck;
 use App\AI6\Shared\Doctor\GrokCliDoctorCheck;
+use App\AI6\Shared\Doctor\MailDoctorCheck;
+use App\AI6\Shared\Doctor\ProcessRolesDoctorCheck;
 use App\AI6\Shared\Doctor\RedactionKeyringDoctorCheck;
+use App\AI6\Shared\Doctor\RetentionDoctorCheck;
 use App\AI6\Shared\Doctor\SecurityPolicyDoctorCheck;
+use App\AI6\Shared\Doctor\SecurityReviewProfileDoctorCheck;
+use App\AI6\Shared\Doctor\TicketManifestDoctorCheck;
 use App\AI6\Shared\Http\HttpSecurityConfiguration;
 use App\AI6\Shared\Http\HttpSecurityConfigurationFactory;
 use App\AI6\Shared\Json\RestrictedJsonDecoder;
@@ -559,17 +565,26 @@ final class AI6ServiceProvider extends ServiceProvider
         );
         $this->app->singleton(
             DoctorCommand::class,
-            static fn (Application $app): DoctorCommand => new DoctorCommand([
-                new SecurityPolicyDoctorCheck($app->make(SecurityPolicy::class)),
-                new RedactionKeyringDoctorCheck($app->make(RedactionKeyringFactory::class)),
-                new CheckerRuntimeDoctorCheck,
-                new GitHubCopilotCliDoctorCheck,
-                new GrokCliDoctorCheck,
-                new CodexCliDoctorCheck(
-                    $app->make(AgentProfileRegistry::class),
-                    $app->make(ProviderRuntimeProfileRegistry::class),
-                ),
-            ]),
+            static fn (Application $app): DoctorCommand => new DoctorCommand(
+                [
+                    new SecurityPolicyDoctorCheck($app->make(SecurityPolicy::class)),
+                    new RedactionKeyringDoctorCheck($app->make(RedactionKeyringFactory::class)),
+                    new CheckerRuntimeDoctorCheck,
+                    new GitHubCopilotCliDoctorCheck,
+                    new GrokCliDoctorCheck,
+                    new CodexCliDoctorCheck(
+                        $app->make(AgentProfileRegistry::class),
+                        $app->make(ProviderRuntimeProfileRegistry::class),
+                    ),
+                    $app->make(MailDoctorCheck::class),
+                    $app->make(GitDoctorCheck::class),
+                    $app->make(RetentionDoctorCheck::class),
+                    $app->make(TicketManifestDoctorCheck::class),
+                ],
+                $app->make(SecurityPolicy::class),
+                $app->make(SecurityReviewProfileDoctorCheck::class),
+                new ProcessRolesDoctorCheck($app->make(ControlOperationRuntimeIdentityFactory::class)),
+            ),
         );
 
         $this->app->make(SecurityPolicy::class);

@@ -94,11 +94,9 @@ final class RuntimeComposeSmokeTest extends TicketUiTestCase
             '/opt/ai6/README.md',
             '/opt/ai6/ai',
             '/opt/ai6/deploy',
-            '/opt/ai6/docs',
             '/opt/ai6/phpstan.neon',
             '/opt/ai6/phpunit.xml',
             '/opt/ai6/pint.json',
-            '/opt/ai6/scripts',
             '/opt/ai6/tests',
             '/opt/ai6/ticket-prompt',
             '/opt/ai6/tickets',
@@ -109,6 +107,26 @@ final class RuntimeComposeSmokeTest extends TicketUiTestCase
         }
         $exampleProbe = $this->compose(['exec', '-T', 'app', 'test', '-f', '/opt/ai6/.env.example'], 30);
         $exampleProbe->mustRun();
+
+        $docsProbe = $this->compose([
+            'exec', '-T', 'app', 'find', '/opt/ai6/docs', '-mindepth', '1', '-maxdepth', '1', '-type', 'f', '-printf', '%f\n',
+        ], 30);
+        $docsProbe->mustRun();
+        $docs = array_values(array_filter(preg_split('/\R/', trim($docsProbe->getOutput())) ?: []));
+        sort($docs);
+        self::assertSame(['AI6_IMPLEMENTATION_PLAN.md', 'AI6_TICKET_MANIFEST.yaml'], $docs);
+
+        $scriptsProbe = $this->compose([
+            'exec', '-T', 'app', 'find', '/opt/ai6/scripts', '-mindepth', '1', '-maxdepth', '1', '-type', 'f', '-printf', '%f\n',
+        ], 30);
+        $scriptsProbe->mustRun();
+        $scripts = array_values(array_filter(preg_split('/\R/', trim($scriptsProbe->getOutput())) ?: []));
+        sort($scripts);
+        self::assertSame(['generate-ticket-manifest.php'], $scripts);
+
+        $doctorProbe = $this->compose(['exec', '-T', 'worker', 'php', 'artisan', 'ai6:doctor'], 30);
+        $doctorProbe->run();
+        self::assertStringContainsString('Ticketmanifest: OK', $doctorProbe->getOutput().$doctorProbe->getErrorOutput());
 
         $this->assertAgentRecreationRejectsPreviousBootHeartbeat();
 

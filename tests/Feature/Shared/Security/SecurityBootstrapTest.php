@@ -287,6 +287,7 @@ PHP,
             'AI6_SECURITY_ACKNOWLEDGE_REDUCED_MODE' => 'false',
             'AI6_CHECKER_EXECUTION_ROOT' => $this->checkerFixtureRoot.'/input',
             'AI6_CHECKER_OUTPUT_ROOT' => $this->checkerFixtureRoot.'/output',
+            'AI6_RUN_ARTIFACT_ROOT' => $this->checkerFixtureRoot.'/artifacts',
             'COLUMNS' => '80',
             'LOG_CHANNEL' => 'stderr',
         ];

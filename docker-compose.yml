@@ -140,7 +140,7 @@
         "APP_ENV": "production",
         "APP_KEY": "${APP_KEY:-}",
         "APP_NAME": "${APP_NAME:-AI6}",
-        "APP_URL": "http://localhost:${AI6_HTTP_PORT:-8080}",
+        "APP_URL": "${AI6_APP_URL:-http://localhost:${AI6_HTTP_PORT:-8080}}",
         "CACHE_STORE": "file",
         "DB_BUSY_TIMEOUT": "${DB_BUSY_TIMEOUT:-5000}",
         "DB_CONNECTION": "sqlite",

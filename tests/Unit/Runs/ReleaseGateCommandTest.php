@@ -26,8 +26,9 @@ final class ReleaseGateCommandTest extends TestCase
         $this->fakeResults();
         self::assertSame(1, Artisan::call('ai6:release-gate'));
         self::assertStringContainsString('unvollständige AC-Nachweise', Artisan::output());
-        self::assertCount(count(FakeAgentReleaseGateCommand::testSelections()), $this->requests);
-        foreach ($this->requests as $index => $request) {
+        self::assertCount(count(FakeAgentReleaseGateCommand::testSelections()) + 1, $this->requests);
+        self::assertSame('ticket-manifest', $this->requests[0]->redactionContext->identifier);
+        foreach (array_slice($this->requests, 1) as $index => $request) {
             [$path, $filter] = FakeAgentReleaseGateCommand::testSelections()[$index];
             self::assertSame([PHP_BINARY, '-r'], array_slice($request->command, 0, 2));
             self::assertSame([
@@ -47,7 +48,7 @@ final class ReleaseGateCommandTest extends TestCase
         $this->fakeResults("Tests: 1, Assertions: 1, Failures: 1.\n", ProcessOutcome::FAILED, 7);
         self::assertSame(7, Artisan::call('ai6:release-gate'));
         self::assertStringContainsString('fehlgeschlagen (Exitcode 7)', Artisan::output());
-        self::assertCount(count(FakeAgentReleaseGateCommand::testSelections()), $this->requests);
+        self::assertCount(count(FakeAgentReleaseGateCommand::testSelections()) + 1, $this->requests);
     }
 
     public function test_a_rejected_central_process_start_fails_without_a_success_exit_code(): void
@@ -139,7 +140,7 @@ final class ReleaseGateCommandTest extends TestCase
         $runner = $this->app->make(ControlProcessRunner::class);
         $this->fakeResults();
         Artisan::call('ai6:release-gate');
-        $request = $this->requests[0];
+        $request = $this->requests[1];
         $script = tempnam(sys_get_temp_dir(), 'ai6-release-bootstrap-');
         self::assertIsString($script);
         $previous = getenv('AI6_RELEASE_GATE_CANARY');
@@ -193,7 +194,13 @@ final class ReleaseGateCommandTest extends TestCase
     ): void {
         $record = function (ProcessRequest $request) use ($output, $outcome, $exitCode, $repeat, $emptyLast): ProcessResult {
             $this->requests[] = $request;
-            $number = count($this->requests);
+            if ($request->redactionContext->identifier === 'ticket-manifest') {
+                return new ProcessResult(ProcessOutcome::SUCCEEDED, 0, 'Ticket manifest is current.', '', 0);
+            }
+            $number = count(array_filter(
+                $this->requests,
+                static fn (ProcessRequest $item): bool => $item->redactionContext->identifier !== 'ticket-manifest',
+            ));
             if ($emptyLast && $number === count(FakeAgentReleaseGateCommand::testSelections())) {
                 return new ProcessResult(ProcessOutcome::SUCCEEDED, 0, 'No tests found.', '', 0);
             }

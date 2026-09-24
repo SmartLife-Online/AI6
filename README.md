@@ -34,6 +34,56 @@ DB_DATABASE="$PWD/storage/app/ai6-local.sqlite" php artisan migrate
 
 Unter PowerShell entsprechen dem `New-Item -ItemType File -Force storage/app/ai6-local.sqlite`, danach `$env:DB_DATABASE = (Resolve-Path storage/app/ai6-local.sqlite).Path` und `php artisan migrate`. Die zusätzlichen Ignore-Regeln für `/database/*.sqlite`, `/database/*.sqlite-shm` und `/database/*.sqlite-wal` verhindern außerdem, dass eine versehentlich am Laravel-Defaultpfad angelegte lokale Datenbank oder ihre WAL-Begleitdateien committed werden kann. Der Docker-Start unten setzt seinen eigenen absoluten Datenbankpfad und legt Datei sowie Schema kontrolliert im einmaligen `init`-Dienst an.
 
+Für eine frische Compose-Installation erzeugt der Host keine PHP-Schlüssel. Zuerst werden in `.env` `APP_KEY` und ein expliziter versionierter Redaction-Ring gesetzt; ein ausfüllbares Beispiel ohne echten Schlüssel ist `AI6_REDACTION_KEYS='{"2026-01":{"version":1,"key":"base64:<schluessel>"}}'`. Der Anwendungsschlüssel kann mit `APP_KEY=base64:$(openssl rand -base64 32)` erzeugt werden. Alternativ zeigt der Container den Laravel-Schlüssel an, ohne einen Host-PHP-Prozess zu verwenden:
+
+```bash
+docker compose run --rm --no-deps --entrypoint php app /opt/ai6/artisan key:generate --show
+```
+
+Danach folgt die feste Reihenfolge: Umgebung mit `APP_KEY` und Ring vorbereiten, `docker compose up -d --build`, den ersten Administrator mit `docker compose exec app php artisan ai6:create-admin ...` anlegen, `known_hosts` und die Git-Allowlisten setzen, Provider in der Agentrolle anmelden und `ai6:install` in `app` ausführen:
+
+```bash
+docker compose exec app php artisan ai6:install
+docker compose exec worker php artisan ai6:doctor --security --all-processes --require-strict
+```
+
+`ai6:install` schreibt weder Dateien noch Datenbank. Es meldet fehlenden Schlüssel, ausstehende Migrationen, fehlenden Administrator und — bei aktivierter Maßnahme — die fehlende Login-Bestätigungsadresse. Die Schlüsselquelle und das Sicherheitsprofil sind nur informative Zeilen. `docker compose exec` ist für `ai6:doctor` erforderlich: `docker compose run --rm` erzeugt einen neuen Container mit leerem Heartbeat-`tmpfs` und kann deshalb keine laufende Worker-/Checker-Evidenz prüfen. Für eine Instanz ohne Projekt ist `keine Hosts konfiguriert` vor der ersten Projektregistrierung ein erwarteter `FEHLER`.
+
+Die produktive Git-Konfiguration verlangt je Host einen Eintrag in `AI6_GIT_ALLOWED_HOSTS`, `AI6_GIT_ALLOWED_REMOTE_PATHS` und `AI6_GIT_PINNED_HOST_KEYS`. Die Hostschlüssel werden außerhalb des Containers gesammelt und geprüft, nicht dynamisch gelernt:
+
+```bash
+ssh-keyscan -t ed25519 <host> > known_hosts
+ssh-keygen -lf known_hosts
+docker compose cp known_hosts worker:/var/lib/ai6/managed/known_hosts
+```
+
+Das Volume gehört `root:root` mit `0755`; das Schreiben nach `/var/lib/ai6/managed/known_hosts` erfolgt deshalb als vorbereitender Root-Schritt, bevor der Worker die Datei liest. `ai6:provider login <alias>` läuft ausschließlich in `agent`.
+
+Auf einer frischen Installation sind folgende Doctor-Befunde geschlossen und fremden Gates zugeordnet: `security_review_adapter_fake` → `AI6-050`; `degraded` oder `runtime` je Provideralias → `AI6-033/MG-01`, `AI6-041/MG-01` oder `AI6-048/MG-01`; der bekannte Grok-Sandboxblocker → der bestehende Grok-Abschnitt. Jeder andere Befund hält die Abnahme offen. Der Release-Gate läuft im Linux-Checkout desselben Commits; die AC-Lücken des FakeAgent-Gates bleiben bis zu ihrer eigenen Nachlieferung sichtbar und werden nicht über Konfigurationswerte umgangen.
+
+### Zugang
+
+Eine Instanz besitzt genau eine WebAuthn-Origin, die aus `APP_URL` gebildet wird. Mit der lokalen Vorgabe `http://localhost:<port>` erfolgt der Fernzugang über einen eingeschränkten SSH-Tunnel; lokaler und entfernter Port müssen identisch und gleich `AI6_HTTP_PORT` sein:
+
+```bash
+ssh -N -L 127.0.0.1:<port>:127.0.0.1:<port> <tunnelbenutzer>@<host>
+```
+
+Das serverseitige Rezept für diesen dedizierten Tunnelbenutzer ist ein `Match User`-Block in `sshd_config`:
+
+```text
+Match User <tunnelbenutzer>
+    AllowTcpForwarding local
+    PermitOpen 127.0.0.1:<port>
+    PermitTTY no
+    ForceCommand /bin/false
+    AllowAgentForwarding no
+    X11Forwarding no
+    PermitTunnel no
+```
+
+VPN plus HTTPS ist nur eine Referenz ohne Abnahme: Dafür wird `AI6_APP_URL=https://<hostname>` gesetzt, `AI6_HTTP_TRUSTED_HOSTS` ergänzt und der Proxy auf `127.0.0.1:<port>` weitergeleitet. Der Proxy muss `Host` und `X-Forwarded-Proto` setzen; die bestehende Caddy-Loopback-Zusicherung bleibt erhalten. Härtungsempfehlungen wie Rootless-Betrieb und zusätzliche SSH-Schlüsseloptionen sind Empfehlungen ohne eigenes Abnahmeversprechen.
+
 Der Health-Endpunkt lässt sich nach dem Start prüfen:
 
 ```bash

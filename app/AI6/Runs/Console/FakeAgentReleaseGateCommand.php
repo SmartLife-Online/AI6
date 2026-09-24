@@ -2,6 +2,7 @@
 
 namespace App\AI6\Runs\Console;
 
+use App\AI6\Shared\Doctor\TicketManifestDoctorCheck;
 use App\AI6\Shared\Process\ControlProcessRunner;
 use App\AI6\Shared\Process\ProcessRequest;
 use App\AI6\Shared\Redaction\RedactionContext;
@@ -95,6 +96,18 @@ final class FakeAgentReleaseGateCommand extends Command
 
     public function handle(): int
     {
+        $manifest = $this->laravel->make(TicketManifestDoctorCheck::class);
+        $manifestResult = $manifest->run();
+        $this->line($manifest->label().': '.($manifestResult->passed ? 'OK' : 'FEHLER'));
+        foreach ($manifestResult->details as $name => $value) {
+            $this->line(sprintf('  %s: %s', $name, $value));
+        }
+        if (! $manifestResult->passed) {
+            $this->line('FEHLER: Release-Gate vor der ersten Testauswahl abgebrochen.');
+
+            return self::FAILURE;
+        }
+
         $environment = [];
         foreach (['PATH', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT', 'TMP', 'TEMP', 'LANG', 'LC_ALL'] as $name) {
             $value = getenv($name);

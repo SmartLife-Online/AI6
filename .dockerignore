@@ -11,12 +11,15 @@ README.md
 ai
 bootstrap/cache/*.php
 deploy
-docs
+docs/*
+!docs/AI6_IMPLEMENTATION_PLAN.md
+!docs/AI6_TICKET_MANIFEST.yaml
 docker-compose.yml
 phpstan.neon
 phpunit.xml
 pint.json
-scripts
+scripts/*
+!scripts/generate-ticket-manifest.php
 storage/**
 tests
 ticket-prompt

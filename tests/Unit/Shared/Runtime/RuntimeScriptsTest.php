@@ -279,12 +279,17 @@ final class RuntimeScriptsTest extends TestCase
         self::assertIsArray($lines);
 
         foreach ([
-            'AGENTS.md', 'CLAUDE.md', 'README.md', 'ai', 'deploy', 'docs', 'docker-compose.yml',
-            'phpstan.neon', 'phpunit.xml', 'pint.json', 'scripts', 'tests', 'ticket-prompt',
+            'AGENTS.md', 'CLAUDE.md', 'README.md', 'ai', 'deploy', 'docker-compose.yml',
+            'phpstan.neon', 'phpunit.xml', 'pint.json', 'tests', 'ticket-prompt',
             'tickets', 'tools',
         ] as $excluded) {
             self::assertContains($excluded, $lines);
         }
+        self::assertContains('docs/*', $lines);
+        self::assertContains('scripts/*', $lines);
+        self::assertContains('!docs/AI6_IMPLEMENTATION_PLAN.md', $lines);
+        self::assertContains('!docs/AI6_TICKET_MANIFEST.yaml', $lines);
+        self::assertContains('!scripts/generate-ticket-manifest.php', $lines);
     }
 
     public function test_composer_contract_and_installed_packages_match_the_ai6_008_platform_contract(): void
