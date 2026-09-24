@@ -2,7 +2,7 @@
 
 > **Diese Datei ist weder Ticket noch Vertragsdokument.** Die verbindlichen Regeln für Ticketerkennung und Autorität stehen ausschließlich im [Implementierungsplan](../docs/AI6_IMPLEMENTATION_PLAN.md) (`TKT-001`, `TKT-005`, `TKT-010`).
 
-Diese Übersicht fasst den Erzeugungsstand der 56 geplanten AI6-Tickets zusammen. Sie dient der Navigation und darf nicht als Eingabe für Status-, Freigabe-, Scope- oder Ausführungsentscheidungen verwendet werden.
+Diese Übersicht fasst den Erzeugungsstand der 57 geplanten AI6-Tickets zusammen. Sie dient der Navigation und darf nicht als Eingabe für Status-, Freigabe-, Scope- oder Ausführungsentscheidungen verwendet werden.
 
 ## 1. Quellen und Grenzen
 
@@ -19,7 +19,7 @@ Diese README formuliert keine dieser Regeln neu. Bei Änderungen an Plan, Templa
 
 | Dateistand | Bedeutung | Anzahl |
 |---|---|---|
-| **Detailticket** | Reguläre Ticketdatei vorhanden | 55 |
+| **Detailticket** | Reguläre Ticketdatei vorhanden | 56 |
 | **Blueprint** | Noch keine reguläre Ticketdatei vorhanden | 1 |
 
 `Dateistand` beschreibt ausschließlich, ob eine reguläre Ticketdatei existiert. Er sagt nichts über Gültigkeit, Freigabe oder Umsetzungsbereitschaft aus. Der Bearbeitungsstand eines Tickets steht in `status` der Ticketdatei. Die hier gezeigten `depends_on`-Werte liefern ausschließlich die Abhängigkeitsbedingung — nicht die Startbarkeit: Nach `RUN-008` wird die Eligibility unmittelbar vor jedem Claim und Start vollständig neu bewertet und hängt zusätzlich von gültiger Approval, Git- und Snapshotbindung, Policy, Capabilities, Projektsperre, Runabschluss und Queuezustand ab. Aus einer erfüllten `depends_on`-Liste folgt daher kein startbares Ticket.
@@ -103,7 +103,7 @@ Die M7-Tickets `AI6-036`, `AI6-037` und `AI6-038` wurden am 19. September 2026 a
 
 ## 3. Backlog
 
-Stand der abgeleiteten Ansicht: 20. September 2026, abgeleitet aus Planrevision V1.7.9 und dem vorhandenen Dateibestand. Revision V1.7.4 trennt den rollenrichtigen Checkvollzug als neuen Blueprint `AI6-045` von `AI6-021` ab; sein Detailticket ist inzwischen vorhanden. Revision V1.7.5 stellt den Adaptern die Blueprints `AI6-046` und `AI6-047` voran; ihre Detailtickets sind vorhanden. Revision V1.7.9 splittet `AI6-036` in `AI6-036` und `AI6-049` und ergänzt `AI6-050` für den realen Securityreview. Mit den M7-Tickets AI6-036, AI6-049, AI6-037 und AI6-038 sind 55 der 56 Blueprints als Detailticket vorhanden; nur AI6-050 ist noch Blueprint, und AI6-038 ist ahead-derived mit offenem Rebase-Gate. AI6-048 liefert die fehlende Copilot-Implementierung aus AI6-042 nach und ist in `e3f09d7` integriert. AI6-034 ist am selben Stand rebased und gegen die gelieferte Copilot-Naht neu abgeleitet; sein Rebase-Gate ist geschlossen, während MG-01 weiterhin offen bleibt.
+Stand der abgeleiteten Ansicht: 24. September 2026, abgeleitet aus dem Planarbeitsstand V1.7.10 und dem vorhandenen Dateibestand. Revision V1.7.4 trennt den rollenrichtigen Checkvollzug als neuen Blueprint `AI6-045` von `AI6-021` ab; sein Detailticket ist inzwischen vorhanden. Revision V1.7.5 stellt den Adaptern die Blueprints `AI6-046` und `AI6-047` voran; ihre Detailtickets sind vorhanden. Revision V1.7.9 splittet `AI6-036` in `AI6-036` und `AI6-049` und ergänzt `AI6-050` für den realen Securityreview. Mit AI6-051 aus V1.7.10 sind 56 der 57 Blueprints als Detailticket vorhanden; nur AI6-050 ist noch Blueprint, und AI6-038 ist ahead-derived mit offenem Rebase-Gate. AI6-051 ist gegen `399076a` abgeleitet und nach zwei Reviews überarbeitet; seine Implementierung ist nicht beauftragt. AI6-048 liefert die fehlende Copilot-Implementierung aus AI6-042 nach und ist in `e3f09d7` integriert. AI6-034 ist am selben Stand rebased und gegen die gelieferte Copilot-Naht neu abgeleitet; sein Rebase-Gate ist geschlossen, während MG-01 weiterhin offen bleibt.
 
 ### M0 — Fundament und sichere Laufzeit
 
@@ -200,6 +200,7 @@ Stand der abgeleiteten Ansicht: 20. September 2026, abgeleitet aus Planrevision 
 | [AI6-049](./AI6-049.md) | Backup, Restore, Rotation und Disaster Recovery | high | Detailticket | AI6-002, AI6-005A, AI6-029, AI6-031 |
 | [AI6-037](./AI6-037.md) | Migration des bisherigen Ticket-Prompt-Tools | medium | Detailticket | AI6-007, AI6-008, AI6-009, AI6-016, AI6-032 |
 | [AI6-038](./AI6-038.md) | Realer M169-Pilot und MVP-Abnahme | high | Detailticket; ahead-derived, Rebase-Gate offen | AI6-032, AI6-035, AI6-036, AI6-037, AI6-049, AI6-050 |
+| [AI6-051](./AI6-051.md) | Git-Repositories im SHA-1- und SHA-256-Objektformat unterstützen | high | Detailticket; Implementierung nicht beauftragt | AI6-006D, AI6-006E, AI6-006F, AI6-029, AI6-032, AI6-040 |
 
 ## 4. Getrennter Index-Refresh
 

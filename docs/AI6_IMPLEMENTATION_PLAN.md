@@ -1,6 +1,8 @@
-# AI6 – Implementierungsplan V1.7.9 – Ticket-Ready, Lean & Secure
+# AI6 – Implementierungsplan V1.7.10 – Ticket-Ready, Lean & Secure
 
-**Stand:** 12. September 2026
+**Stand:** 24. September 2026
+
+**Revision V1.7.10:** Auf ausdrückliche menschliche Produktentscheidung und Ticketbeauftragung vom 24. September 2026 ergänzt `AI6-051` die durchgängige Unterstützung von SHA-1- und SHA-256-Git-Repositories. Anlass ist der beim MG-01-Vorlauf von AI6-036 abgewiesene SHA-1-Control-OID des ausgewählten Testprojekts. Der neue Vertrag betrifft Git-Objekt-IDs und deren persistierte Bindungen; AI6-eigene SHA-256-Prüfsummen bleiben unverändert. Der Backlog wächst von 56 auf 57 Blueprints. Für diesen einen Kompatibilitätsauftrag werden die notwendigen konsumierenden OID-Verträge gemeinsam mit der Git-Naht und einer zusammenhängenden Schemafortschreibung angepasst; die Modulzahl allein erzwingt hier keinen Split nach §13.2, weil eine Teilauslieferung keine durchgängige Formatkompatibilität liefert. Neue Fachabläufe, unabhängige Migrationen oder zusätzliche Outcomes bleiben splitpflichtig. Frühere Verträge und Evidenz-IDs bleiben historisch erhalten; Ticketstatus und Gate-Ergebnisse werden nicht geändert. Diese Revision beauftragt die Planung, nicht die Implementierung.
 
 **Revision V1.7.9:** Auf ausdrückliche menschliche Entscheidung vom 19. September 2026, nach dem Review der M7-Entwürfe in `docs/AI6_M7_TICKET_REVIEW.md`, wächst der Backlog von 54 auf 56 Blueprints. Erstens wird `AI6-036` nach §13.2 und §13.7 gesplittet: Er behält seine ID und den Teil Installation, Zugang, Doctor-Optionen und -Prüfungen, Manifestprüfung in Doctor und Release-Gate sowie Upgrade- und Härtungsdokumentation; der neue Teil erhält die nächste nie vergebene ID `AI6-049` mit Backup, Restore, Rotation, Retention-Wiederauferstehungsnachweis und Disaster-Recovery-Dokumentation. Die Requirement-Refs werden verteilt, nicht dupliziert: `OPS-001`, `OPS-003`, `OPS-006` und `PROD-002` bleiben bei `AI6-036`, `SEC-010` und `SEC-011` gehen an `AI6-049`; beide Teile sind unabhängig voneinander umsetzbar, und `AI6-038` hängt zusätzlich von `AI6-049` ab. Der unterstützte Betriebsfall von `AI6-049` ist ausdrücklich begrenzt: Sicherung und Wiederherstellung einer ruhenden Instanz auf demselben Software- und Schemastand; die privaten Deploy-Keys gehören zum Backup, weil ein bereits provisioniertes Projekt keinen Recoverypfad besitzt. Zweitens entsteht `AI6-050`: Der Securityreview des Publish-Kandidaten nach `REV-008`/`SEC-008` ist im integrierten Stand nur mit dem FakeAgent ausführbar — `SecurityReviewStep` verweigert jeden realen Adapter, und kein Profil der ersten Providerstufe trägt die Rolle `security_review` —, sodass ein strict betriebener Pilot seine aktive Maßnahme nicht erfüllen könnte. `AI6-050` führt den Schritt über die vorhandene Providerturn-Übergabe mit einem Copilot-Profil aus, ohne zweiten Adapter, Prompt oder Resolver; `AI6-038` hängt zusätzlich davon ab. Requirement-Texte, veröffentlichte `AC-`/`TC-`/`MG-`/`EXT-`-IDs, Meilensteinzuschnitte, Ticketstatus und alle übrigen Blueprintverträge bleiben unverändert; §14.1, §16 und §21 werden nachgezogen.
 
@@ -1287,6 +1289,7 @@ Erscheint eine neuere Major-, Minor- oder Patchversion einer dieser drei Laufzei
 54. AI6-049 — Backup, Restore, Rotation und Disaster Recovery
 55. AI6-037 — Migration des bisherigen Ticket-Prompt-Tools
 56. AI6-038 — Realer M169-Pilot und MVP-Abnahme
+57. AI6-051 — Git-Repositories im SHA-1- und SHA-256-Objektformat unterstützen
 ```
 
 Die Reihenfolge ist eine gültige Topologie, aber nicht jede unabhängige Arbeit muss künstlich seriell erfolgen. Innerhalb eines Meilensteins dürfen nur Tickets parallel entwickelt werden, deren `depends_on` vollständig erfüllt ist und die nicht denselben noch instabilen Vertrag definieren.
@@ -4026,6 +4029,48 @@ Die menschliche Sichtung eines nachgelagerten Security-Ergebnisses gehört zum C
 
 ---
 
+### AI6-051 — Git-Repositories im SHA-1- und SHA-256-Objektformat unterstützen
+
+- **Initialstatus des späteren Detailtickets:** `todo`
+- **Risiko:** `high`
+- **Kind:** `feature`
+- **Depends on:** `AI6-006D`, `AI6-006E`, `AI6-006F`, `AI6-029`, `AI6-032`, `AI6-040`
+- **Requirement-Refs:** `GIT-001`, `GIT-005`, `GIT-006`, `GIT-008`, `GIT-009`, `GIT-010`, `GIT-011`, `SEC-006`, `SEC-009`
+- **Erwartete Module:** `Git`, `Projects`, `Runs`, `Tickets`, `Reviews`, `HumanLoop`
+
+**Ziel**
+
+Verwaltete Git-Repositories im SHA-1- und SHA-256-Objektformat durchgängig verarbeiten, ohne bestehende Provenienz-, Freigabe- oder Sicherheitsbindungen abzuschwächen.
+
+**Deliverables**
+
+- Ein zentraler Git-Objektformatvertrag für vollständige kleingeschriebene SHA-1- und SHA-256-OIDs; getrennt von unveränderten AI6-SHA-256-Prüfsummen.
+- Worker-seitige Formatermittlung und projektgebundene Bestätigung am verwalteten Repository; kein frei wählbares Format aus Browser-, Ticket- oder Providerinhalt und kein stiller Formatwechsel.
+- Durchgängige Anwendung auf Clone/Fetch, Control-Branch-Wechsel, Read Models, Ticketmutationen, Approval, Runbasis, Checkpoints, Review-only, Publish und Status-CAS einschließlich Recovery.
+- Eine zusammenhängende additive Schemafortschreibung für Formatbindung und betroffene OID-Guards; bestehende SHA-256-Daten und signierte beziehungsweise gehashte Snapshots bleiben unverändert. Dokumentierter Upgrade- und verlustfreier beziehungsweise geschlossen verweigerter Rollbackpfad.
+- Beide Objektformate in echten Linux-Git-Integrationstests und im FakeAgent-Durchlauf; ein menschlicher SSH-Smoke auf einem freigegebenen SHA-1-Testprojekt.
+
+**Akzeptanzvertrag**
+
+- SHA-1- und SHA-256-Projekte können nebeneinander den bestehenden Git-Workflow durchlaufen; OID-Länge, Format und Projektbindung stimmen an jeder wirkenden Grenze überein.
+- Unbekannte, gemischte, verkürzte oder manipulierte OIDs sowie Formatdrift scheitern ohne Publish oder Freigabe; AI6-Prüfsummen bleiben exakt SHA-256.
+- Neue und aktualisierte Datenbanken erzwingen denselben Vertrag; vorhandene SHA-256-Projekte, laufende Bindungen und Auditdaten bleiben lesbar und unverfälscht.
+- CAS, Lease, Effekt-Lock, Step-up, Hostpinning, Credentialtrennung und sämtliche Review-/Publishgates bleiben wirksam.
+
+**Mindestens zu erzeugende Testfälle**
+
+- Formatmatrix mit echten SHA-1-/SHA-256-Repositories, Negativfälle für Fremdformat, unbekanntes Format, Abkürzungen, Null-OIDs und Hash/OID-Verwechslung.
+- Beide Formate von Clone über Refresh, Approval, Checkpoint und Review bis zum gebundenen Commit/Push und Ticketstatus-CAS; Drift-, Wiederholungs- und Recoveryfälle.
+- SQLite-Neuinstallation, Upgrade mit bestehenden SHA-256-Bindungen, direkte ungültige Schreibversuche und Rollback mit und ohne SHA-1-Daten.
+- Candidate-gebundener menschlicher SSH-Smoke und unveränderte SHA-256-Regression.
+
+**Nicht Teil dieses Tickets**
+
+- Repositorykonvertierung, Umschreiben bestehender Git-Historie, Hashalgorithmuswechsel für AI6-Prüfsummen, Provideradapter oder neue UI-Abläufe.
+- Umsetzung während der Ticketerzeugung, produktiver Push oder Schließen fremder manueller Gates.
+
+---
+
 ## 16. Requirement-Traceability
 
 Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. Mehrfachzuordnungen sind erlaubt, wenn ein Vertrag in Fundament und E2E erneut verifiziert wird.
@@ -4046,17 +4091,17 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `TKT-010` | `AI6-007` |
 | `TKT-011` | `AI6-007`, `AI6-010`, `AI6-037` |
 | `TKT-012` | `AI6-020`, `AI6-029` |
-| `GIT-001` | `AI6-006A`, `AI6-006B`, `AI6-006D`, `AI6-006E`, `AI6-006F`, `AI6-009`, `AI6-010`, `AI6-012`, `AI6-013`, `AI6-030` |
+| `GIT-001` | `AI6-006A`, `AI6-006B`, `AI6-006D`, `AI6-006E`, `AI6-006F`, `AI6-009`, `AI6-010`, `AI6-012`, `AI6-013`, `AI6-030`, `AI6-051` |
 | `GIT-002` | `AI6-013`, `AI6-014` |
 | `GIT-003` | `AI6-014`, `AI6-019`, `AI6-022` |
 | `GIT-004` | `AI6-014`, `AI6-022`, `AI6-023` |
-| `GIT-005` | `AI6-027`, `AI6-029` |
-| `GIT-006` | `AI6-027`, `AI6-029` |
+| `GIT-005` | `AI6-027`, `AI6-029`, `AI6-051` |
+| `GIT-006` | `AI6-027`, `AI6-029`, `AI6-051` |
 | `GIT-007` | `AI6-012`, `AI6-029` |
-| `GIT-008` | `AI6-009`, `AI6-013`, `AI6-029`, `AI6-039` |
-| `GIT-009` | `AI6-006C`, `AI6-006D`, `AI6-006E`, `AI6-006F`, `AI6-008`, `AI6-009` |
-| `GIT-010` | `AI6-014`, `AI6-015`, `AI6-019`, `AI6-021`, `AI6-023`, `AI6-028`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-040`, `AI6-041`, `AI6-042`, `AI6-045`, `AI6-046`, `AI6-048` |
-| `GIT-011` | `AI6-040` |
+| `GIT-008` | `AI6-009`, `AI6-013`, `AI6-029`, `AI6-039`, `AI6-051` |
+| `GIT-009` | `AI6-006C`, `AI6-006D`, `AI6-006E`, `AI6-006F`, `AI6-008`, `AI6-009`, `AI6-051` |
+| `GIT-010` | `AI6-014`, `AI6-015`, `AI6-019`, `AI6-021`, `AI6-023`, `AI6-028`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-040`, `AI6-041`, `AI6-042`, `AI6-045`, `AI6-046`, `AI6-048`, `AI6-051` |
+| `GIT-011` | `AI6-040`, `AI6-051` |
 | `CFG-001` | `AI6-003`, `AI6-011` |
 | `CFG-002` | `AI6-010`, `AI6-020` |
 | `CFG-003` | `AI6-010`, `AI6-021` |
@@ -4109,10 +4154,10 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `SEC-003` | `AI6-005A` |
 | `SEC-004` | `AI6-003`, `AI6-004`, `AI6-005B`, `AI6-010`, `AI6-044` |
 | `SEC-005` | `AI6-015`, `AI6-021`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-045`, `AI6-046`, `AI6-047`, `AI6-048` |
-| `SEC-006` | `AI6-006A` |
+| `SEC-006` | `AI6-006A`, `AI6-051` |
 | `SEC-007` | `AI6-003`, `AI6-005B`, `AI6-006F`, `AI6-021`, `AI6-031`, `AI6-044`, `AI6-045` |
 | `SEC-008` | `AI6-028`, `AI6-032`, `AI6-050` |
-| `SEC-009` | `AI6-027`, `AI6-028` |
+| `SEC-009` | `AI6-027`, `AI6-028`, `AI6-051` |
 | `SEC-010` | `AI6-049` |
 | `SEC-011` | `AI6-031`, `AI6-040`, `AI6-049` |
 | `OPS-001` | `AI6-002`, `AI6-036` |
@@ -4251,8 +4296,10 @@ Der MVP ist erreicht, wenn:
 
 ## 21. Kurzbegründung der Ticketanzahl
 
-56 Tickets sind für den Funktionsumfang bewusst kleiner als die bisherigen zehn Pakete, aber keine künstlichen Mikrotickets. Jeder Blueprint bildet eine reviewbare Grenze: Datenvertrag, vertikaler Benutzerfluss oder sicherheitsrelevante technische Naht. Die fünf mit V1.7.0 ergänzten Blueprints folgen demselben Schnitt: zwei für den Review-only-Modus (Statusvertrag getrennt von Quellbindung und Bedienung), zwei für die neuen Provideradapter (je CLI ein eigenständig testbarer Adapter) und einer für die providerunabhängige Verifier-Orchestrierung. `AI6-044` ergänzt als eigener manueller Benutzerfluss ausschließlich die Clipboard-Bedienung des zentralen Promptkatalogs und bleibt von Provider- und Runwirkung getrennt. `AI6-045` folgt demselben Schnitt als sicherheitsrelevante technische Naht: Die Definition eines Checks und sein rollenrichtiger Vollzug sind getrennt reviewbar, weil der Vollzug eigene Container-, Mount- und Wartezustandsverträge berührt, die die Profildefinition nicht kennt. Ein Ticket darf während der Detailerzeugung weiter gesplittet werden, aber nur über eine explizite Planrevision; ein stilles Zusammenlegen mehrerer Blueprints ist nicht zulässig.
+57 Tickets sind für den Funktionsumfang bewusst kleiner als die bisherigen zehn Pakete, aber keine künstlichen Mikrotickets. Jeder Blueprint bildet eine reviewbare Grenze: Datenvertrag, vertikaler Benutzerfluss oder sicherheitsrelevante technische Naht. Die fünf mit V1.7.0 ergänzten Blueprints folgen demselben Schnitt: zwei für den Review-only-Modus (Statusvertrag getrennt von Quellbindung und Bedienung), zwei für die neuen Provideradapter (je CLI ein eigenständig testbarer Adapter) und einer für die providerunabhängige Verifier-Orchestrierung. `AI6-044` ergänzt als eigener manueller Benutzerfluss ausschließlich die Clipboard-Bedienung des zentralen Promptkatalogs und bleibt von Provider- und Runwirkung getrennt. `AI6-045` folgt demselben Schnitt als sicherheitsrelevante technische Naht: Die Definition eines Checks und sein rollenrichtiger Vollzug sind getrennt reviewbar, weil der Vollzug eigene Container-, Mount- und Wartezustandsverträge berührt, die die Profildefinition nicht kennt. Ein Ticket darf während der Detailerzeugung weiter gesplittet werden, aber nur über eine explizite Planrevision; ein stilles Zusammenlegen mehrerer Blueprints ist nicht zulässig.
 
 `AI6-048` ist eine ausdrücklich beauftragte Nachlieferung zur fehlenden Umsetzung von `AI6-042`. Adapter, Doctor, Testdouble und Smoke beweisen gemeinsam genau eine Providergrenze und werden nicht in parallele Implementierungen aufgeteilt. Die frühere Konfigurationslieferung bleibt erhalten; eine neue gemeinsame Mount-/Namespacegrenze gehört ausdrücklich nicht zu diesem Korrekturauftrag. Claude-Modellprofile aus `AI6-034` konsumieren erst danach diese eine Copilot-Naht.
 
 `AI6-049` trennt nach §13.2 Backup, Restore und Disaster Recovery von Installation und Doctor in `AI6-036`: Beide Teile sind unabhängig auslieferbar, zurückrollbar und testbar und berühren keine gemeinsame instabile Naht. `AI6-050` schließt die Lücke zwischen dem Fake-gebundenen Securitygate aus `AI6-028` und der ersten Providerstufe über genau die eine bestehende Copilot-Naht; ohne ihn könnte ein strict betriebener Pilot die aktive Maßnahme nur mit dem FakeAgent erfüllen.
+
+`AI6-051` erweitert einen bestehenden Git-Objektformatvertrag atomar über seine Verbraucher. Die in V1.7.10 ausdrücklich begrenzte Modul-Ausnahme erlaubt keine zusätzlichen Fachabläufe; ein allein freigeschalteter SHA-1-Clone ohne funktionsfähige nachgelagerte Bindungen wäre keine auslieferbare Fähigkeit.

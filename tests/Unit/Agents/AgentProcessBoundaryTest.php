@@ -32,6 +32,29 @@ use Tests\TestCase;
 
 final class AgentProcessBoundaryTest extends TestCase
 {
+    public function test_apache_configuration_uses_the_cli_binary_for_policies_and_check_profiles(): void
+    {
+        $namespace = 'Tests\\Fixtures\\ApacheProcessConfiguration';
+        if (! defined($namespace.'\\PHP_BINARY')) {
+            define($namespace.'\\PHP_BINARY', '');
+            define($namespace.'\\PHP_SAPI', 'apache2handler');
+        }
+        $source = file_get_contents(base_path('config/ai6.php'));
+        self::assertIsString($source);
+        // Evaluate the shipped configuration with the constants observed under Apache.
+        $configured = eval('namespace '.$namespace.';'.substr($source, strlen('<?php')));
+        self::assertIsArray($configured);
+        config(['ai6.process.policies' => $configured['process']['policies']]);
+        $registry = ProcessPolicyRegistry::fromConfiguredValues();
+        $expected = PHP_BINDIR.DIRECTORY_SEPARATOR.(PHP_OS_FAMILY === 'Windows' ? 'php.exe' : 'php');
+
+        self::assertContains($expected, $registry->get(ProcessPolicyName::AGENT)->allowedExecutables);
+        self::assertContains($expected, $registry->get(ProcessPolicyName::CHECKER)->allowedExecutables);
+        self::assertNotContains('', $registry->get(ProcessPolicyName::CHECKER)->allowedExecutables);
+        self::assertSame($expected, $configured['checks']['profiles']['php-targeted']['program']);
+        self::assertSame($expected, $configured['checks']['profiles']['php-all']['program']);
+    }
+
     public function test_shipped_control_roots_include_exactly_the_doctor_staging_root(): void
     {
         $expected = [base_path(), storage_path(), config('ai6.execution_mailboxes.agent_root'), config('ai6.provider_onboarding.private_root')];

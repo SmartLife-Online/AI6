@@ -9,6 +9,31 @@ use PHPUnit\Framework\TestCase;
 
 final class RuntimeScriptsTest extends TestCase
 {
+    public function test_image_discovers_packages_as_runtime_user_after_sealing_code(): void
+    {
+        $dockerfile = $this->read('Dockerfile');
+        $discovery = strpos($dockerfile, 'runuser -u ai6 -- php artisan package:discover --ansi;');
+        self::assertNotFalse($discovery);
+
+        foreach ([
+            'find /opt/ai6 -path /opt/ai6/storage -prune -o -type d -exec chmod 0555 {} +;',
+            'find /opt/ai6 -path /opt/ai6/storage -prune -o -type f -exec chmod 0444 {} +;',
+            'chown -R ai6:ai6 /opt/ai6/storage /var/lib/ai6;',
+            'chmod 0555 /opt/ai6/artisan /opt/ai6/docker/*.sh /opt/ai6/bin/ai6-git-ssh.sh',
+            'chown -R ai6:ai6 /opt/ai6/bootstrap/cache;',
+            'chmod 0770 /opt/ai6/bootstrap/cache;',
+        ] as $precondition) {
+            $position = strpos($dockerfile, $precondition);
+            self::assertNotFalse($position);
+            self::assertLessThan($discovery, $position);
+        }
+
+        self::assertStringNotContainsString('    php artisan package:discover --ansi;', $dockerfile);
+        self::assertGreaterThan($discovery, strrpos($dockerfile, 'find /opt/ai6 -path /opt/ai6/storage -prune -o -type f -exec chmod 0444 {} +;'));
+        self::assertStringContainsString('COPY --chmod=0444 docker/apache-ports.conf /etc/apache2/ports.conf', $dockerfile);
+        self::assertStringContainsString('COPY --chmod=0444 docker/apache-vhost.conf /etc/apache2/sites-available/000-default.conf', $dockerfile);
+    }
+
     public function test_entrypoint_has_six_fixed_role_branches_and_rejects_unknown_roles(): void
     {
         $script = $this->read('docker/entrypoint.sh');

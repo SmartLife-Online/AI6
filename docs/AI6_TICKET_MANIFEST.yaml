@@ -1,7 +1,7 @@
 schema: ai6.ticket-manifest.v1
 source: docs/AI6_IMPLEMENTATION_PLAN.md
-plan_revision: "V1.7.9"
-blueprint_count: 56
+plan_revision: "V1.7.10"
+blueprint_count: 57
 blueprints:
   - id: "AI6-001"
     title: "Laravel-Grundgerüst und Qualitätsbaseline"
@@ -451,3 +451,11 @@ blueprints:
     kind: "spike"
     depends_on: ["AI6-032", "AI6-035", "AI6-036", "AI6-037", "AI6-049", "AI6-050"]
     requirement_refs: ["PROD-001", "AGT-001", "RUN-010", "REV-001", "HUM-002", "RUN-009", "OPS-005"]
+  - id: "AI6-051"
+    title: "Git-Repositories im SHA-1- und SHA-256-Objektformat unterstützen"
+    milestone: "M7"
+    initial_status: "todo"
+    risk: "high"
+    kind: "feature"
+    depends_on: ["AI6-006D", "AI6-006E", "AI6-006F", "AI6-029", "AI6-032", "AI6-040"]
+    requirement_refs: ["GIT-001", "GIT-005", "GIT-006", "GIT-008", "GIT-009", "GIT-010", "GIT-011", "SEC-006", "SEC-009"]

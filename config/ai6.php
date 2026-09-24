@@ -1,5 +1,10 @@
 <?php
 
+// Apache exposes no PHP_BINARY; child processes still require the fixed CLI executable.
+$phpCliBinary = PHP_SAPI === 'cli'
+    ? PHP_BINARY
+    : PHP_BINDIR.DIRECTORY_SEPARATOR.(PHP_OS_FAMILY === 'Windows' ? 'php.exe' : 'php');
+
 return [
     'runtime_role' => env('AI6_RUNTIME_ROLE', ''),
     'auth' => [
@@ -93,7 +98,7 @@ return [
                 // codex_cli profiles by name and must never enter this list, because an empty entry
                 // would make the whole agent policy unreadable and take the FakeAgent down with it.
                 'allowed_executables' => array_values(array_filter(
-                    [PHP_BINARY, env('AI6_CODEX_BINARY', '/usr/local/bin/codex'), env('AI6_COPILOT_BINARY', '/usr/local/bin/copilot'), env('AI6_GROK_BINARY', '/usr/local/bin/grok')],
+                    [$phpCliBinary, env('AI6_CODEX_BINARY', '/usr/local/bin/codex'), env('AI6_COPILOT_BINARY', '/usr/local/bin/copilot'), env('AI6_GROK_BINARY', '/usr/local/bin/grok')],
                     static fn (mixed $binary): bool => is_string($binary) && $binary !== '',
                 )),
                 // CODEX_HOME points the Codex CLI at the read-only auth projection of the sealed home (AI6-033).
@@ -108,7 +113,7 @@ return [
             'checker' => [
                 'timeout_seconds' => env('AI6_CHECKER_PROCESS_TIMEOUT_SECONDS', '900'),
                 'output_limit_bytes' => env('AI6_CHECKER_PROCESS_OUTPUT_LIMIT_BYTES', '5000000'),
-                'allowed_executables' => [PHP_BINARY, env('AI6_GIT_BINARY', '/usr/bin/git')],
+                'allowed_executables' => [$phpCliBinary, env('AI6_GIT_BINARY', '/usr/bin/git')],
                 'environment_allowlist' => ['PATH', 'HOME', 'XDG_CONFIG_HOME', 'TMPDIR', 'AI6_CHECK_PROFILE', 'LC_ALL', 'LANG'],
                 'working_roots' => [
                     env('AI6_CHECKER_EXECUTION_ROOT', '/var/lib/ai6/checker-executions'),
@@ -422,7 +427,7 @@ return [
         ],
         'profiles' => [
             'php-targeted' => [
-                'program' => PHP_BINARY,
+                'program' => $phpCliBinary,
                 'arguments' => ['artisan', 'test', '--compact'],
                 'phases' => ['before_review'],
                 'working_directory' => 'tree',
@@ -432,7 +437,7 @@ return [
                 'mutates' => false,
             ],
             'php-all' => [
-                'program' => PHP_BINARY,
+                'program' => $phpCliBinary,
                 'arguments' => ['artisan', 'test'],
                 'phases' => ['final'],
                 'working_directory' => 'tree',

@@ -130,8 +130,8 @@ WORKDIR /opt/ai6
 
 COPY . .
 COPY --from=vendor /opt/ai6/vendor ./vendor
-COPY docker/apache-ports.conf /etc/apache2/ports.conf
-COPY docker/apache-vhost.conf /etc/apache2/sites-available/000-default.conf
+COPY --chmod=0444 docker/apache-ports.conf /etc/apache2/ports.conf
+COPY --chmod=0444 docker/apache-vhost.conf /etc/apache2/sites-available/000-default.conf
 
 RUN set -eux; \
     groupadd --gid 10001 ai6; \
@@ -151,7 +151,14 @@ RUN set -eux; \
         /var/lib/ai6/git-home/cache \
         /var/lib/ai6/git-home/xdg \
         /opt/ai6/etc/git-hooks; \
-    php artisan package:discover --ansi; \
+    find /opt/ai6 -path /opt/ai6/storage -prune -o -type d -exec chmod 0555 {} +; \
+    find /opt/ai6 -path /opt/ai6/storage -prune -o -type f -exec chmod 0444 {} +; \
+    chmod 0555 /opt/ai6/artisan /opt/ai6/docker/*.sh /opt/ai6/bin/ai6-git-ssh.sh /opt/ai6/app/AI6/Git/generate-deploy-key.sh /opt/ai6/app/AI6/Shared/Process/control-process-wrapper.sh /opt/ai6/app/AI6/Shared/Process/checker-process-wrapper.sh; \
+    chown -R ai6:ai6 /opt/ai6/storage /var/lib/ai6; \
+    mkdir -p /opt/ai6/bootstrap/cache; \
+    chown -R ai6:ai6 /opt/ai6/bootstrap/cache; \
+    chmod 0770 /opt/ai6/bootstrap/cache; \
+    runuser -u ai6 -- php artisan package:discover --ansi; \
     printf '%s\n' \
         '[core]' \
         '    hooksPath = /opt/ai6/etc/git-hooks' \
@@ -165,7 +172,6 @@ RUN set -eux; \
         '[submodule]' \
         '    recurse = false' \
         > /opt/ai6/etc/gitconfig; \
-    chown -R ai6:ai6 /opt/ai6/storage /var/lib/ai6; \
     find /opt/ai6 -path /opt/ai6/storage -prune -o -type d -exec chmod 0555 {} +; \
     find /opt/ai6 -path /opt/ai6/storage -prune -o -type f -exec chmod 0444 {} +; \
     chmod 0555 /opt/ai6/artisan /opt/ai6/docker/*.sh /opt/ai6/bin/ai6-git-ssh.sh /opt/ai6/app/AI6/Git/generate-deploy-key.sh /opt/ai6/app/AI6/Shared/Process/control-process-wrapper.sh /opt/ai6/app/AI6/Shared/Process/checker-process-wrapper.sh; \
