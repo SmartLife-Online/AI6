@@ -60,7 +60,8 @@ final readonly class QueueRunStart
 
     private function persist(User $actor, Project $project, TicketApproval $approval, TicketReadModel $readModel, string $operationId, bool $automatic = false): ControlOperation
     {
-        if ($project->provisioning_status !== ProjectProvisioningStatus::PROVISIONED) {
+        if ($project->provisioning_status !== ProjectProvisioningStatus::PROVISIONED
+            || $project->object_format?->validOid($project->control_oid) !== true) {
             throw new ControlOperationConflict('The project is not provisioned for run start.');
         }
         if (! is_string($project->project_identifier) || $project->project_identifier === '') {
@@ -129,7 +130,7 @@ final readonly class QueueRunStart
             'target_status' => 'in_progress',
             'source_contract_sha256' => $approval->ticket_contract_sha256,
             'target_contract_sha256' => $projection->contractHash,
-            'expected_target_blob_sha' => hash('sha256', 'blob '.strlen($target)."\0".$target),
+            'expected_target_blob_sha' => $project->object_format->objectId('blob', $target),
             'expected_target_tree_oid' => str_repeat('0', 64),
             'expected_control_binding_version' => $project->control_binding_version,
             'audit_reason' => 'Runstart aus freigegebener Approval.',

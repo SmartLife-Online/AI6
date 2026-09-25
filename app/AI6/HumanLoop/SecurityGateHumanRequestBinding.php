@@ -2,6 +2,7 @@
 
 namespace App\AI6\HumanLoop;
 
+use App\AI6\Git\GitObjectFormat;
 use App\AI6\HumanLoop\Models\HumanRequest;
 
 /** Candidate-, policy-, profile- and instruction-bound security override provenance. */
@@ -35,7 +36,8 @@ final class SecurityGateHumanRequestBinding
     {
         if (! str_starts_with($request->bound_agent_slot, self::SLOT_PREFIX)
             || ! in_array(self::EFFECT, $request->allowed_effects, true)
-            || preg_match('/\A([0-9a-f]{64}):([0-9a-f]{64}):([0-9a-f]{64}):([0-9a-f]{64}):([0-9a-f]{64}):([a-z][a-z0-9._-]{0,63})\z/D', $request->bound_requested_effect, $matches) !== 1) {
+            || preg_match('/\A([0-9a-f]{40}(?:[0-9a-f]{24})?):([0-9a-f]{64}):([0-9a-f]{40}(?:[0-9a-f]{24})?):([0-9a-f]{64}):([0-9a-f]{64}):([a-z][a-z0-9._-]{0,63})\z/D', $request->bound_requested_effect, $matches) !== 1
+            || GitObjectFormat::tryFromOid($matches[1])?->validOid($matches[3]) !== true) {
             return null;
         }
         $profileId = substr($request->bound_agent_slot, strlen(self::SLOT_PREFIX));

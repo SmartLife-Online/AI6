@@ -5,6 +5,7 @@ namespace Tests\Feature\Runs;
 use App\AI6\Auth\Models\User;
 use App\AI6\Git\ControlOperationRuntimeIdentity;
 use App\AI6\Git\ControlOperationType;
+use App\AI6\Git\GitObjectFormat;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\ReviewSubjectKind;
 use App\AI6\Git\ReviewSubjectReference;
@@ -25,6 +26,7 @@ use App\AI6\Shared\Redaction\RedactionContext;
 use Illuminate\Support\Facades\DB;
 use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Feature\Git\BuildsRunWorkspaceGitFixture;
 use Tests\Feature\Tickets\TicketUiTestCase;
 
@@ -62,16 +64,17 @@ final class ReviewOnlyApprovalUiTest extends TicketUiTestCase
         });
     }
 
-    public function test_the_panel_binds_a_review_subject_before_the_claim_and_starts_it_asynchronously(): void
+    #[DataProvider('objectFormats')]
+    public function test_the_panel_binds_a_review_subject_before_the_claim_and_starts_it_asynchronously(GitObjectFormat $format): void
     {
-        $managed = $this->prepareManagedReviewProject('AI6-040-UI');
+        $managed = $this->prepareManagedReviewProject('AI6-040-UI', $format);
         $project = $managed['project'];
         $approver = $this->createUser();
         $operator = $this->createUser();
         $this->addMembership($approver, $project, ProjectRole::APPROVER);
         $this->addMembership($operator, $project, ProjectRole::OPERATOR);
         $content = $this->validTicketMarkdown('AI6-040-UI');
-        $readModel = $this->publishReadModel($managed['administrator'], $project, 'tickets/AI6-040-UI.md', $content);
+        $readModel = $this->publishReadModel($managed['administrator'], $project, 'tickets/AI6-040-UI.md', $content, ['blob_sha' => $format->objectId('blob', $content)]);
 
         [$component, $preview] = $this->readyPreview($approver, $project, $readModel, $managed['source']);
         $payload = $this->approvalPayload($component, $preview, $readModel, $content, $managed['source']);
@@ -83,6 +86,13 @@ final class ReviewOnlyApprovalUiTest extends TicketUiTestCase
         // The bound-source controls appear once the human selects the run type.
         $component->assertSee('Gebundene Basis-OID');
         $component->assertSee('Verwaltete Ref');
+        $component->set('reviewSubjectKind', 'checkpoint');
+        $html = $component->html();
+        foreach (['review_base_oid', 'review_source_oid', 'review_tree_oid'] as $field) {
+            self::assertMatchesRegularExpression('/<input[^>]*name="'.$field.'"[^>]*pattern="\[0-9a-f\]\{'.$format->length().'\}"[^>]*maxlength="'.$format->length().'"/', $html);
+        }
+        self::assertMatchesRegularExpression('/<input[^>]*name="review_diff_hash"[^>]*pattern="\[0-9a-f\]\{64\}"[^>]*maxlength="64"/', $html);
+        $component->set('reviewSubjectKind', 'managed_branch');
 
         // A user without the approval role never reaches the bound source.
         $this->actingAs($operator)
@@ -115,6 +125,13 @@ final class ReviewOnlyApprovalUiTest extends TicketUiTestCase
         self::assertSame(0, Run::query()->count());
         self::assertSame(0, DB::table('execution_jobs')->count());
         self::assertSame(1, ControlOperation::query()->where('operation_type', ControlOperationType::TICKET_APPROVAL)->count());
+    }
+
+    /** @return iterable<string, array{GitObjectFormat}> */
+    public static function objectFormats(): iterable
+    {
+        yield 'sha1' => [GitObjectFormat::SHA1];
+        yield 'sha256' => [GitObjectFormat::SHA256];
     }
 
     public function test_the_start_action_refuses_a_source_of_its_own(): void

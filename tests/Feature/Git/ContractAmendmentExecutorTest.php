@@ -17,6 +17,7 @@ use App\AI6\Git\ControlOperationPhase;
 use App\AI6\Git\ControlOperationState;
 use App\AI6\Git\ControlOperationTerminalConflict;
 use App\AI6\Git\ControlOperationType;
+use App\AI6\Git\GitObjectFormat;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\ControlOperationResult;
 use App\AI6\Git\Models\TicketMutation;
@@ -27,6 +28,7 @@ use App\AI6\Projects\ProjectRole;
 use App\AI6\Reviews\ReviewerSlotFactory;
 use App\AI6\Runs\ApprovalClaimStarter;
 use App\AI6\Runs\ApprovalLimits;
+use App\AI6\Runs\ApprovalQueue;
 use App\AI6\Runs\ApprovalSelection;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ExecutionJobState;
@@ -40,6 +42,7 @@ use App\AI6\Runs\WaitReason;
 use App\AI6\Shared\Redaction\RedactionContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Feature\Tickets\TicketUiTestCase;
 
 /**
@@ -54,14 +57,22 @@ use Tests\Feature\Tickets\TicketUiTestCase;
  */
 final class ContractAmendmentExecutorTest extends TicketUiTestCase
 {
+    use AssertsGitObjectGuards;
     use BuildsManagedControlRuntimeFixture;
+
+    /** @return iterable<string, array{GitObjectFormat}> */
+    public static function objectFormats(): iterable
+    {
+        yield 'sha1' => [GitObjectFormat::SHA1];
+        yield 'sha256' => [GitObjectFormat::SHA256];
+    }
 
     /**
      * @return array{fixture: array<string, mixed>, run: Run, readModel: TicketReadModel, actor: User, path: string, content: string}
      */
-    private function amendableManagedRun(string $ticketId): array
+    private function amendableManagedRun(string $ticketId, GitObjectFormat $format = GitObjectFormat::SHA256): array
     {
-        $fixture = $this->managedFixture();
+        $fixture = $this->managedFixture($format);
         $relativePath = 'tickets/'.$ticketId.'.md';
         $todo = $this->validTicketMarkdown($ticketId, 'todo', '[]', 'Gebundener Runstart.');
         self::assertNotFalse(file_put_contents($fixture['source'].'/'.$relativePath, $todo));
@@ -116,6 +127,8 @@ final class ContractAmendmentExecutorTest extends TicketUiTestCase
         DB::table('jobs')->delete();
         $this->app->make(ControlOperationExecutor::class)->execute($approvalOperation->id);
         self::assertSame('complete', TicketApproval::query()->findOrFail($approvalId)->saga_phase);
+        $approval = TicketApproval::query()->findOrFail($approvalId);
+        $this->app->make(ApprovalQueue::class)->enqueue($fixture['project']->refresh(), $approvalId, $approval->version);
 
         $runStart = $this->app->make(ApprovalClaimStarter::class)->start(
             $operator,
@@ -153,13 +166,15 @@ final class ContractAmendmentExecutorTest extends TicketUiTestCase
         ];
     }
 
-    public function test_the_worker_publishes_the_amendment_and_rebinds_the_run(): void
+    #[DataProvider('objectFormats')]
+    public function test_the_worker_publishes_the_amendment_and_rebinds_the_run(GitObjectFormat $format): void
     {
+        $this->observeGitObjectGuards(['runs_amendment_update_guard']);
         if (DIRECTORY_SEPARATOR !== '/') {
             self::markTestSkipped('The real contract-amendment worker proof requires the POSIX process and effect-lock runtime.');
         }
 
-        $bound = $this->amendableManagedRun('AI6-AMEND-OK');
+        $bound = $this->amendableManagedRun('AI6-AMEND-OK', $format);
         $fixture = $bound['fixture'];
         $run = $bound['run'];
         $initialBase = $run->initial_run_base_sha;
@@ -223,6 +238,7 @@ final class ContractAmendmentExecutorTest extends TicketUiTestCase
         // prompt; the effective project configuration stayed byte-stable
         // because only the ticket file changed.
         self::assertSame($mutation->expected_target_blob_sha, $amended->ticket_blob_sha);
+        $this->assertGitObjectGuardsObserved(['runs_amendment_update_guard']);
         self::assertSame($mutation->target_contract_sha256, $amended->ticket_contract_sha256);
         self::assertSame($configHashBefore, (string) $amended->config_hash);
         self::assertSame($scopeHashBefore, (string) $amended->scope_hash);

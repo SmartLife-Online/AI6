@@ -1,6 +1,8 @@
-# AI6 – Implementierungsplan V1.7.10 – Ticket-Ready, Lean & Secure
+# AI6 – Implementierungsplan V1.7.11 – Ticket-Ready, Lean & Secure
 
-**Stand:** 24. September 2026
+**Stand:** 25. September 2026
+
+**Revision V1.7.11:** Auf ausdrückliche menschliche Freigabe vom 25. September 2026 wird Option 1 aus `docs/AI6-052_PROMPT_TOOLS_ENTSCHEIDUNGSANTRAG.md` aufgenommen. Der neue Blueprint `AI6-052` macht die drei vorhandenen manuellen Prompt-Funktionen unter `/prompts/help` ohne Login nutzbar. Die Ausnahme betrifft genau die projektunabhängige Bedienung des zentralen Promptkatalogs ohne fachliche Datenbankzugriffe und ohne LLM-/Providerwirkung; technische Websessions und CSRF bleiben erhalten, ein datenbankfreier HTTP-Betrieb wird nicht zugesagt. `UI-007` und die enge Ausnahme in `SEC-002` definieren den neuen Zugang. Der veröffentlichte Loginvertrag von `AI6-044` bleibt als Historie erkennbar und wird ausschließlich für diesen Zugang durch `AI6-052` abgelöst; seine übrigen Lieferzusagen, Evidenz-IDs, sein Detailticket und sein Status bleiben unverändert. Geschützte Projekt-, Ticket-, Run-, Agentenprofil-, Administrations- und HumanLoop-Funktionen sowie alle nicht abschaltbaren Kontrollen behalten ihre Grenzen. Der Backlog wächst von 57 auf 58 Blueprints; §14.1, §16 und §21 werden nachgeführt. Diese Freigabe beauftragt Plan und Detailableitung, nicht die Implementierung oder eine Gate-Abnahme.
 
 **Revision V1.7.10:** Auf ausdrückliche menschliche Produktentscheidung und Ticketbeauftragung vom 24. September 2026 ergänzt `AI6-051` die durchgängige Unterstützung von SHA-1- und SHA-256-Git-Repositories. Anlass ist der beim MG-01-Vorlauf von AI6-036 abgewiesene SHA-1-Control-OID des ausgewählten Testprojekts. Der neue Vertrag betrifft Git-Objekt-IDs und deren persistierte Bindungen; AI6-eigene SHA-256-Prüfsummen bleiben unverändert. Der Backlog wächst von 56 auf 57 Blueprints. Für diesen einen Kompatibilitätsauftrag werden die notwendigen konsumierenden OID-Verträge gemeinsam mit der Git-Naht und einer zusammenhängenden Schemafortschreibung angepasst; die Modulzahl allein erzwingt hier keinen Split nach §13.2, weil eine Teilauslieferung keine durchgängige Formatkompatibilität liefert. Neue Fachabläufe, unabhängige Migrationen oder zusätzliche Outcomes bleiben splitpflichtig. Frühere Verträge und Evidenz-IDs bleiben historisch erhalten; Ticketstatus und Gate-Ergebnisse werden nicht geändert. Diese Revision beauftragt die Planung, nicht die Implementierung.
 
@@ -298,11 +300,11 @@ Die IDs sind stabil. Detaillierte Tickets referenzieren diese IDs unter `spec_re
 - **UI-004** – Die Runansicht zeigt Phase, Sessions, geänderte Dateien, Diff, Checks, Findings, Security-Gate, Pushstatus und Interventionen.
 - **UI-005** – Eine Attention-Inbox zeigt offene Fragen, Freigaben, Limits und Securityentscheidungen mit ihrem Mailstatus.
 - **UI-006** – Das Panel zeigt die freigegebene Projektqueue, blockierende Abhängigkeiten und das nächste startbare Ticket.
-- **UI-007** – Ein globaler authentifizierter Promptarbeitsbereich zeigt statische und dynamische manuelle Prompts mit bearbeitbarer Eingabe, read-only Vorschau und einer expliziten Kopieraktion. Er ist auf Laptop und Smartphone ohne horizontales Scrollen bedienbar, meldet Clipboard-Erfolg nur nach bestätigtem Browsererfolg und bietet bei verweigerter oder fehlender Clipboard-API stattdessen die vollständig auswählbare Vorschau samt klarer manueller Kopieranweisung; die feste CSP wird weder durch Inline-Script noch durch `unsafe-inline` oder `unsafe-eval` gelockert.
+- **UI-007** – Ein globaler, ohne Login erreichbarer Promptarbeitsbereich zeigt statische und dynamische manuelle Prompts mit bearbeitbarer Eingabe, read-only Vorschau und einer expliziten Kopieraktion. Öffentlich sind ausschließlich die ausdrücklich freigegebenen projektunabhängigen Prompt-Funktionen ohne fachliche Datenbankzugriffe und ohne LLM-/Providerwirkung nach `AGT-011` und `SEC-002`; technische Websessions bleiben erhalten. Er ist auf Laptop und Smartphone ohne horizontales Scrollen bedienbar, meldet Clipboard-Erfolg nur nach bestätigtem Browsererfolg und bietet bei verweigerter oder fehlender Clipboard-API stattdessen die vollständig auswählbare Vorschau samt klarer manueller Kopieranweisung; die feste CSP wird weder durch Inline-Script noch durch `unsafe-inline` oder `unsafe-eval` gelockert.
 
 ### 3.10 Sicherheit
 - **SEC-001** – SecurityPolicy besitzt strict als Default sowie development/custom mit sichtbarer, explizit bestätigter Reduktion.
-- **SEC-002** – Webzugriff nutzt projektbezogene Autorisierung; privilegierte Rollen verwenden standardmäßig Passkey/TOTP und Step-up.
+- **SEC-002** – Webzugriff nutzt projektbezogene Autorisierung; privilegierte Rollen verwenden standardmäßig Passkey/TOTP und Step-up. Die ausdrücklich freigegebenen manuellen Prompt-Funktionen aus `AI6-052` sind als enge Ausnahme ohne Login erreichbar: Sie besitzen keinen Projektbezug, lesen oder verändern keine fachlichen Datenbankdaten und starten keine LLM-/Provideraufrufe. Technische Sessionverwaltung und gegebenenfalls Benutzerprüfung des bestehenden Webstacks bleiben zulässig; Prompt-Eingaben und dynamische Ergebnisse werden dabei nicht gespeichert. Diese Ausnahme gewährt weder Zugriff auf geschützte Funktionen noch eine pauschale Freigabe des gemeinsamen Livewire-Endpunkts und nimmt keine Kontrolle aus `SEC-004` aus.
 - **SEC-003** – Jede neue autorisierte Websession benötigt standardmäßig einen Code an AI6_LOGIN_CONFIRMATION_EMAIL; die Maßnahme ist nur per Env/Config abschaltbar.
 - **SEC-004** – CSRF, Pfad-/Ref-/JSON-Validierung, Shell-Injection-Schutz, Credentialtrennung, Anti-Replay und sichere Ausgabe sind nicht abschaltbar.
 - **SEC-005** – Agenten- und Checker-Sandbox fallen bei aktivierter Kontrolle geschlossen aus und können nicht durch Projektinhalt gelockert werden.
@@ -1290,6 +1292,7 @@ Erscheint eine neuere Major-, Minor- oder Patchversion einer dieser drei Laufzei
 55. AI6-037 — Migration des bisherigen Ticket-Prompt-Tools
 56. AI6-038 — Realer M169-Pilot und MVP-Abnahme
 57. AI6-051 — Git-Repositories im SHA-1- und SHA-256-Objektformat unterstützen
+58. AI6-052 — Öffentlicher Zugang zu manuellen Prompt-Tools
 ```
 
 Die Reihenfolge ist eine gültige Topologie, aber nicht jede unabhängige Arbeit muss künstlich seriell erfolgen. Innerhalb eines Meilensteins dürfen nur Tickets parallel entwickelt werden, deren `depends_on` vollständig erfüllt ist und die nicht denselben noch instabilen Vertrag definieren.
@@ -2172,6 +2175,8 @@ Zulässige Adapter-, Modell-, Rollen- und Effort-Kombinationen sowie den vor jed
 - **Requirement-Refs:** `AGT-008`, `AGT-011`, `UI-001`, `UI-007`, `SEC-004`, `SEC-007`
 - **Erwartete Module:** `Prompts`, `Shared`
 
+**Zugangsvertrag ab V1.7.11:** Der nachfolgend erhaltene ursprüngliche Vertrag verlangte eine vollständige Anmeldung. Ausschließlich diese Zugangsvoraussetzung einschließlich des Gast-Ausschlusses wird durch den Folgeauftrag `AI6-052` abgelöst. Zieltext, übrige Lieferung, Detailticket, veröffentlichte Evidenz-IDs und Status von `AI6-044` bleiben historisch erhalten; daraus folgt keine Gate-Abnahme.
+
 **Ziel**
 
 Einen globalen authentifizierten Promptarbeitsbereich bereitstellen, der statische und aus vollständigen Reviewantworten erzeugte Prompts für Codex- und Claude-Desktop-Sitzungen sicher in die Zwischenablage überträgt.
@@ -2214,6 +2219,52 @@ Einen globalen authentifizierten Promptarbeitsbereich bereitstellen, der statisc
 - Provideraufrufe, Sitzungsfortsetzung oder Übernahme in einen AI6-Run.
 - Freie Promptbearbeitung, Prompt-Historie oder Benutzer-/Projekttemplates.
 - Ein zweiter Promptkatalog, Renderer oder providerindividuelle Varianten derselben manuellen Prompts.
+
+### AI6-052 — Öffentlicher Zugang zu manuellen Prompt-Tools
+
+- **Initialstatus des späteren Detailtickets:** `todo`
+- **Risiko:** `medium`
+- **Kind:** `feature`
+- **Depends on:** `AI6-044`
+- **Requirement-Refs:** `AGT-008`, `AGT-011`, `UI-001`, `UI-007`, `SEC-002`, `SEC-004`, `SEC-007`
+- **Erwartete Module:** `Prompts`, `Shared`
+
+**Ziel**
+
+Die manuellen Prompt-Tools ohne fachliche Datenbankzugriffe und ohne LLM-Aufrufe für Gäste und angemeldete Benutzer unter der bestehenden Prompt-Hilfe ohne Login nutzbar machen.
+
+**Deliverables**
+
+- Öffentlicher GET-Zugang unter der bestehenden URL `/prompts/help` und dem bestehenden Routennamen `prompts.help`, mit erreichbarem Navigationseintrag auf der Loginseite und unverändertem Zugang für angemeldete Benutzer.
+- Gastbedienung der beiden statischen manuellen Prompts sowie der dynamischen Fixprompt-Erzeugung aus einer Reviewantwort über den bestehenden HTTP-/Livewire-Weg bis zur Vorschau und Kopieraktion; ausschließlich derselbe zentrale Katalog, Renderer und Extraktor.
+- Genau auf diese manuellen Funktionen begrenzte Zugangsfreigabe. Geschützte Projekt-, Ticket-, Run-, Agentenprofil-, Administrations- und HumanLoop-Funktionen bleiben geschützt; der gemeinsame Livewire-Endpunkt erhält keine pauschale Ausnahme, auch nicht für fremde Komponenten oder gemischte Anfragen.
+- Keine fachlichen Datenbankzugriffe, Queuejobs, Git-, Prozess-, Mail- oder Provideraufrufe der Prompt-Funktionen und keine Speicherung von Eingaben oder dynamischen Ergebnissen in Datenbank, Session, Cache oder Log. Technische Websessions für Livewire/CSRF und gegebenenfalls Benutzerprüfung im bestehenden Webstack bleiben zulässig und werden im Nachweis getrennt betrachtet.
+- Unveränderte zentrale UTF-8-/Redaction-, Größen-, Marker- und Ausgabekontrollen, CSRF, signierte Livewire-Snapshots, CSP sowie Host- und HTTPS-/Private-Access-Prüfung. Die neue Zugriffsfähigkeit ist keine Sicherheitsreduktion und besitzt keinen Abschaltschalter für diese Kontrollen.
+- Gast-Browsernachweis für Kopieren, ehrlichen Clipboard-Fallback und mobile Bedienung sowie Dokumentation der öffentlichen URL und der fortbestehenden technischen Sessionabhängigkeit.
+
+**Akzeptanzvertrag**
+
+- Ein frischer Gast erreicht die vollständige Prompt-Hilfe ohne Loginumleitung; angemeldete Benutzer erreichen sie weiterhin. Der öffentliche Einstieg ist auf der Loginseite sichtbar.
+- Ein realer Gast-GET mit anschließendem gültigem Livewire-POST erzeugt ausschließlich den zentral gerenderten dynamischen Prompt; beide statischen Vorschauen stimmen mit den Katalogbytes überein.
+- Ohne vollständige Anmeldung entstehen weder geschützte Datenzugriffe noch geschützte Aktionen über gewöhnliche Routen, fremde oder manipulierte Komponentensnapshots oder gemischte Livewire-Anfragen. Eine begonnene oder abgelaufene Anmeldung gewährt ebenfalls keine solchen Rechte.
+- Gültige und ungültige Gastverarbeitung bleiben ohne fachliche Datenbankzugriffe und ohne ausgehende Wirkungen; eingegebene Reviewantworten und dynamische Ergebnisse werden weder gespeichert noch geloggt. Technische Session-/Benutzerzugriffe allein sind kein Verstoß und dürfen nicht als datenbankfreier Betrieb ausgegeben werden.
+- Die bestehenden Fehler-, Redaction- und Grenzfälle liefern auch für Gäste sichere Ausgaben ohne Teilprompt oder falschen Kopiererfolg; `Nichts zu fixen.` bleibt ein Endzustand ohne Folgeprompt. CSRF-Verletzungen und manipulierte Snapshots werden abgewiesen.
+- Die feste CSP und übrigen HTTP-Kontrollen gelten unverändert. Kopieraktion, Fallback-Selektion und Laptop-/Smartphoneansicht funktionieren mit frischer Gastsitzung; übersprungene Browser-Smokes gelten nicht als bestanden.
+
+**Mindestens zu erzeugende Testfälle**
+
+- Routen-, Navigations- und tatsächlicher HTTP-/Livewire-Erfolgstest für Gast sowie Regression des angemeldeten Zugangs.
+- Negativtests für geschützte Routen, fehlenden/fremden CSRF-Nachweis, manipulierte und fremde geschützte Komponentensnapshots sowie gemischte Anfragen mit einer öffentlichen und einer geschützten Komponente.
+- Beobachtung fachlicher Lese- und Schreibzugriffe und ausgehender Wirkungen während gültiger und ungültiger Gastverarbeitung; ein unveränderter Tabellenzähler allein belegt keine Abwesenheit von Lesezugriffen. Technische Sessionverwaltung wird gesondert ausgewiesen.
+- Regressionen für Katalogbytes, terminale Marker, leere/mehrfache/fehlende Abschnitte, ungültiges UTF-8, zentrale Redaction, sichere HTML-Ausgabe, zulässige Höchstgröße und ein Byte darüber sowie `Nichts zu fixen.`.
+- Exakte öffentliche Routeninventur, bestehende HTTP-/CSRF-Architekturprüfungen und Gast-Browser-Smoke hinter dem bestehenden expliziten Flag für statische und dynamische Ausgabe, Clipboard-Erfolg, verweigerten Zugriff, vollständige Fallback-Selektion und mobile Breite.
+
+**Nicht Teil dieses Tickets**
+
+- Betrieb ohne Datenbank oder ein neuer Session-/Transportvertrag; technische Sessions und der zentrale serverseitige Renderer bleiben erhalten.
+- Öffentliche Ticket-, Projekt-, Run-, Agentenprofil-, Administrations- oder HumanLoop-Daten und -Aktionen sowie eine Veröffentlichung des Legacy-Backends `ticket-prompt/api.php`.
+- Neue Promptinhalte, ein zweiter Katalog/Renderer, LLM-Ausführung, Prompt-Historie oder automatische Steuerung der Desktop-Apps.
+- Änderungen am Detailticket, Status oder manuellen Abnahmegate von `AI6-044`.
 
 ### AI6-012 — Ticketprüfung, Approval-Snapshot und Multi-Reviewer-Auswahl
 
@@ -4112,10 +4163,10 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `AGT-005` | `AI6-016`, `AI6-032`, `AI6-040` |
 | `AGT-006` | `AI6-006A`, `AI6-015`, `AI6-045`, `AI6-047` |
 | `AGT-007` | `AI6-015`, `AI6-021`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-045`, `AI6-047`, `AI6-048` |
-| `AGT-008` | `AI6-011`, `AI6-012`, `AI6-016`, `AI6-019`, `AI6-044` |
+| `AGT-008` | `AI6-011`, `AI6-012`, `AI6-016`, `AI6-019`, `AI6-044`, `AI6-052` |
 | `AGT-009` | `AI6-011`, `AI6-012`, `AI6-015`, `AI6-016`, `AI6-019`, `AI6-020`, `AI6-023`, `AI6-028`, `AI6-032`, `AI6-033`, `AI6-034`, `AI6-041`, `AI6-042`, `AI6-046`, `AI6-048` |
 | `AGT-010` | `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-047`, `AI6-048`, `AI6-050` |
-| `AGT-011` | `AI6-044` |
+| `AGT-011` | `AI6-044`, `AI6-052` |
 | `RUN-001` | `AI6-013`, `AI6-017`, `AI6-039` |
 | `RUN-002` | `AI6-012`, `AI6-013`, `AI6-039` |
 | `RUN-003` | `AI6-017`, `AI6-019`, `AI6-021`, `AI6-022`, `AI6-025`, `AI6-027`, `AI6-045`, `AI6-046`, `AI6-047` |
@@ -4142,20 +4193,20 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `HUM-003` | `AI6-005A`, `AI6-018` |
 | `HUM-004` | `AI6-018`, `AI6-020`, `AI6-032` |
 | `HUM-005` | `AI6-020`, `AI6-026` |
-| `UI-001` | `AI6-008`, `AI6-018`, `AI6-031`, `AI6-044` |
+| `UI-001` | `AI6-008`, `AI6-018`, `AI6-031`, `AI6-044`, `AI6-052` |
 | `UI-002` | `AI6-008` |
 | `UI-003` | `AI6-012` |
 | `UI-004` | `AI6-017`, `AI6-019`, `AI6-024`, `AI6-031`, `AI6-040` |
 | `UI-005` | `AI6-018`, `AI6-026` |
 | `UI-006` | `AI6-030` |
-| `UI-007` | `AI6-044` |
+| `UI-007` | `AI6-044`, `AI6-052` |
 | `SEC-001` | `AI6-003` |
-| `SEC-002` | `AI6-004`, `AI6-005A`, `AI6-006C` |
+| `SEC-002` | `AI6-004`, `AI6-005A`, `AI6-006C`, `AI6-052` |
 | `SEC-003` | `AI6-005A` |
-| `SEC-004` | `AI6-003`, `AI6-004`, `AI6-005B`, `AI6-010`, `AI6-044` |
+| `SEC-004` | `AI6-003`, `AI6-004`, `AI6-005B`, `AI6-010`, `AI6-044`, `AI6-052` |
 | `SEC-005` | `AI6-015`, `AI6-021`, `AI6-033`, `AI6-034`, `AI6-035`, `AI6-041`, `AI6-042`, `AI6-045`, `AI6-046`, `AI6-047`, `AI6-048` |
 | `SEC-006` | `AI6-006A`, `AI6-051` |
-| `SEC-007` | `AI6-003`, `AI6-005B`, `AI6-006F`, `AI6-021`, `AI6-031`, `AI6-044`, `AI6-045` |
+| `SEC-007` | `AI6-003`, `AI6-005B`, `AI6-006F`, `AI6-021`, `AI6-031`, `AI6-044`, `AI6-045`, `AI6-052` |
 | `SEC-008` | `AI6-028`, `AI6-032`, `AI6-050` |
 | `SEC-009` | `AI6-027`, `AI6-028`, `AI6-051` |
 | `SEC-010` | `AI6-049` |
@@ -4296,10 +4347,12 @@ Der MVP ist erreicht, wenn:
 
 ## 21. Kurzbegründung der Ticketanzahl
 
-57 Tickets sind für den Funktionsumfang bewusst kleiner als die bisherigen zehn Pakete, aber keine künstlichen Mikrotickets. Jeder Blueprint bildet eine reviewbare Grenze: Datenvertrag, vertikaler Benutzerfluss oder sicherheitsrelevante technische Naht. Die fünf mit V1.7.0 ergänzten Blueprints folgen demselben Schnitt: zwei für den Review-only-Modus (Statusvertrag getrennt von Quellbindung und Bedienung), zwei für die neuen Provideradapter (je CLI ein eigenständig testbarer Adapter) und einer für die providerunabhängige Verifier-Orchestrierung. `AI6-044` ergänzt als eigener manueller Benutzerfluss ausschließlich die Clipboard-Bedienung des zentralen Promptkatalogs und bleibt von Provider- und Runwirkung getrennt. `AI6-045` folgt demselben Schnitt als sicherheitsrelevante technische Naht: Die Definition eines Checks und sein rollenrichtiger Vollzug sind getrennt reviewbar, weil der Vollzug eigene Container-, Mount- und Wartezustandsverträge berührt, die die Profildefinition nicht kennt. Ein Ticket darf während der Detailerzeugung weiter gesplittet werden, aber nur über eine explizite Planrevision; ein stilles Zusammenlegen mehrerer Blueprints ist nicht zulässig.
+58 Tickets sind für den Funktionsumfang bewusst kleiner als die bisherigen zehn Pakete, aber keine künstlichen Mikrotickets. Jeder Blueprint bildet eine reviewbare Grenze: Datenvertrag, vertikaler Benutzerfluss oder sicherheitsrelevante technische Naht. Die fünf mit V1.7.0 ergänzten Blueprints folgen demselben Schnitt: zwei für den Review-only-Modus (Statusvertrag getrennt von Quellbindung und Bedienung), zwei für die neuen Provideradapter (je CLI ein eigenständig testbarer Adapter) und einer für die providerunabhängige Verifier-Orchestrierung. `AI6-044` ergänzt als eigener manueller Benutzerfluss ausschließlich die Clipboard-Bedienung des zentralen Promptkatalogs und bleibt von Provider- und Runwirkung getrennt. `AI6-045` folgt demselben Schnitt als sicherheitsrelevante technische Naht: Die Definition eines Checks und sein rollenrichtiger Vollzug sind getrennt reviewbar, weil der Vollzug eigene Container-, Mount- und Wartezustandsverträge berührt, die die Profildefinition nicht kennt. Ein Ticket darf während der Detailerzeugung weiter gesplittet werden, aber nur über eine explizite Planrevision; ein stilles Zusammenlegen mehrerer Blueprints ist nicht zulässig.
 
 `AI6-048` ist eine ausdrücklich beauftragte Nachlieferung zur fehlenden Umsetzung von `AI6-042`. Adapter, Doctor, Testdouble und Smoke beweisen gemeinsam genau eine Providergrenze und werden nicht in parallele Implementierungen aufgeteilt. Die frühere Konfigurationslieferung bleibt erhalten; eine neue gemeinsame Mount-/Namespacegrenze gehört ausdrücklich nicht zu diesem Korrekturauftrag. Claude-Modellprofile aus `AI6-034` konsumieren erst danach diese eine Copilot-Naht.
 
 `AI6-049` trennt nach §13.2 Backup, Restore und Disaster Recovery von Installation und Doctor in `AI6-036`: Beide Teile sind unabhängig auslieferbar, zurückrollbar und testbar und berühren keine gemeinsame instabile Naht. `AI6-050` schließt die Lücke zwischen dem Fake-gebundenen Securitygate aus `AI6-028` und der ersten Providerstufe über genau die eine bestehende Copilot-Naht; ohne ihn könnte ein strict betriebener Pilot die aktive Maßnahme nur mit dem FakeAgent erfüllen.
 
 `AI6-051` erweitert einen bestehenden Git-Objektformatvertrag atomar über seine Verbraucher. Die in V1.7.10 ausdrücklich begrenzte Modul-Ausnahme erlaubt keine zusätzlichen Fachabläufe; ein allein freigeschalteter SHA-1-Clone ohne funktionsfähige nachgelagerte Bindungen wäre keine auslieferbare Fähigkeit.
+
+`AI6-052` erweitert den bestehenden manuellen Benutzerfluss aus `AI6-044` um genau eine neue Zugriffsfähigkeit: Nutzung ohne Login bei weiterhin geschützten fachlichen Daten und Aktionen. Technische Websessions, zentrale Promptverarbeitung und Sicherheitskontrollen bleiben erhalten; ein neuer Session- oder Transportvertrag gehört nicht dazu.

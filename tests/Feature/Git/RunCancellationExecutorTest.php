@@ -33,12 +33,14 @@ use App\AI6\Projects\ProjectRole;
 use App\AI6\Reviews\ReviewerSlotFactory;
 use App\AI6\Runs\ApprovalClaimStarter;
 use App\AI6\Runs\ApprovalLimits;
+use App\AI6\Runs\ApprovalQueue;
 use App\AI6\Runs\ApprovalSelection;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ExecutionStepType;
 use App\AI6\Runs\Jobs\ExecuteRunStep;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
+use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\RunCancellationMode;
 use App\AI6\Runs\RunCancellationService;
 use App\AI6\Runs\RunOrchestrator;
@@ -354,6 +356,8 @@ final class RunCancellationExecutorTest extends TicketUiTestCase
         DB::table('jobs')->delete();
         $this->app->make(ControlOperationExecutor::class)->execute($approvalOperation->id);
 
+        $approval = TicketApproval::query()->findOrFail($approvalId);
+        $this->app->make(ApprovalQueue::class)->enqueue($fixture['project']->refresh(), $approvalId, $approval->version);
         $runStart = $this->app->make(ApprovalClaimStarter::class)->start(
             $operator,
             $fixture['project']->refresh(),

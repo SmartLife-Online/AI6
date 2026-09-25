@@ -380,7 +380,7 @@ final class HardenedGitRunner
         RedactionContext $redactionContext,
     ): ProcessResult {
         $this->assertOid($fromCommit);
-        $this->assertOid($toCommit);
+        $this->assertSameFormat($fromCommit, $toCommit);
 
         return $this->runRepositoryCommand($repository, [
             'diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--raw', '-z', '--no-abbrev', $fromCommit, $toCommit,
@@ -400,7 +400,7 @@ final class HardenedGitRunner
         RedactionContext $redactionContext,
     ): ProcessResult {
         $this->assertOid($fromCommit);
-        $this->assertOid($toCommit);
+        $this->assertSameFormat($fromCommit, $toCommit);
 
         return $this->runRepositoryCommand($repository, [
             'diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--no-color', '--patch', '--unified=3', '--full-index', $fromCommit, $toCommit,
@@ -479,7 +479,8 @@ final class HardenedGitRunner
         foreach (explode("\0", substr($result->output, 0, -1)) as $record) {
             $tab = strpos($record, "\t");
             if ($tab === false
-                || preg_match('/\A([0-7]{6}) (blob|tree|commit) ([0-9a-f]{64})\z/D', substr($record, 0, $tab), $matches) !== 1) {
+                || preg_match('/\A([0-7]{6}) (blob|tree|commit) ([0-9a-f]{'.strlen($treeOid).'})\z/D', substr($record, 0, $tab), $matches) !== 1
+                || ! GitObjectFormat::fromOid($treeOid)->validOid($matches[3])) {
                 throw new RuntimeException('Git returned a malformed run tree entry.');
             }
             $name = substr($record, $tab + 1);
@@ -526,6 +527,20 @@ final class HardenedGitRunner
         $this->remotePolicy->validateRef($ref);
 
         return $this->resolveRepositoryRef($repository, $ref, $redactionContext);
+    }
+
+    public function objectFormat(string $repository, RedactionContext $redactionContext): GitObjectFormat
+    {
+        $result = $this->runRepositoryCommand($repository, ['rev-parse', '--show-object-format=storage'], $redactionContext);
+        if (! $result->succeeded()) {
+            throw new RuntimeException('The repository storage format could not be confirmed.');
+        }
+
+        return match ($result->output) {
+            "sha1\n", "sha1\r\n" => GitObjectFormat::SHA1,
+            "sha256\n", "sha256\r\n" => GitObjectFormat::SHA256,
+            default => throw new InvalidArgumentException('The repository storage format is invalid.'),
+        };
     }
 
     public function resolveAttemptRef(string $repository, string $attemptRef, RedactionContext $redactionContext): ProcessResult
@@ -586,7 +601,8 @@ final class HardenedGitRunner
         }
         $metadata = substr($record, 0, $tab);
         $returnedPath = substr($record, $tab + 1);
-        if (preg_match('/\A(100644|100755) blob ([0-9a-f]{64})\z/D', $metadata, $matches) !== 1
+        if (preg_match('/\A(100644|100755) blob ([0-9a-f]{'.strlen($controlCommit).'})\z/D', $metadata, $matches) !== 1
+            || ! GitObjectFormat::fromOid($controlCommit)->validOid($matches[2])
             || ! hash_equals($relativePath, $returnedPath)) {
             throw new ControlOperationTerminalConflict(
                 'refresh_path_not_regular_blob',
@@ -655,7 +671,8 @@ final class HardenedGitRunner
         foreach (explode("\0", substr($result->output, 0, -1)) as $record) {
             $tab = strpos($record, "\t");
             if ($tab === false
-                || preg_match('/\A([0-7]{6}) (blob|tree|commit) ([0-9a-f]{64})\z/D', substr($record, 0, $tab), $matches) !== 1) {
+                || preg_match('/\A([0-7]{6}) (blob|tree|commit) ([0-9a-f]{'.strlen($controlCommit).'})\z/D', substr($record, 0, $tab), $matches) !== 1
+                || ! GitObjectFormat::fromOid($controlCommit)->validOid($matches[3])) {
                 throw new ControlOperationTerminalConflict(
                     'refresh_tree_inventory_malformed',
                     'Git lieferte eine ungültige Bauminventur.',
@@ -784,7 +801,7 @@ final class HardenedGitRunner
         $this->remotePolicy->validateRef($ref);
         $this->assertOid($targetOid);
         if ($expectedOid !== null) {
-            $this->assertOid($expectedOid);
+            $this->assertSameFormat($targetOid, $expectedOid);
         }
         $variables = $this->environment->variables();
         $preflight = $this->repositoryConfiguration($repository, $variables, $redactionContext);
@@ -796,7 +813,7 @@ final class HardenedGitRunner
             '-c', 'core.logAllRefUpdates=false',
             'update-ref', '--no-deref', $ref, $targetOid,
         ];
-        $command[] = $expectedOid ?? str_repeat('0', 64);
+        $command[] = $expectedOid ?? GitObjectFormat::fromOid($targetOid)->zeroOid();
 
         return $this->processes->run($this->request($command, $repository, $variables, $redactionContext));
     }
@@ -831,7 +848,8 @@ final class HardenedGitRunner
         foreach ($result->output === '' ? [] : explode("\0", substr($result->output, 0, -1)) as $record) {
             $tab = strpos($record, "\t");
             if ($tab === false
-                || preg_match('/\A(100644|100755|120000|160000) (blob|commit) ([0-9a-f]{64})\z/D', substr($record, 0, $tab), $matches) !== 1) {
+                || preg_match('/\A(100644|100755|120000|160000) (blob|commit) ([0-9a-f]{'.strlen($parentOid).'})\z/D', substr($record, 0, $tab), $matches) !== 1
+                || ! GitObjectFormat::fromOid($parentOid)->validOid($matches[3])) {
                 throw new RuntimeException('The parent tree contains a malformed leaf entry.');
             }
             $path = substr($record, $tab + 1);
@@ -847,12 +865,13 @@ final class HardenedGitRunner
             throw new TicketMutationGitConflict('ticket_path_not_regular_blob', 'Die Ticketdatei ist kein regulärer Blob.');
         }
 
-        $blobOid = hash('sha256', 'blob '.strlen($content)."\0".$content);
+        $format = GitObjectFormat::fromOid($parentOid);
+        $blobOid = $format->objectId('blob', $content);
         $this->replaceTreeLeaf($root, explode('/', $relativePath), $targetMode, $blobOid);
 
         return [
             'blob_oid' => $blobOid,
-            'tree_oid' => $this->treeOid($root),
+            'tree_oid' => $this->treeOid($root, $format),
             'mode' => $targetMode,
         ];
     }
@@ -869,8 +888,7 @@ final class HardenedGitRunner
         RedactionContext $redactionContext,
     ): void {
         $this->assertOid($parentOid);
-        $this->assertOid($expectedBlobOid);
-        $this->assertOid($expectedTreeOid);
+        $this->assertSameFormat($parentOid, $expectedBlobOid, $expectedTreeOid);
         if (! in_array($mode, ['100644', '100755'], true)
             || RefreshPathPolicy::canonicalBasePath($relativePath) !== $relativePath) {
             throw new InvalidArgumentException('The ticket mutation tree contract is invalid.');
@@ -961,7 +979,7 @@ final class HardenedGitRunner
                 : ['update-index', '--add', '--cacheinfo', $mode.','.$oid.','.$path];
             if (! str_starts_with($status, 'D')
                 && (! in_array($mode, ['100644', '100755', '120000', '160000'], true)
-                    || preg_match('/\A[0-9a-f]{64}\z/D', $oid) !== 1)) {
+                    || ! GitObjectFormat::fromOid($baseOid)->validOid($oid))) {
                 throw new RuntimeException('The candidate diff contains an unsupported object binding.');
             }
             if (! $run($arguments)->succeeded()) {
@@ -971,7 +989,7 @@ final class HardenedGitRunner
 
         $tree = $run(['write-tree']);
         $oid = trim($tree->output);
-        if (! $tree->succeeded() || preg_match('/\A[0-9a-f]{64}\z/D', $oid) !== 1) {
+        if (! $tree->succeeded() || ! GitObjectFormat::fromOid($baseOid)->validOid($oid)) {
             throw new RuntimeException('The candidate tree could not be written.');
         }
 
@@ -990,7 +1008,7 @@ final class HardenedGitRunner
         RedactionContext $redactionContext,
     ): string {
         $this->assertOid($treeOid);
-        $this->assertOid($parentOid);
+        $this->assertSameFormat($treeOid, $parentOid);
         if ($authorName === '' || $authorEmail === '' || str_contains($authorName.$authorEmail, "\n")) {
             throw new InvalidArgumentException('The trusted Git author identity is invalid.');
         }
@@ -1014,7 +1032,7 @@ final class HardenedGitRunner
             '-c', 'commit.gpgSign=false', 'commit-tree', $treeOid, '-p', $parentOid, '-F', $messagePath,
         ], $repository, $variables, $redactionContext));
         $oid = trim($commit->output);
-        if (! $commit->succeeded() || ! $this->validOid($oid)) {
+        if (! $commit->succeeded() || ! GitObjectFormat::fromOid($parentOid)->validOid($oid)) {
             throw new RuntimeException('The ticket mutation commit could not be created.');
         }
 
@@ -1047,9 +1065,11 @@ final class HardenedGitRunner
             $lines,
             static fn (string $line): bool => str_starts_with($line, 'parent '),
         ));
-        if (preg_match('/\Atree ([0-9a-f]{64})\z/D', $tree, $treeMatch) !== 1
+        if (preg_match('/\Atree ([0-9a-f]{'.strlen($commitOid).'})\z/D', $tree, $treeMatch) !== 1
             || count($parents) !== 1
-            || preg_match('/\Aparent ([0-9a-f]{64})\z/D', $parents[0], $parentMatch) !== 1) {
+            || preg_match('/\Aparent ([0-9a-f]{'.strlen($commitOid).'})\z/D', $parents[0], $parentMatch) !== 1
+            || ! GitObjectFormat::fromOid($commitOid)->validOid($treeMatch[1])
+            || ! GitObjectFormat::fromOid($commitOid)->validOid($parentMatch[1])) {
             throw new TicketMutationGitConflict(
                 'prepared_commit_shape_mismatch',
                 'Der vorbereitete Mutationscommit besitzt nicht genau den gebundenen Tree und Parent.',
@@ -1066,7 +1086,7 @@ final class HardenedGitRunner
         RedactionContext $redactionContext,
     ): bool {
         $this->assertOid($ancestorOid);
-        $this->assertOid($descendantOid);
+        $this->assertSameFormat($ancestorOid, $descendantOid);
         $variables = $this->environment->variables();
         $preflight = $this->repositoryConfiguration($repository, $variables, $redactionContext);
         if ($preflight instanceof ProcessResult) {
@@ -1098,8 +1118,10 @@ final class HardenedGitRunner
         RedactionContext $redactionContext,
     ): ProcessResult {
         $validated = $this->remotePolicy->validate($remote, $ref, $knownHosts, $expectedHostKeyFingerprint);
-        $this->assertOid($expectedParent);
         $this->assertOid($commitOid);
+        if (! GitObjectFormat::fromOid($commitOid)->validOid($expectedParent, allowZero: true)) {
+            throw new InvalidArgumentException('The expected remote object identifier is invalid.');
+        }
         $variables = $this->environment->variables($privateKey, $knownHosts);
         $preflight = $this->repositoryConfiguration($repository, $variables, $redactionContext);
         if ($preflight instanceof ProcessResult) {
@@ -1152,7 +1174,7 @@ final class HardenedGitRunner
         return $this->processes->run($this->request([
             ...$this->environment->commandPrefix(), ...$preflight,
             '-c', 'core.logAllRefUpdates=false',
-            'update-ref', '--no-deref', $attemptRef, $commitOid, str_repeat('0', 64),
+            'update-ref', '--no-deref', $attemptRef, $commitOid, GitObjectFormat::fromOid($commitOid)->zeroOid(),
         ], $repository, $variables, $redactionContext));
     }
 
@@ -1208,16 +1230,16 @@ final class HardenedGitRunner
     }
 
     /** @param array<string, array<string, mixed>> $node */
-    private function treeOid(array $node): string
+    private function treeOid(array $node, GitObjectFormat $format): string
     {
         $entries = [];
         foreach ($node as $name => $value) {
             $leaf = ($value['leaf'] ?? null) === true;
             $oid = $leaf
                 ? ($value['oid'] ?? null)
-                : (is_array($value['children'] ?? null) ? $this->treeOid($value['children']) : null);
+                : (is_array($value['children'] ?? null) ? $this->treeOid($value['children'], $format) : null);
             $mode = $leaf ? ($value['mode'] ?? null) : '40000';
-            if (! is_string($oid) || ! $this->validOid($oid) || ! is_string($mode)) {
+            if (! is_string($oid) || ! $format->validOid($oid) || ! is_string($mode)) {
                 throw new RuntimeException('The planned mutation tree is malformed.');
             }
             $entries[] = ['name' => $name, 'sort' => $name.($leaf ? '' : '/'), 'mode' => $mode, 'oid' => $oid];
@@ -1232,7 +1254,7 @@ final class HardenedGitRunner
             $bytes .= $entry['mode'].' '.$entry['name']."\0".$binaryOid;
         }
 
-        return hash('sha256', 'tree '.strlen($bytes)."\0".$bytes);
+        return $format->objectId('tree', $bytes);
     }
 
     private function writePrivateAttemptFile(string $path, string $content): void
@@ -1467,6 +1489,16 @@ final class HardenedGitRunner
 
     private function validOid(string $oid): bool
     {
-        return preg_match('/\A[0-9a-f]{64}\z/D', $oid) === 1;
+        return GitObjectFormat::tryFromOid($oid) !== null;
+    }
+
+    private function assertSameFormat(string $boundOid, string ...$oids): void
+    {
+        $format = GitObjectFormat::fromOid($boundOid);
+        foreach ($oids as $oid) {
+            if (! $format->validOid($oid)) {
+                throw new InvalidArgumentException('The Git object identifiers have incompatible formats.');
+            }
+        }
     }
 }

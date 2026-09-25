@@ -47,6 +47,7 @@ use Tests\Feature\Tickets\TicketUiTestCase;
  */
 final class ContractAmendmentTest extends TicketUiTestCase
 {
+    use AssertsGitObjectGuards;
     use BuildsHumanRequestFixture;
 
     /** @param list<string> $files */
@@ -316,6 +317,7 @@ final class ContractAmendmentTest extends TicketUiTestCase
     /** TC-08 (DB half): only run_base_sha moves; approval and initial_run_base_sha stay. */
     public function test_apply_contract_amendment_moves_only_the_run_base_and_invalidates_evidence(): void
     {
+        $this->observeGitObjectGuards(['runs_amendment_update_guard']);
         $fixture = $this->amendableRun('AI6-020-AMEND-APPLY');
         $run = $fixture['run'];
         $orchestrator = $this->app->make(RunOrchestrator::class);
@@ -349,6 +351,7 @@ final class ContractAmendmentTest extends TicketUiTestCase
         self::assertSame($newBase, $amended->run_base_sha);
         self::assertSame($initialBase, $amended->initial_run_base_sha);
         self::assertSame(str_repeat('1', 64), $amended->ticket_blob_sha);
+        $this->assertGitObjectGuardsObserved(['runs_amendment_update_guard']);
         self::assertSame(str_repeat('2', 64), $amended->ticket_contract_sha256);
         self::assertSame(['app/Example.php', 'app/New.php'], $amended->scope_snapshot['ticket_files']);
         // The recomputed effective scope carries the amended initial scope plus

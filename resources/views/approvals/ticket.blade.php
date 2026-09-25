@@ -46,14 +46,14 @@
             <label>Laufart <select name="run_type" wire:model.live="runType" required><option value="implementation">Implementierung</option><option value="review_only">Nur Review</option></select></label>
             @if ($runType === 'review_only')
                 <label>Quellart <select name="review_subject_kind" wire:model.live="reviewSubjectKind" required><option value="managed_branch">Verwalteter Branch</option><option value="commit_range">Commit-Range</option><option value="single_commit">Einzelcommit</option><option value="validated_patch">Validierter Patch</option><option value="checkpoint">Vorhandener Checkpoint</option></select></label>
-                <label>Gebundene Basis-OID <input name="review_base_oid" wire:model.live="reviewBaseOid" required pattern="[0-9a-f]{64}" maxlength="64"></label>
-                <label>Quell-OID <input name="review_source_oid" wire:model.live="reviewSourceOid" required pattern="[0-9a-f]{64}" maxlength="64"></label>
+                <label>Gebundene Basis-OID <input name="review_base_oid" wire:model.live="reviewBaseOid" required pattern="{{ '[0-9a-f]{'.($project->object_format?->length() ?? 0).'}' }}" maxlength="{{ $project->object_format?->length() ?? 0 }}"></label>
+                <label>Quell-OID <input name="review_source_oid" wire:model.live="reviewSourceOid" required pattern="{{ '[0-9a-f]{'.($project->object_format?->length() ?? 0).'}' }}" maxlength="{{ $project->object_format?->length() ?? 0 }}"></label>
                 @if ($reviewSubjectKind === 'managed_branch')
                     <label>Verwaltete Ref <input name="review_source_ref" wire:model.live="reviewSourceRef" required maxlength="1024"></label>
                 @endif
                 @if (in_array($reviewSubjectKind, ['validated_patch', 'checkpoint'], true))
                     <label>Quell-Run-ID <input name="review_source_run_id" wire:model.live="reviewSourceRunId" required></label>
-                    <label>Gebundene Tree-OID <input name="review_tree_oid" wire:model.live="reviewTreeOid" required pattern="[0-9a-f]{64}" maxlength="64"></label>
+                    <label>Gebundene Tree-OID <input name="review_tree_oid" wire:model.live="reviewTreeOid" required pattern="{{ '[0-9a-f]{'.($project->object_format?->length() ?? 0).'}' }}" maxlength="{{ $project->object_format?->length() ?? 0 }}"></label>
                     <label>Gebundener Diff-Hash <input name="review_diff_hash" wire:model.live="reviewDiffHash" required pattern="[0-9a-f]{64}" maxlength="64"></label>
                 @endif
                 <label>Abschlussmodus <select name="completion_mode" wire:model.live="completionMode" required><option value="manual">Manuell bestätigen</option><option value="automatic_after_gates">Automatisch nach Gates</option></select></label>

@@ -6,7 +6,9 @@ use App\AI6\Auth\Models\User;
 use App\AI6\Git\ControlOperationConfiguration;
 use App\AI6\Git\ControlOperationExecutor;
 use App\AI6\Git\ControlOperationRecoveryProcessor;
+use App\AI6\Git\ControlRemoteProbe;
 use App\AI6\Git\GitConfiguration;
+use App\AI6\Git\GitObjectFormat;
 use App\AI6\Git\GitRemotePolicy;
 use App\AI6\Git\HardenedGitEnvironment;
 use App\AI6\Git\HardenedGitRunner;
@@ -36,7 +38,7 @@ trait BuildsManagedControlRuntimeFixture
      *     lease: ProjectOperationLease
      * }
      */
-    protected function managedFixture(): array
+    protected function managedFixture(GitObjectFormat $format = GitObjectFormat::SHA256): array
     {
         $administrator = $this->createUser(['is_global_admin' => true]);
         $project = $this->registeredProject($administrator);
@@ -44,7 +46,7 @@ trait BuildsManagedControlRuntimeFixture
         $remote = $root.'/remote.git';
         $source = $root.'/source';
         self::assertTrue(mkdir($source, 0700));
-        (new Process(['git', 'init', '--object-format=sha256', '--initial-branch=main'], $source))->mustRun();
+        (new Process(['git', 'init', '--object-format='.$format->value, '--initial-branch=main'], $source))->mustRun();
         $this->managedFixtureGit(['config', 'user.name', 'AI6 Test'], $source);
         $this->managedFixtureGit(['config', 'user.email', 'ai6@example.invalid'], $source);
         self::assertTrue(mkdir($source.'/tickets', 0700));
@@ -55,7 +57,7 @@ trait BuildsManagedControlRuntimeFixture
         $this->managedFixtureGit(['commit', '-m', 'first'], $source);
         $firstOid = trim($this->managedFixtureGit(['rev-parse', 'HEAD'], $source));
         self::assertTrue(mkdir($remote, 0700));
-        $this->managedFixtureGit(['init', '--bare', '--object-format=sha256'], $remote);
+        $this->managedFixtureGit(['init', '--bare', '--object-format='.$format->value], $remote);
         $this->managedFixtureGit(['push', $remote, 'refs/heads/main:refs/heads/main'], $source);
 
         $keyBytes = random_bytes(48);
@@ -139,6 +141,7 @@ SH)));
         $this->app->instance(GitRemotePolicy::class, $policy);
         $this->app->instance(HardenedGitRunner::class, $runner);
         foreach ([
+            ControlRemoteProbe::class,
             ManagedCloneSynchronizer::class,
             TicketReadModelRefresher::class,
             ControlOperationRecoveryProcessor::class,

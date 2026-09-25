@@ -21,6 +21,7 @@ final class TicketReadModelRefreshWebTest extends ControlOperationTestCase
         $project->forceFill([
             'provisioning_status' => ProjectProvisioningStatus::PROVISIONED,
             'control_oid' => str_repeat('a', 64),
+            'object_format' => 'sha256',
         ])->save();
         $operationId = (string) Str::uuid();
 
@@ -68,6 +69,7 @@ final class TicketReadModelRefreshWebTest extends ControlOperationTestCase
         $project->forceFill([
             'provisioning_status' => ProjectProvisioningStatus::PROVISIONED,
             'control_oid' => str_repeat('a', 64),
+            'object_format' => 'sha256',
         ])->save();
 
         $this->actingAs($operator)->from(route('projects.show', $project))->post(
@@ -98,6 +100,7 @@ final class TicketReadModelRefreshWebTest extends ControlOperationTestCase
         $project->forceFill([
             'provisioning_status' => ProjectProvisioningStatus::PROVISIONED,
             'control_oid' => str_repeat('a', 64),
+            'object_format' => 'sha256',
         ])->save();
 
         $this->actingAs($administrator)->post(route('projects.ticket-read-model.refresh', $project), [

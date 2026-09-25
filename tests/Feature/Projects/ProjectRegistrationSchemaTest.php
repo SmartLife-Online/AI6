@@ -31,6 +31,7 @@ final class ProjectRegistrationSchemaTest extends ProjectRegistrationTestCase
             'pending_control_ref',
             'pending_control_oid',
             'pending_control_operation_id',
+            'object_format',
         ];
 
         foreach ($expected as $column) {
@@ -51,6 +52,7 @@ final class ProjectRegistrationSchemaTest extends ProjectRegistrationTestCase
         self::assertNull($project->operation_lock_lease_expires_at);
         self::assertNull($project->operation_lock_heartbeat_at);
         self::assertNull($project->control_oid);
+        self::assertNull($project->object_format);
         self::assertNull($project->pending_control_ref);
         self::assertNull($project->pending_control_oid);
         self::assertNull($project->pending_control_operation_id);

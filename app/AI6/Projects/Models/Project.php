@@ -2,6 +2,7 @@
 
 namespace App\AI6\Projects\Models;
 
+use App\AI6\Git\GitObjectFormat;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Projects\ProjectProvisioningStatus;
 use App\AI6\Runs\Models\Run;
@@ -28,6 +29,7 @@ use Illuminate\Support\Carbon;
  * @property int $operation_lock_attempt_token
  * @property int $control_generation
  * @property string|null $control_oid
+ * @property GitObjectFormat|null $object_format
  * @property int $control_binding_version
  * @property string|null $pending_control_ref
  * @property string|null $pending_control_oid
@@ -56,6 +58,7 @@ final class Project extends Model
         'provisioning_operation_id',
         'control_generation',
         'control_oid',
+        'object_format',
         'control_binding_version',
         'pending_control_ref',
         'pending_control_oid',
@@ -97,6 +100,7 @@ final class Project extends Model
     protected function casts(): array
     {
         return [
+            'object_format' => GitObjectFormat::class,
             'provisioning_status' => ProjectProvisioningStatus::class,
             'operation_lock_lease_expires_at' => 'datetime',
             'operation_lock_heartbeat_at' => 'datetime',

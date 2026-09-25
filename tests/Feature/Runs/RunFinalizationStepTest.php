@@ -14,6 +14,7 @@ use App\AI6\Checks\CheckRunner;
 use App\AI6\Checks\Models\CheckResultRecord;
 use App\AI6\Git\ControlOperationConfiguration;
 use App\AI6\Git\ManagedProjectPath;
+use App\AI6\Git\PublishCandidateException;
 use App\AI6\HumanLoop\Http\HumanRequestAnswerController;
 use App\AI6\HumanLoop\HumanRequestRejected;
 use App\AI6\HumanLoop\HumanRequestService;
@@ -46,12 +47,16 @@ use App\AI6\Shared\Security\SecurityPolicy;
 use App\AI6\Shared\Security\SecurityPolicyFactory;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Http\Request;
+use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use PHPUnit\Framework\Attributes\DataProvider;
+use ReflectionMethod;
+use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
 use Tests\Feature\Checks\BuildsCheckFixture;
 use Tests\Feature\Reviews\BuildsReviewRoundFixture;
@@ -73,11 +78,14 @@ final class RunFinalizationStepTest extends TicketUiTestCase
         $identifier = (string) $run->project()->value('project_identifier');
 
         $this->reviewAdapter([$this->reviewSlotIds[0] => AgentScenario::FINDINGS]);
-        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReviewRound($run, 1)->state);
-        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeFix($run, 1)->state);
+        $firstReview = $this->executeReviewRound($run, 1);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $firstReview->state, (string) $firstReview->failure_code);
+        $fix = $this->executeFix($run, 1);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $fix->state, (string) $fix->failure_code);
         $run = $this->completeCheckRound($run, $identifier, 2);
         $adapter = $this->reviewAdapter([]);
-        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReviewRound($run, 2)->state);
+        $secondReview = $this->executeReviewRound($run, 2);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $secondReview->state, (string) $secondReview->failure_code);
         $run = $this->seedBeforeReviewCheck($run->fresh());
         $reviewEvidenceBefore = [
             'results' => ReviewResult::query()->where('run_id', $run->id)->orderBy('id')->pluck('id')->all(),
@@ -145,11 +153,14 @@ final class RunFinalizationStepTest extends TicketUiTestCase
         $run = $this->withoutBoundChecks($prepared['run']);
         $identifier = (string) $run->project()->value('project_identifier');
         $this->reviewAdapter([$this->reviewSlotIds[0] => AgentScenario::FINDINGS]);
-        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReviewRound($run, 1)->state);
-        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeFix($run, 1)->state);
+        $firstReview = $this->executeReviewRound($run, 1);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $firstReview->state, (string) $firstReview->failure_code);
+        $fix = $this->executeFix($run, 1);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $fix->state, (string) $fix->failure_code);
         $run = $this->completeCheckRound($run, $identifier, 2);
         $adapter = $this->reviewAdapter([]);
-        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReviewRound($run, 2)->state);
+        $secondReview = $this->executeReviewRound($run, 2);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $secondReview->state, (string) $secondReview->failure_code);
         $run = $this->seedBeforeReviewCheck($run->fresh());
         $finalize = ExecutionJob::query()->where('run_id', $run->id)
             ->where('step_type', ExecutionStepType::FINALIZE->value)->sole();
@@ -180,6 +191,8 @@ final class RunFinalizationStepTest extends TicketUiTestCase
             $security->fresh()->state,
             json_encode([
                 'message' => $request instanceof HumanRequest ? $request->message : (string) $security->fresh()->failure_code,
+                'failure_code' => $security->fresh()->failure_code,
+                'why_needed' => $request?->why_needed,
                 'security_slots' => $run->agents()->where('role', 'security_review')->count(),
                 'turns' => $adapter->turnCount,
                 'security_results' => ReviewResult::query()->where('run_id', $run->id)->where('role', 'security_review')->count(),
@@ -700,7 +713,8 @@ final class RunFinalizationStepTest extends TicketUiTestCase
         $run = $this->withoutBoundChecks($prepared['run']);
         $this->reviewAdapter([$this->reviewSlotIds[0] => AgentScenario::FINDINGS]);
 
-        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReviewRound($run, 1)->state);
+        $firstReview = $this->executeReviewRound($run, 1);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $firstReview->state, (string) $firstReview->failure_code);
         self::assertFalse(ExecutionJob::query()->where('run_id', $run->id)
             ->where('step_type', ExecutionStepType::FINALIZE->value)->exists());
     }
@@ -711,7 +725,8 @@ final class RunFinalizationStepTest extends TicketUiTestCase
         $prepared = $this->preparedReviewRun('AI6-027-TC14');
         $run = $this->withoutBoundChecks($prepared['run']);
         $this->reviewAdapter([]);
-        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReviewRound($run, 1)->state);
+        $firstReview = $this->executeReviewRound($run, 1);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $firstReview->state, (string) $firstReview->failure_code);
         $finalize = ExecutionJob::query()->where('run_id', $run->id)
             ->where('step_type', ExecutionStepType::FINALIZE->value)->sole();
         $branchBefore = $this->gitOutput(['rev-parse', (string) $run->run_branch], $prepared['worktree']);
@@ -731,6 +746,50 @@ final class RunFinalizationStepTest extends TicketUiTestCase
         self::assertNull($parked->candidate_diff_hash);
         self::assertTrue(HumanRequest::query()->where('run_id', $run->id)
             ->where('resolution_state', 'open')->exists());
+    }
+
+    #[DataProvider('candidateFailureMessageProvider')]
+    public function test_candidate_failure_diagnostics_are_redacted_without_changing_the_terminal_reason(string $message, string $expected): void
+    {
+        Queue::fake();
+        $this->configureChecks();
+        $prepared = $this->preparedReviewRun('AI6-051-CAUSE', implementationScenario: AgentScenario::SUCCESS);
+        $run = $prepared['run'];
+        $this->reviewAdapter([]);
+        $review = $this->executeReviewRound($run, 1);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $review->state, (string) $review->failure_code);
+        $finalize = ExecutionJob::query()->where('run_id', $run->id)
+            ->where('step_type', ExecutionStepType::FINALIZE->value)->sole();
+        $owner = (string) Str::uuid();
+        $claimed = $this->app->make(RunOrchestrator::class)->claimStep($finalize, $owner);
+        self::assertNotNull($claimed);
+        $diagnostic = [];
+        Log::listen(static function (MessageLogged $event) use (&$diagnostic): void {
+            if ($event->message === 'publish_candidate_failed') {
+                $diagnostic = $event->context;
+            }
+        });
+        $step = $this->app->make(RunFinalizationStep::class);
+        (new ReflectionMethod($step, 'rejectCandidate'))->invoke(
+            $step, $claimed, $run->fresh(), $owner,
+            new PublishCandidateException('candidate_generation_failed', new RuntimeException($message)),
+        );
+
+        self::assertSame(ExecutionJobState::FAILED, $finalize->fresh()->state);
+        self::assertSame('candidate_generation_failed', $finalize->fresh()->failure_code);
+        self::assertSame(RunState::FAILED, $run->fresh()->state);
+        self::assertNull($run->fresh()->candidate_tree_sha);
+        self::assertSame($run->id, $diagnostic['run_id']);
+        self::assertSame('candidate_generation_failed', $diagnostic['reason']);
+        self::assertSame(RuntimeException::class, $diagnostic['cause_class']);
+        self::assertSame($expected, $diagnostic['cause_message']);
+    }
+
+    /** @return iterable<string, array{string, string}> */
+    public static function candidateFailureMessageProvider(): iterable
+    {
+        yield 'secret' => ['secret=synthetic-candidate-secret', 'secret=[REDACTED:SECRET]'];
+        yield 'invalid UTF-8' => ["\xFF", 'The candidate failure contained invalid UTF-8.'];
     }
 
     private function withoutBoundChecks(Run $run): Run
@@ -798,11 +857,14 @@ final class RunFinalizationStepTest extends TicketUiTestCase
         $run = $this->withoutBoundChecks($prepared['run']);
         $identifier = (string) $run->project()->value('project_identifier');
         $this->reviewAdapter([$this->reviewSlotIds[0] => AgentScenario::FINDINGS]);
-        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReviewRound($run, 1)->state);
-        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeFix($run, 1)->state);
+        $firstReview = $this->executeReviewRound($run, 1);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $firstReview->state, (string) $firstReview->failure_code);
+        $fix = $this->executeFix($run, 1);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $fix->state, (string) $fix->failure_code);
         $run = $this->completeCheckRound($run, $identifier, 2);
         $this->reviewAdapter([]);
-        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReviewRound($run, 2)->state);
+        $secondReview = $this->executeReviewRound($run, 2);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $secondReview->state, (string) $secondReview->failure_code);
         $run = $this->seedBeforeReviewCheck($run->fresh());
         $finalize = ExecutionJob::query()->where('run_id', $run->id)
             ->where('step_type', ExecutionStepType::FINALIZE->value)->sole();

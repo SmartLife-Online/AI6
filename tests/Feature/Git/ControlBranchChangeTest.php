@@ -637,6 +637,7 @@ final class ControlBranchChangeTest extends ControlOperationTestCase
             'deploy_key_reference' => '/managed/key',
             'public_deploy_key' => "ssh-ed25519 fixture\n",
             'control_oid' => str_repeat('a', 64),
+            'object_format' => 'sha256',
             'control_binding_version' => 4,
             'control_generation' => 7,
         ]);

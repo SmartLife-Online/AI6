@@ -10,6 +10,10 @@ use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunGate;
+use App\AI6\Shared\Redaction\InvalidRedactionInputException;
+use App\AI6\Shared\Redaction\RedactionContext;
+use App\AI6\Shared\Redaction\Redactor;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /** Final checks, deterministic prospect, one gate, and atomic candidate binding. */
@@ -112,6 +116,20 @@ final readonly class RunFinalizationStep
         string $owner,
         PublishCandidateException $exception,
     ): void {
+        if (($cause = $exception->getPrevious()) !== null) {
+            try {
+                $message = app(Redactor::class)->redact(
+                    $cause->getMessage(),
+                    new RedactionContext((string) $run->project_id, $run->id, 'candidate-failure'),
+                )->text;
+            } catch (InvalidRedactionInputException) {
+                $message = 'The candidate failure contained invalid UTF-8.';
+            }
+            Log::warning('publish_candidate_failed', [
+                'run_id' => $run->id, 'reason' => $exception->reason,
+                'cause_class' => $cause::class, 'cause_message' => $message,
+            ]);
+        }
         if ($exception->reason === 'control_head_drift') {
             try {
                 $fresh = $run->fresh() ?? $run;

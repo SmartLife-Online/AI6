@@ -2,6 +2,8 @@
 
 Instructions for agentic LLMs working in this repository. `CLAUDE.md` imports this file; it is the only instruction source.
 
+If `.ai6-local-context.md` exists in the repository root, read it as user-provided local context. It is intentionally git-ignored and must not be added to Git.
+
 **AI6** manages Git-native software tickets, has them reviewed by a human, and then orchestrates separate LLM sessions for implementation and review. Product form: a modular Laravel monolith — one codebase, one Docker image, separate process roles.
 
 ---

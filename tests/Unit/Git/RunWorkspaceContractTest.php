@@ -109,6 +109,7 @@ final class RunWorkspaceContractTest extends TestCase
         $raw = ':100644 100755 '.$old.' '.$new." M\0src/file.php\0";
 
         $first = $hasher->fromRaw($raw, $context);
+        self::assertSame('567e8684540ac1ffa4a948a055e58f409c614e14690a3b6e4a202130565323c8', $first->hash);
         self::assertSame($first->hash, $hasher->fromRaw($raw, $context)->hash);
         self::assertNotSame($first->hash, $hasher->fromRaw(':100644 100644 '.$old.' '.$new." M\0src/file.php\0", $context)->hash);
         self::assertNotSame($first->hash, $hasher->fromRaw(':100644 100755 '.$old.' '.$new." M\0src/other.php\0", $context)->hash);
@@ -128,6 +129,35 @@ final class RunWorkspaceContractTest extends TestCase
         }
 
         self::assertSame($unsafe, $rejected, 'Traversing, absolute and abbreviated entries must be rejected.');
+    }
+
+    public function test_raw_diff_null_sentinels_are_mode_bound_and_related_objects_cannot_mix_formats(): void
+    {
+        $hasher = $this->app->make(CanonicalDiffHasher::class);
+        $context = new RedactionContext('project', null, 'format-diff');
+        $empty = $hasher->fromRaw('', $context);
+        self::assertSame([], $empty->entries);
+        foreach ([40, 64] as $length) {
+            $zero = str_repeat('0', $length);
+            $object = str_repeat('a', $length);
+            $addition = ':000000 100644 '.$zero.' '.$object." A\0added\0";
+            $deletion = ':100644 000000 '.$object.' '.$zero." D\0deleted\0";
+            self::assertCount(2, $hasher->fromRaw($addition.$deletion, $context)->entries);
+            foreach ([
+                ':100644 100644 '.$zero.' '.$object." M\0bad\0",
+                ':000000 100644 '.$object.' '.$object." A\0bad\0",
+                ':000000 000000 '.$zero.' '.$zero." D\0bad\0",
+                ':100644 100644 '.$object.' '.str_repeat('b', $length === 40 ? 64 : 40)." M\0bad\0",
+                $addition.':100644 100644 '.str_repeat('a', $length === 40 ? 64 : 40).' '.str_repeat('b', $length === 40 ? 64 : 40)." M\0bad\0",
+            ] as $raw) {
+                try {
+                    $hasher->fromRaw($raw, $context);
+                    self::fail('Incompatible raw object bindings passed.');
+                } catch (RuntimeException $exception) {
+                    self::assertSame('The Git raw diff contains incompatible object bindings.', $exception->getMessage());
+                }
+            }
+        }
     }
 
     public function test_the_import_applies_only_validated_in_scope_changes_to_the_bound_worktree(): void

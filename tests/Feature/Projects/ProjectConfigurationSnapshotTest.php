@@ -10,6 +10,7 @@ use App\AI6\Git\ControlOperationConfiguration;
 use App\AI6\Git\ControlOperationPhase;
 use App\AI6\Git\ControlOperationState;
 use App\AI6\Git\ControlOperationType;
+use App\AI6\Git\GitObjectFormat;
 use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\ProjectOperationLease;
 use App\AI6\Projects\Actions\ApproveProjectConfiguration;
@@ -32,14 +33,21 @@ use Illuminate\Session\ArraySessionHandler;
 use Illuminate\Session\Store;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Feature\Auth\AuthFeatureTestCase;
+use Tests\Feature\Git\AssertsGitObjectGuards;
 
 final class ProjectConfigurationSnapshotTest extends AuthFeatureTestCase
 {
-    public function test_approval_is_cas_bound_idempotent_and_generation_stale_while_historic_binding_remains_resolvable(): void
+    use AssertsGitObjectGuards;
+
+    #[DataProvider('objectFormats')]
+    public function test_approval_is_cas_bound_idempotent_and_generation_stale_while_historic_binding_remains_resolvable(GitObjectFormat $format): void
     {
+        $guards = ['project_config_drafts_insert_guard', 'project_config_snapshots_insert_guard', 'control_branch_audit_insert_guard'];
+        $this->observeGitObjectGuards($guards);
         $approver = $this->createUser(['is_global_admin' => true]);
-        $project = $this->registeredProject();
+        $project = $this->registeredProject($format);
         $this->addMembership($approver, $project, ProjectRole::APPROVER);
         $configuration = new ProjectConfiguration(config('ai6.project_config.server_defaults'));
         $values = $configuration->values;
@@ -83,7 +91,7 @@ final class ProjectConfigurationSnapshotTest extends AuthFeatureTestCase
         self::assertIsInt($token);
         DB::table('control_operations')->where('id', $branchChange->id)->update([
             'phase' => 'remote_probed',
-            'target_control_oid' => str_repeat('d', 64),
+            'target_control_oid' => str_repeat('d', $format->length()),
             'version' => DB::raw('version + 1'),
         ]);
         self::assertTrue($this->app->make(ControlBranchChanger::class)->advance($branchChange->refresh(), $token));
@@ -99,6 +107,7 @@ final class ProjectConfigurationSnapshotTest extends AuthFeatureTestCase
             self::fail('An immutable config snapshot was updated.');
         } catch (QueryException) {
         }
+        $this->assertGitObjectGuardsObserved($guards);
     }
 
     public function test_changed_draft_does_not_replace_approval_and_missing_config_selects_visible_server_defaults(): void
@@ -151,11 +160,12 @@ final class ProjectConfigurationSnapshotTest extends AuthFeatureTestCase
         self::assertSame($hasher->hash($defaults), $effective->configHash);
     }
 
-    public function test_http_approval_requires_and_consumes_action_bound_step_up_once(): void
+    #[DataProvider('objectFormats')]
+    public function test_http_approval_requires_and_consumes_action_bound_step_up_once(GitObjectFormat $format): void
     {
         $approver = $this->createUser();
         $secret = $this->createConfirmedTotp($approver);
-        $project = $this->registeredProject();
+        $project = $this->registeredProject($format);
         $this->addMembership($approver, $project, ProjectRole::APPROVER);
         $configuration = new ProjectConfiguration(config('ai6.project_config.server_defaults'));
         $hash = $this->app->make(ProjectConfigurationHasher::class)->hash($configuration);
@@ -185,7 +195,14 @@ final class ProjectConfigurationSnapshotTest extends AuthFeatureTestCase
         self::assertSame(1, ProjectConfigSnapshot::query()->count());
     }
 
-    private function registeredProject(): Project
+    /** @return iterable<string, array{GitObjectFormat}> */
+    public static function objectFormats(): iterable
+    {
+        yield 'sha1' => [GitObjectFormat::SHA1];
+        yield 'sha256' => [GitObjectFormat::SHA256];
+    }
+
+    private function registeredProject(GitObjectFormat $format = GitObjectFormat::SHA256): Project
     {
         return Project::query()->create([
             'name' => 'Config-Projekt', 'remote' => 'git@git.example.test:acme/config.git',
@@ -194,7 +211,8 @@ final class ProjectConfigurationSnapshotTest extends AuthFeatureTestCase
             'provisioning_status' => ProjectProvisioningStatus::PROVISIONED,
             'deploy_key_reference' => '/managed/config-key',
             'public_deploy_key' => "ssh-ed25519 fixture\n",
-            'control_oid' => str_repeat('b', 64),
+            'control_oid' => str_repeat('b', $format->length()),
+            'object_format' => $format,
         ])->refresh();
     }
 
@@ -267,7 +285,7 @@ final class ProjectConfigurationSnapshotTest extends AuthFeatureTestCase
 
         return ProjectConfigDraft::query()->create([
             'project_id' => $project->getKey(), 'control_operation_id' => $operation->id,
-            'control_commit' => $project->control_oid, 'blob_sha' => hash('sha256', $operation->id),
+            'control_commit' => $project->control_oid, 'blob_sha' => $project->object_format->objectId('blob', $operation->id),
             'control_generation' => $project->control_generation, 'state' => 'valid',
             'config_hash' => $hash, 'normalized_config' => $configuration->values,
             'validation_errors' => [], 'redaction_matches' => [],

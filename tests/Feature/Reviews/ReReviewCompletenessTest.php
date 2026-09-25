@@ -14,6 +14,7 @@ use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\Models\TicketApproval;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Str;
+use Tests\Feature\Git\AssertsGitObjectGuards;
 use Tests\Feature\Runs\BuildsFixLoopFixture;
 use Tests\Feature\Tickets\TicketUiTestCase;
 
@@ -26,6 +27,7 @@ use Tests\Feature\Tickets\TicketUiTestCase;
  */
 final class ReReviewCompletenessTest extends TicketUiTestCase
 {
+    use AssertsGitObjectGuards;
     use BuildsFixLoopFixture;
     use BuildsReviewRoundFixture;
 
@@ -91,6 +93,7 @@ final class ReReviewCompletenessTest extends TicketUiTestCase
     /** TC-07: each presented finding gets exactly one immutable entry per slot and round. */
     public function test_every_status_entry_is_unique_per_slot_and_round_and_immutable(): void
     {
+        $this->observeGitObjectGuards(['finding_statuses_insert_guard']);
         $prepared = $this->preparedReviewRun('AI6-025-TC07');
         $run = $prepared['run'];
         $identifier = (string) Project::query()->findOrFail($run->project_id)->project_identifier;
@@ -154,6 +157,7 @@ final class ReReviewCompletenessTest extends TicketUiTestCase
         } catch (QueryException) {
         }
         self::assertSame('fixed', FindingStatus::query()->findOrFail($existing->id)->status->value);
+        $this->assertGitObjectGuardsObserved(['finding_statuses_insert_guard']);
     }
 
     private function statusOf(string $findingId, int $round): string

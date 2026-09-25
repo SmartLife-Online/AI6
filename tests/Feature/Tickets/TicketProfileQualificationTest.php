@@ -25,6 +25,7 @@ final class TicketProfileQualificationTest extends ControlOperationTestCase
             'deploy_key_reference' => '/managed/test-key',
             'public_deploy_key' => "ssh-ed25519 fixture\n",
             'control_oid' => $controlCommit,
+            'object_format' => 'sha256',
         ])->save();
         $operation = $this->app->make(QueueTicketReadModelRefresh::class)->handle(
             $administrator,

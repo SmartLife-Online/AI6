@@ -4,6 +4,7 @@ namespace Tests\Feature\Git;
 
 use App\AI6\Git\CanonicalDiffHasher;
 use App\AI6\Git\CanonicalJson;
+use App\AI6\Git\GitObjectFormat;
 use App\AI6\Git\RunBranchName;
 use App\AI6\Git\RunHistoryContext;
 use App\AI6\Runs\Models\Run;
@@ -14,6 +15,7 @@ use App\AI6\Shared\Redaction\RedactionPolicy;
 use App\AI6\Shared\Redaction\RedactionRuleSet;
 use App\AI6\Shared\Redaction\Redactor;
 use PHPUnit\Framework\Attributes\After;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -64,11 +66,12 @@ final class RunWorkspaceGitTest extends TestCase
         self::assertNotSame($renamedHash, $modeHash);
     }
 
-    public function test_the_staged_worktree_diff_covers_added_modified_and_deleted_paths_with_full_object_ids(): void
+    #[DataProvider('objectFormats')]
+    public function test_the_staged_worktree_diff_covers_added_modified_and_deleted_paths_with_full_object_ids(GitObjectFormat $format): void
     {
         $root = $this->runWorkspaceRoot();
         $runner = $this->runWorkspaceRunner($root);
-        [$repository, $base] = $this->runWorkspaceRepository($root);
+        [$repository, $base] = $this->runWorkspaceRepository($root, format: $format);
         $context = new RedactionContext('project-1', null, 'run-worktree-diff');
 
         self::assertNotFalse(file_put_contents($repository.'/a.txt', "modified\n"));
@@ -83,8 +86,8 @@ final class RunWorkspaceGitTest extends TestCase
         self::assertSame(['M', 'A', 'D'], array_column($working->entries, 'status'));
         foreach ($working->entries as $entry) {
             if ($entry['status'] !== 'D') {
-                self::assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/D', $entry['new_oid']);
-                self::assertNotSame(str_repeat('0', 64), $entry['new_oid']);
+                self::assertTrue($format->validOid($entry['new_oid']));
+                self::assertNotSame($format->zeroOid(), $entry['new_oid']);
             }
         }
 
@@ -95,6 +98,38 @@ final class RunWorkspaceGitTest extends TestCase
             $context,
         );
         self::assertSame($committed->hash, $working->hash);
+    }
+
+    /** @return iterable<string, array{GitObjectFormat}> */
+    public static function objectFormats(): iterable
+    {
+        yield 'sha1' => [GitObjectFormat::SHA1];
+        yield 'sha256' => [GitObjectFormat::SHA256];
+    }
+
+    #[DataProvider('objectFormats')]
+    public function test_nested_mutation_objects_match_git_and_empty_diff_keeps_its_hash(GitObjectFormat $format): void
+    {
+        $root = $this->runWorkspaceRoot();
+        $runner = $this->runWorkspaceRunner($root);
+        [$repository, $base] = $this->runWorkspaceRepository($root, format: $format);
+        $context = new RedactionContext('project', null, 'object-format');
+        self::assertSame($format, $runner->objectFormat($repository, $context));
+        $content = "nested replacement\n";
+        $plan = $runner->planSingleFileMutation($repository, $base, 'sub/b.txt', $content, $context);
+        self::assertNotFalse(file_put_contents($repository.'/sub/b.txt', $content));
+        $this->runWorkspaceGit(['add', 'sub/b.txt'], $repository);
+        self::assertSame(trim($this->runWorkspaceGit(['hash-object', 'sub/b.txt'], $repository)), $plan['blob_oid']);
+        self::assertSame(trim($this->runWorkspaceGit(['write-tree'], $repository)), $plan['tree_oid']);
+        $empty = $this->hasher()->fromRaw($runner->canonicalRawDiff($repository, $base, $base, $context)->output, $context);
+        self::assertSame([], $empty->entries);
+        self::assertSame(64, strlen($empty->hash));
+        self::assertTrue($runner->updateRef($repository, 'refs/heads/created', $base, null, $context)->succeeded());
+        self::assertFalse($runner->updateRef($repository, 'refs/heads/created', $base, null, $context)->succeeded());
+        $attempt = 'refs/ai6/attempts/123e4567-e89b-42d3-a456-426614174000/1/control';
+        self::assertTrue($runner->createAttemptRef($repository, $attempt, $base, $context)->succeeded());
+        self::assertFalse($runner->createAttemptRef($repository, $attempt, $base, $context)->succeeded());
+        self::assertSame($base, trim($this->runWorkspaceGit(['rev-parse', $attempt], $repository)));
     }
 
     public function test_the_run_diff_executes_no_repository_or_host_configured_helper(): void

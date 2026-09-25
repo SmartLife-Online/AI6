@@ -110,7 +110,7 @@ trait BuildsFinalizedRunFixture
             );
         }
         $todo = $this->validTicketMarkdown($ticketId, 'todo', $dependsOn);
-        $todoBlob = hash('sha256', 'blob '.strlen($todo)."\0".$todo);
+        $todoBlob = $project->object_format->objectId('blob', $todo);
         $readModel = $this->publishReadModel($administrator, $project, 'tickets/'.$ticketId.'.md', $todo, ['blob_sha' => $todoBlob]);
         $selection = $this->approvalSelection($attentionUser);
         $operationId = (string) Str::uuid();
@@ -131,7 +131,7 @@ trait BuildsFinalizedRunFixture
         );
         DB::table('jobs')->delete();
         $ready = str_replace('status: todo', 'status: ready', $todo);
-        $readyBlob = hash('sha256', 'blob '.strlen($ready)."\0".$ready);
+        $readyBlob = $project->object_format->objectId('blob', $ready);
         self::assertSame(1, TicketApproval::query()->whereKey($operationId)->update([
             'approved_ticket_blob_sha' => $readyBlob,
             'approved_control_sha' => $project->control_oid,

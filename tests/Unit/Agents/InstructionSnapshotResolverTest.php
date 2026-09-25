@@ -18,6 +18,25 @@ use Tests\TestCase;
 
 final class InstructionSnapshotResolverTest extends TestCase
 {
+    public function test_blob_ids_are_complete_nonzero_and_consistent_but_snapshot_hashes_stay_sha256(): void
+    {
+        $resolver = $this->resolver(new AgentInputLimits(4, 100, 200, 4, 100));
+        foreach ([40, 64] as $length) {
+            $first = $this->candidate('AGENTS.md', 'root', blob: str_repeat('a', $length));
+            $valid = $resolver->resolve('fake', [$first], $this->context());
+            self::assertSame(64, strlen($valid->hash));
+            self::assertSame(hash('sha256', 'root'), $valid->entries[0]->contentSha256);
+            foreach ([str_repeat('a', $length === 40 ? 64 : 40), str_repeat('0', $length), str_repeat('A', $length), str_repeat('a', $length - 1)] as $invalid) {
+                try {
+                    $resolver->resolve('fake', [$first, $this->candidate('docs/AGENTS.md', 'nested', blob: $invalid, discovery: 'agents_md_nested')], $this->context());
+                    self::fail('An invalid or mixed-format instruction blob passed.');
+                } catch (InstructionResolutionException $exception) {
+                    self::assertSame(InstructionResolutionError::BLOB_SHA_INVALID, $exception->reason);
+                }
+            }
+        }
+    }
+
     public function test_order_and_hash_are_stable_and_bind_path_blob_and_effective_content(): void
     {
         $resolver = $this->resolver(new AgentInputLimits(4, 100, 200, 4, 100));

@@ -2,15 +2,69 @@
 
 namespace Tests\Feature\Tickets;
 
+use App\AI6\Git\GitObjectFormat;
 use App\AI6\Git\Models\TicketMutation;
+use App\AI6\Projects\ProjectProvisioningStatus;
 use App\AI6\Projects\ProjectRole;
 use App\AI6\Projects\TicketReadModelRedactionState;
 use App\AI6\Shared\Redaction\RedactionMatchType;
 use App\AI6\Tickets\TicketMutationController;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 final class TicketMutationWebTest extends TicketUiTestCase
 {
+    /** @return iterable<string, array{bool}> */
+    public static function mutationRoutes(): iterable
+    {
+        yield 'edit' => [true];
+        yield 'status' => [false];
+    }
+
+    #[DataProvider('mutationRoutes')]
+    public function test_sha1_mutations_accept_only_nonzero_project_oids_through_the_step_up_route(bool $edit): void
+    {
+        $administrator = $this->createUser(['is_global_admin' => true]);
+        $project = $this->registeredProject($administrator);
+        $project->forceFill([
+            'provisioning_status' => ProjectProvisioningStatus::PROVISIONED,
+            'deploy_key_reference' => '/managed/test-key',
+            'public_deploy_key' => "ssh-ed25519 fixture\n",
+            'control_oid' => str_repeat('a', 40),
+            'object_format' => GitObjectFormat::SHA1,
+        ])->save();
+        $content = $this->validTicketMarkdown('AI6-051-WEB');
+        $readModel = $this->publishReadModel($administrator, $project, 'tickets/AI6-051-WEB.md', $content, [
+            'blob_sha' => GitObjectFormat::SHA1->objectId('blob', $content),
+        ]);
+        $route = route($edit ? 'projects.tickets.update' : 'projects.tickets.status', [$project, $readModel]);
+        $payload = [
+            'operation_id' => (string) Str::uuid(),
+            'expected_control_oid' => $readModel->control_commit,
+            'expected_blob' => $readModel->blob_sha,
+            'base_content' => $content,
+            'reason' => 'Formatgebundene Mutation',
+        ] + ($edit ? ['target_content' => str_replace('Ziel des Tickets.', 'Neues Ziel.', $content)] : ['status_operation' => 'block']);
+        $this->actingAs($administrator);
+        $this->preserveCurrentSessionCookie();
+        $this->withCredentials();
+        $secret = $this->createConfirmedTotp($administrator);
+        $this->post(route('auth.step-up.totp.verify', ['action' => $edit
+            ? TicketMutationController::EDIT_STEP_UP_ACTION : TicketMutationController::STATUS_STEP_UP_ACTION]), [
+                'code' => $this->currentTotpCode($secret),
+            ])->assertRedirect();
+        foreach (['expected_control_oid', 'expected_blob'] as $field) {
+            foreach ([str_repeat('a', 64), str_repeat('0', 40)] as $invalid) {
+                $this->post($route, [...$payload, $field => $invalid])->assertSessionHasErrors($field);
+                self::assertSame(0, TicketMutation::query()->count());
+            }
+        }
+        $this->post($route, $payload)->assertRedirect()->assertSessionHasNoErrors();
+        $mutation = TicketMutation::query()->sole();
+        self::assertSame($readModel->control_commit, $mutation->operation()->firstOrFail()->expected_control_commit);
+        self::assertSame($readModel->blob_sha, $mutation->expected_ticket_blob_sha);
+    }
+
     public function test_editor_displays_the_exact_clear_base_and_rejects_masked_projection(): void
     {
         $administrator = $this->createUser(['is_global_admin' => true]);

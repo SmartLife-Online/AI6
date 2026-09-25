@@ -11,6 +11,7 @@ use App\AI6\Auth\Models\User;
 use App\AI6\Checks\CheckPhase;
 use App\AI6\Checks\CheckResultState;
 use App\AI6\Checks\Models\CheckResultRecord;
+use App\AI6\Git\GitObjectFormat;
 use App\AI6\Git\ManagedProjectPath;
 use App\AI6\Git\ReviewSubject;
 use App\AI6\Git\ReviewSubjectException;
@@ -50,6 +51,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Feature\Git\AssertsGitObjectGuards;
 use Tests\Feature\Git\BuildsRunWorkspaceGitFixture;
 use Tests\Feature\Tickets\TicketUiTestCase;
 
@@ -60,6 +62,7 @@ use Tests\Feature\Tickets\TicketUiTestCase;
  */
 final class ReviewOnlyExecutionTest extends TicketUiTestCase
 {
+    use AssertsGitObjectGuards;
     use BuildsImplementationTurnFixture;
     use BuildsReviewOnlyRunFixture;
     use BuildsRunWorkspaceGitFixture;
@@ -83,10 +86,30 @@ final class ReviewOnlyExecutionTest extends TicketUiTestCase
         return $this->reviewOnlySelection($attentionUser);
     }
 
-    public function test_a_review_only_run_prepares_checks_reviews_and_reports_on_one_bound_checkpoint(): void
+    #[DataProvider('objectFormats')]
+    public function test_review_only_insert_and_update_guards_use_the_bound_project_format(GitObjectFormat $format): void
+    {
+        $guards = ['review_only_execution_insert_guard', 'review_only_execution_update_guard'];
+        $this->observeGitObjectGuards($guards);
+        // Exercise the permitted non-null insert case as well as the normal
+        // later update. This is a database fixture, not a materialized export.
+        Run::creating(static function (Run $run): void {
+            $subject = json_decode((string) $run->review_subject_reference, true, flags: JSON_THROW_ON_ERROR);
+            $run->review_subject_kind = ReviewSubjectKind::from($subject['kind'])->value;
+            $run->review_subject_base_sha = $subject['base_oid'];
+            $run->review_subject_source_sha = $subject['source_oid'];
+            $run->review_workspace_hash = hash('sha256', 'database fixture workspace');
+        });
+        $prepared = $this->preparedReviewOnlyRun('AI6-051-REVIEW-DB', format: $format);
+        self::assertSame($format->length(), strlen($prepared['run']->review_subject_source_sha));
+        $this->assertGitObjectGuardsObserved($guards);
+    }
+
+    #[DataProvider('objectFormats')]
+    public function test_a_review_only_run_prepares_checks_reviews_and_reports_on_one_bound_checkpoint(GitObjectFormat $format): void
     {
         $this->requiresPosixEffectRuntime();
-        $prepared = $this->preparedReviewOnlyRun('AI6-040-E2E-OK');
+        $prepared = $this->preparedReviewOnlyRun('AI6-040-E2E-OK', format: $format);
         $run = $this->prepareAndCheck($prepared);
 
         $workspace = (string) $run->worktree_path;
@@ -97,6 +120,9 @@ final class ReviewOnlyExecutionTest extends TicketUiTestCase
         $result = ReviewResult::query()->where('run_id', $run->id)->sole();
         self::assertSame($boundTree, $result->checkpoint_tree_sha, 'The reviewer must see the bound review checkpoint.');
         self::assertSame((string) $run->review_workspace_hash, $result->workspace_tree_hash);
+        self::assertSame($format->length(), strlen($boundTree));
+        self::assertSame(64, strlen($result->workspace_tree_hash));
+        self::assertNotSame($boundTree, $result->workspace_tree_hash);
         $package = RunArtifact::query()->where('run_id', $run->id)
             ->where('kind', RunArtifactKind::CONTEXT_PACKAGE->value)->sole();
         self::assertSame('quality_review:1:'.$result->slot_id, $package->redacted_metadata['stage'] ?? null);
@@ -115,6 +141,13 @@ final class ReviewOnlyExecutionTest extends TicketUiTestCase
                 || ($fresh->state === RunState::WAITING && $fresh->wait_reason === WaitReason::MANUAL_REPORT),
             'The manual completion mode ends in its own bound saga or wait.',
         );
+    }
+
+    /** @return iterable<string, array{GitObjectFormat}> */
+    public static function objectFormats(): iterable
+    {
+        yield 'sha1' => [GitObjectFormat::SHA1];
+        yield 'sha256' => [GitObjectFormat::SHA256];
     }
 
     /** @param list<SecurityMeasure> $disabledMeasures */

@@ -106,6 +106,9 @@ final readonly class QueueContractAmendment
             $binding = $this->projectConfiguration->for($currentProject);
             $approvalPath = TicketApproval::query()->whereKey($currentRun->ticket_approval_id)->value('relative_path');
             if ($currentProject->provisioning_status !== ProjectProvisioningStatus::PROVISIONED
+                || $currentProject->object_format === null
+                || ! $currentProject->object_format->validOid($currentRun->run_base_sha)
+                || ! $currentProject->object_format->validOid($currentReadModel->blob_sha)
                 || $currentProject->pending_control_oid !== null
                 || $currentProject->active_run_id !== $currentRun->getKey()
                 || in_array($currentRun->state, [RunState::COMPLETED, RunState::CANCELLED], true)
@@ -224,7 +227,7 @@ final readonly class QueueContractAmendment
                 $expectedControlOid,
                 $parameters,
             );
-            $targetBlob = hash('sha256', 'blob '.strlen($targetContent)."\0".$targetContent);
+            $targetBlob = $currentProject->object_format->objectId('blob', $targetContent);
             $requestHash = hash('sha256', "AI6-CONTRACT-AMENDMENT-REQUEST-V1\0".$coreHash.$expectedBlob.$targetBlob.$projection->contractHash);
 
             $existing = ControlOperation::query()->find($operationId);

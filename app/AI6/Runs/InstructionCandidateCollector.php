@@ -26,7 +26,8 @@ final readonly class InstructionCandidateCollector implements InstructionCandida
      */
     public function collect(Project $project, string $providerProfile, array $ticketFiles, RedactionContext $context): array
     {
-        if ($project->project_identifier === null || $project->control_oid === null) {
+        if ($project->project_identifier === null || $project->control_oid === null
+            || $project->object_format?->validOid($project->control_oid) !== true) {
             throw new \InvalidArgumentException('Die Control-Bindung für die Instruktionsauflösung fehlt.');
         }
         $repositoryDirectory = $this->paths->repositoryDirectory($project->project_identifier);

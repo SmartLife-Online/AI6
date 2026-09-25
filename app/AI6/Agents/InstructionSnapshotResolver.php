@@ -3,6 +3,7 @@
 namespace App\AI6\Agents;
 
 use App\AI6\Git\CanonicalJson;
+use App\AI6\Git\GitObjectFormat;
 use App\AI6\Shared\Redaction\InvalidRedactionInputException;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
@@ -27,6 +28,7 @@ final readonly class InstructionSnapshotResolver
 
         $entriesByPath = [];
         $totalBytes = 0;
+        $format = null;
         foreach ($candidates as $candidate) {
             $this->assertCandidateBoundary($candidate);
             $discovery = $profile->discoveries[$candidate->discoveryName]
@@ -35,7 +37,8 @@ final readonly class InstructionSnapshotResolver
             if (isset($entriesByPath[$path])) {
                 throw new InstructionResolutionException(InstructionResolutionError::PATH_DUPLICATE);
             }
-            if (preg_match('/\A[0-9a-f]{40}\z/D', $candidate->blobSha) !== 1) {
+            $format ??= GitObjectFormat::tryFromOid($candidate->blobSha);
+            if ($format === null || ! $format->validOid($candidate->blobSha)) {
                 throw new InstructionResolutionException(InstructionResolutionError::BLOB_SHA_INVALID);
             }
 

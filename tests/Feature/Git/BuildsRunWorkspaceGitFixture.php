@@ -3,6 +3,7 @@
 namespace Tests\Feature\Git;
 
 use App\AI6\Git\GitConfiguration;
+use App\AI6\Git\GitObjectFormat;
 use App\AI6\Git\GitRemotePolicy;
 use App\AI6\Git\HardenedGitEnvironment;
 use App\AI6\Git\HardenedGitRunner;
@@ -123,11 +124,11 @@ trait BuildsRunWorkspaceGitFixture
      *
      * @return array{0: string, 1: string}
      */
-    protected function runWorkspaceRepository(string $root, string $name = 'repository'): array
+    protected function runWorkspaceRepository(string $root, string $name = 'repository', GitObjectFormat $format = GitObjectFormat::SHA256): array
     {
         $repository = $root.'/'.$name;
         self::assertTrue(mkdir($repository, 0700));
-        $this->runWorkspaceGit(['init', '--object-format=sha256', '--initial-branch=main'], $repository);
+        $this->runWorkspaceGit(['init', '--object-format='.$format->value, '--initial-branch=main'], $repository);
         $this->runWorkspaceGit(['config', 'user.name', 'AI6 Test'], $repository);
         $this->runWorkspaceGit(['config', 'user.email', 'ai6@example.invalid'], $repository);
         self::assertNotFalse(file_put_contents($repository.'/a.txt', "first\n"));

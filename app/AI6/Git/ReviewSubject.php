@@ -15,10 +15,9 @@ final readonly class ReviewSubject implements JsonSerializable
         public ?string $expectedTreeOid = null,
         public ?string $expectedDiffHash = null,
     ) {
-        foreach ([$baseOid, $sourceOid] as $oid) {
-            if (preg_match('/\A[0-9a-f]{64}\z/D', $oid) !== 1) {
-                throw new ReviewSubjectException('source_oid_invalid');
-            }
+        $format = GitObjectFormat::tryFromOid($baseOid);
+        if ($format === null || ! $format->validOid($sourceOid)) {
+            throw new ReviewSubjectException('source_oid_invalid');
         }
         if ($kind === ReviewSubjectKind::MANAGED_BRANCH) {
             if (! is_string($ref) || $ref === '') {
@@ -35,7 +34,7 @@ final readonly class ReviewSubject implements JsonSerializable
         }
         if (in_array($kind, [ReviewSubjectKind::VALIDATED_PATCH, ReviewSubjectKind::CHECKPOINT], true)) {
             if (! is_string($sourceRunId) || ! ManagedProjectPath::validRunIdentifier($sourceRunId)
-                || ! self::sha($expectedTreeOid) || ! self::sha($expectedDiffHash)) {
+                || ! $format->validOid($expectedTreeOid) || ! self::sha($expectedDiffHash)) {
                 throw new ReviewSubjectException('stored_source_binding_incomplete');
             }
         } elseif ($sourceRunId !== null || $expectedTreeOid !== null || $expectedDiffHash !== null) {

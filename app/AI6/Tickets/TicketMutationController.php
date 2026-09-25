@@ -6,6 +6,7 @@ use App\AI6\Auth\Models\User;
 use App\AI6\Auth\StepUpGuard;
 use App\AI6\Git\Actions\QueueTicketMutation;
 use App\AI6\Git\ControlOperationConflict;
+use App\AI6\Git\ProjectGitOidRule;
 use App\AI6\Projects\EffectiveProjectConfiguration;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
@@ -42,7 +43,7 @@ final readonly class TicketMutationController
         $actor = $request->user();
         abort_unless($actor instanceof User, 403);
         $model = $this->readModel($project, $readModel);
-        $validated = $request->validate($this->baseRules() + [
+        $validated = $request->validate($this->baseRules($project) + [
             'target_content' => ['required', 'string', 'max:1048576'],
         ]);
         $stepUp->consumeFresh($request, $actor, self::EDIT_STEP_UP_ACTION);
@@ -69,7 +70,7 @@ final readonly class TicketMutationController
         $actor = $request->user();
         abort_unless($actor instanceof User, 403);
         $model = $this->readModel($project, $readModel);
-        $validated = $request->validate($this->baseRules() + [
+        $validated = $request->validate($this->baseRules($project) + [
             'status_operation' => ['required', Rule::enum(TicketStatusOperation::class)->except(TicketStatusOperation::APPROVE)],
             'external_completion_confirmed' => ['sometimes', 'accepted'],
         ]);
@@ -94,13 +95,13 @@ final readonly class TicketMutationController
         return redirect()->route('projects.operations.show', [$project, $operation]);
     }
 
-    /** @return array<string, list<string|\Closure>> */
-    private function baseRules(): array
+    /** @return array<string, list<string|ProjectGitOidRule>> */
+    private function baseRules(Project $project): array
     {
         return [
             'operation_id' => ['required', 'uuid'],
-            'expected_control_oid' => ['required', 'regex:/\A[0-9a-f]{64}\z/D'],
-            'expected_blob' => ['required', 'regex:/\A[0-9a-f]{64}\z/D'],
+            'expected_control_oid' => ['required', new ProjectGitOidRule($project->object_format)],
+            'expected_blob' => ['required', new ProjectGitOidRule($project->object_format)],
             'base_content' => ['required', 'string', 'max:1048576'],
             'reason' => ['required', 'string', 'max:2000'],
         ];

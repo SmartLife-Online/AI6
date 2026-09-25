@@ -65,6 +65,7 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
             'operation_lock_lease_expires_at' => null,
             'operation_lock_heartbeat_at' => null,
             'control_oid' => str_repeat('b', 64),
+            'object_format' => 'sha256',
             'control_binding_version' => 1,
         ])->save();
         $fetchId = (string) Str::uuid();
@@ -119,6 +120,7 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
             'deploy_key_reference' => '/managed/key',
             'public_deploy_key' => "ssh-ed25519 fixture\n",
             'control_oid' => str_repeat('a', 64),
+            'object_format' => 'sha256',
             'control_binding_version' => 1,
         ])->save();
         $firstId = (string) Str::uuid();
@@ -199,6 +201,7 @@ final class ManagedCloneControlOperationTest extends ControlOperationTestCase
         ]);
         DB::table('projects')->where('id', $project->getKey())->update([
             'control_oid' => $targetOid,
+            'object_format' => 'sha256',
             'control_binding_version' => 1,
             'operation_lock_operation_id' => null,
             'operation_lock_lease_expires_at' => null,

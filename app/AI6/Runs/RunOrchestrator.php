@@ -894,7 +894,7 @@ final readonly class RunOrchestrator
                 throw new RunTransitionConflict('approval_not_startable', 'The approval is not in the startable queue state.');
             }
             foreach ([$claimParentControlSha, $confirmedCommitSha] as $sha) {
-                if (preg_match('/\A[0-9a-f]{64}\z/D', $sha) !== 1) {
+                if ($project->object_format?->validOid($sha) !== true) {
                     throw new RunTransitionConflict('invalid_control_sha', 'The bound control commit is invalid.');
                 }
             }
@@ -997,7 +997,13 @@ final readonly class RunOrchestrator
         string $diffHash,
         string $workspaceHash,
     ): Run {
-        foreach ([$baseOid, $sourceOid, $treeOid, $diffHash, $workspaceHash] as $value) {
+        $format = $run->project()->firstOrFail()->object_format;
+        foreach ([$baseOid, $sourceOid, $treeOid] as $oid) {
+            if ($format?->validOid($oid) !== true) {
+                throw new RunTransitionConflict('invalid_review_checkpoint_binding', 'The review checkpoint binding is invalid.');
+            }
+        }
+        foreach ([$diffHash, $workspaceHash] as $value) {
             if (preg_match('/\A[0-9a-f]{64}\z/D', $value) !== 1) {
                 throw new RunTransitionConflict('invalid_review_checkpoint_binding', 'The review checkpoint binding is invalid.');
             }
@@ -1052,7 +1058,13 @@ final readonly class RunOrchestrator
         string $treeSha,
         string $diffHash,
     ): Run {
-        foreach ([$commitSha, $treeSha, $diffHash] as $value) {
+        $format = $run->project()->firstOrFail()->object_format;
+        foreach ([$commitSha, $treeSha] as $oid) {
+            if ($format?->validOid($oid) !== true) {
+                throw new RunTransitionConflict('invalid_checkpoint_binding', 'The checkpoint binding is invalid.');
+            }
+        }
+        foreach ([$diffHash] as $value) {
             if (preg_match('/\A[0-9a-f]{64}\z/D', $value) !== 1) {
                 throw new RunTransitionConflict('invalid_checkpoint_binding', 'The checkpoint binding is invalid.');
             }
@@ -1111,7 +1123,13 @@ final readonly class RunOrchestrator
 
     public function bindCandidate(Run $run, int $expectedVersion, PublishCandidate $candidate): Run
     {
-        foreach ([$candidate->treeOid, $candidate->diffHash, $candidate->baseSha] as $value) {
+        $format = $run->project()->firstOrFail()->object_format;
+        foreach ([$candidate->treeOid, $candidate->baseSha] as $oid) {
+            if ($format?->validOid($oid) !== true) {
+                throw new RunTransitionConflict('invalid_candidate_binding', 'The publish candidate binding is invalid.');
+            }
+        }
+        foreach ([$candidate->diffHash] as $value) {
             if (preg_match('/\A[0-9a-f]{64}\z/D', $value) !== 1) {
                 throw new RunTransitionConflict('invalid_candidate_binding', 'The publish candidate binding is invalid.');
             }
@@ -1369,7 +1387,7 @@ final readonly class RunOrchestrator
 
     public function prepareBranchPublication(Run $run, int $expectedVersion, string $expectedRemoteOid): Run
     {
-        if (preg_match('/\A[0-9a-f]{64}\z/D', $expectedRemoteOid) !== 1
+        if ($run->project()->firstOrFail()->object_format?->validOid($expectedRemoteOid, allowZero: true) !== true
             || $run->phase !== RunPhase::PUBLISH || $run->candidate_tree_sha === null) {
             throw new RunTransitionConflict('publish_binding_invalid', 'Die Publish-Bindung ist ungültig.');
         }
@@ -1402,10 +1420,9 @@ final readonly class RunOrchestrator
         string $expectedRemoteOid,
         bool $createdCommit,
     ): Run {
-        foreach ([$publicationTargetOid, $expectedRemoteOid] as $oid) {
-            if (preg_match('/\A[0-9a-f]{64}\z/D', $oid) !== 1) {
-                throw new RunTransitionConflict('publish_binding_invalid', 'Die Publish-Bindung ist ungültig.');
-            }
+        $format = $run->project()->firstOrFail()->object_format;
+        if ($format?->validOid($publicationTargetOid) !== true || ! $format->validOid($expectedRemoteOid, allowZero: true)) {
+            throw new RunTransitionConflict('publish_binding_invalid', 'Die Publish-Bindung ist ungültig.');
         }
         if ($run->phase !== RunPhase::PUBLISH || $run->candidate_tree_sha === null
             || $run->candidate_base_sha === null || ! hash_equals($run->candidate_base_sha, $run->run_base_sha)) {
@@ -2126,7 +2143,13 @@ final readonly class RunOrchestrator
         int $maxAddedScopePaths,
         ?string $humanRequestId = null,
     ): Run {
-        foreach ([$newRunBaseSha, $ticketBlobSha, $ticketContractSha256, $scopeHash, $configHash, $promptHash] as $value) {
+        $format = $run->project()->firstOrFail()->object_format;
+        foreach ([$newRunBaseSha, $ticketBlobSha] as $oid) {
+            if ($format?->validOid($oid) !== true) {
+                throw new RunTransitionConflict('invalid_amendment_binding', 'The contract amendment binding is invalid.');
+            }
+        }
+        foreach ([$ticketContractSha256, $scopeHash, $configHash, $promptHash] as $value) {
             if (preg_match('/\A[0-9a-f]{64}\z/D', $value) !== 1) {
                 throw new RunTransitionConflict('invalid_amendment_binding', 'The contract amendment binding is invalid.');
             }
@@ -2355,17 +2378,25 @@ final readonly class RunOrchestrator
             $gate = RunGate::query()->findOrFail($gateId);
             $candidateIsBound = $run->candidate_invalidated_at === null
                 && $run->candidate_tree_sha === $candidate->treeOid
-                && $run->candidate_diff_hash === $candidate->diffHash;
-            $expectedVersion = $candidateIsBound ? $run->version : $run->version + 1;
+                && $run->candidate_diff_hash === $candidate->diffHash
+                && $run->candidate_base_sha === $candidate->baseSha;
+            // Before binding, evidence authorizes exactly the next candidate CAS.
+            // Afterwards the unchanged candidate provenance carries that authorization
+            // across phase and publication progress without rewriting the evidence.
+            $versionIsCurrent = $gate->evidence_expected_run_version !== null
+                && ($candidateIsBound
+                    ? $gate->evidence_expected_run_version <= $run->version
+                    : $gate->evidence_expected_run_version === $run->version + 1);
             $valid = $gate->state === GateState::CLOSED
                 && $candidateBindingCurrent
+                && $candidate->baseSha === $run->run_base_sha
                 && $gate->invalidated_at === null
                 && is_string($contract)
                 && $gate->evidence_ticket_contract_sha256 === $contract
                 && $gate->checkpoint_commit_sha === $run->checkpoint_commit_sha
                 && $gate->evidence_candidate_tree_sha === $candidate->treeOid
                 && $gate->evidence_candidate_diff_hash === $candidate->diffHash
-                && $gate->evidence_expected_run_version === $expectedVersion;
+                && $versionIsCurrent;
             if (! $valid) {
                 if ($gate->state === GateState::CLOSED) {
                     $gate->forceFill(['state' => GateState::OPEN, 'invalidated_at' => now()])->save();

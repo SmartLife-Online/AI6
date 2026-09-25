@@ -70,7 +70,7 @@ final readonly class QueueControlBranchChange
             throw new ControlOperationConflict('The pending control binding does not match the current control ref.');
         }
         $oldControlOid = $project->control_oid ?? $pending?->oid;
-        if ($oldControlOid === null || preg_match('/\A[0-9a-f]{64}\z/D', $oldControlOid) !== 1) {
+        if ($oldControlOid === null || $project->object_format?->validOid($oldControlOid) !== true) {
             throw new ControlOperationConflict('The project has no valid control binding to replace.');
         }
 

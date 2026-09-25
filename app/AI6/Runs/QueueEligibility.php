@@ -44,7 +44,7 @@ final readonly class QueueEligibility
         if (! is_string($project->project_identifier) || $project->project_identifier === '') {
             $projectReasons[] = 'project_identifier_missing';
         }
-        if (! is_string($project->control_oid) || $project->control_oid === '') {
+        if ($project->object_format?->validOid($project->control_oid) !== true) {
             $projectReasons[] = 'control_head_unverified';
         }
 
@@ -76,7 +76,8 @@ final readonly class QueueEligibility
         }
         $readModelBlobSha = $readModel->getAttribute('blob_sha');
         if (! is_string($readModelBlobSha)
-            || ! hash_equals($readModelBlobSha, hash('sha256', 'blob '.strlen($readModel->redacted_content)."\0".$readModel->redacted_content))) {
+            || $project->object_format?->validOid($readModelBlobSha) !== true
+            || ! hash_equals($readModelBlobSha, $project->object_format->objectId('blob', $readModel->redacted_content))) {
             $reasons[] = 'ticket_blob_inconsistent';
         }
         if ($this->freshness->readModelGenerationIsCurrent($project, $readModel)

@@ -388,7 +388,11 @@ final readonly class SecurityReviewStep
 
     private function candidateComplete(Run $run): bool
     {
-        foreach (['candidate_tree_sha', 'candidate_diff_hash', 'candidate_base_sha', 'candidate_ticket_contract_sha256', 'candidate_scope_hash'] as $field) {
+        $format = $run->project()->first()?->object_format;
+        if ($format?->validOid($run->candidate_tree_sha) !== true || ! $format->validOid($run->candidate_base_sha)) {
+            return false;
+        }
+        foreach (['candidate_diff_hash', 'candidate_ticket_contract_sha256', 'candidate_scope_hash'] as $field) {
             if (! is_string($value = $run->getAttribute($field)) || preg_match('/\A[0-9a-f]{64}\z/D', $value) !== 1) {
                 return false;
             }

@@ -31,6 +31,7 @@ abstract class TicketUiTestCase extends ControlOperationTestCase
             'deploy_key_reference' => '/managed/test-key',
             'public_deploy_key' => "ssh-ed25519 fixture\n",
             'control_oid' => str_repeat('a', 64),
+            'object_format' => 'sha256',
         ])->save();
 
         return $project->refresh();

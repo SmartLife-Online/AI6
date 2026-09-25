@@ -28,7 +28,7 @@ final readonly class PendingControlBinding
         if ($present !== [true, true, true]
             || ! is_string($project->pending_control_ref)
             || ! is_string($project->pending_control_oid)
-            || preg_match('/\A[0-9a-f]{64}\z/D', $project->pending_control_oid) !== 1
+            || $project->object_format?->validOid($project->pending_control_oid) !== true
             || ! is_string($project->pending_control_operation_id)
             || $project->control_binding_version < 0) {
             throw new RuntimeException('The pending control binding is incomplete or malformed.');

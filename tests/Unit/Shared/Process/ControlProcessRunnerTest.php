@@ -6,15 +6,20 @@ use App\AI6\Shared\Process\ControlProcessRunner;
 use App\AI6\Shared\Process\EffectLock;
 use App\AI6\Shared\Process\ProcessConfiguration;
 use App\AI6\Shared\Process\ProcessLimit;
+use App\AI6\Shared\Process\ProcessLimits;
 use App\AI6\Shared\Process\ProcessOutcome;
 use App\AI6\Shared\Process\ProcessRequest;
+use App\AI6\Shared\Process\RunningControlProcess;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\RedactionFingerprintGenerator;
 use App\AI6\Shared\Redaction\RedactionKeyring;
 use App\AI6\Shared\Redaction\RedactionPolicy;
 use App\AI6\Shared\Redaction\RedactionRuleSet;
 use App\AI6\Shared\Redaction\Redactor;
+use PHPUnit\Framework\Attributes\DataProvider;
 use ReflectionMethod;
+use RuntimeException;
+use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 final class ControlProcessRunnerTest extends TestCase
@@ -192,6 +197,181 @@ PHP;
                 rmdir($procRoot);
             }
         }
+    }
+
+    #[DataProvider('completedProcessProvider')]
+    public function test_a_completed_direct_process_keeps_its_pid_result_limits_and_redaction(
+        string $code,
+        int $outputLimit,
+        ProcessOutcome $outcome,
+        int $exitCode,
+        string $output,
+        string $error,
+    ): void {
+        $process = $this->completedDirectProcess([PHP_BINARY, '-r', $code]);
+        self::assertFalse($process->isRunning());
+        self::assertNull($process->getPid(), 'Exercise adoption only after Symfony has lost its live PID.');
+        $runner = $this->runner(timeout: 5, outputLimit: $outputLimit);
+        $running = $this->trackCompletedProcess($runner, $process, $outputLimit);
+
+        self::assertGreaterThan(1, $running->processId);
+        self::assertStringStartsWith('__AI6_PROCESS_STARTED_V1__:'.$running->processId."\n", $process->getOutput());
+        $result = $running->wait();
+        self::assertSame($outcome, $result->outcome);
+        self::assertSame($exitCode, $result->exitCode);
+        self::assertSame($output, $result->output);
+        self::assertSame($error, $result->errorOutput);
+        self::assertFalse($running->running());
+        if ($outcome === ProcessOutcome::OUTPUT_LIMIT_EXCEEDED) {
+            self::assertSame(ProcessLimit::OUTPUT_BYTES, $result->limitResult->limit);
+            self::assertSame(65, $result->limitResult->observed);
+            self::assertSame(64, $result->limitResult->maximum);
+        }
+    }
+
+    /** @return iterable<string, array{string, int, ProcessOutcome, int, string, string}> */
+    public static function completedProcessProvider(): iterable
+    {
+        yield 'successful exit' => ['echo "payload";', 4096, ProcessOutcome::SUCCEEDED, 0, 'payload', ''];
+        yield 'failed exit with redacted error' => ['echo "payload"; fwrite(STDERR, "secret=super-secret"); exit(7);', 4096, ProcessOutcome::FAILED, 7, 'payload', 'secret=[REDACTED:SECRET]'];
+        yield 'exact output maximum excludes protocol' => ['echo str_repeat("x", 64);', 64, ProcessOutcome::SUCCEEDED, 0, str_repeat('x', 64), ''];
+        yield 'one byte above output maximum' => ['echo str_repeat("x", 65);', 64, ProcessOutcome::OUTPUT_LIMIT_EXCEEDED, 0, '', 'The control process exceeded a resource limit.'];
+        yield 'payload cannot replace the wrapper identity' => ['echo "__AI6_PROCESS_STARTED_V1__:9999\n";', 4096, ProcessOutcome::SUCCEEDED, 0, "__AI6_PROCESS_STARTED_V1__:9999\n", ''];
+    }
+
+    #[DataProvider('missingProcessIdentityProvider')]
+    public function test_a_completed_process_without_a_valid_identity_still_fails_closed(string $output): void
+    {
+        if (PHP_OS_FAMILY !== 'Linux') {
+            self::markTestSkipped('The direct wrapper identity requires Linux.');
+        }
+        // Deliberately omit the trusted wrapper to exercise its failed protocol.
+        $process = new Process([PHP_BINARY, '-r', 'echo $argv[1];', $output]);
+        self::assertSame(0, $process->run());
+        self::assertNull($process->getPid());
+        $this->expectException(RuntimeException::class);
+        $this->trackCompletedProcess($this->runner(5, 4096), $process, 4096);
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function missingProcessIdentityProvider(): iterable
+    {
+        yield 'missing' => [''];
+        yield 'zero' => ["__AI6_PROCESS_STARTED_V1__:0\n"];
+        yield 'negative' => ["__AI6_PROCESS_STARTED_V1__:-1\n"];
+        yield 'integer overflow' => ["__AI6_PROCESS_STARTED_V1__:9999999999999999999\n"];
+    }
+
+    #[DataProvider('orphanedProcessGroupProvider')]
+    public function test_a_completed_parent_keeps_background_children_subject_to_group_limits_and_termination(int $children, bool $cancel): void
+    {
+        if (PHP_OS_FAMILY !== 'Linux' || ! function_exists('pcntl_fork')) {
+            self::markTestSkipped('The orphaned process-group proof requires Linux with pcntl.');
+        }
+        $directory = sys_get_temp_dir().'/ai6-orphan-process-'.bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($directory, 0700));
+        $code = <<<'PHP'
+file_put_contents($argv[1].'/parent', (string) getmypid());
+for ($i = 0; $i < (int) $argv[2]; $i++) {
+    $pid = pcntl_fork();
+    if ($pid === -1) { exit(3); }
+    if ($pid === 0) {
+        fclose(STDOUT);
+        fclose(STDERR);
+        pcntl_async_signals(true);
+        pcntl_signal(SIGTERM, SIG_IGN);
+        file_put_contents($argv[1].'/child-'.$i, (string) getmypid());
+        while (true) { usleep(10000); }
+    }
+}
+$deadline = microtime(true) + 5;
+while (count(glob($argv[1].'/child-*')) !== (int) $argv[2]) {
+    if (microtime(true) >= $deadline) { exit(4); }
+    usleep(1000);
+}
+echo 'parent-completed';
+PHP;
+        try {
+            $process = $this->completedDirectProcess([PHP_BINARY, '-r', $code, $directory, (string) $children]);
+            $parentPid = (int) file_get_contents($directory.'/parent');
+            self::assertSame(0, $process->getExitCode());
+            self::assertNull($process->getPid());
+            $runner = $this->runner(5, 4096);
+            $limits = new ProcessLimits(5, 4096, 1, 10, 1024, 10);
+            $running = $this->trackCompletedProcess($runner, $process, 4096, $limits);
+            self::assertSame($parentPid, $running->processId, 'The exec target must keep the wrapper/group PID.');
+            self::assertTrue($running->running(), 'Children remain supervised after the parent has exited.');
+            $childPids = array_map(static fn (string $path): int => (int) file_get_contents($path), glob($directory.'/child-*'));
+            self::assertCount($children, $childPids);
+            foreach ($childPids as $childPid) {
+                self::assertTrue($this->liveProcess($childPid));
+            }
+            if ($cancel) {
+                $running->cancel();
+            }
+            $result = $running->wait();
+            self::assertSame($cancel ? ProcessOutcome::CANCELLED : ProcessOutcome::RESOURCE_LIMIT_EXCEEDED, $result->outcome);
+            self::assertSame(0, $result->exitCode, 'The exited parent must not hide its surviving group.');
+            self::assertSame('', $result->output);
+            if (! $cancel) {
+                self::assertSame(ProcessLimit::PROCESS_COUNT, $result->limitResult->limit);
+                self::assertSame(1, $result->limitResult->maximum);
+                self::assertSame($children, $result->limitResult->observed);
+            }
+            foreach ($childPids as $childPid) {
+                self::assertFalse($this->liveProcess($childPid), 'The TERM-ignoring child must be killed with its group.');
+            }
+            self::assertFalse($running->running());
+        } finally {
+            // Also clean up when the regression deliberately fails on old code.
+            if (is_file($directory.'/parent')) {
+                $parentPid = (int) file_get_contents($directory.'/parent');
+                if ($parentPid > 1) {
+                    (new Process(['/usr/bin/kill', '-KILL', '--', '-'.$parentPid]))->run();
+                }
+            }
+            foreach (glob($directory.'/*') as $path) {
+                unlink($path);
+            }
+            rmdir($directory);
+        }
+    }
+
+    /** @return iterable<string, array{int, bool}> */
+    public static function orphanedProcessGroupProvider(): iterable
+    {
+        yield 'two surviving children exceed one process' => [2, false];
+        yield 'one surviving child is cancelled as a group' => [1, true];
+    }
+
+    private function liveProcess(int $pid): bool
+    {
+        $stat = @file_get_contents('/proc/'.$pid.'/stat');
+        $end = is_string($stat) ? strrpos($stat, ')') : false;
+
+        return $end !== false && ! in_array(substr($stat, $end + 2, 1), ['Z', 'X'], true);
+    }
+
+    /** @param non-empty-list<string> $command */
+    private function completedDirectProcess(array $command): Process
+    {
+        if (PHP_OS_FAMILY !== 'Linux') {
+            self::markTestSkipped('The direct wrapper identity requires Linux.');
+        }
+        $process = new Process([
+            '/usr/bin/setsid', '--', '/usr/bin/dash',
+            dirname(__DIR__, 4).'/app/AI6/Shared/Process/control-process-wrapper.sh', 'direct', '--', ...$command,
+        ]);
+        $process->run();
+
+        return $process;
+    }
+
+    private function trackCompletedProcess(ControlProcessRunner $runner, Process $process, int $outputLimit, ?ProcessLimits $limits = null): RunningControlProcess
+    {
+        return (new ReflectionMethod($runner, 'trackStartedProcess'))->invoke(
+            $runner, $process, $this->request(['/usr/bin/true']), [5, $outputLimit, 100, $limits],
+        );
     }
 
     private function runner(int $timeout, int $outputLimit, ?string $killBinary = null): ControlProcessRunner

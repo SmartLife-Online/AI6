@@ -17,6 +17,7 @@ use App\AI6\Shared\Redaction\RedactionPolicy;
 use App\AI6\Shared\Redaction\RedactionRuleSet;
 use App\AI6\Shared\Redaction\Redactor;
 use PHPUnit\Framework\Attributes\After;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
@@ -24,6 +25,33 @@ use Tests\TestCase;
 final class HardenedGitRunnerTest extends TestCase
 {
     private ?string $fixture = null;
+
+    /** @return iterable<string, array{string, int}> */
+    public static function invalidStorageFormats(): iterable
+    {
+        yield 'unknown' => ["sha512\n", 0];
+        yield 'uppercase' => ["SHA1\n", 0];
+        yield 'extra output' => ["sha1\nsha256\n", 0];
+        yield 'trailing content' => ["sha1 extra\n", 0];
+        yield 'missing newline' => ['sha1', 0];
+        yield 'transport failure' => ["sha1\n", 1];
+    }
+
+    #[DataProvider('invalidStorageFormats')]
+    public function test_storage_format_confirmation_has_no_fallback_for_malformed_or_failed_output(string $output, int $exitCode): void
+    {
+        if (DIRECTORY_SEPARATOR !== '/') {
+            self::markTestSkipped('The executable Git output fixture requires Linux.');
+        }
+        $root = $this->createFixtureRoot();
+        mkdir($root.'/repository');
+        $fakeGit = $root.'/git-format';
+        file_put_contents($fakeGit, "#!/usr/bin/dash\nprintf '%s' ".escapeshellarg($output)."\nexit ".$exitCode."\n");
+        chmod($fakeGit, 0555);
+        $runner = $this->runner($root.'/runtime', gitBinary: $fakeGit);
+        $this->expectException($exitCode === 0 ? \InvalidArgumentException::class : \RuntimeException::class);
+        $runner->objectFormat($root.'/repository', new RedactionContext('format', null, 'invalid-storage-format'));
+    }
 
     public function test_checkout_does_not_run_hooks_filters_textconv_pager_fsmonitor_credentials_or_submodules(): void
     {

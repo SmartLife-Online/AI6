@@ -792,9 +792,9 @@ final class RunRetentionSweepTest extends TicketUiTestCase
         $event = $this->app->make(RunOrchestrator::class)->recordStepEvent($run->id, 'implement', ExecutionJobState::RUNNING, 'ROHDATEN-MIGRATION-2', 'ai6-031-migrate-event');
         $this->app->make(RunOrchestrator::class)->failRun($run->id);
 
-        // Roll back the later execution binding first, then the retention
-        // contract whose legacy columns this upgrade test exercises.
-        self::assertSame(0, Artisan::call('migrate:rollback', ['--step' => 2]), Artisan::output());
+        // Roll back the later object format and execution bindings first, then
+        // the retention contract whose legacy columns this upgrade test exercises.
+        self::assertSame(0, Artisan::call('migrate:rollback', ['--step' => 3]), Artisan::output());
         self::assertFalse(Schema::hasColumn('run_artifacts', 'execution_id'));
         self::assertFalse(Schema::hasColumn('run_events', 'retention_expires_at'));
         self::assertFalse(Schema::hasColumn('check_results', 'fingerprint'));

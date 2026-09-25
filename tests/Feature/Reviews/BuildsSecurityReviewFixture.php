@@ -22,6 +22,8 @@ use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\RunFinalizationStep;
 use App\AI6\Runs\RunOrchestrator;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Log\Events\MessageLogged;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\Feature\Checks\BuildsCheckFixture;
@@ -67,6 +69,12 @@ trait BuildsSecurityReviewFixture
         $run = $this->seedSecurityBeforeReviewCheck($run->fresh());
         $finalize = ExecutionJob::query()->where('run_id', $run->id)
             ->where('step_type', ExecutionStepType::FINALIZE->value)->sole();
+        $candidateFailure = [];
+        Log::listen(static function (MessageLogged $event) use ($run, &$candidateFailure): void {
+            if ($event->message === 'publish_candidate_failed' && ($event->context['run_id'] ?? null) === $run->id) {
+                $candidateFailure = $event->context;
+            }
+        });
         (new ExecuteRunStep($finalize->id))->handle(
             $this->app->make(RunOrchestrator::class),
             finalization: $this->app->make(RunFinalizationStep::class),
@@ -77,7 +85,11 @@ trait BuildsSecurityReviewFixture
                 finalization: $this->app->make(RunFinalizationStep::class),
             );
         });
-        self::assertSame(ExecutionJobState::SUCCEEDED, $finalize->fresh()->state, (string) $finalize->fresh()->failure_code);
+        $finalize->refresh();
+        self::assertSame(ExecutionJobState::SUCCEEDED, $finalize->state, json_encode([
+            'failure_code' => $finalize->failure_code,
+            'candidate_failure' => $candidateFailure,
+        ], JSON_THROW_ON_ERROR));
         $this->bindSecurityRepository($run->fresh(), $prepared['worktree']);
 
         return ['run' => $run->fresh(), 'worktree' => $prepared['worktree']];

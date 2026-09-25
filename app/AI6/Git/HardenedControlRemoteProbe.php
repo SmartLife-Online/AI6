@@ -38,8 +38,8 @@ final readonly class HardenedControlRemoteProbe implements ControlRemoteProbe
         );
         if (! $result->succeeded()) {
             if ($result->exitCode === 2
-                && trim($result->output) === ''
-                && trim($result->errorOutput) === '') {
+                && $result->output === ''
+                && $result->errorOutput === '') {
                 throw new ControlRemoteRefUnresolved('The control ref does not exist on the remote.');
             }
 
@@ -50,19 +50,6 @@ final readonly class HardenedControlRemoteProbe implements ControlRemoteProbe
             );
         }
 
-        $lines = preg_split('/\r?\n/', trim($result->output)) ?: [];
-        if (count($lines) !== 1) {
-            throw new ControlRemoteRefUnresolved('The control ref remote probe returned no unique result.');
-        }
-
-        $parts = preg_split('/\s+/', $lines[0], 2);
-        if (! is_array($parts)
-            || count($parts) !== 2
-            || $parts[1] !== $ref
-            || preg_match('/\A[0-9a-f]{64}\z/D', $parts[0]) !== 1) {
-            throw new ControlRemoteRefUnresolved('The control ref remote probe returned a malformed binding.');
-        }
-
-        return $parts[0];
+        return GitRemoteRefResponse::oid($result->output, $ref);
     }
 }

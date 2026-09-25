@@ -120,6 +120,7 @@ trait BuildsObservedRunFixture
             'deploy_key_reference' => '/managed/test-key-second',
             'public_deploy_key' => "ssh-ed25519 fixture-second\n",
             'control_oid' => str_repeat('b', 64),
+            'object_format' => 'sha256',
         ]);
         $this->addMembership($administrator, $project, ProjectRole::ADMIN);
 

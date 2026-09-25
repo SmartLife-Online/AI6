@@ -293,6 +293,9 @@ final readonly class QueueTicketMutation
             $currentReadModel = TicketReadModel::query()->findOrFail($readModel->getKey());
             $binding = $this->projectConfiguration->for($currentProject);
             if ($currentProject->provisioning_status !== ProjectProvisioningStatus::PROVISIONED
+                || $currentProject->object_format === null
+                || ! $currentProject->object_format->validOid($expectedControlOid)
+                || ! $currentProject->object_format->validOid($expectedBlob)
                 || $currentProject->control_oid === null
                 || ! hash_equals($expectedControlOid, $currentProject->control_oid)
                 || $currentProject->pending_control_oid !== null
@@ -404,7 +407,9 @@ final readonly class QueueTicketMutation
                         $externalCompletionConfirmed,
                     );
                 }
-                $targetContent = $this->statuses->replace($baseContent, $sourceStatus, $targetStatus);
+                if ($implementationRunId === null) {
+                    $targetContent = $this->statuses->replace($baseContent, $sourceStatus, $targetStatus);
+                }
                 $type = $statusOperation === TicketStatusOperation::APPROVE
                     ? ControlOperationType::TICKET_APPROVAL
                     : ControlOperationType::TICKET_STATUS_CHANGE;
@@ -475,7 +480,7 @@ final readonly class QueueTicketMutation
                 $expectedControlOid,
                 $parameters,
             );
-            $targetBlob = hash('sha256', 'blob '.strlen($targetContent)."\0".$targetContent);
+            $targetBlob = $currentProject->object_format->objectId('blob', $targetContent);
             $approvalBinding = $statusOperation === TicketStatusOperation::APPROVE
                 ? $approvalSnapshot->aggregateHash
                 : '';

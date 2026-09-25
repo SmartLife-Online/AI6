@@ -2,6 +2,7 @@
 
 namespace App\AI6\HumanLoop;
 
+use App\AI6\Git\GitObjectFormat;
 use App\AI6\HumanLoop\Models\HumanRequest;
 
 /** Provenance contract that distinguishes candidate-gate answers on the generic route. */
@@ -26,7 +27,8 @@ final class GateEvidenceHumanRequestBinding
     {
         if (! str_starts_with($request->bound_agent_slot, self::SLOT_PREFIX)
             || ! in_array(self::EFFECT, $request->allowed_effects, true)
-            || preg_match('/\A([0-9a-f]{64}):([0-9a-f]{64})\z/D', $request->bound_requested_effect, $matches) !== 1) {
+            || preg_match('/\A([0-9a-f]{40}(?:[0-9a-f]{24})?):([0-9a-f]{64})\z/D', $request->bound_requested_effect, $matches) !== 1
+            || GitObjectFormat::tryFromOid($matches[1]) === null) {
             return null;
         }
         $gateId = substr($request->bound_agent_slot, strlen(self::SLOT_PREFIX));

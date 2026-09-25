@@ -60,7 +60,7 @@ final readonly class QueueTicketReadModelRefresh
             if ($currentProject->provisioning_status !== ProjectProvisioningStatus::PROVISIONED
                 || $currentProject->project_identifier === null
                 || $currentProject->control_oid === null
-                || preg_match('/\A[0-9a-f]{64}\z/D', $currentProject->control_oid) !== 1
+                || $currentProject->object_format?->validOid($currentProject->control_oid) !== true
                 || $currentProject->pending_control_oid !== null) {
                 throw new ControlOperationConflict('The project has no refreshable active control binding.');
             }

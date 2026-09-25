@@ -23,6 +23,7 @@ use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
 use App\AI6\Tickets\TicketMutationConflict;
+use App\AI6\Tickets\TicketStatusOperation;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -144,7 +145,7 @@ final readonly class RunCancellationService
 
     public function reconcileOperation(ControlOperation $operation): ?Run
     {
-        if ($this->isReportOnlyCompletion($operation)) {
+        if ($this->isCompletionOperation($operation)) {
             return null;
         }
         $run = Run::query()->where('pending_status_operation_id', $operation->id)->first();
@@ -169,7 +170,7 @@ final readonly class RunCancellationService
 
     public function recordConflict(ControlOperation $operation): ?Run
     {
-        if ($this->isReportOnlyCompletion($operation)) {
+        if ($this->isCompletionOperation($operation)) {
             return null;
         }
         $run = Run::query()->where('pending_status_operation_id', $operation->id)->first();
@@ -217,7 +218,7 @@ final readonly class RunCancellationService
         return $parked;
     }
 
-    private function isReportOnlyCompletion(ControlOperation $operation): bool
+    private function isCompletionOperation(ControlOperation $operation): bool
     {
         try {
             $parameters = json_decode($operation->operation_parameters_jcs, true, flags: JSON_THROW_ON_ERROR);
@@ -226,6 +227,9 @@ final readonly class RunCancellationService
         }
 
         return is_array($parameters)
-            && ($parameters['status_operation'] ?? null) === 'complete_report_only';
+            && in_array($parameters['status_operation'] ?? null, [
+                TicketStatusOperation::COMPLETE_REPORT_ONLY->value,
+                TicketStatusOperation::COMPLETE_IMPLEMENTATION->value,
+            ], true);
     }
 }

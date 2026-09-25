@@ -66,11 +66,16 @@ final readonly class ManagedCloneSynchronizer
             throw new RuntimeException('Authorization changed before the managed Git process started.');
         }
 
-        $targetOid = $this->remoteProbe->resolve(
-            $project,
-            $parameters['control_ref'],
-            $this->context($operation, 'managed-remote-probe'),
-        );
+        try {
+            $targetOid = $this->remoteProbe->resolve(
+                $project,
+                $parameters['control_ref'],
+                $this->context($operation, 'managed-remote-probe'),
+            );
+        } catch (ControlRemoteRefUnresolved) {
+            throw new ControlOperationTerminalConflict('remote_ref_unresolved', 'Der Control-Branch konnte nicht eindeutig aufgelöst werden.');
+        }
+        $this->assertObjectBinding($operation, $project, $targetOid, false);
         if ($parameters['pending_control_oid'] !== null
             && ! hash_equals($parameters['pending_control_oid'], $targetOid)) {
             throw new ControlOperationTerminalConflict(
@@ -97,6 +102,7 @@ final readonly class ManagedCloneSynchronizer
             $repository = $this->paths->assertRepository(
                 $this->paths->repositoryDirectory((string) $project->project_identifier),
             );
+            $this->confirmObjectFormat($operation, $project, $repository, $targetOid, false);
             $argumentHash = $this->git->fetchArgumentHash(
                 (string) $project->remote,
                 $parameters['control_ref'],
@@ -275,6 +281,10 @@ final readonly class ManagedCloneSynchronizer
         $lock = $this->acquireEffectLock($operation, $project, $attemptToken, 'managed-clone publication');
         try {
             $repositoryPath = $this->paths->repositoryDirectory((string) $project->project_identifier);
+            $confirmationPath = is_dir($repositoryPath)
+                ? $repositoryPath
+                : $this->paths->stagedRepository((string) $project->project_identifier, $operation->id, $effectAttemptToken);
+            $this->confirmObjectFormat($operation, $project, $this->paths->assertRepository($confirmationPath), $targetOid, is_dir($repositoryPath));
             $published = $this->existingRefOid($repositoryPath, $parameters['control_ref'], $operation, 'published-state-inspection');
             if ($published !== $targetOid) {
                 if ($operation->operation_type === ControlOperationType::MANAGED_CLONE) {
@@ -316,19 +326,22 @@ final readonly class ManagedCloneSynchronizer
         $targetOid = $this->intentOid($operation);
         $lock = $this->acquireEffectLock($operation, $project, $attemptToken, 'control-binding finalization');
         try {
-            $this->assertPublishedEffect($operation, $project, $parameters['control_ref'], $targetOid);
-            DB::transaction(function () use ($operation, $project, $parameters, $targetOid, $attemptToken): void {
+            $format = $this->assertPublishedEffect($operation, $project, $parameters['control_ref'], $targetOid);
+            DB::transaction(function () use ($operation, $project, $parameters, $targetOid, $attemptToken, $format): void {
                 $project->refresh();
                 $expectedVersion = $parameters['expected_binding_version'];
                 if (! ($project->control_oid === $targetOid
+                    && $project->object_format === $format
                     && $project->control_binding_version === $expectedVersion + 1
                     && PendingControlBinding::fromProject($project) === null)) {
                     $query = Project::query()
                         ->whereKey($project->getKey())
                         ->where('operation_lock_operation_id', $operation->id)
                         ->where('operation_lock_attempt_token', $attemptToken)
+                        ->where('object_format', $project->object_format?->value)
                         ->where('control_binding_version', $expectedVersion);
                     $updates = [
+                        'object_format' => $format->value,
                         'control_oid' => $targetOid,
                         'control_binding_version' => DB::raw('control_binding_version + 1'),
                         'updated_at' => Date::now(),
@@ -383,6 +396,8 @@ final readonly class ManagedCloneSynchronizer
     private function complete(ControlOperation $operation, int $attemptToken): bool
     {
         $targetOid = $this->intentOid($operation);
+        $project = $operation->project()->firstOrFail();
+        $this->assertPublishedEffect($operation, $project, $this->parameters($operation)['control_ref'], $targetOid);
         $this->cleanupFailedAttempt($operation, $attemptToken);
         DB::transaction(function () use ($operation, $attemptToken, $targetOid): void {
             if (! $this->lease->owns($operation->id, $operation->project_id, $attemptToken)) {
@@ -525,17 +540,19 @@ final readonly class ManagedCloneSynchronizer
         $lock = $this->acquireEffectLock($operation, $project, $attemptToken, 'managed recovery retry');
         try {
             $this->assertRecoveryEffectUnchanged($operation, $project);
-            $this->assertPublishedEffect($operation, $project, $parameters['control_ref'], $targetOid);
+            $format = $this->assertPublishedEffect($operation, $project, $parameters['control_ref'], $targetOid);
             for ($reconciliation = 0; $reconciliation < $this->configuration->reconciliationBudget; $reconciliation++) {
-                $resolved = DB::transaction(function () use ($operation, $decision, $project, $attemptToken, $targetOid): bool {
+                $resolved = DB::transaction(function () use ($operation, $decision, $project, $attemptToken, $targetOid, $format): bool {
                     $project->refresh();
-                    if ($project->control_oid !== $targetOid) {
+                    if ($project->control_oid !== $targetOid || $project->object_format !== $format) {
                         $updated = Project::query()
                             ->whereKey($project->getKey())
                             ->where('operation_lock_operation_id', $operation->id)
                             ->where('operation_lock_attempt_token', $attemptToken)
+                            ->where('object_format', $project->object_format?->value)
                             ->where('control_binding_version', $project->control_binding_version)
                             ->update([
+                                'object_format' => $format->value,
                                 'control_oid' => $targetOid,
                                 'control_binding_version' => DB::raw('control_binding_version + 1'),
                                 'updated_at' => Date::now(),
@@ -691,7 +708,7 @@ final readonly class ManagedCloneSynchronizer
             && $parameters['pending_binding_version'] >= 0
             && $parameters['pending_binding_version'] === $parameters['expected_binding_version']
             && is_string($parameters['pending_control_oid'])
-            && preg_match('/\A[0-9a-f]{64}\z/D', $parameters['pending_control_oid']) === 1;
+            && GitObjectFormat::tryFromOid($parameters['pending_control_oid']) !== null;
         if (! $allNull && ! $complete) {
             throw new RuntimeException('Managed-fetch pending-binding parameters are incomplete.');
         }
@@ -768,6 +785,7 @@ final readonly class ManagedCloneSynchronizer
             return false;
         }
         $repository = $this->paths->assertRepository($repository);
+        $this->confirmObjectFormat($operation, $project, $repository, $targetOid, false);
         $ref = $operation->operation_type === ControlOperationType::MANAGED_CLONE
             ? $controlRef
             : ManagedProjectPath::attemptRef($operation->id, $attemptToken);
@@ -794,10 +812,11 @@ final readonly class ManagedCloneSynchronizer
         Project $project,
         string $controlRef,
         string $targetOid,
-    ): void {
+    ): GitObjectFormat {
         $repository = $this->paths->assertRepository(
             $this->paths->repositoryDirectory((string) $project->project_identifier),
         );
+        $format = $this->confirmObjectFormat($operation, $project, $repository, $targetOid, true);
         $refs = $this->git->refs($repository, $this->context($operation, 'published-ref-inventory'));
         if (($refs[$controlRef] ?? null) !== $targetOid) {
             throw new ControlOperationRecoveryRequired('The published managed-clone ref differs from the persisted intent.');
@@ -808,6 +827,43 @@ final readonly class ManagedCloneSynchronizer
                 throw new ControlOperationRecoveryRequired('The managed repository contains a ref outside the configured allowlist.');
             }
         }
+
+        return $format;
+    }
+
+    private function assertObjectBinding(ControlOperation $operation, Project $project, string $oid, bool $published): GitObjectFormat
+    {
+        $format = GitObjectFormat::tryFromOid($oid);
+        if ($format === null || ($project->object_format !== null && $project->object_format !== $format)
+            || ($project->object_format === null && $operation->operation_type !== ControlOperationType::MANAGED_CLONE)) {
+            $this->rejectObjectFormat($published);
+        }
+
+        return $format;
+    }
+
+    private function confirmObjectFormat(ControlOperation $operation, Project $project, string $repository, string $oid, bool $published): GitObjectFormat
+    {
+        $format = $this->assertObjectBinding($operation, $project, $oid, $published);
+        try {
+            $actual = $this->git->objectFormat($repository, $this->context($operation, 'managed-object-format'));
+        } catch (\InvalidArgumentException) {
+            $this->rejectObjectFormat($published);
+        }
+        if ($actual !== $format) {
+            $this->rejectObjectFormat($published);
+        }
+
+        return $format;
+    }
+
+    private function rejectObjectFormat(bool $published): never
+    {
+        if ($published) {
+            throw new ControlOperationRecoveryRequired('The published Git storage format differs from its bound intent.');
+        }
+
+        throw new ControlOperationTerminalConflict('git_object_format_mismatch', 'Das Git-Objektformat stimmt nicht mit der gebundenen Control-Identität überein.');
     }
 
     private function existingRefOid(
@@ -1006,6 +1062,6 @@ final readonly class ManagedCloneSynchronizer
 
     private function validOid(string $oid): bool
     {
-        return preg_match('/\A[0-9a-f]{64}\z/D', $oid) === 1;
+        return GitObjectFormat::tryFromOid($oid) !== null;
     }
 }

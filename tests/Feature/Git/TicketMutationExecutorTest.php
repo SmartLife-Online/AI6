@@ -17,6 +17,7 @@ use App\AI6\Git\ControlOperationPhase;
 use App\AI6\Git\ControlOperationState;
 use App\AI6\Git\ControlOperationTerminalConflict;
 use App\AI6\Git\ControlOperationType;
+use App\AI6\Git\GitObjectFormat;
 use App\AI6\Git\HardenedGitRunner;
 use App\AI6\Git\ManagedProjectPath;
 use App\AI6\Git\Models\ControlOperation;
@@ -53,13 +54,13 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
     use BuildsManagedControlRuntimeFixture;
 
     #[DataProvider('mutationKinds')]
-    public function test_worker_publishes_one_file_commit_and_finalizes_every_bound_projection(string $kind): void
+    public function test_worker_publishes_one_file_commit_and_finalizes_every_bound_projection(string $kind, GitObjectFormat $format): void
     {
         if (DIRECTORY_SEPARATOR !== '/') {
             self::markTestSkipped('The real ticket-mutation worker proof requires the POSIX process and effect-lock runtime.');
         }
 
-        $fixture = $this->managedFixture();
+        $fixture = $this->managedFixture($format);
         $actor = $fixture['administrator'];
         if ($kind === 'approval') {
             $actor = $this->createUser();
@@ -128,6 +129,8 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
         self::assertIsInt($attemptToken);
         $executor = $this->app->make(TicketMutationExecutor::class);
 
+        self::assertSame(str_repeat('0', 64), TicketMutation::query()->findOrFail($operation->id)->expected_target_tree_oid);
+
         self::assertTrue($fixture['lease']->expire($operation->id, $operation->project_id, $attemptToken));
         $attemptToken = $fixture['lease']->claim($operation->refresh(), str_repeat('f', 32));
         self::assertIsInt($attemptToken);
@@ -153,6 +156,7 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
         }
         self::assertFalse($executor->advance($operation, $attemptToken));
         self::assertSame(ControlOperationPhase::COMMIT_PREPARED, $operation->refresh()->phase);
+        self::assertTrue($format->validOid(TicketMutation::query()->findOrFail($operation->id)->expected_target_tree_oid));
         if ($kind === 'approval') {
             self::assertSame(1, TicketApproval::query()->whereKey($operation->id)->count());
             self::assertSame('commit_prepared', TicketApproval::query()->findOrFail($operation->id)->saga_phase);
@@ -320,12 +324,14 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
         self::assertSame(1, $missingAttempt->exitCode);
     }
 
-    /** @return iterable<string, array{string}> */
+    /** @return iterable<string, array{string, GitObjectFormat}> */
     public static function mutationKinds(): iterable
     {
-        yield 'ticket edit' => ['edit'];
-        yield 'ticket status change' => ['status'];
-        yield 'ticket approval' => ['approval'];
+        foreach (GitObjectFormat::cases() as $format) {
+            foreach (['edit', 'status', 'approval'] as $kind) {
+                yield $format->value.' '.$kind => [$kind, $format];
+            }
+        }
     }
 
     #[DataProvider('runStartLineageCases')]
@@ -1115,7 +1121,15 @@ final class TicketMutationExecutorTest extends TicketUiTestCase
             (string) Str::uuid(),
         );
         DB::table('jobs')->delete();
-        $this->app->make(ControlOperationExecutor::class)->execute($clone->id);
+        try {
+            $this->app->make(ControlOperationExecutor::class)->execute($clone->id);
+        } finally {
+            $clone->refresh();
+            self::assertSame(ControlOperationState::COMPLETED, $clone->state, json_encode([
+                'fixture' => 'recovery_clone',
+                'last_error' => $clone->last_error,
+            ], JSON_THROW_ON_ERROR));
+        }
         $refresh = $this->app->make(QueueTicketReadModelRefresh::class)->handle(
             $fixture['administrator'],
             $fixture['project']->refresh(),

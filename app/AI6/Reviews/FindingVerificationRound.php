@@ -208,7 +208,8 @@ final readonly class FindingVerificationRound
             'slot_prompt_hash' => $prompt->hash,
             'slot_instruction_hash' => $instruction->hash,
             'slot_runtime_profile_hash' => $runtime->hash,
-            'workspace_tree_hash' => $run->checkpoint_tree_sha,
+            // AI6-051/AC-05: populated only by CheckTreeBinding after export below.
+            'workspace_tree_hash' => null,
             'original_finding_id' => $groupVerification ? null : $finding->id,
             'original_duplicate_group' => $groupVerification ? $finding->duplicate_group : null,
         ];
@@ -240,6 +241,14 @@ final readonly class FindingVerificationRound
             if ($expectedWorkspaceHash !== null && ! hash_equals($expectedWorkspaceHash, $bindings['workspace_tree_hash'])) {
                 throw new ImplementationImportException('review_workspace_hash_mismatch', 'The verifier workspace differs from the reviewed workspace.');
             }
+        } catch (Throwable $exception) {
+            $reason = $exception instanceof ImplementationImportException ? $exception->reason : 'review_workspace_unavailable';
+            $this->destroy(null, $export, $input, $output);
+            $this->results->append($run, $slot, $job->step_number, $attempt, ReviewInvocationOutcome::WORKSPACE_ERROR, $bindings, $reason);
+
+            return false;
+        }
+        try {
             $agentContext = new AgentResultContext(
                 AgentRole::FINDING_VERIFICATION,
                 $prompt,

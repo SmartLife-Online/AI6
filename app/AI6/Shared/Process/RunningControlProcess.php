@@ -16,6 +16,8 @@ final class RunningControlProcess
 
     private bool $terminationFailed = false;
 
+    private bool $finished = false;
+
     public function __construct(
         private readonly Process $process,
         private readonly Redactor $redactor,
@@ -37,7 +39,8 @@ final class RunningControlProcess
 
     public function running(): bool
     {
-        return $this->process->isRunning();
+        return ! $this->finished && ($this->process->isRunning()
+            || ($this->terminateProcessGroup !== null && $this->processGroupInventory()[1] > 0));
     }
 
     public function waitForOutputPrefix(string $prefix, int $timeoutSeconds): bool
@@ -60,7 +63,7 @@ final class RunningControlProcess
 
     public function cancel(): void
     {
-        if (! $this->process->isRunning()) {
+        if (! $this->running()) {
             return;
         }
 
@@ -83,7 +86,7 @@ final class RunningControlProcess
         $nextHeartbeat = microtime(true) + $heartbeatSeconds;
         $nextResourceCheck = microtime(true);
 
-        while ($this->process->isRunning()) {
+        while ($this->running()) {
             $observedBytes += strlen($this->process->getIncrementalOutput());
             $observedBytes += strlen($this->process->getIncrementalErrorOutput());
 
@@ -95,7 +98,7 @@ final class RunningControlProcess
             }
 
             if ($observe !== null) {
-                $visible = $this->process->getOutput().$this->process->getErrorOutput();
+                $visible = substr($this->process->getOutput(), $this->discardOutputPrefixBytes).$this->process->getErrorOutput();
                 $lastNewline = strrpos($visible, "\n");
                 if ($lastNewline !== false) {
                     try {
@@ -152,8 +155,13 @@ final class RunningControlProcess
         $duration = max(0.0, microtime(true) - $this->startedAt);
         $limitResult ??= $this->resourceLimitResult();
         if ($limitResult !== null) {
+            if ($outcome !== ProcessOutcome::RESOURCE_LIMIT_EXCEEDED) {
+                $this->terminate();
+            }
             $outcome = ProcessOutcome::RESOURCE_LIMIT_EXCEEDED;
         }
+
+        $this->finished = ! $this->terminationFailed;
 
         if ($this->terminationFailed) {
             return $this->limitedResult(ProcessOutcome::TERMINATION_FAILED, $duration, 'The control process group could not be terminated safely.');
@@ -234,24 +242,34 @@ final class RunningControlProcess
 
     private function processCount(): int
     {
+        return max(1, $this->processGroupInventory()[0]);
+    }
+
+    /** @return array{int, int} Total members and members that can still execute. */
+    private function processGroupInventory(): array
+    {
         if (DIRECTORY_SEPARATOR !== '/' || ! is_dir('/proc')) {
-            return 1;
+            return [1, 0];
         }
 
         $count = 0;
+        $live = 0;
         foreach (scandir('/proc') ?: [] as $entry) {
             if (preg_match('/\A[1-9][0-9]*\z/D', $entry) !== 1) {
                 continue;
             }
             $stat = @file_get_contents('/proc/'.$entry.'/stat');
             $end = is_string($stat) ? strrpos($stat, ')') : false;
-            if ($end !== false && preg_match('/\A[A-Z] [0-9]+ ([0-9]+) /', substr($stat, $end + 2), $match) === 1
-                && (int) $match[1] === $this->processId) {
+            if ($end !== false && preg_match('/\A([A-Z]) [0-9]+ ([0-9]+) /', substr($stat, $end + 2), $match) === 1
+                && (int) $match[2] === $this->processId) {
                 $count++;
+                if (! in_array($match[1], ['Z', 'X'], true)) {
+                    $live++;
+                }
             }
         }
 
-        return max(1, $count);
+        return [$count, $live];
     }
 
     /** @return array{int, int} */

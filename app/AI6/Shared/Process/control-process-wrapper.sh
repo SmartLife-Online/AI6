@@ -12,6 +12,7 @@ if [ "$mode" = "direct" ]; then
     [ "${1:-}" = "--" ] || exit 78
     shift
     [ "$#" -gt 0 ] || exit 78
+    printf '__AI6_PROCESS_STARTED_V1__:%s\n' "$$"
     exec "$@"
 fi
 

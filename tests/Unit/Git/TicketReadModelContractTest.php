@@ -82,6 +82,7 @@ final class TicketReadModelContractTest extends TestCase
             'name' => 'Freshness project',
             'control_generation' => 4,
             'control_oid' => str_repeat('a', 64),
+            'object_format' => 'sha256',
         ]);
         $binding = $this->app->make(EffectiveProjectConfiguration::class)->for($project);
         $model = (new TicketReadModel)->forceFill([

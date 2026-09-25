@@ -103,6 +103,9 @@ final readonly class ControlBranchChanger
             );
         }
 
+        if ($project->object_format?->validOid($targetOid) !== true) {
+            throw new ControlOperationTerminalConflict('git_object_format_mismatch', 'Das Remote-Objektformat stimmt nicht mit dem Projekt überein.');
+        }
         $updated = ControlOperation::query()
             ->whereKey($operation->id)
             ->where('current_attempt_token', $attemptToken)
@@ -133,7 +136,7 @@ final readonly class ControlBranchChanger
     {
         $parameters = $this->parameters($operation);
         $targetOid = $operation->target_control_oid;
-        if ($targetOid === null || preg_match('/\A[0-9a-f]{64}\z/D', $targetOid) !== 1) {
+        if ($targetOid === null || $operation->project()->firstOrFail()->object_format?->validOid($targetOid) !== true) {
             throw new ControlOperationTerminalConflict(
                 'remote_probe_binding_invalid',
                 'Der gespeicherte Ziel-OID des Control-Branch-Wechsels ist ungültig.',
@@ -251,7 +254,7 @@ final readonly class ControlBranchChanger
         $parameters = $operation->operation_type->parameters($decoded);
         if (! is_string($parameters['old_control_ref'])
             || ! is_string($parameters['old_control_oid'])
-            || preg_match('/\A[0-9a-f]{64}\z/D', $parameters['old_control_oid']) !== 1
+            || GitObjectFormat::tryFromOid($parameters['old_control_oid']) === null
             || ! is_int($parameters['expected_binding_version'])
             || $parameters['expected_binding_version'] < 0
             || ! is_string($parameters['new_control_ref'])
@@ -275,6 +278,7 @@ final readonly class ControlBranchChanger
         $pending = PendingControlBinding::fromProject($project);
         $currentOid = $project->control_oid ?? $pending?->oid;
         if ($project->provisioning_status !== ProjectProvisioningStatus::PROVISIONED
+            || $project->object_format?->validOid($currentOid) !== true
             || $project->remote === null
             || $project->deploy_key_reference === null
             || $project->host_key_fingerprint === null

@@ -66,7 +66,8 @@ final readonly class ReviewSubjectVerifier
     /** @return array{tree_oid: string, diff_hash: string} */
     private function verifyResolved(string $repository, ReviewSubject $subject, string $expectedBase, int $projectId, RedactionContext $context): array
     {
-        if (! hash_equals($expectedBase, $subject->baseOid)) {
+        if (Project::query()->find($projectId)?->object_format?->validOid($expectedBase) !== true
+            || ! hash_equals($expectedBase, $subject->baseOid)) {
             throw new ReviewSubjectException('source_base_mismatch');
         }
 
@@ -97,7 +98,7 @@ final readonly class ReviewSubjectVerifier
         }
 
         $tree = $this->git->resolveTree($repository, $subject->sourceOid, $context);
-        if (! $tree->succeeded() || preg_match('/\A[0-9a-f]{64}\z/D', trim($tree->output)) !== 1) {
+        if (! $tree->succeeded() || ! GitObjectFormat::fromOid($subject->sourceOid)->validOid(trim($tree->output))) {
             throw new ReviewSubjectException('source_tree_unavailable');
         }
         $treeOid = trim($tree->output);

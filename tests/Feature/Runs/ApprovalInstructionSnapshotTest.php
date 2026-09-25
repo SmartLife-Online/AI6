@@ -9,25 +9,84 @@ use App\AI6\Agents\InstructionCandidate;
 use App\AI6\Agents\InstructionCandidateOrigin;
 use App\AI6\Agents\InstructionFileType;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
+use App\AI6\Git\Actions\QueueManagedCloneOperation;
 use App\AI6\Git\Actions\QueueTicketMutation;
+use App\AI6\Git\Actions\QueueTicketReadModelRefresh;
+use App\AI6\Git\ControlOperationExecutor;
+use App\AI6\Git\ControlOperationState;
+use App\AI6\Git\ControlOperationType;
+use App\AI6\Git\GitObjectFormat;
 use App\AI6\Projects\Models\Project;
+use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Projects\ProjectRole;
 use App\AI6\Reviews\ReviewerSlotFactory;
 use App\AI6\Runs\ApprovalFreshness;
 use App\AI6\Runs\ApprovalLimits;
 use App\AI6\Runs\ApprovalSelection;
 use App\AI6\Runs\ApprovalSnapshotFactory;
+use App\AI6\Runs\InstructionCandidateCollector;
 use App\AI6\Runs\InstructionCandidateSource;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Shared\Redaction\RedactionContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Feature\Git\BuildsManagedControlRuntimeFixture;
 use Tests\Feature\Tickets\TicketUiTestCase;
 use Tests\Fixtures\Agents\BuildsProviderOnboarding;
 
 final class ApprovalInstructionSnapshotTest extends TicketUiTestCase
 {
+    use BuildsManagedControlRuntimeFixture;
     use BuildsProviderOnboarding;
+
+    /** @return iterable<string, array{GitObjectFormat}> */
+    public static function objectFormats(): iterable
+    {
+        yield 'sha1' => [GitObjectFormat::SHA1];
+        yield 'sha256' => [GitObjectFormat::SHA256];
+    }
+
+    #[DataProvider('objectFormats')]
+    public function test_real_instruction_blobs_are_collected_resolved_and_approval_bound(GitObjectFormat $format): void
+    {
+        $fixture = $this->managedFixture($format);
+        $content = $this->validTicketMarkdown('AI6-INSTRUCTIONS');
+        $instructions = "Approved project instructions.\n";
+        file_put_contents($fixture['source'].'/AGENTS.md', $instructions);
+        file_put_contents($fixture['source'].'/tickets/AI6-INSTRUCTIONS.md', $content);
+        $this->managedFixtureGit(['add', 'AGENTS.md', 'tickets/AI6-INSTRUCTIONS.md'], $fixture['source']);
+        $this->managedFixtureGit(['commit', '-m', 'instructions and ticket'], $fixture['source']);
+        $this->managedFixtureGit(['push', $fixture['remote'], 'HEAD:refs/heads/main'], $fixture['source']);
+        $blob = trim($this->managedFixtureGit(['rev-parse', 'HEAD:AGENTS.md'], $fixture['source']));
+        $project = $fixture['project'];
+        $actor = $fixture['administrator'];
+        $clone = app(QueueManagedCloneOperation::class)->handle($actor, $project, ControlOperationType::MANAGED_CLONE, (string) Str::uuid());
+        app(ControlOperationExecutor::class)->execute($clone->id);
+        self::assertSame(ControlOperationState::COMPLETED, $clone->refresh()->state);
+        $refresh = app(QueueTicketReadModelRefresh::class)->handle($actor, $project->refresh(), 'tickets/AI6-INSTRUCTIONS.md', (string) Str::uuid());
+        app(ControlOperationExecutor::class)->execute($refresh->id);
+        $readModel = TicketReadModel::query()->where('relative_path', 'tickets/AI6-INSTRUCTIONS.md')->sole();
+        $this->app->bind(InstructionCandidateSource::class, InstructionCandidateCollector::class);
+        $this->app->forgetInstance(ApprovalSnapshotFactory::class);
+        $selection = $this->selection();
+        $contextId = (string) Str::uuid();
+        $snapshot = app(ApprovalSnapshotFactory::class)->create($project, $readModel, $selection, $contextId);
+        $entry = $snapshot->instructions['fake']['entries'][0];
+        self::assertSame('AGENTS.md', $entry['repository_path']);
+        self::assertSame($blob, $entry['blob_sha']);
+        self::assertSame($format->length(), strlen($entry['blob_sha']));
+        self::assertSame(hash('sha256', $instructions), $entry['content_sha256']);
+        $approver = $this->createUser();
+        $this->addMembership($approver, $project, ProjectRole::APPROVER);
+        $operation = app(QueueTicketMutation::class)->approve(
+            $approver, $project, $readModel, (string) Str::uuid(), $readModel->control_commit,
+            $readModel->blob_sha, $content, 'Instruktionsfreigabe', true, $selection, $snapshot, $contextId,
+        );
+        $approval = TicketApproval::query()->findOrFail($operation->id);
+        self::assertSame($snapshot->instructionHash, $approval->instruction_hash);
+        self::assertSame($snapshot->instructions, $approval->instruction_snapshot);
+    }
 
     public function test_instruction_order_hashes_adapter_and_runtime_changes_are_approval_bound(): void
     {

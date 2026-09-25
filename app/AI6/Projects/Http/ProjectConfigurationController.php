@@ -5,6 +5,7 @@ namespace App\AI6\Projects\Http;
 use App\AI6\Auth\Models\User;
 use App\AI6\Auth\StepUpGuard;
 use App\AI6\Git\ControlOperationConflict;
+use App\AI6\Git\ProjectGitOidRule;
 use App\AI6\Projects\Actions\ApproveProjectConfiguration;
 use App\AI6\Projects\Actions\QueueProjectConfigRefresh;
 use App\AI6\Projects\Models\Project;
@@ -44,8 +45,8 @@ final readonly class ProjectConfigurationController
         $model = ProjectConfigDraft::query()->whereKey($draft)->where('project_id', $project->getKey())->firstOrFail();
         $validated = $request->validate([
             'approval_id' => ['required', 'uuid'],
-            'expected_control_commit' => ['required', 'regex:/\A[0-9a-f]{64}\z/D'],
-            'expected_blob_sha' => ['required', 'regex:/\A[0-9a-f]{64}\z/D'],
+            'expected_control_commit' => ['required', new ProjectGitOidRule($project->object_format)],
+            'expected_blob_sha' => ['required', new ProjectGitOidRule($project->object_format)],
             'expected_config_hash' => ['required', 'regex:/\A[0-9a-f]{64}\z/D'],
             'expected_control_generation' => ['required', 'integer', 'min:0'],
         ]);

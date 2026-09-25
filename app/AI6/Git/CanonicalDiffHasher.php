@@ -26,6 +26,7 @@ final readonly class CanonicalDiffHasher
         }
 
         $entries = [];
+        $format = null;
         $records = explode("\0", substr($raw, 0, -1));
         if (count($records) % 2 !== 0) {
             throw new RuntimeException('The Git raw diff is malformed.');
@@ -33,9 +34,17 @@ final readonly class CanonicalDiffHasher
         for ($index = 0; $index < count($records); $index += 2) {
             $metadata = $records[$index];
             $path = $records[$index + 1];
-            if (preg_match('/\A:([0-7]{6}) ([0-7]{6}) ([0-9a-f]{64}) ([0-9a-f]{64}) ([ACDMRTUXB][0-9]{0,3})\z/D', $metadata, $matches) !== 1
+            if (preg_match('/\A:([0-7]{6}) ([0-7]{6}) ([0-9a-f]{40}(?:[0-9a-f]{24})?) ([0-9a-f]{40}(?:[0-9a-f]{24})?) ([ACDMRTUXB][0-9]{0,3})\z/D', $metadata, $matches) !== 1
                 || ! $this->canonicalPath($path)) {
                 throw new RuntimeException('The Git raw diff contains an unsafe entry.');
+            }
+            $format ??= GitObjectFormat::tryFromOid($matches[3], allowZero: true);
+            if ($format === null || ! $format->validOid($matches[3], allowZero: true)
+                || ! $format->validOid($matches[4], allowZero: true)
+                || ($matches[1] === '000000') !== ($matches[3] === $format->zeroOid())
+                || ($matches[2] === '000000') !== ($matches[4] === $format->zeroOid())
+                || ($matches[1] === '000000' && $matches[2] === '000000')) {
+                throw new RuntimeException('The Git raw diff contains incompatible object bindings.');
             }
             $entries[] = [
                 'old_mode' => $matches[1], 'new_mode' => $matches[2], 'old_oid' => $matches[3], 'new_oid' => $matches[4],

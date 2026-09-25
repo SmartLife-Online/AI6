@@ -10,6 +10,8 @@ use App\AI6\Agents\ProviderCapabilityReport;
 use App\AI6\Agents\ProviderCredentialStore;
 use App\AI6\Auth\Models\User;
 use App\AI6\Auth\StepUpGuard;
+use App\AI6\Git\IsolatedTreeExport;
+use App\AI6\Git\ReviewCheckpointVerifier;
 use App\AI6\HumanLoop\Http\HumanRequestAnswerController;
 use App\AI6\HumanLoop\HumanRequestService;
 use App\AI6\HumanLoop\InterventionAuthorization;
@@ -37,12 +39,15 @@ use Illuminate\Session\ArraySessionHandler;
 use Illuminate\Session\Store;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Feature\Git\AssertsGitObjectGuards;
 use Tests\Feature\Tickets\TicketUiTestCase;
 use Tests\Fixtures\Agents\AgentMailboxFixture;
 use Tests\Fixtures\Agents\MissingAnswerAdapter;
 
 final class FindingVerificationRoundTest extends TicketUiTestCase
 {
+    use AssertsGitObjectGuards;
     use BuildsReviewRoundFixture;
 
     private bool $nativeMissingAnswer = false;
@@ -55,6 +60,77 @@ final class FindingVerificationRoundTest extends TicketUiTestCase
     private const STRICT_POLICY = "default-src 'self'; script-src http://localhost/assets/; style-src 'self'; "
         ."img-src 'self'; font-src 'self'; connect-src 'self'; form-action 'self'; "
         ."base-uri 'none'; object-src 'none'; frame-ancestors 'none';";
+
+    /** @return iterable<string, array{string}> */
+    public static function earlyVerificationFailures(): iterable
+    {
+        yield 'binding error' => ['binding_error'];
+        yield 'workspace error' => ['workspace_error'];
+        yield 'export failure' => ['export_failure'];
+    }
+
+    #[DataProvider('earlyVerificationFailures')]
+    public function test_early_failures_store_no_checker_hash_and_a_subsequent_run_computes_it(string $outcome): void
+    {
+        $guards = ['findings_insert_guard', 'review_results_insert_guard'];
+        $this->observeGitObjectGuards($guards);
+        Mail::fake();
+        config(['ai6.agent_profiles.grok-cli-review.roles' => ['quality_review']]);
+        $prepared = $this->preparedReviewRun('AI6-051-VERIFY');
+        $run = $prepared['run'];
+        $this->reviewAdapter([$this->reviewSlotIds[0] => AgentScenario::FINDINGS]);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReview($run)->state);
+        $this->assertGitObjectGuardsObserved($guards);
+        $file = $prepared['worktree'].'/app/Example.php';
+        $original = file_get_contents($file);
+        self::assertIsString($original);
+        $root = config('ai6.execution_mailboxes.agent_root');
+        $exporter = app(IsolatedTreeExport::class);
+        if ($outcome === 'binding_error') {
+            self::assertNotFalse(file_put_contents($file, $original."\n// dirty\n"));
+        } elseif ($outcome === 'export_failure') {
+            $this->app->instance(IsolatedTreeExport::class, new class implements IsolatedTreeExport
+            {
+                public function export(string $source, string $destination, bool $writable = false): void
+                {
+                    throw new \RuntimeException('Injected export failure.');
+                }
+            });
+            $this->app->forgetInstance(FindingVerificationRound::class);
+        } else {
+            config(['ai6.execution_mailboxes.agent_root' => '']);
+        }
+        $failed = ExecutionJob::query()->where('run_id', $run->id)->where('step_type', 'verify')->sole();
+        (new ExecuteRunStep($failed->id))->handle(app(RunOrchestrator::class), verifications: app(FindingVerificationRound::class));
+        self::assertSame(ExecutionJobState::FAILED, $failed->refresh()->state);
+        $results = ReviewResult::query()->where('run_id', $run->id)->where('role', 'finding_verification')->get();
+        self::assertNotEmpty($results);
+        foreach ($results as $result) {
+            self::assertSame($outcome === 'export_failure' ? 'workspace_error' : $outcome, $result->invocation_outcome->value);
+            self::assertNull($result->workspace_tree_hash);
+        }
+        file_put_contents($file, $original);
+        $this->gitOutput(['status', '--porcelain=v2'], $prepared['worktree']);
+        config(['ai6.execution_mailboxes.agent_root' => $root]);
+        $this->app->instance(IsolatedTreeExport::class, $exporter);
+        // Binding/workspace errors are terminal in the existing workflow; a new
+        // authorized run must calculate its own hash instead of reusing one.
+        $this->removeRunWorkspaceFixture();
+        $this->removeImplementationFixture();
+        $this->app->forgetInstance(ReviewCheckpointVerifier::class);
+        $this->app->forgetInstance(FindingVerificationRound::class);
+        $subsequent = $this->preparedReviewRun('AI6-051-VERIFY-RETRY');
+        $run = $subsequent['run'];
+        $this->reviewAdapter([$this->reviewSlotIds[0] => AgentScenario::FINDINGS]);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeReview($run)->state);
+        $this->reviewAdapter([]);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $this->executeVerification($run->fresh())->state);
+        $result = ReviewResult::query()->where('run_id', $run->id)->where('role', 'finding_verification')
+            ->where('invocation_outcome', 'valid_result')->sole();
+        self::assertSame(64, strlen($result->workspace_tree_hash));
+        self::assertNotSame($result->checkpoint_tree_sha, $result->workspace_tree_hash);
+        self::assertSame(ReviewResult::query()->where('run_id', $run->id)->where('role', 'quality_review')->firstOrFail()->workspace_tree_hash, $result->workspace_tree_hash);
+    }
 
     public function test_expired_verifier_evidence_parks_without_recording_a_failed_attempt(): void
     {

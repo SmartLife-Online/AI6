@@ -2,7 +2,7 @@
 
 > **Diese Datei ist weder Ticket noch Vertragsdokument.** Die verbindlichen Regeln für Ticketerkennung und Autorität stehen ausschließlich im [Implementierungsplan](../docs/AI6_IMPLEMENTATION_PLAN.md) (`TKT-001`, `TKT-005`, `TKT-010`).
 
-Diese Übersicht fasst den Erzeugungsstand der 57 geplanten AI6-Tickets zusammen. Sie dient der Navigation und darf nicht als Eingabe für Status-, Freigabe-, Scope- oder Ausführungsentscheidungen verwendet werden.
+Diese Übersicht fasst den Erzeugungsstand der 58 geplanten AI6-Tickets zusammen. Sie dient der Navigation und darf nicht als Eingabe für Status-, Freigabe-, Scope- oder Ausführungsentscheidungen verwendet werden.
 
 ## 1. Quellen und Grenzen
 
@@ -101,9 +101,11 @@ Die M7-Tickets `AI6-036`, `AI6-037` und `AI6-038` wurden am 19. September 2026 a
 
 `AI6-036` wurde am 20. September 2026 auf ausdrücklichen menschlichen Auftrag gegen den integrierten Stand `a7d83e908b24002b8f29f8d605ab79243757fde6` (`AI6-035`) und Planrevision V1.7.9 rebased. Verifiziert wurden alle `files` und Scope-Marker sowie die bestehende Doctor-, Bootstrap-, Providerdiagnose-, Runtime-/Heartbeat-, Retention-, Artefaktwurzel-, Git-/Known-Hosts-, Manifest-, Release-Gate-, Compose- und Dokumentationsnaht; `bootstrap/app.php` wurde als notwendiger bestehender Registrierungspfad für `ai6:install` ergänzt. Das Rebase-Gate ist geschlossen; der Status bleibt `todo`, die AC-/TC-/MG-IDs bleiben unverändert, und MG-01 sowie die fremden Gates bleiben offen.
 
+AI6-052 wurde am 25. September 2026 nach ausdrücklicher Freigabe des Entscheidungsantrags und der Planrevision V1.7.11 vollständig gegen den Arbeitsstand zu `4ed8927` abgeleitet. Die vorhandene Prompt-Hilfe, ihr Katalog-/Renderer-/Extraktorvertrag, die HTTP-/Livewire-Zugangsgrenze und ihre Tests wurden geprüft; es besteht kein offenes Rebase-Gate. Das neue Ticket beginnt auf `todo` und beauftragt noch keine Umsetzung. Technische Sessions bleiben erhalten; die Gate-Ergebnisse und der historische Detailvertrag von AI6-044 bleiben unverändert.
+
 ## 3. Backlog
 
-Stand der abgeleiteten Ansicht: 24. September 2026, abgeleitet aus dem Planarbeitsstand V1.7.10 und dem vorhandenen Dateibestand. Revision V1.7.4 trennt den rollenrichtigen Checkvollzug als neuen Blueprint `AI6-045` von `AI6-021` ab; sein Detailticket ist inzwischen vorhanden. Revision V1.7.5 stellt den Adaptern die Blueprints `AI6-046` und `AI6-047` voran; ihre Detailtickets sind vorhanden. Revision V1.7.9 splittet `AI6-036` in `AI6-036` und `AI6-049` und ergänzt `AI6-050` für den realen Securityreview. Mit AI6-051 aus V1.7.10 sind 56 der 57 Blueprints als Detailticket vorhanden; nur AI6-050 ist noch Blueprint, und AI6-038 ist ahead-derived mit offenem Rebase-Gate. AI6-051 ist gegen `399076a` abgeleitet und nach zwei Reviews überarbeitet; seine Implementierung ist nicht beauftragt. AI6-048 liefert die fehlende Copilot-Implementierung aus AI6-042 nach und ist in `e3f09d7` integriert. AI6-034 ist am selben Stand rebased und gegen die gelieferte Copilot-Naht neu abgeleitet; sein Rebase-Gate ist geschlossen, während MG-01 weiterhin offen bleibt.
+Stand der abgeleiteten Ansicht: 25. September 2026, abgeleitet aus dem Planarbeitsstand V1.7.11 und dem vorhandenen Dateibestand. Revision V1.7.4 trennt den rollenrichtigen Checkvollzug als neuen Blueprint `AI6-045` von `AI6-021` ab; sein Detailticket ist inzwischen vorhanden. Revision V1.7.5 stellt den Adaptern die Blueprints `AI6-046` und `AI6-047` voran; ihre Detailtickets sind vorhanden. Revision V1.7.9 splittet `AI6-036` in `AI6-036` und `AI6-049` und ergänzt `AI6-050` für den realen Securityreview. Mit AI6-052 aus V1.7.11 sind 57 der 58 Blueprints als Detailticket vorhanden; nur AI6-050 ist noch Blueprint, und AI6-038 ist ahead-derived mit offenem Rebase-Gate. AI6-051 ist gegen `399076a` abgeleitet und nach zwei Reviews überarbeitet; seine Implementierung ist nicht beauftragt. AI6-048 liefert die fehlende Copilot-Implementierung aus AI6-042 nach und ist in `e3f09d7` integriert. AI6-034 ist am selben Stand rebased und gegen die gelieferte Copilot-Naht neu abgeleitet; sein Rebase-Gate ist geschlossen, während MG-01 weiterhin offen bleibt.
 
 ### M0 — Fundament und sichere Laufzeit
 
@@ -137,6 +139,7 @@ Stand der abgeleiteten Ansicht: 24. September 2026, abgeleitet aus dem Planarbei
 |---|---|---|---|---|
 | [AI6-011](./AI6-011.md) | Agentenprofil-, Capability- und Promptkatalog | medium | Detailticket | AI6-003, AI6-004 |
 | [AI6-044](./AI6-044.md) | Manuelle Prompt-Hilfe für Codex und Claude | medium | Detailticket | AI6-008, AI6-011 |
+| [AI6-052](./AI6-052.md) | Öffentlicher Zugang zu manuellen Prompt-Tools | medium | Detailticket; Implementierung nicht beauftragt | AI6-044 |
 | [AI6-012](./AI6-012.md) | Ticketprüfung, Approval-Snapshot und Multi-Reviewer-Auswahl | high | Detailticket | AI6-008, AI6-009, AI6-010, AI6-011 |
 | [AI6-013](./AI6-013.md) | Run-State-Machine, Persistenz und Projektsperre | high | Detailticket | AI6-004, AI6-012 |
 | [AI6-014](./AI6-014.md) | Run-Branch, Worktree, Checkpoint und Diff-Service | high | Detailticket | AI6-006D, AI6-013 |

@@ -12,6 +12,8 @@ use App\AI6\Git\CanonicalJson;
 use App\AI6\Git\ControlOperationConfiguration;
 use App\AI6\Git\ControlOperationPhase;
 use App\AI6\Git\ControlOperationState;
+use App\AI6\Git\GitConfiguration;
+use App\AI6\Git\HardenedGitEnvironment;
 use App\AI6\Git\HardenedGitRunner;
 use App\AI6\Git\ManagedProjectPath;
 use App\AI6\Git\Models\ControlOperation;
@@ -40,6 +42,7 @@ use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\PublishCompletionService;
 use App\AI6\Runs\RecordedScopeRenderer;
+use App\AI6\Runs\RunCancellationService;
 use App\AI6\Runs\RunOrchestrator;
 use App\AI6\Runs\RunPhase;
 use App\AI6\Runs\RunState;
@@ -47,6 +50,7 @@ use App\AI6\Runs\RunTransitionConflict;
 use App\AI6\Runs\WaitReason;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Tickets\TicketReadModelProjector;
+use App\AI6\Tickets\TicketV1Parser;
 use App\AI6\Tickets\TicketValidationProfile;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -54,11 +58,14 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\After;
 use PHPUnit\Framework\Attributes\DataProvider;
+use ReflectionProperty;
+use RuntimeException;
 use Tests\Feature\Runs\BuildsFinalizedRunFixture;
 use Tests\Feature\Tickets\TicketUiTestCase;
 
 final class PublishCandidateTest extends TicketUiTestCase
 {
+    use AssertsGitObjectGuards;
     use BuildsFinalizedRunFixture;
     use BuildsRunWorkspaceGitFixture;
 
@@ -103,6 +110,11 @@ final class PublishCandidateTest extends TicketUiTestCase
 
     public function test_the_final_commit_and_publish_intent_keep_the_exact_candidate_parent_and_remote_binding(): void
     {
+        $guards = ['control_operations_insert_guard', 'control_operations_update_guard',
+            'runs_candidate_update_guard', 'runs_insert_guard', 'runs_update_guard', 'runs_publish_completion_update_guard',
+            'run_intervention_state_update_guard', 'ticket_approvals_insert_guard', 'ticket_approvals_update_guard',
+            'ticket_mutations_insert_guard', 'ticket_read_models_insert_guard', 'ticket_read_models_update_guard'];
+        $this->observeGitObjectGuards($guards);
         $prepared = $this->preparedCandidate('AI6-029-PUBLISH', "published\n");
         $candidate = $this->app->make(PublishCandidateService::class)->prospect($prepared['run']);
         $run = $this->app->make(PublishCandidateService::class)->bind($prepared['run'], $candidate);
@@ -147,6 +159,7 @@ final class PublishCandidateTest extends TicketUiTestCase
         $run = $orchestrator->confirmBranchPublication($run, $run->version, $commit);
         self::assertSame($commit, $run->confirmed_branch_publication_oid);
         self::assertSame('confirmed', $run->branch_publication_state);
+        $this->assertGitObjectGuardsObserved($guards);
     }
 
     public function test_no_change_publication_records_no_fictitious_commit_parent_tuple(): void
@@ -289,6 +302,7 @@ final class PublishCandidateTest extends TicketUiTestCase
             $statusTarget,
             'Testbindung für den Publish-Statuskonflikt.',
         );
+        self::assertSame($statusTarget, $operation->ticketMutation()->firstOrFail()->target_content);
         DB::table('jobs')->delete();
 
         Run::query()->whereKey($run->id)->update([
@@ -330,6 +344,11 @@ final class PublishCandidateTest extends TicketUiTestCase
             ControlOperationState::FAILED,
             'control_ref_changed',
         );
+
+        $beforeCancellationProbe = $run->refresh()->getAttributes();
+        self::assertNull($this->app->make(RunCancellationService::class)->recordConflict($operation->refresh()));
+        self::assertSame($beforeCancellationProbe, $run->refresh()->getAttributes());
+        self::assertSame(0, HumanRequest::query()->where('run_id', $run->id)->count());
 
         $released = $this->app->make(PublishCompletionService::class)->recordConflict($operation->refresh());
 
@@ -478,6 +497,46 @@ final class PublishCandidateTest extends TicketUiTestCase
         $this->expectException(PublishCandidateException::class);
         $this->expectExceptionMessage('candidate_secret_detected');
         $this->app->make(PublishCandidateService::class)->prospect($prepared['run']);
+    }
+
+    public function test_candidate_generation_preserves_the_original_git_failure_as_its_cause(): void
+    {
+        if (PHP_OS_FAMILY !== 'Linux') {
+            self::markTestSkipped('The failing Git command fixture requires Linux.');
+        }
+        $prepared = $this->preparedCandidate('AI6-051-CANDIDATE-CAUSE', "changed\n");
+        $git = $this->app->make(HardenedGitRunner::class);
+        $environment = (new ReflectionProperty($git, 'environment'))->getValue($git);
+        $configuration = (new ReflectionProperty($environment, 'configuration'))->getValue($environment);
+        $wrapper = $this->runWorkspaceRoot().'/fail-candidate-read-tree.sh';
+        self::assertNotFalse(file_put_contents($wrapper, "#!/bin/sh\n"
+            .'for argument do [ "$argument" != read-tree ] || exit 23; done'."\n"
+            .'exec '.escapeshellarg($configuration->gitBinary).' "$@"'."\n"));
+        self::assertTrue(chmod($wrapper, 0555));
+        $failingGit = new HardenedGitRunner(
+            (new ReflectionProperty($git, 'processes'))->getValue($git),
+            (new ReflectionProperty($git, 'remotePolicy'))->getValue($git),
+            new HardenedGitEnvironment(new GitConfiguration(...[
+                ...get_object_vars($configuration), 'gitBinary' => $wrapper,
+            ])),
+        );
+        $service = new PublishCandidateService(
+            $failingGit, $this->app->make(RunTreeService::class),
+            $this->app->make(CandidateProvenancePreflight::class),
+            $this->app->make(TicketV1Parser::class),
+            $this->app->make(RunOrchestrator::class),
+        );
+
+        try {
+            $service->prospect($prepared['run']);
+            self::fail('The failed read-tree must reject the candidate.');
+        } catch (PublishCandidateException $exception) {
+            self::assertSame('candidate_generation_failed', $exception->reason);
+            self::assertSame('candidate_generation_failed', $exception->getMessage());
+            self::assertInstanceOf(RuntimeException::class, $exception->getPrevious());
+            self::assertSame('The candidate base could not be loaded into its isolated index.', $exception->getPrevious()->getMessage());
+        }
+        self::assertNull($prepared['run']->fresh()->candidate_tree_sha);
     }
 
     #[DataProvider('unsupportedCandidateBlobProvider')]

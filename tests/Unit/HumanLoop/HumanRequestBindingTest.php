@@ -2,9 +2,13 @@
 
 namespace Tests\Unit\HumanLoop;
 
+use App\AI6\HumanLoop\GateEvidenceHumanRequestBinding;
 use App\AI6\HumanLoop\HumanRequestRejected;
 use App\AI6\HumanLoop\HumanRequestService;
+use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\HumanLoop\Models\Intervention;
+use App\AI6\HumanLoop\SecurityGateHumanRequestBinding;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Feature\Runs\BuildsHumanRequestFixture;
@@ -13,6 +17,36 @@ use Tests\Feature\Tickets\TicketUiTestCase;
 final class HumanRequestBindingTest extends TicketUiTestCase
 {
     use BuildsHumanRequestFixture;
+
+    public function test_candidate_bindings_distinguish_both_git_formats_from_sha256_checksums(): void
+    {
+        foreach ([40, 64] as $length) {
+            $tree = str_repeat('a', $length);
+            $base = str_repeat('b', $length);
+            $hash = str_repeat('c', 64);
+            $request = new HumanRequest([
+                'bound_agent_slot' => GateEvidenceHumanRequestBinding::agentSlot('MG-01'),
+                'allowed_effects' => [GateEvidenceHumanRequestBinding::EFFECT],
+                'bound_requested_effect' => GateEvidenceHumanRequestBinding::requestedEffect($tree, $hash),
+            ]);
+            self::assertSame(['gate_id' => 'MG-01', 'tree_oid' => $tree, 'diff_hash' => $hash], GateEvidenceHumanRequestBinding::binding($request));
+            foreach ([str_repeat('0', $length).':'.$hash, $tree.':'.str_repeat('c', 40), strtoupper($tree).':'.$hash, $tree.':'.$hash."\n"] as $invalid) {
+                $request->bound_requested_effect = $invalid;
+                self::assertNull(GateEvidenceHumanRequestBinding::binding($request));
+            }
+            $request->bound_agent_slot = SecurityGateHumanRequestBinding::agentSlot('fake');
+            $request->allowed_effects = [SecurityGateHumanRequestBinding::EFFECT];
+            $parts = [$tree, $hash, $base, $hash, $hash, 'fake'];
+            $request->bound_requested_effect = implode(':', $parts);
+            self::assertNotNull(SecurityGateHumanRequestBinding::binding($request));
+            foreach ([0 => str_repeat('0', $length), 1 => str_repeat('c', 40), 2 => str_repeat('b', $length === 40 ? 64 : 40), 3 => str_repeat('c', 40), 4 => str_repeat('c', 40), 5 => 'other'] as $index => $invalid) {
+                $changed = $parts;
+                $changed[$index] = $invalid;
+                $request->bound_requested_effect = implode(':', $changed);
+                self::assertNull(SecurityGateHumanRequestBinding::binding($request));
+            }
+        }
+    }
 
     /**
      * @return iterable<string, array{string, string, string}>
@@ -74,6 +108,22 @@ final class HumanRequestBindingTest extends TicketUiTestCase
         Mail::fake();
         $opened = $this->openedHumanRequest('AI6-018-BND-OK');
         $request = $opened['request'];
+
+        // AI6-051/TC-03: persisted SHA-256 approvals, operations and human bindings
+        // remain readable by their real continuation after a schema round trip.
+        $before = [];
+        foreach (['ticket_approvals', 'control_operations', 'ticket_mutations', 'runs', 'human_requests'] as $table) {
+            $before[$table] = DB::table($table)->get()->toJson();
+        }
+        $migration = require base_path('database/migrations/2026_09_24_000000_add_git_object_format_contract.php');
+        foreach (['down', 'up', 'down', 'up'] as $method) {
+            self::assertIsCallable([$migration, $method]);
+            call_user_func([$migration, $method]);
+        }
+        foreach ($before as $table => $bytes) {
+            self::assertSame($bytes, DB::table($table)->get()->toJson());
+        }
+        $request->refresh();
 
         $intervention = $this->app->make(HumanRequestService::class)->answer(
             $request,

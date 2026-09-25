@@ -159,6 +159,7 @@ trait BuildsImplementationTurnFixture
             'deploy_key_reference' => '/managed/test-key',
             'public_deploy_key' => "ssh-ed25519 fixture\n",
             'control_oid' => $controlOid,
+            'object_format' => 'sha256',
         ]);
         $this->addMembership($administrator, $project, ProjectRole::ADMIN);
         $this->addMembership($approver, $project, ProjectRole::APPROVER);

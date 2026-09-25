@@ -297,7 +297,7 @@ final class ControlOperationPersistenceTest extends ControlOperationTestCase
             $project->forceFill(['provisioning_operation_id' => (string) Str::uuid()])->save();
         }];
         yield 'control_oid' => ['control_oid', static function (Project $project): void {
-            $project->forceFill(['control_oid' => str_repeat('c', 40)])->save();
+            $project->forceFill(['object_format' => 'sha256', 'control_oid' => str_repeat('c', 64)])->save();
         }];
     }
 

@@ -105,13 +105,11 @@ final readonly class TicketMutationExecutor
                 ControlOperationPhase::PREPARED => $this->prepareCommit($operation, $attemptToken),
                 ControlOperationPhase::COMMIT_PREPARED => $this->publish($operation, $attemptToken),
                 ControlOperationPhase::CONTROL_CONFIRMED => $this->finalize($operation, $attemptToken),
-                ControlOperationPhase::DB_FINALIZED => $this->reconcileRunCancellation($operation),
+                ControlOperationPhase::DB_FINALIZED => $this->reconcileStatusOperation($operation),
                 default => throw new RuntimeException('The ticket mutation has an incompatible phase.'),
             };
         } catch (ControlOperationTerminalConflict $exception) {
-            $this->runCancellations->recordConflict($operation);
-            $this->reportOnlyCompletions->recordConflict($operation);
-            $this->publishCompletions->recordConflict($operation);
+            $this->statusOperationHandler($operation)->recordConflict($operation);
             if ($this->publishedIntent($operation)) {
                 throw new ControlOperationRecoveryRequired(
                     'A published ticket mutation encountered a terminal preflight deviation.',
@@ -816,16 +814,23 @@ final readonly class TicketMutationExecutor
         });
         $this->cleanupFailedAttempt($operation, $attemptToken);
 
-        return $this->reconcileRunCancellation($operation->fresh() ?? $operation);
+        return $this->reconcileStatusOperation($operation->fresh() ?? $operation);
     }
 
-    private function reconcileRunCancellation(ControlOperation $operation): bool
+    private function reconcileStatusOperation(ControlOperation $operation): bool
     {
-        $this->runCancellations->reconcileOperation($operation);
-        $this->reportOnlyCompletions->reconcileOperation($operation);
-        $this->publishCompletions->reconcileOperation($operation);
+        $this->statusOperationHandler($operation)->reconcileOperation($operation);
 
         return true;
+    }
+
+    private function statusOperationHandler(ControlOperation $operation): RunCancellationService|ReportOnlyCompletionService|PublishCompletionService
+    {
+        return match ($this->parameters($operation)['status_operation'] ?? null) {
+            TicketStatusOperation::COMPLETE_IMPLEMENTATION->value => $this->publishCompletions,
+            TicketStatusOperation::COMPLETE_REPORT_ONLY->value => $this->reportOnlyCompletions,
+            default => $this->runCancellations,
+        };
     }
 
     /** @return array{Project, TicketMutation, string, RedactionContext} */
@@ -852,6 +857,10 @@ final readonly class TicketMutationExecutor
             throw new ControlOperationRetryableConflict('lease_lost', 'The ticket mutation lost its project lease.');
         }
         if ($project->provisioning_status !== ProjectProvisioningStatus::PROVISIONED
+            || $project->object_format === null
+            || ! $project->object_format->validOid($operation->expected_control_commit)
+            || ! $project->object_format->validOid($mutation->expected_ticket_blob_sha)
+            || ! $project->object_format->validOid($mutation->expected_target_blob_sha)
             || $project->project_identifier === null
             || $project->control_branch === null
             || $project->remote === null
@@ -1384,7 +1393,7 @@ final readonly class TicketMutationExecutor
     {
         $local = $this->git->resolveRef($repository, $controlRef, $context);
         $oid = trim($local->output);
-        if (! $local->succeeded() || preg_match('/\A[0-9a-f]{64}\z/D', $oid) !== 1) {
+        if (! $local->succeeded() || GitObjectFormat::tryFromOid($oid) === null) {
             throw new ControlOperationRecoveryRequired('The local ticket mutation control ref could not be resolved safely.');
         }
 

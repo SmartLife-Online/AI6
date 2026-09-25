@@ -41,7 +41,7 @@
         "source": {
             "target": "instance_receiver_requires_review",
             "code": "$project->forceFill(['remote' => 'git@git.fixture.test:acme/control.git', 'host_key_fingerprint' => $fingerprint, 'provisioning_status' => \\App\\AI6\\Projects\\ProjectProvisioningStatus::PROVISIONED, 'deploy_key_reference' => (string) realpath($privateKey), 'public_deploy_key' => \"ssh-ed25519 fixture\\n\"])->save()",
-            "context_sha256": "1a69280bed0959eeadeeac06082cf356be416f191194dad87221687c151ef070"
+            "context_sha256": "04b434af99bb77913ede0ebdd2fdcd171d1a45912e586bc43e021dcdd754f1b4"
         }
     },
     "tests/Feature/Git/ContractAmendmentTest.php::amendableRun#1": {
@@ -148,8 +148,8 @@
         "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
         "source": {
             "target": "instance_receiver_requires_review",
-            "code": "$project->forceFill(['provisioning_status' => \\App\\AI6\\Projects\\ProjectProvisioningStatus::PROVISIONED, 'deploy_key_reference' => '/managed/key', 'public_deploy_key' => \"ssh-ed25519 fixture\\n\", 'control_oid' => str_repeat('a', 64), 'control_binding_version' => 4, 'control_generation' => 7])->save()",
-            "context_sha256": "54570eda0a97fb769ed621bf45d6564f55f5fa11ffb45c7c8ac766abadf8f83e"
+            "code": "$project->forceFill(['provisioning_status' => \\App\\AI6\\Projects\\ProjectProvisioningStatus::PROVISIONED, 'deploy_key_reference' => '/managed/key', 'public_deploy_key' => \"ssh-ed25519 fixture\\n\", 'control_oid' => str_repeat('a', 64), 'object_format' => 'sha256', 'control_binding_version' => 4, 'control_generation' => 7])->save()",
+            "context_sha256": "674934cc7fa14474fb0c4778cdb7bc8ce41dafa9e8fd4c525e2f9da9b7ee14c6"
         }
     },
     "tests/Feature/Git/ControlOperationCrashInjectionTest.php::test_control_branch_redelivery_is_exactly_once_at_every_phase_boundary#2": {
@@ -158,7 +158,7 @@
         "source": {
             "target": "instance_receiver_requires_review",
             "code": "$operation->forceFill(['updated_at' => now()->subSeconds($this->app->make(\\App\\AI6\\Git\\ControlOperationConfiguration::class)->reconcilerSeconds + 1)])->save()",
-            "context_sha256": "54570eda0a97fb769ed621bf45d6564f55f5fa11ffb45c7c8ac766abadf8f83e"
+            "context_sha256": "674934cc7fa14474fb0c4778cdb7bc8ce41dafa9e8fd4c525e2f9da9b7ee14c6"
         }
     },
     "tests/Feature/Git/ControlOperationCrashInjectionTest.php::test_reconciler_requeues_the_same_operation_after_a_crash_boundary#1": {
@@ -248,7 +248,7 @@
         "source": {
             "target": "instance_receiver_requires_review",
             "code": "$project->forceFill(['project_identifier' => $identifier])->save()",
-            "context_sha256": "1da0761174aa7460e5866344561f1100504f07ac4fa552545d473148645010ac"
+            "context_sha256": "268606773e8e44e6fcd42f5b44739a9143b249929c953b1862412f225284f294"
         }
     },
     "tests/Feature/Git/PublishCandidateTest.php::test_no_change_publication_records_no_fictitious_commit_parent_tuple#1": {
@@ -284,7 +284,7 @@
         "source": {
             "target": "Run",
             "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($run->id)->update(['state' => 'waiting', 'wait_reason' => \\App\\AI6\\Runs\\WaitReason::MANUAL_PUSH->value, 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
-            "context_sha256": "45ba68b79cdc4a5954229964b7b0c26a245847ea5e02be5dc55a2428645780ad"
+            "context_sha256": "72feb126651410c267649b1db4ea483e2c4df34bbbc0e5b8ef8d58cc1a9e38c4"
         }
     },
     "tests/Feature/Git/PublishCandidateTest.php::test_publish_status_conflict_releases_operation_and_scope_binding_for_reauthorization#2": {
@@ -293,7 +293,7 @@
         "source": {
             "target": "Run",
             "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($run->id)->update(['state' => 'running', 'wait_reason' => null, 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
-            "context_sha256": "45ba68b79cdc4a5954229964b7b0c26a245847ea5e02be5dc55a2428645780ad"
+            "context_sha256": "72feb126651410c267649b1db4ea483e2c4df34bbbc0e5b8ef8d58cc1a9e38c4"
         }
     },
     "tests/Feature/Git/PublishCandidateTest.php::test_publish_status_conflict_releases_operation_and_scope_binding_for_reauthorization#3": {
@@ -302,7 +302,7 @@
         "source": {
             "target": "instance_receiver_requires_review",
             "code": "$session->save()",
-            "context_sha256": "45ba68b79cdc4a5954229964b7b0c26a245847ea5e02be5dc55a2428645780ad"
+            "context_sha256": "72feb126651410c267649b1db4ea483e2c4df34bbbc0e5b8ef8d58cc1a9e38c4"
         }
     },
     "tests/Feature/Git/PublishCandidateTest.php::test_publish_status_conflict_releases_operation_and_scope_binding_for_reauthorization#4": {
@@ -311,7 +311,7 @@
         "source": {
             "target": "instance_receiver_requires_review",
             "code": "$session->save()",
-            "context_sha256": "45ba68b79cdc4a5954229964b7b0c26a245847ea5e02be5dc55a2428645780ad"
+            "context_sha256": "72feb126651410c267649b1db4ea483e2c4df34bbbc0e5b8ef8d58cc1a9e38c4"
         }
     },
     "tests/Feature/Git/PublishCandidateTest.php::test_the_candidate_is_reconstructed_on_the_new_run_base_without_rebasing_the_run_branch#1": {
@@ -329,7 +329,7 @@
         "source": {
             "target": "Run",
             "code": "\\App\\AI6\\Runs\\Models\\Run::query()->whereKey($run->id)->update(['phase' => \\App\\AI6\\Runs\\RunPhase::PUBLISH->value, 'candidate_tree_sha' => str_repeat('a', 64), 'candidate_diff_hash' => str_repeat('b', 64), 'candidate_base_sha' => $run->run_base_sha, 'candidate_checkpoint_commit_sha' => $run->checkpoint_commit_sha, 'candidate_ticket_contract_sha256' => $approval->ticket_contract_sha256, 'candidate_approval_snapshot_hash' => $snapshot->aggregateHash, 'candidate_evidence_epoch' => $run->evidence_epoch, 'candidate_scope_hash' => $run->effective_scope_hash ?? $run->scope_hash, 'candidate_config_hash' => $run->config_hash, 'candidate_prompt_hash' => $run->prompt_hash, 'candidate_security_policy_hash' => $run->security_policy_hash, 'candidate_bound_at' => now(), 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1')])",
-            "context_sha256": "012aabec5b2ccd48ca4bacdfb0c9a9b8f04fa3227da7141b76bc261c6596a5fd"
+            "context_sha256": "2d4690c28dc6b34585a4ede347c9b93248bdb945587ecf26485ad838951dfc2f"
         }
     },
     "tests/Feature/Git/TicketMutationExecutorTest.php::test_precommit_recovery_can_be_abandoned_and_releases_the_project_lock#1": {
@@ -482,7 +482,7 @@
         "source": {
             "target": "instance_receiver_requires_review",
             "code": "$existing->forceFill(['evidence' => 'Nachtraeglich veraendert.'])->save()",
-            "context_sha256": "7e1ba0878355fef4f2c9ab5a8bef73580bf300c8e5e5ca22b694f1168994c0ba"
+            "context_sha256": "9589f55bf2ccb24dd7cb4b2e079799d0df083fb958e9b5a19fae766669228253"
         }
     },
     "tests/Feature/Reviews/ReviewRoundTest.php::test_an_oversized_answer_opens_a_resource_limit_request#1": {
@@ -509,7 +509,7 @@
         "source": {
             "target": "TicketApproval",
             "code": "\\App\\AI6\\Runs\\Models\\TicketApproval::query()->whereKey($operationId)->update(['approved_ticket_blob_sha' => $readyBlob, 'approved_control_sha' => $project->control_oid, 'intended_commit_sha' => $project->control_oid, 'saga_phase' => 'complete', 'queue_state' => 'available', 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
-            "context_sha256": "7a1d32115dd0361df5d192d283e730cedf9608b829807d4032e5ab385f9a8a06"
+            "context_sha256": "5b3f800f6f02688dd0f0374d72b63be4072f656dd0e82de9dbad0142d181bc52"
         }
     },
     "tests/Feature/Runs/BuildsFinalizedRunFixture.php::completedApproval#2": {
@@ -518,7 +518,7 @@
         "source": {
             "target": "ticket_read_models",
             "code": "\\Illuminate\\Support\\Facades\\DB::table('ticket_read_models')->where('id', $readModel->id)->update(['control_operation_id' => $operation->id, 'blob_sha' => $readyBlob, 'redacted_content' => $ready, 'editor_eligible' => true, 'approval_eligible' => true, 'generated_at' => \\Illuminate\\Support\\Facades\\Date::now(), 'updated_at' => \\Illuminate\\Support\\Facades\\Date::now()])",
-            "context_sha256": "7a1d32115dd0361df5d192d283e730cedf9608b829807d4032e5ab385f9a8a06"
+            "context_sha256": "5b3f800f6f02688dd0f0374d72b63be4072f656dd0e82de9dbad0142d181bc52"
         }
     },
     "tests/Feature/Runs/BuildsFixLoopFixture.php::disposeAsHuman#1": {
@@ -536,7 +536,7 @@
         "source": {
             "target": "TicketApproval",
             "code": "\\App\\AI6\\Runs\\Models\\TicketApproval::query()->whereKey($operationId)->update(['approved_ticket_blob_sha' => $readyBlob, 'approved_control_sha' => $project->control_oid, 'intended_commit_sha' => $project->control_oid, 'saga_phase' => 'complete', 'queue_state' => 'available', 'version' => \\Illuminate\\Support\\Facades\\DB::raw('version + 1'), 'updated_at' => now()])",
-            "context_sha256": "76c17ad1281c9fb049209c03636c71f3ee619fffe0a5988101521fb83665b7a6"
+            "context_sha256": "7528db6c46f3268d5d1ad09e041861949a4079bc73eb8ba3c9b3a41007c625e7"
         }
     },
     "tests/Feature/Runs/BuildsImplementationTurnFixture.php::preparedImplementationRun#2": {
@@ -545,7 +545,7 @@
         "source": {
             "target": "ticket_read_models",
             "code": "\\Illuminate\\Support\\Facades\\DB::table('ticket_read_models')->where('id', $readModel->id)->update(['control_operation_id' => $operation->id, 'blob_sha' => $readyBlob, 'redacted_content' => $ready, 'editor_eligible' => true, 'approval_eligible' => true, 'generated_at' => now(), 'updated_at' => now()])",
-            "context_sha256": "76c17ad1281c9fb049209c03636c71f3ee619fffe0a5988101521fb83665b7a6"
+            "context_sha256": "7528db6c46f3268d5d1ad09e041861949a4079bc73eb8ba3c9b3a41007c625e7"
         }
     },
     "tests/Feature/Runs/BuildsReviewOnlyRunFixture.php::crashedStep#1": {
@@ -562,8 +562,8 @@
         "reason": "Ticketprojektion über QueueTicketReadModelRefresh und TicketReadModelRefresher aus dem gebundenen Controlbranch herstellen; direkte Projektionsersetzung ist hier noch kein vollständiger Worker-Nachweis.",
         "source": {
             "target": "TicketReadModel",
-            "code": "\\App\\AI6\\Projects\\Models\\TicketReadModel::query()->whereKey($model->getKey())->update(['control_operation_id' => $operation->id, 'blob_sha' => hash('sha256', $content), 'redacted_content' => $content, 'generated_at' => now(), 'updated_at' => now()])",
-            "context_sha256": "953f5d3e7c04ed4be9afa54be0d08a59945e3c27144f73fa1eaf90a893ba0de3"
+            "code": "\\App\\AI6\\Projects\\Models\\TicketReadModel::query()->whereKey($model->getKey())->update(['control_operation_id' => $operation->id, 'blob_sha' => $managed['project']->object_format->objectId('blob', $content), 'redacted_content' => $content, 'generated_at' => now(), 'updated_at' => now()])",
+            "context_sha256": "43684b69475bd35bd9683b4fb2747f7815c2c13426f491407b196d84eef63996"
         }
     },
     "tests/Feature/Runs/BuildsReviewOnlyRunFixture.php::withoutBoundChecks#1": {
@@ -782,6 +782,15 @@
             "context_sha256": "df38fb30a34df9c119ac8f557e34ac84863db44603b57518353f5d8c995924a8"
         }
     },
+    "tests/Feature/Runs/PublishCandidateGateTest.php::changeCandidateApprovalBinding#1": {
+        "decision": "external_effect",
+        "reason": "Gezielte Abweichung der gespeicherten Candidate-Approvalbindung; der anschließende Produktaufruf muss Candidate und Gate invalidieren. Kein erfolgreicher Approvaleffekt wird vorgegeben.",
+        "source": {
+            "target": "runs",
+            "code": "\\Illuminate\\Support\\Facades\\DB::table('runs')->where('id', $run->id)->update(['candidate_approval_snapshot_hash' => str_repeat('f', 64), 'version' => $run->version + 1])",
+            "context_sha256": "6d4f19c6c6e6cfbf95a4ded4c6065bf7dfe7d0d03a2df7078536ae80e8f7e456"
+        }
+    },
     "tests/Feature/Runs/PublishCandidateGateTest.php::changeSecurityPolicyBinding#1": {
         "decision": "requires_service",
         "reason": "Runzustand, Phase und Bindungen über RunOrchestrator beziehungsweise die zugehörige Status-/Publish-Saga herstellen; die direkte Vorgabe bleibt offen.",
@@ -798,6 +807,15 @@
             "target": "ExecutionJob",
             "code": "\\App\\AI6\\Runs\\Models\\ExecutionJob::query()->create(['run_id' => $run->id, 'step_type' => \\App\\AI6\\Runs\\ExecutionStepType::FINALIZE->value, 'step_number' => 1, 'idempotency_key' => \\App\\AI6\\Runs\\RunOrchestrator::stepKey($run->id, \\App\\AI6\\Runs\\ExecutionStepType::FINALIZE, 1), 'state' => \\App\\AI6\\Runs\\ExecutionJobState::PLANNED])",
             "context_sha256": "1db1c88fbf9ccc60f0b19dd8684941955529a1065fa0eb203aa4b75126c1982a"
+        }
+    },
+    "tests/Feature/Runs/PublishCandidateGateTest.php::test_bound_candidate_evidence_survives_phase_progress_without_rewriting_its_authorization#1": {
+        "decision": "external_effect",
+        "reason": "Nach regulärer Autorisierung und Candidatebindung wird ausschließlich für den Negativfall eine zukünftige Evidenzversion injiziert; die bestehende Entscheidung muss das Gate öffnen. Kein Publish- oder Freigabeeffekt wird vorgetäuscht.",
+        "source": {
+            "target": "instance_receiver_requires_review",
+            "code": "$gate->forceFill(['evidence_expected_run_version' => $run->version + 1])->save()",
+            "context_sha256": "528e96d9b1ede15eea5c76eb750455889b542e30a0518d97c7879236b9820080"
         }
     },
     "tests/Feature/Runs/PublishCandidateGateTest.php::test_manual_gate_request_authorizes_one_bound_intervention_and_resumes_the_same_step#1": {
@@ -932,7 +950,7 @@
         "source": {
             "target": "instance_receiver_requires_review",
             "code": "$run->project()->update(['control_oid' => str_repeat('f', 64)])",
-            "context_sha256": "407f871a4e8bab33e0ca4ea6e395400f98e0087fb75ca2e74df0574e91bbb4e6"
+            "context_sha256": "804e0535cf2dd9fcbcdb31d16817f4338b5a129741f58d338d2314d125e28360"
         }
     },
     "tests/Feature/Runs/RunFinalizationStepTest.php::test_security_runtime_limit_parks_under_security_gate_before_resource_limit#1": {
@@ -1066,8 +1084,8 @@
         "reason": "Der geprüfte Empfänger ist ein Session-, Projekt- oder ControlOperation-Objekt, kein Datensatz einer der acht in diesem Audit überwachten Tabellen. Diese Klassifikation ist keine Freigabe sonstiger Fixtureabkürzungen.",
         "source": {
             "target": "instance_receiver_requires_review",
-            "code": "$project->forceFill(['provisioning_status' => \\App\\AI6\\Projects\\ProjectProvisioningStatus::PROVISIONED, 'deploy_key_reference' => '/managed/test-key', 'public_deploy_key' => \"ssh-ed25519 fixture\\n\", 'control_oid' => str_repeat('a', 64)])->save()",
-            "context_sha256": "8b716b2bdabfe9eefc280ced3816b98072ca567ce4d56ea54a53f89f87c062de"
+            "code": "$project->forceFill(['provisioning_status' => \\App\\AI6\\Projects\\ProjectProvisioningStatus::PROVISIONED, 'deploy_key_reference' => '/managed/test-key', 'public_deploy_key' => \"ssh-ed25519 fixture\\n\", 'control_oid' => str_repeat('a', 64), 'object_format' => 'sha256'])->save()",
+            "context_sha256": "0045466f1278265795c2ce5901740f1ca68e2da17b44b9a3b45c639474f72918"
         }
     },
     "tests/Feature/Tickets/TicketUiTestCase.php::publishReadModel#1": {

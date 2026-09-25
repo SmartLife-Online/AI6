@@ -11,6 +11,7 @@ use App\AI6\Auth\StepUpGuard;
 use App\AI6\Git\Actions\QueueTicketMutation;
 use App\AI6\Git\CanonicalJson;
 use App\AI6\Git\ControlOperationConflict;
+use App\AI6\Git\ProjectGitOidRule;
 use App\AI6\Git\ReviewSubjectException;
 use App\AI6\Git\ReviewSubjectKind;
 use App\AI6\Projects\Models\Project;
@@ -38,8 +39,8 @@ final readonly class TicketApprovalController
         $rules = [
             'operation_id' => ['required', 'uuid'],
             'preview_id' => ['required', 'uuid'],
-            'expected_control_oid' => ['required', 'regex:/\A[0-9a-f]{64}\z/D'],
-            'expected_blob' => ['required', 'regex:/\A[0-9a-f]{64}\z/D'],
+            'expected_control_oid' => ['required', new ProjectGitOidRule($project->object_format)],
+            'expected_blob' => ['required', new ProjectGitOidRule($project->object_format)],
             'base_content' => ['required', 'string', 'max:2097152'],
             'reason' => ['required', 'string', 'max:2000'],
             'implementation_profile' => ['required', 'string'],
@@ -55,11 +56,11 @@ final readonly class TicketApprovalController
             'push_mode' => ['required', Rule::in(['manual', 'automatic_after_gates'])],
             'run_type' => ['sometimes', Rule::in(['implementation', 'review_only'])],
             'review_subject_kind' => ['required_if:run_type,review_only', Rule::in(array_column(ReviewSubjectKind::cases(), 'value'))],
-            'review_base_oid' => ['required_if:run_type,review_only', 'regex:/\A[0-9a-f]{64}\z/D'],
-            'review_source_oid' => ['required_if:run_type,review_only', 'regex:/\A[0-9a-f]{64}\z/D'],
+            'review_base_oid' => ['required_if:run_type,review_only', new ProjectGitOidRule($project->object_format)],
+            'review_source_oid' => ['required_if:run_type,review_only', new ProjectGitOidRule($project->object_format)],
             'review_source_ref' => ['required_if:review_subject_kind,managed_branch', 'nullable', 'string', 'max:1024'],
             'review_source_run_id' => ['required_if:review_subject_kind,validated_patch,checkpoint', 'nullable', 'uuid'],
-            'review_tree_oid' => ['required_if:review_subject_kind,validated_patch,checkpoint', 'nullable', 'regex:/\A[0-9a-f]{64}\z/D'],
+            'review_tree_oid' => ['required_if:review_subject_kind,validated_patch,checkpoint', 'nullable', new ProjectGitOidRule($project->object_format)],
             'review_diff_hash' => ['required_if:review_subject_kind,validated_patch,checkpoint', 'nullable', 'regex:/\A[0-9a-f]{64}\z/D'],
             'completion_mode' => ['required_if:run_type,review_only', 'nullable', Rule::in(['manual', 'automatic_after_gates'])],
             'confirm_snapshot' => ['required', 'accepted'],

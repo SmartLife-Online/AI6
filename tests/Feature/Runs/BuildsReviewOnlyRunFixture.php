@@ -10,6 +10,7 @@ use App\AI6\Checks\CheckRunner;
 use App\AI6\Checks\CheckTreeBinding;
 use App\AI6\Git\Actions\QueueTicketReadModelRefresh;
 use App\AI6\Git\ControlOperationConfiguration;
+use App\AI6\Git\GitObjectFormat;
 use App\AI6\Git\HardenedGitRunner;
 use App\AI6\Git\ManagedProjectPath;
 use App\AI6\Git\ProjectOperationLease;
@@ -199,12 +200,12 @@ trait BuildsReviewOnlyRunFixture
      *
      * @return array{0: string, 1: string}
      */
-    protected function managedReviewRepository(string $projectIdentifier): array
+    protected function managedReviewRepository(string $projectIdentifier, GitObjectFormat $format = GitObjectFormat::SHA256): array
     {
         $paths = $this->bindManagedReviewRoot();
         $repository = $paths->repositoryDirectory($projectIdentifier);
         self::assertTrue(mkdir($repository, 0700, true));
-        $this->managedGit(['init', '--object-format=sha256', '--initial-branch=main'], $repository);
+        $this->managedGit(['init', '--object-format='.$format->value, '--initial-branch=main'], $repository);
         self::assertNotFalse(file_put_contents($repository.'/README.md', "base\n"));
         self::assertTrue(mkdir($repository.'/app', 0700));
         self::assertNotFalse(file_put_contents($repository.'/app/Example.php', "<?php\n\n// base\n"));
@@ -253,7 +254,7 @@ trait BuildsReviewOnlyRunFixture
      *
      * @return array{project: Project, operator: User, administrator: User, attention: User, repository: string, base: string, source: string, paths: ManagedProjectPath}
      */
-    protected function prepareManagedReviewProject(string $ticketId): array
+    protected function prepareManagedReviewProject(string $ticketId, GitObjectFormat $format = GitObjectFormat::SHA256): array
     {
         $this->bindImplementationProcessBoundary();
         config([
@@ -285,7 +286,7 @@ trait BuildsReviewOnlyRunFixture
         }
 
         $identifier = substr(hash('sha256', $ticketId.microtime(true)), 0, 32);
-        [$repository, $base] = $this->managedReviewRepository($identifier);
+        [$repository, $base] = $this->managedReviewRepository($identifier, $format);
 
         $administrator = $this->createUser(['is_global_admin' => true]);
         $operator = $this->createUser();
@@ -299,6 +300,7 @@ trait BuildsReviewOnlyRunFixture
             'deploy_key_reference' => '/managed/test-key',
             'public_deploy_key' => "ssh-ed25519 fixture\n",
             'control_oid' => $base,
+            'object_format' => $format,
         ]);
         $attention = $this->createUser(['email' => 'attention-'.strtolower($ticketId).'@example.test']);
         $this->addMembership($administrator, $project, ProjectRole::ADMIN);
@@ -345,9 +347,10 @@ trait BuildsReviewOnlyRunFixture
         ?ReviewSubjectKind $kind = null,
         ReviewOnlyCompletionMode $completionMode = ReviewOnlyCompletionMode::MANUAL,
         ?string $checkProfile = null,
+        GitObjectFormat $format = GitObjectFormat::SHA256,
     ): array {
         $this->reviewOnlyCheckProfile = $checkProfile;
-        $managed = $this->prepareManagedReviewProject($ticketId);
+        $managed = $this->prepareManagedReviewProject($ticketId, $format);
         $this->reviewOnlyCompletionMode = $completionMode;
         $this->reviewOnlySubject = $this->reviewSubjectFor(
             $kind ?? ReviewSubjectKind::MANAGED_BRANCH,
@@ -456,7 +459,7 @@ trait BuildsReviewOnlyRunFixture
         self::assertIsInt($attemptToken);
         self::assertSame(1, TicketReadModel::query()->whereKey($model->getKey())->update([
             'control_operation_id' => $operation->id,
-            'blob_sha' => hash('sha256', $content),
+            'blob_sha' => $managed['project']->object_format->objectId('blob', $content),
             'redacted_content' => $content,
             'generated_at' => now(),
             'updated_at' => now(),

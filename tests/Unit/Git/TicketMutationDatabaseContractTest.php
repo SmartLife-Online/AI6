@@ -13,12 +13,16 @@ use Closure;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Feature\Git\AssertsGitObjectGuards;
 use Tests\Feature\Tickets\TicketUiTestCase;
 
 final class TicketMutationDatabaseContractTest extends TicketUiTestCase
 {
+    use AssertsGitObjectGuards;
+
     public function test_mutation_guards_enforce_immutable_bindings_and_one_time_effect_oids(): void
     {
+        $this->observeGitObjectGuards(['ticket_mutations_update_guard']);
         [$operation, $mutation] = $this->queuedMutation();
         $token = $this->app->make(ProjectOperationLease::class)->claim($operation, str_repeat('d', 32));
         self::assertIsInt($token);
@@ -43,6 +47,7 @@ final class TicketMutationDatabaseContractTest extends TicketUiTestCase
         $this->expectGuardRejection(static fn () => TicketMutation::query()
             ->whereKey($mutation->status_operation_id)
             ->update(['prepared_commit_oid' => str_repeat('e', 64)]));
+        $this->assertGitObjectGuardsObserved(['ticket_mutations_update_guard']);
     }
 
     public function test_mutation_guards_reject_status_enums_and_impossible_operation_matrix(): void

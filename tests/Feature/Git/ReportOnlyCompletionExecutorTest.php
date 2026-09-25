@@ -32,6 +32,7 @@ use App\AI6\Reviews\ReviewerSlotFactory;
 use App\AI6\Reviews\ReviewInvocationOutcome;
 use App\AI6\Runs\ApprovalClaimStarter;
 use App\AI6\Runs\ApprovalLimits;
+use App\AI6\Runs\ApprovalQueue;
 use App\AI6\Runs\ApprovalSelection;
 use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\Models\Run;
@@ -78,13 +79,14 @@ final class ReportOnlyCompletionExecutorTest extends TicketUiTestCase
         self::assertSame(ControlOperationState::COMPLETED, $operation->fresh()->state);
         self::assertSame(RunState::COMPLETED, $completed->state);
         self::assertNull($fixture['project']->fresh()->active_run_id);
-        self::assertSame($mutation->prepared_commit_oid, $completed->run_base_sha);
-        self::assertStringContainsString('status: review', $this->managedFixtureGit([
+        self::assertSame($mutation->refresh()->prepared_commit_oid, $completed->run_base_sha);
+        $publishedTicket = $this->managedFixtureGit([
             '--git-dir='.$fixture['remote'], 'show', $completed->run_base_sha.':'.$bound['relativePath'],
-        ], $fixture['root']));
-        self::assertStringContainsString('## Recorded Scope', $this->managedFixtureGit([
-            '--git-dir='.$fixture['remote'], 'show', $completed->run_base_sha.':'.$bound['relativePath'],
-        ], $fixture['root']));
+        ], $fixture['root']);
+        self::assertStringContainsString('status: review', $publishedTicket);
+        self::assertStringContainsString('## Recorded Scope', $publishedTicket);
+        self::assertSame($mutation->target_content, $publishedTicket);
+        self::assertSame($completed->recorded_scope_sha256, hash('sha256', $publishedTicket));
     }
 
     public function test_report_only_completion_survives_a_crash_at_every_phase_and_releases_only_after_finalization(): void
@@ -167,7 +169,7 @@ final class ReportOnlyCompletionExecutorTest extends TicketUiTestCase
             );
             self::fail('The consumed approval started a second run lineage.');
         } catch (ControlOperationConflict $conflict) {
-            self::assertSame('The approval is not startable.', $conflict->getMessage());
+            self::assertSame('The approval is not eligible: approval_not_queued', $conflict->getMessage());
         }
         self::assertSame(1, Run::query()->count());
     }
@@ -338,6 +340,8 @@ final class ReportOnlyCompletionExecutorTest extends TicketUiTestCase
         DB::table('jobs')->delete();
         $this->app->make(ControlOperationExecutor::class)->execute($approvalOperation->id);
 
+        $approval = TicketApproval::query()->findOrFail($approvalId);
+        $this->app->make(ApprovalQueue::class)->enqueue($fixture['project']->refresh(), $approvalId, $approval->version);
         $start = $this->app->make(ApprovalClaimStarter::class)->start(
             $operator, $fixture['project']->refresh(), $approvalId, (string) Str::uuid(),
         );
@@ -400,6 +404,8 @@ final class ReportOnlyCompletionExecutorTest extends TicketUiTestCase
         );
         DB::table('jobs')->delete();
         $this->app->make(ControlOperationExecutor::class)->execute($approvalOperation->id);
+        $approval = TicketApproval::query()->findOrFail($approvalId);
+        $this->app->make(ApprovalQueue::class)->enqueue($fixture['project']->refresh(), $approvalId, $approval->version);
         $start = $this->app->make(ApprovalClaimStarter::class)->start(
             $operator, $fixture['project']->refresh(), $approvalId, (string) Str::uuid(),
         );

@@ -6,6 +6,9 @@ use App\AI6\Auth\Models\User;
 use App\AI6\Git\Actions\QueueTicketMutation;
 use App\AI6\Git\ControlOperationConfiguration;
 use App\AI6\Git\ControlOperationState;
+use App\AI6\Git\ControlRemoteRefUnresolved;
+use App\AI6\Git\GitObjectFormat;
+use App\AI6\Git\GitRemoteRefResponse;
 use App\AI6\Git\HardenedGitRunner;
 use App\AI6\Git\ManagedProjectPath;
 use App\AI6\Git\Models\ControlOperation;
@@ -44,8 +47,6 @@ use Throwable;
 /** Commit, branch publication and the bound post-push ticket-status saga. */
 final readonly class PublishCompletionService
 {
-    private const ZERO_OID = '0000000000000000000000000000000000000000000000000000000000000000';
-
     public function __construct(
         private PublishCandidateService $candidates,
         private CandidateGate $candidateGate,
@@ -307,9 +308,10 @@ final readonly class PublishCompletionService
     private function publishBranch(Run $run, Project $project, string $repository, RunBranchName $branch, string $targetOid, RedactionContext $context): Run
     {
         $local = $this->git->resolveRunBranch($repository, $branch, $context);
-        $localOid = $local->succeeded() ? trim($local->output) : self::ZERO_OID;
+        $zeroOid = GitObjectFormat::fromOid($targetOid)->zeroOid();
+        $localOid = $local->succeeded() ? trim($local->output) : $zeroOid;
         if (! hash_equals($localOid, $targetOid)) {
-            $updated = $this->git->updateRef($repository, $branch->value, $targetOid, $localOid === self::ZERO_OID ? null : $localOid, $context);
+            $updated = $this->git->updateRef($repository, $branch->value, $targetOid, $localOid === $zeroOid ? null : $localOid, $context);
             if (! $updated->succeeded()) {
                 throw new RunTransitionConflict('run_branch_drift', 'Der lokale Run-Branch konnte nicht gebunden fortgeschrieben werden.');
             }
@@ -336,19 +338,32 @@ final readonly class PublishCompletionService
     private function remoteOid(Run $run, string $repository, RedactionContext $context): string
     {
         $project = Project::query()->findOrFail($run->project_id);
+        $format = $project->object_format;
+        if ($format === null || ! $format->validOid($run->run_base_sha)
+            || $this->git->objectFormat($repository, $context) !== $format) {
+            throw new RunTransitionConflict('git_object_format_mismatch', 'Das Repositoryformat passt nicht zum gebundenen Projekt.');
+        }
         $probe = $this->git->probeRemote(
             (string) $project->remote, (string) $run->run_branch, $repository,
             (string) $project->deploy_key_reference, $this->configuration->knownHostsFile,
             (string) $project->host_key_fingerprint, $context,
         );
-        if ($probe->exitCode === 2 && trim($probe->output) === '') {
-            return self::ZERO_OID;
+        if ($probe->exitCode === 2 && $probe->output === '') {
+            return $format->zeroOid();
         }
-        if (! $probe->succeeded() || preg_match('/\A([0-9a-f]{64})\s/', trim($probe->output), $match) !== 1) {
+        if (! $probe->succeeded()) {
             throw new RunTransitionConflict('remote_probe_failed', 'Der Remotezustand konnte nicht sicher bestimmt werden.');
         }
+        try {
+            $oid = GitRemoteRefResponse::oid($probe->output, (string) $run->run_branch);
+        } catch (ControlRemoteRefUnresolved) {
+            throw new RunTransitionConflict('remote_probe_failed', 'Der Remotezustand konnte nicht sicher bestimmt werden.');
+        }
+        if (! $format->validOid($oid)) {
+            throw new RunTransitionConflict('git_object_format_mismatch', 'Die Remote-OID passt nicht zum gebundenen Projektformat.');
+        }
 
-        return $match[1];
+        return $oid;
     }
 
     private function startStatusSynchronization(Run $run, TicketApproval $approval): Run

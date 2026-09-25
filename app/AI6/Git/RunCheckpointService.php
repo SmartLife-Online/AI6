@@ -33,7 +33,7 @@ final readonly class RunCheckpointService
             new RunBranchName($run->run_branch),
             $context,
         );
-        if (! $branchHead->succeeded() || preg_match('/\A[0-9a-f]{64}\z/D', trim($branchHead->output)) !== 1) {
+        if (! $branchHead->succeeded() || $run->project()->firstOrFail()->object_format?->validOid(trim($branchHead->output)) !== true) {
             throw new RuntimeException('The run branch head could not be resolved.');
         }
         $branchHeadSha = trim($branchHead->output);
@@ -53,7 +53,7 @@ final readonly class RunCheckpointService
         if (! hash_equals($expectedHeadSha, $branchHeadSha)) {
             $parent = $this->git->resolveFirstParent($run->worktree_path, $branchHeadSha, $context);
             if (! $parent->succeeded()
-                || preg_match('/\A[0-9a-f]{64}\z/D', trim($parent->output)) !== 1
+                || ! $run->project()->firstOrFail()->object_format->validOid(trim($parent->output))
                 || ! hash_equals($expectedHeadSha, trim($parent->output))) {
                 throw new RuntimeException('The run branch advanced outside the checkpoint protocol.');
             }
@@ -100,7 +100,7 @@ final readonly class RunCheckpointService
             $effectLockName,
             $context,
         );
-        if (! $commit->succeeded() || preg_match('/\A[0-9a-f]{64}\z/D', trim($commit->output)) !== 1) {
+        if (! $commit->succeeded() || ! $run->project()->firstOrFail()->object_format->validOid(trim($commit->output))) {
             throw new RuntimeException('The local run checkpoint could not be created.');
         }
         $commitSha = trim($commit->output);
@@ -111,7 +111,7 @@ final readonly class RunCheckpointService
     private function bindResolvedCheckpoint(Run $run, string $commitSha, RedactionContext $context): Run
     {
         $tree = $this->git->resolveTree($run->worktree_path, $commitSha, $context);
-        if (! $tree->succeeded() || preg_match('/\A[0-9a-f]{64}\z/D', trim($tree->output)) !== 1) {
+        if (! $tree->succeeded() || $run->project()->firstOrFail()->object_format?->validOid(trim($tree->output)) !== true) {
             throw new RuntimeException('The checkpoint tree could not be resolved.');
         }
 

@@ -26,7 +26,8 @@ use Tests\Feature\Auth\AuthFeatureTestCase;
 
 abstract class ControlOperationTestCase extends AuthFeatureTestCase
 {
-    private ?string $realWorkerRoot = null;
+    /** @var list<string> */
+    private array $realWorkerRoots = [];
 
     private string|false|null $previousHeartbeatDirectory = null;
 
@@ -73,8 +74,8 @@ abstract class ControlOperationTestCase extends AuthFeatureTestCase
         if (! mkdir($root, 0700, true) && ! is_dir($root)) {
             self::fail('The real worker test root could not be created.');
         }
-        $this->realWorkerRoot = $root;
-        $this->previousHeartbeatDirectory = getenv('AI6_HEARTBEAT_DIRECTORY');
+        $this->realWorkerRoots[] = $root;
+        $this->previousHeartbeatDirectory ??= getenv('AI6_HEARTBEAT_DIRECTORY');
         putenv('AI6_HEARTBEAT_DIRECTORY='.$heartbeatDirectory);
 
         $process = new ProcessConfiguration(
@@ -108,7 +109,8 @@ abstract class ControlOperationTestCase extends AuthFeatureTestCase
         $mapping = new ProjectEffectLockName($process);
         for ($index = 1; $index <= 10000; $index++) {
             $identifier = hash('md5', 'ai6-worker-project-'.$index);
-            if ($mapping->forProject($identifier) === 'lock-0001') {
+            if ($mapping->forProject($identifier) === 'lock-0001'
+                && ! Project::query()->where('project_identifier', $identifier)->where('id', '!=', $project->id)->exists()) {
                 $project->forceFill(['project_identifier' => $identifier])->save();
                 break;
             }
@@ -185,8 +187,8 @@ abstract class ControlOperationTestCase extends AuthFeatureTestCase
             DB::purge('sqlite');
             @unlink($this->forkDatabasePath);
         }
-        if ($this->realWorkerRoot !== null) {
-            (new Filesystem)->deleteDirectory($this->realWorkerRoot);
+        foreach ($this->realWorkerRoots as $root) {
+            (new Filesystem)->deleteDirectory($root);
         }
         if ($this->previousHeartbeatDirectory !== null) {
             if ($this->previousHeartbeatDirectory === false) {

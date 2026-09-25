@@ -14,8 +14,8 @@ use App\AI6\Shared\Redaction\RedactionKeyring;
 use App\AI6\Shared\Redaction\RedactionPolicy;
 use App\AI6\Shared\Redaction\RedactionRuleSet;
 use App\AI6\Shared\Redaction\Redactor;
-use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\TestCase;
 
 final class EffectLockRuntimeSecurityTest extends TestCase
 {

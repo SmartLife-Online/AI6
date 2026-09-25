@@ -7,15 +7,21 @@ use App\AI6\Auth\StepUpGuard;
 use App\AI6\Git\Actions\QueueControlBranchChange;
 use App\AI6\Git\Actions\QueueDeployKeyProvisioning;
 use App\AI6\Git\Actions\QueueManagedCloneOperation;
+use App\AI6\Git\Actions\QueueTicketReadModelRefresh;
 use App\AI6\Git\ControlOperationConflict;
 use App\AI6\Git\ControlOperationExecutor;
 use App\AI6\Git\ControlOperationPhase;
 use App\AI6\Git\ControlOperationReconciler;
+use App\AI6\Git\ControlOperationRecoveryRequired;
 use App\AI6\Git\ControlOperationRetryableConflict;
 use App\AI6\Git\ControlOperationState;
 use App\AI6\Git\ControlOperationType;
+use App\AI6\Git\ControlRemoteProbe;
+use App\AI6\Git\GitObjectFormat;
+use App\AI6\Git\HardenedControlRemoteProbe;
 use App\AI6\Git\ManagedCloneSynchronizer;
 use App\AI6\Git\ManagedProjectPath;
+use App\AI6\Git\Models\ControlOperation;
 use App\AI6\Git\Models\ControlOperationRecoveryDecision;
 use App\AI6\Git\Models\ControlOperationResult;
 use App\AI6\Git\RecoveryDecisionType;
@@ -37,13 +43,86 @@ final class ManagedCloneSynchronizerTest extends ControlOperationTestCase
 {
     use BuildsManagedControlRuntimeFixture;
 
-    public function test_control_branch_probe_publish_and_fetch_consume_the_exact_pending_binding(): void
+    public function test_both_formats_clone_and_fetch_in_one_worker_process_without_global_format_state(): void
+    {
+        $bindings = [];
+        foreach ([GitObjectFormat::SHA1, GitObjectFormat::SHA256] as $format) {
+            $fixture = $this->managedFixture($format);
+            foreach ([ControlOperationType::MANAGED_CLONE, ControlOperationType::MANAGED_FETCH] as $type) {
+                $operation = app(QueueManagedCloneOperation::class)->handle(
+                    $fixture['administrator'], $fixture['project']->refresh(), $type, (string) Str::uuid(),
+                );
+                DB::table('jobs')->delete();
+                app(ControlOperationExecutor::class)->execute($operation->id);
+                self::assertSame(ControlOperationState::COMPLETED, $operation->refresh()->state);
+                self::assertSame($format, $fixture['project']->refresh()->object_format);
+                self::assertSame($fixture['first_oid'], $fixture['project']->control_oid);
+            }
+            $bindings[$fixture['project']->id] = $fixture['project']->only(['object_format', 'control_oid', 'control_binding_version']);
+        }
+        foreach ($bindings as $id => $binding) {
+            self::assertSame($binding, Project::query()->findOrFail($id)->only(array_keys($binding)));
+        }
+        self::assertCount(2, $bindings);
+    }
+
+    #[DataProvider('objectFormats')]
+    public function test_wrong_first_clone_format_is_terminal_and_a_reloaded_page_can_start_a_fresh_clone(GitObjectFormat $format): void
+    {
+        $fixture = $this->managedFixture($format);
+        $project = $fixture['project'];
+        $administrator = $fixture['administrator'];
+        $wrong = str_repeat('a', $format === GitObjectFormat::SHA1 ? 64 : 40);
+        $this->app->instance(ControlRemoteProbe::class, new class($wrong) implements ControlRemoteProbe
+        {
+            public function __construct(private readonly string $oid) {}
+
+            public function resolve(Project $project, string $ref, RedactionContext $context): string
+            {
+                return $this->oid;
+            }
+        });
+        $failed = app(QueueManagedCloneOperation::class)->handle($administrator, $project, ControlOperationType::MANAGED_CLONE, (string) Str::uuid());
+        DB::table('jobs')->delete();
+        app(ControlOperationExecutor::class)->execute($failed->id);
+        self::assertSame(ControlOperationState::FAILED, $failed->refresh()->state);
+        self::assertNull($project->refresh()->control_oid);
+        self::assertNull($project->object_format);
+        self::assertDirectoryDoesNotExist($fixture['paths']->repositoryDirectory((string) $project->project_identifier));
+        $history = $failed->result()->sole()->getAttributes();
+        self::assertSame(
+            hash('sha256', "AI6-CONTROL-RESULT-V1\0".$failed->id.$failed->request_hash.'git_object_format_mismatch'),
+            $history['result_binding'],
+        );
+        $this->app->forgetInstance(ControlRemoteProbe::class);
+        $this->app->bind(ControlRemoteProbe::class, HardenedControlRemoteProbe::class);
+        $this->app->forgetInstance(ManagedCloneSynchronizer::class);
+        $this->app->forgetInstance(ControlOperationExecutor::class);
+        $this->actingAs($administrator)->get(route('projects.show', $project))->assertOk()->assertSee('Clone starten');
+        $newId = (string) Str::uuid();
+        $this->post(route('projects.managed-clone.clone', $project), ['operation_id' => $newId])->assertRedirect();
+        DB::table('jobs')->delete();
+        app(ControlOperationExecutor::class)->execute($newId);
+        self::assertSame(ControlOperationState::COMPLETED, ControlOperation::query()->findOrFail($newId)->state);
+        self::assertSame($format, $project->refresh()->object_format);
+        $refresh = app(QueueTicketReadModelRefresh::class)->handle($administrator, $project, 'tickets/AI6-099.md', (string) Str::uuid());
+        DB::table('jobs')->delete();
+        app(ControlOperationExecutor::class)->execute($refresh->id);
+        self::assertSame(ControlOperationState::COMPLETED, $refresh->refresh()->state);
+        $binding = $project->refresh()->only(['object_format', 'control_oid', 'control_binding_version']);
+        app(ControlOperationExecutor::class)->execute($failed->id);
+        self::assertSame($binding, $project->refresh()->only(['object_format', 'control_oid', 'control_binding_version']));
+        self::assertSame($history, $failed->result()->sole()->getAttributes());
+    }
+
+    #[DataProvider('objectFormats')]
+    public function test_control_branch_probe_publish_and_fetch_consume_the_exact_pending_binding(GitObjectFormat $format): void
     {
         if (DIRECTORY_SEPARATOR !== '/') {
             self::markTestSkipped('The control-branch probe and managed-fetch proof requires the Linux runtime.');
         }
 
-        $fixture = $this->managedFixture();
+        $fixture = $this->managedFixture($format);
         $administrator = $fixture['administrator'];
         $project = $fixture['project'];
         $clone = $this->app->make(QueueManagedCloneOperation::class)->handle(
@@ -241,13 +320,14 @@ SH,
         self::assertSame($nextOid, $expectedCommitOperation->expected_control_commit);
     }
 
-    public function test_clone_then_fetch_publish_only_the_bound_control_ref_and_binding(): void
+    #[DataProvider('objectFormats')]
+    public function test_clone_then_fetch_publish_only_the_bound_control_ref_and_binding(GitObjectFormat $format): void
     {
         if (DIRECTORY_SEPARATOR !== '/') {
             self::markTestSkipped('The managed-clone process and effect-lock proof requires the Linux runtime.');
         }
 
-        $fixture = $this->managedFixture();
+        $fixture = $this->managedFixture($format);
         $administrator = $fixture['administrator'];
         $project = $fixture['project'];
         $root = $fixture['root'];
@@ -271,6 +351,7 @@ SH,
         self::assertSame('completed', $clone->state->value);
         self::assertSame($firstOid, $project->control_oid);
         self::assertSame(1, $project->control_binding_version);
+        self::assertSame($format, $project->object_format);
         $repository = $paths->assertRepository($paths->repositoryDirectory((string) $project->project_identifier));
         self::assertSame(['refs/heads/main' => $firstOid], $runner->refs($repository, $this->context($project->getKey(), $clone->id)));
         self::assertDirectoryDoesNotExist($root.'/.control-staging/'.$clone->id);
@@ -293,25 +374,113 @@ SH,
         $fetch->refresh();
         self::assertSame('completed', $fetch->state->value);
         self::assertSame($secondOid, $project->control_oid);
+        self::assertSame($format, $project->object_format);
         self::assertSame(2, $project->control_binding_version);
         self::assertFileDoesNotExist($repository.'/FETCH_HEAD');
         self::assertSame(['refs/heads/main' => $secondOid], $runner->refs($repository, $this->context($project->getKey(), $fetch->id)));
         self::assertSame($protectedMetadata, $this->protectedMetadataSnapshot($repository));
         self::assertDirectoryDoesNotExist($root.'/.control-staging/'.$fetch->id);
 
+        $context = $this->context($project->getKey(), $fetch->id);
+        $runRef = 'refs/heads/first-push';
+        self::assertTrue($runner->pushCommitCas(
+            $repository, $project->remote, $runRef, $format->zeroOid(), $firstOid,
+            $project->deploy_key_reference, $root.'/known_hosts', $project->host_key_fingerprint, $context,
+        )->succeeded());
+        self::assertFalse($runner->pushCommitCas(
+            $repository, $project->remote, $runRef, $format->zeroOid(), $secondOid,
+            $project->deploy_key_reference, $root.'/known_hosts', $project->host_key_fingerprint, $context,
+        )->succeeded(), 'A create-only push must not replace an unexpectedly existing ref.');
+        self::assertSame($firstOid, trim($this->managedFixtureGit(['--git-dir='.$remote, 'rev-parse', $runRef], $root)));
+        self::assertSame($secondOid, $project->refresh()->control_oid);
+
         $this->managedFixtureGit(['fetch', $remote, 'refs/heads/main'], $repository);
         self::assertFileExists($repository.'/FETCH_HEAD');
         self::assertNotSame($protectedMetadata, $this->protectedMetadataSnapshot($repository));
     }
 
-    #[DataProvider('sagaCrashPhases')]
-    public function test_clone_saga_reconciles_each_cross_storage_crash_boundary(ControlOperationPhase $crashPhase): void
+    /** @return iterable<string, array{GitObjectFormat}> */
+    public static function objectFormats(): iterable
+    {
+        yield 'sha1' => [GitObjectFormat::SHA1];
+        yield 'sha256' => [GitObjectFormat::SHA256];
+    }
+
+    /** @return iterable<string, array{GitObjectFormat, bool}> */
+    public static function publishedStageFormats(): iterable
+    {
+        foreach (GitObjectFormat::cases() as $format) {
+            yield $format->value.' unchanged' => [$format, false];
+            yield $format->value.' format drift' => [$format, true];
+        }
+    }
+
+    #[DataProvider('publishedStageFormats')]
+    public function test_clone_resumes_after_filesystem_publish_before_phase_progress(GitObjectFormat $format, bool $drift): void
+    {
+        $fixture = $this->managedFixture($format);
+        $project = $fixture['project'];
+        $operation = app(QueueManagedCloneOperation::class)->handle(
+            $fixture['administrator'], $project, ControlOperationType::MANAGED_CLONE, (string) Str::uuid(),
+        );
+        DB::table('jobs')->delete();
+        $attempt = $fixture['lease']->claim($operation, str_repeat('1', 32));
+        self::assertIsInt($attempt);
+        self::assertFalse(app(ManagedCloneSynchronizer::class)->advance($operation, $attempt));
+        self::assertSame(ControlOperationPhase::EFFECT_STAGED, $operation->refresh()->phase);
+        // Crash after the actual rename, before publishOutcome persists its phase.
+        $repository = $fixture['paths']->publishStagedRepository($project->project_identifier, $operation->id, $attempt);
+        self::assertSame(ControlOperationPhase::EFFECT_STAGED, $operation->refresh()->phase);
+        self::assertNull($project->refresh()->object_format);
+        self::assertNull($project->control_oid);
+        if ($drift) {
+            self::assertTrue(rename($repository, $repository.'-original'));
+            self::assertTrue(mkdir($repository, 0700));
+            $other = $format === GitObjectFormat::SHA1 ? GitObjectFormat::SHA256 : GitObjectFormat::SHA1;
+            $this->managedFixtureGit(['init', '--object-format='.$other->value, '--initial-branch=main'], $repository);
+            $this->managedFixtureGit(['-c', 'user.name=AI6 Test', '-c', 'user.email=ai6@example.invalid', 'commit', '--allow-empty', '-m', 'foreign format'], $repository);
+            self::assertSame($other->value, trim($this->managedFixtureGit(['rev-parse', '--show-object-format=storage'], $repository)));
+        }
+        self::assertTrue($fixture['lease']->expire($operation->id, $project->id, $attempt));
+        if ($drift) {
+            $resumedAttempt = $fixture['lease']->claim($operation->refresh(), str_repeat('2', 32));
+            self::assertIsInt($resumedAttempt);
+            try {
+                app(ManagedCloneSynchronizer::class)->advance($operation, $resumedAttempt);
+                self::fail('A published repository with a foreign storage format was accepted.');
+            } catch (ControlOperationRecoveryRequired $exception) {
+                self::assertSame('The published Git storage format differs from its bound intent.', $exception->getMessage());
+            }
+            self::assertSame(ControlOperationPhase::EFFECT_STAGED, $operation->refresh()->phase);
+            self::assertTrue($fixture['lease']->expire($operation->id, $project->id, $resumedAttempt));
+        }
+        app(ControlOperationExecutor::class)->execute($operation->id);
+        self::assertGreaterThan($attempt, $operation->refresh()->current_attempt_token);
+        self::assertSame($attempt, $operation->effect_attempt_token);
+        if ($drift) {
+            self::assertSame(ControlOperationState::RECOVERY_REQUIRED, $operation->state);
+            self::assertSame('Die sichere Reconciliation konnte Außenstand und persistierten Intent nicht konsistent zusammenführen.', $operation->last_error);
+            self::assertNull($project->refresh()->object_format);
+            self::assertNull($project->control_oid);
+            self::assertSame($operation->id, $project->operation_lock_operation_id);
+        } else {
+            self::assertSame(ControlOperationState::COMPLETED, $operation->state);
+            self::assertSame($format, $project->refresh()->object_format);
+            self::assertSame($fixture['first_oid'], $project->control_oid);
+            self::assertSame(1, $project->control_binding_version);
+            self::assertSame(1, $operation->result()->count());
+            self::assertNull($project->operation_lock_operation_id);
+        }
+    }
+
+    #[DataProvider('cloneFormatCrashPhases')]
+    public function test_clone_saga_reconciles_each_cross_storage_crash_boundary(ControlOperationPhase $crashPhase, GitObjectFormat $format): void
     {
         if (DIRECTORY_SEPARATOR !== '/') {
             self::markTestSkipped('The managed-clone saga crash proof requires the Linux runtime.');
         }
 
-        $fixture = $this->managedFixture();
+        $fixture = $this->managedFixture($format);
         $administrator = $fixture['administrator'];
         $project = $fixture['project'];
         $lease = $fixture['lease'];
@@ -329,6 +498,18 @@ SH,
             self::assertFalse($synchronizer->advance($operation, $attemptToken));
         }
         self::assertSame($crashPhase, $operation->refresh()->phase);
+        if ($format === GitObjectFormat::SHA256 && $crashPhase === ControlOperationPhase::OUTCOME_PUBLISHED) {
+            // AI6-051/TC-03: resume an actual open legacy clone after upgrade,
+            // preserving the serialized intent, hash and already published effect.
+            $before = (array) DB::table('control_operations')->where('id', $operation->id)->first();
+            $migration = require base_path('database/migrations/2026_09_24_000000_add_git_object_format_contract.php');
+            foreach (['down', 'up'] as $direction) {
+                self::assertIsCallable([$migration, $direction]);
+                call_user_func([$migration, $direction]);
+            }
+            self::assertSame($before, (array) DB::table('control_operations')->where('id', $operation->id)->first());
+            self::assertNull($project->refresh()->object_format);
+        }
         if ($crashPhase === ControlOperationPhase::EFFECT_STAGED) {
             self::assertDirectoryDoesNotExist(
                 $fixture['paths']->repositoryDirectory((string) $project->project_identifier),
@@ -342,6 +523,7 @@ SH,
         $project->refresh();
         self::assertSame(ControlOperationState::COMPLETED, $operation->state);
         self::assertSame(ControlOperationPhase::ATTEMPT_COMPLETED, $operation->phase);
+        self::assertSame($format, $project->object_format);
         self::assertSame($fixture['first_oid'], $project->control_oid);
         self::assertSame(1, $project->control_binding_version);
         self::assertSame(1, ControlOperationResult::query()->where('control_operation_id', $operation->id)->count());
@@ -438,6 +620,16 @@ SH,
         yield 'sqlite binding finalized before cleanup' => [ControlOperationPhase::BINDING_FINALIZED];
     }
 
+    /** @return iterable<string, array{ControlOperationPhase, GitObjectFormat}> */
+    public static function cloneFormatCrashPhases(): iterable
+    {
+        foreach (GitObjectFormat::cases() as $format) {
+            foreach (self::sagaCrashPhases() as $name => [$phase]) {
+                yield $format->value.' '.$name => [$phase, $format];
+            }
+        }
+    }
+
     public function test_remote_probe_mismatch_never_publishes_a_usable_clone(): void
     {
         if (DIRECTORY_SEPARATOR !== '/') {
@@ -511,13 +703,23 @@ SH,
         self::assertDirectoryDoesNotExist($fixture['root'].'/.control-staging/'.$operation->id);
     }
 
-    public function test_binding_version_conflict_stays_visible_until_bound_recovery_reconciles_it(): void
+    /** @return iterable<string, array{GitObjectFormat, bool}> */
+    public static function recoveryFormats(): iterable
+    {
+        foreach (GitObjectFormat::cases() as $format) {
+            yield $format->value.' first clone' => [$format, true];
+            yield $format->value.' fetch' => [$format, false];
+        }
+    }
+
+    #[DataProvider('recoveryFormats')]
+    public function test_binding_version_conflict_stays_visible_until_bound_recovery_reconciles_it(GitObjectFormat $format, bool $firstClone): void
     {
         if (DIRECTORY_SEPARATOR !== '/') {
             self::markTestSkipped('The managed-clone recovery proof requires the Linux runtime.');
         }
 
-        $fixture = $this->managedFixture();
+        $fixture = $this->managedFixture($format);
         $project = $fixture['project'];
         $clone = $this->app->make(QueueManagedCloneOperation::class)->handle(
             $fixture['administrator'],
@@ -526,18 +728,18 @@ SH,
             (string) Str::uuid(),
         );
         DB::table('jobs')->delete();
-        $this->app->make(ControlOperationExecutor::class)->execute($clone->id);
-
-        self::assertNotFalse(file_put_contents($fixture['source'].'/ticket.md', "recovery target\n"));
-        $this->managedFixtureGit(['commit', '-am', 'recovery target'], $fixture['source']);
-        $targetOid = trim($this->managedFixtureGit(['rev-parse', 'HEAD'], $fixture['source']));
-        $this->managedFixtureGit(['push', $fixture['remote'], 'refs/heads/main:refs/heads/main'], $fixture['source']);
-        $fetch = $this->app->make(QueueManagedCloneOperation::class)->handle(
-            $fixture['administrator'],
-            $project->refresh(),
-            ControlOperationType::MANAGED_FETCH,
-            (string) Str::uuid(),
-        );
+        $targetOid = $fixture['first_oid'];
+        $fetch = $clone;
+        if (! $firstClone) {
+            $this->app->make(ControlOperationExecutor::class)->execute($clone->id);
+            self::assertNotFalse(file_put_contents($fixture['source'].'/ticket.md', "recovery target\n"));
+            $this->managedFixtureGit(['commit', '-am', 'recovery target'], $fixture['source']);
+            $targetOid = trim($this->managedFixtureGit(['rev-parse', 'HEAD'], $fixture['source']));
+            $this->managedFixtureGit(['push', $fixture['remote'], 'refs/heads/main:refs/heads/main'], $fixture['source']);
+            $fetch = $this->app->make(QueueManagedCloneOperation::class)->handle(
+                $fixture['administrator'], $project->refresh(), ControlOperationType::MANAGED_FETCH, (string) Str::uuid(),
+            );
+        }
         DB::table('jobs')->delete();
         $attemptToken = $fixture['lease']->claim($fetch, str_repeat('2', 32));
         self::assertIsInt($attemptToken);
@@ -560,8 +762,9 @@ SH,
         self::assertSame(ControlOperationState::RECOVERY_REQUIRED, $fetch->state);
         self::assertSame(ControlOperationPhase::RECOVERY_REQUIRED, $fetch->phase);
         self::assertSame($fetch->id, $project->operation_lock_operation_id);
-        self::assertSame($fixture['first_oid'], $project->control_oid);
-        self::assertSame(2, $project->control_binding_version);
+        self::assertSame($firstClone ? null : $fixture['first_oid'], $project->control_oid);
+        self::assertSame($firstClone ? null : $format, $project->object_format);
+        self::assertSame($firstClone ? 1 : 2, $project->control_binding_version);
         try {
             $this->app->make(QueueManagedCloneOperation::class)->handle(
                 $fixture['administrator'],
@@ -598,9 +801,12 @@ SH,
         self::assertSame(ControlOperationState::COMPLETED, $fetch->state);
         self::assertSame(ControlOperationPhase::ATTEMPT_COMPLETED, $fetch->phase);
         self::assertSame($targetOid, $project->control_oid);
-        self::assertSame(3, $project->control_binding_version);
+        self::assertSame($format, $project->object_format);
+        self::assertSame($firstClone ? 2 : 3, $project->control_binding_version);
         self::assertNull($project->operation_lock_operation_id);
         self::assertSame(1, ControlOperationResult::query()->where('control_operation_id', $fetch->id)->count());
+        $this->app->make(ControlOperationExecutor::class)->execute($fetch->id);
+        self::assertSame($firstClone ? 2 : 3, $project->refresh()->control_binding_version);
     }
 
     public function test_clone_takeover_removes_the_superseded_attempt_tree_before_restaging(): void

@@ -39,6 +39,8 @@ final class ControlProcessRunner
 
     private const RELEASED_PREFIX = '__AI6_PROCESS_RELEASED_V1__:';
 
+    private const STARTED_PREFIX = '__AI6_PROCESS_STARTED_V1__:';
+
     public function __construct(
         private readonly ProcessConfiguration $configuration,
         private readonly Redactor $redactor,
@@ -79,7 +81,7 @@ final class ControlProcessRunner
             && in_array($request->command[0], [config('ai6.codex.binary'), config('ai6.grok.binary'), config('ai6.copilot.binary')], true)) {
             throw new ProcessStartRejectedException('The provider supervisor scope is missing.');
         }
-        [$timeout, $outputLimit, $cancelGrace, $limits] = $this->resolvePolicy($request);
+        $policy = $this->resolvePolicy($request);
         $payload = $request->command;
         if ($this->agentScope !== null) {
             $payload = $this->agentScope->command($request);
@@ -104,8 +106,30 @@ final class ControlProcessRunner
             : $request->command;
         $process = new Process($command, $request->workingDirectory, $this->environment($request), $request->standardInput, null);
         $process->start();
+
+        return $this->trackStartedProcess($process, $request, $policy);
+    }
+
+    /** @param array{int, int, int, ?ProcessLimits} $policy */
+    private function trackStartedProcess(Process $process, ProcessRequest $request, array $policy): RunningControlProcess
+    {
+        [$timeout, $outputLimit, $cancelGrace, $limits] = $policy;
         $startedAt = $process->getStartTime();
         $processId = $process->getPid();
+        $prefixBytes = 0;
+
+        if (DIRECTORY_SEPARATOR === '/') {
+            try {
+                [$processId, $prefixBytes] = $this->directProcessIdentity($process, $processId, $timeout);
+            } catch (Throwable $exception) {
+                $terminate = $this->processGroupTerminator($process);
+                if ($processId !== null && $terminate !== null) {
+                    $terminate($processId, $cancelGrace);
+                }
+                $process->stop(0, 9);
+                throw $exception;
+            }
+        }
 
         if ($processId === null) {
             $process->stop(0);
@@ -121,12 +145,42 @@ final class ControlProcessRunner
             $cancelGrace,
             $processId,
             $startedAt,
+            discardOutputPrefixBytes: $prefixBytes,
             terminateProcessGroup: $this->processGroupTerminator($process),
             limits: $limits,
             resultDirectory: $request->resultDirectory,
             artifactDirectory: $request->artifactDirectory,
             supervisorHeartbeat: $this->agentScope?->heartbeat,
         );
+    }
+
+    /** @return array{int, int} */
+    private function directProcessIdentity(Process $process, ?int $observedPid, int $timeout): array
+    {
+        $deadline = $process->getStartTime() + min($timeout, $this->configuration->wrapperReadyTimeoutSeconds);
+        do {
+            // Parse the prefix even when the status update observes completion.
+            // The trusted wrapper writes its PID before exec; the bytes survive.
+            $running = $process->isRunning();
+            $output = $process->getOutput();
+            $newline = strpos($output, "\n");
+            if ($newline !== false) {
+                $line = substr($output, 0, $newline + 1);
+                if (preg_match('/\A'.self::STARTED_PREFIX.'([1-9][0-9]{0,18})\n\z/D', $line, $matches) === 1) {
+                    $pid = filter_var($matches[1], FILTER_VALIDATE_INT, ['options' => ['min_range' => 2]]);
+                    if (is_int($pid) && ($observedPid === null || $observedPid === $pid)) {
+                        return [$pid, strlen($line)];
+                    }
+                }
+                throw new RuntimeException('The direct process identifier binding is invalid.');
+            }
+            if (strlen($output) > strlen(self::STARTED_PREFIX) + 19 || ! $running) {
+                break;
+            }
+            usleep(1000);
+        } while (microtime(true) < $deadline);
+
+        throw new RuntimeException('The direct process identifier is unavailable.');
     }
 
     public function startBlocked(ProcessRequest $request, string $lockName): BlockedProcessStartResult

@@ -36,14 +36,18 @@ final readonly class RunPreflight
         if (! $approval instanceof TicketApproval || $approval->saga_phase !== 'complete') {
             return 'approval_not_complete';
         }
-        if (! $this->sha($approval->approved_control_sha)
+        $format = $run->project()->first()?->object_format;
+        if ($format?->validOid($approval->approved_control_sha) !== true
             || (! hash_equals((string) $approval->approved_control_sha, $run->claim_parent_control_sha)
                 && ! $this->confirmedFastForwardClaim($run, $approval))
-            || ! $this->sha($approval->approved_ticket_blob_sha)) {
+            || ! $format->validOid($approval->approved_ticket_blob_sha)) {
             return 'approval_binding_stale';
         }
 
-        foreach (['run_base_sha', 'prompt_hash', 'instruction_hash', 'runtime_profile_hash', 'agent_profile_hash', 'security_policy_hash'] as $field) {
+        if (! $format->validOid($run->run_base_sha)) {
+            return 'preflight_binding_missing';
+        }
+        foreach (['prompt_hash', 'instruction_hash', 'runtime_profile_hash', 'agent_profile_hash', 'security_policy_hash'] as $field) {
             if (! $this->sha($run->{$field})) {
                 return 'preflight_binding_missing';
             }
@@ -159,7 +163,8 @@ final readonly class RunPreflight
 
     private function confirmedFastForwardClaim(Run $run, TicketApproval $approval): bool
     {
-        if (! $this->sha($run->claim_parent_control_sha) || ! $this->sha($run->initial_run_base_sha)) {
+        $format = $run->project()->first()?->object_format;
+        if ($format?->validOid($run->claim_parent_control_sha) !== true || ! $format->validOid($run->initial_run_base_sha)) {
             return false;
         }
 

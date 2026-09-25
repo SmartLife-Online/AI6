@@ -69,8 +69,8 @@ final readonly class PublishCandidateService
             return new PublishCandidate($tree, $candidate->hash, $run->run_base_sha);
         } catch (PublishCandidateException $exception) {
             throw $exception;
-        } catch (Throwable) {
-            throw new PublishCandidateException('candidate_generation_failed');
+        } catch (Throwable $exception) {
+            throw new PublishCandidateException('candidate_generation_failed', $exception);
         } finally {
             if (file_exists($index) || is_link($index)) {
                 @unlink($index);
@@ -92,14 +92,17 @@ final readonly class PublishCandidateService
 
     private function assertBindings(Run $run): void
     {
-        foreach (['initial_run_base_sha', 'run_base_sha', 'checkpoint_commit_sha', 'checkpoint_tree_sha', 'checkpoint_diff_hash'] as $field) {
+        $project = $run->project()->first();
+        foreach (['initial_run_base_sha', 'run_base_sha', 'checkpoint_commit_sha', 'checkpoint_tree_sha'] as $field) {
             $value = $run->getAttribute($field);
-            if (! is_string($value) || preg_match('/\A[0-9a-f]{64}\z/D', $value) !== 1) {
+            if (! is_string($value) || $project?->object_format?->validOid($value) !== true) {
                 throw new PublishCandidateException('candidate_binding_incomplete');
             }
         }
-        $project = $run->project()->first();
-        if ($project === null || ! is_string($project->control_oid)
+        if (! is_string($run->checkpoint_diff_hash) || preg_match('/\A[0-9a-f]{64}\z/D', $run->checkpoint_diff_hash) !== 1) {
+            throw new PublishCandidateException('candidate_binding_incomplete');
+        }
+        if (! is_string($project->control_oid)
             || ! hash_equals($run->run_base_sha, $project->control_oid)) {
             throw new PublishCandidateException('control_head_drift');
         }

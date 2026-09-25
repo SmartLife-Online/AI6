@@ -268,8 +268,10 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Git/DeployKeyProvisioner.php',
             'app/AI6/Git/GitConfiguration.php',
             'app/AI6/Git/GitConfigurationFactory.php',
+            'app/AI6/Git/GitObjectFormat.php',
             'app/AI6/Git/GitRefName.php',
             'app/AI6/Git/GitRemotePolicy.php',
+            'app/AI6/Git/GitRemoteRefResponse.php',
             'app/AI6/Git/GitRemoteRejected.php',
             'app/AI6/Git/GitTreeEntry.php',
             'app/AI6/Git/HardenedControlRemoteProbe.php',
@@ -289,6 +291,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Git/Models/TicketMutation.php',
             'app/AI6/Git/ProjectConfigRefresher.php',
             'app/AI6/Git/ProjectEffectLockName.php',
+            'app/AI6/Git/ProjectGitOidRule.php',
             'app/AI6/Git/ProjectOperationLease.php',
             'app/AI6/Git/PublishCandidate.php',
             'app/AI6/Git/PublishCandidateException.php',
@@ -983,6 +986,7 @@ final class ScaffoldStructureTest extends TestCase
             '2026_09_01_010000_add_project_queue_contract.php',
             '2026_09_02_000000_add_run_artifact_retention_contract.php',
             '2026_09_07_000000_bind_provider_artifacts_to_execution.php',
+            '2026_09_24_000000_add_git_object_format_contract.php',
         ], $migrations);
     }
 

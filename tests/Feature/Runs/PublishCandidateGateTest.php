@@ -21,6 +21,7 @@ use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunGate;
 use App\AI6\Runs\RunOrchestrator;
+use App\AI6\Runs\RunPhase;
 use App\AI6\Runs\RunState;
 use App\AI6\Tickets\TicketV1Parser;
 use Illuminate\Http\Request;
@@ -29,14 +30,62 @@ use Illuminate\Session\Store;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Feature\Git\AssertsGitObjectGuards;
 use Tests\Feature\Tickets\TicketUiTestCase;
 
 final class PublishCandidateGateTest extends TicketUiTestCase
 {
+    use AssertsGitObjectGuards;
     use BuildsImplementationTurnFixture;
+
+    public function test_bound_candidate_evidence_survives_phase_progress_without_rewriting_its_authorization(): void
+    {
+        $fixture = $this->preparedImplementationRun('AI6-051-GATE-PHASE');
+        $run = $fixture['run'];
+        $orchestrator = app(RunOrchestrator::class);
+        $orchestrator->prepareGates($run, app(TicketV1Parser::class)->parse($this->gateTicket()));
+        $approver = $this->createUser();
+        $this->addMembership($approver, $fixture['project'], ProjectRole::APPROVER);
+        $candidate = new PublishCandidate(str_repeat('a', 64), str_repeat('b', 64), $run->run_base_sha);
+        $gate = $orchestrator->authorizeCandidateGateEvidence(
+            $run, 'MG-01', $approver->id, 'intervention:phase-progress', $candidate, $run->version + 1,
+        );
+        $evidence = $gate->getAttributes();
+        $run = $orchestrator->bindCandidate($run, $run->version, $candidate);
+        foreach ([RunPhase::SECURITY_REVIEW, RunPhase::PUBLISH] as $phase) {
+            $previousVersion = $run->version;
+            $run = $orchestrator->advancePhase($run, $run->version, $phase);
+            self::assertSame($previousVersion + 1, $run->version);
+            self::assertSame([], $orchestrator->invalidateStaleCandidateGateEvidence($run, $candidate));
+            self::assertSame($evidence, $gate->refresh()->getAttributes());
+            self::assertNull($run->candidate_invalidated_at);
+        }
+        $gate->forceFill(['evidence_expected_run_version' => $run->version + 1])->save();
+        self::assertSame(['MG-01'], $orchestrator->invalidateStaleCandidateGateEvidence($run, $candidate));
+        self::assertSame(GateState::OPEN, $gate->refresh()->state);
+    }
+
+    public function test_phase_progress_before_candidate_binding_stales_the_prospective_authorization(): void
+    {
+        $fixture = $this->preparedImplementationRun('AI6-051-GATE-PROSPECT');
+        $run = $fixture['run'];
+        $orchestrator = app(RunOrchestrator::class);
+        $orchestrator->prepareGates($run, app(TicketV1Parser::class)->parse($this->gateTicket()));
+        $approver = $this->createUser();
+        $this->addMembership($approver, $fixture['project'], ProjectRole::APPROVER);
+        $candidate = new PublishCandidate(str_repeat('a', 64), str_repeat('b', 64), $run->run_base_sha);
+        $gate = $orchestrator->authorizeCandidateGateEvidence(
+            $run, 'MG-01', $approver->id, 'intervention:prospective-progress', $candidate, $run->version + 1,
+        );
+        $run = $orchestrator->advancePhase($run, $run->version, RunPhase::FINALIZE);
+        self::assertSame(['MG-01'], $orchestrator->invalidateStaleCandidateGateEvidence($run, $candidate));
+        self::assertSame(GateState::OPEN, $gate->refresh()->state);
+    }
 
     public function test_candidate_gate_evidence_is_exactly_bound_and_scope_change_invalidates_candidate_and_gate(): void
     {
+        $guards = ['run_gates_candidate_update_guard', 'run_gates_update_guard'];
+        $this->observeGitObjectGuards($guards);
         $fixture = $this->preparedImplementationRun('AI6-027-GATE');
         $run = $fixture['run'];
         $orchestrator = $this->app->make(RunOrchestrator::class);
@@ -89,6 +138,47 @@ final class PublishCandidateGateTest extends TicketUiTestCase
 
         self::assertNotNull($run->candidate_invalidated_at);
         self::assertSame(GateState::OPEN, RunGate::query()->where('run_id', $run->id)->where('gate_id', 'MG-01')->firstOrFail()->state);
+        $this->assertGitObjectGuardsObserved($guards);
+    }
+
+    #[DataProvider('candidateMismatchProvider')]
+    public function test_a_changed_candidate_invalidates_evidence_even_when_other_candidate_fields_match(string $field, bool $bound): void
+    {
+        $fixture = $this->preparedImplementationRun('AI6-051-GATE-'.strtoupper($field));
+        $run = $fixture['run'];
+        $orchestrator = app(RunOrchestrator::class);
+        $orchestrator->prepareGates($run, app(TicketV1Parser::class)->parse($this->gateTicket()));
+        $approver = $this->createUser();
+        $this->addMembership($approver, $fixture['project'], ProjectRole::APPROVER);
+        $candidate = new PublishCandidate(str_repeat('a', 64), str_repeat('b', 64), $run->run_base_sha);
+        $gate = $orchestrator->authorizeCandidateGateEvidence(
+            $run, 'MG-01', $approver->id, 'intervention:candidate-mismatch', $candidate, $run->version + 1,
+        );
+        $expectedVersion = $gate->evidence_expected_run_version;
+        if ($bound) {
+            $run = $orchestrator->bindCandidate($run, $run->version, $candidate);
+        }
+        $changed = new PublishCandidate(
+            $field === 'tree' ? str_repeat('e', 64) : $candidate->treeOid,
+            $field === 'diff' ? str_repeat('e', 64) : $candidate->diffHash,
+            $field === 'base' ? str_repeat('e', 64) : $candidate->baseSha,
+        );
+
+        self::assertSame(['MG-01'], $orchestrator->invalidateStaleCandidateGateEvidence($run, $changed));
+        self::assertSame(GateState::OPEN, $gate->refresh()->state);
+        self::assertNotNull($gate->invalidated_at);
+        self::assertSame($candidate->treeOid, $gate->evidence_candidate_tree_sha);
+        self::assertSame($candidate->diffHash, $gate->evidence_candidate_diff_hash);
+        self::assertSame($expectedVersion, $gate->evidence_expected_run_version);
+    }
+
+    /** @return iterable<string, array{string, bool}> */
+    public static function candidateMismatchProvider(): iterable
+    {
+        foreach (['tree', 'diff', 'base'] as $field) {
+            yield 'prospective candidate '.$field => [$field, false];
+            yield 'bound candidate '.$field => [$field, true];
+        }
     }
 
     public function test_manual_gate_request_authorizes_one_bound_intervention_and_resumes_the_same_step(): void
@@ -231,6 +321,10 @@ final class PublishCandidateGateTest extends TicketUiTestCase
                 $run, $run->version, str_repeat('4', 64), str_repeat('5', 64), str_repeat('6', 64),
             ),
             'security' => $this->changeSecurityPolicyBinding($run, $candidate, $orchestrator),
+            'scope' => $orchestrator->applyScopeDecision(
+                $run, 'app/Added.php', true, null, 12, app(CanonicalJson::class), 'auto_allow',
+            ),
+            'approval' => $this->changeCandidateApprovalBinding($run, $candidate, $orchestrator),
             default => throw new \LogicException('Unknown candidate invalidation cause.'),
         };
 
@@ -284,6 +378,20 @@ final class PublishCandidateGateTest extends TicketUiTestCase
         yield 'prompt snapshot' => ['prompt'];
         yield 'security policy' => ['security'];
         yield 'checkpoint' => ['checkpoint'];
+        yield 'scope' => ['scope'];
+        yield 'approval' => ['approval'];
+    }
+
+    private function changeCandidateApprovalBinding(Run $run, PublishCandidate $candidate, RunOrchestrator $orchestrator): Run
+    {
+        DB::table('runs')->where('id', $run->id)->update([
+            'candidate_approval_snapshot_hash' => str_repeat('f', 64),
+            'version' => $run->version + 1,
+        ]);
+        $changed = $run->fresh();
+        self::assertSame(['MG-01'], $orchestrator->invalidateStaleCandidateGateEvidence($changed, $candidate));
+
+        return $changed->fresh();
     }
 
     private function changeSecurityPolicyBinding(
