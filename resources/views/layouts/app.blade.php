@@ -9,6 +9,13 @@
 <body>
     <header>
         <strong>AI6</strong>
+        @guest
+            @if (app(\App\AI6\Prompts\PromptHelpGuestAccess::class)->enabled())
+                <nav aria-label="Hauptnavigation">
+                    <a href="{{ route('prompts.help') }}">Prompt-Hilfe</a>
+                </nav>
+            @endif
+        @endguest
         @auth
             <nav aria-label="Hauptnavigation">
                 <a href="{{ route('projects.index') }}">Projekte</a>

@@ -189,12 +189,29 @@ trait BrowserSmokeTestHarness
         int $width = 375,
         int $height = 812,
     ): void {
-        $viewportWidth = $this->execute('return window.visualViewport?.width ?? window.innerWidth;');
-        self::assertIsNumeric($viewportWidth);
+        // The configured viewport includes a classic vertical scrollbar; the
+        // visible area does not. Each is checked against its own expectation,
+        // so a desktop scrollbar is not mistaken for a wrong viewport and a
+        // zoomed visual viewport still fails.
+        $viewport = $this->execute(
+            'return {'
+            .'configured: window.innerWidth,'
+            .'visible: window.visualViewport ? window.visualViewport.width : document.documentElement.clientWidth,'
+            .'scrollbar: window.innerWidth - document.documentElement.clientWidth};',
+        );
+        self::assertIsArray($viewport);
+        self::assertIsNumeric($viewport['configured'] ?? null);
+        self::assertIsNumeric($viewport['visible'] ?? null);
+        self::assertIsNumeric($viewport['scrollbar'] ?? null);
         self::assertSame(
             $width,
-            (int) $viewportWidth,
+            (int) $viewport['configured'],
             sprintf('%s must render in the requested %d-pixel viewport.', $viewName, $width),
+        );
+        self::assertSame(
+            $width - (int) $viewport['scrollbar'],
+            (int) round((float) $viewport['visible']),
+            sprintf('%s must show the requested viewport minus only its vertical scrollbar.', $viewName),
         );
 
         $overflow = $this->execute(

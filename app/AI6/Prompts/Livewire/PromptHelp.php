@@ -13,6 +13,7 @@ use App\AI6\Shared\Redaction\RedactionContext;
 use Illuminate\Contracts\View\View;
 use InvalidArgumentException;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 
 #[Layout('layouts.app', ['title' => 'Prompt-Hilfe – AI6'])]
@@ -26,14 +27,19 @@ final class PromptHelp extends Component
 
     public string $reviewAnswer = '';
 
+    #[Locked]
     public string $dynamicPreview = '';
 
+    #[Locked]
     public bool $dynamicCopyEnabled = false;
 
+    #[Locked]
     public bool $nothingToFix = false;
 
+    #[Locked]
     public bool $dynamicRejected = false;
 
+    #[Locked]
     public bool $redacted = false;
 
     public function processReviewAnswer(): void

@@ -1,6 +1,6 @@
 schema: ai6.ticket-manifest.v1
 source: docs/AI6_IMPLEMENTATION_PLAN.md
-plan_revision: "V1.7.11"
+plan_revision: "V1.7.12"
 blueprint_count: 58
 blueprints:
   - id: "AI6-001"
@@ -148,7 +148,7 @@ blueprints:
     depends_on: ["AI6-008", "AI6-011"]
     requirement_refs: ["AGT-008", "AGT-011", "UI-001", "UI-007", "SEC-004", "SEC-007"]
   - id: "AI6-052"
-    title: "Öffentlicher Zugang zu manuellen Prompt-Tools"
+    title: "Schaltbarer Gastzugang zu manuellen Prompt-Tools"
     milestone: "M2"
     initial_status: "todo"
     risk: "medium"

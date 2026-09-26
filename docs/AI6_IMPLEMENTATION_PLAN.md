@@ -1,6 +1,8 @@
-# AI6 – Implementierungsplan V1.7.11 – Ticket-Ready, Lean & Secure
+# AI6 – Implementierungsplan V1.7.12 – Ticket-Ready, Lean & Secure
 
-**Stand:** 25. September 2026
+**Stand:** 26. September 2026
+
+**Revision V1.7.12:** Auf ausdrückliche menschliche Entscheidung vom 26. September 2026 nach dem Umsetzungsreview von `AI6-052` wird der Gastzugang zu den manuellen Prompt-Tools schaltbar und ist standardmäßig abgeschaltet. Die enge Ausnahme aus `SEC-002` und `UI-007` gilt nur noch, wenn der vertrauenswürdige Instanzschalter `AI6_PROMPT_HELP_GUEST_ACCESS` ausdrücklich aktiviert ist; fehlt er, ist er leer oder abgeschaltet, verlangt die Prompt-Hilfe wie vor V1.7.11 eine vollständige Anmeldung, und ein ungültiger Wert wird als benannte Konfigurationsverletzung abgewiesen. Der Schalter ist für lokale Einzelplatzinstanzen bestimmt, ist weder eine abschaltbare Maßnahme nach §10.2 noch ein Disable-Flag einer Invariante, und die ausgelieferte Container-Konfiguration reicht ihn nicht durch. Anlass ist die im Review bestätigte, vorbestehende Lücke der zentralen Redaction, über die übergroße oder unvollständig zitierte Eingaben eine generische Serverfehlerantwort statt einer sichtbaren Ablehnung auslösen; ihre Behebung bleibt einem gesonderten Fixauftrag vorbehalten und wird durch diese Revision weder erteilt noch als Risiko akzeptiert. `AI6-052` behält ID, Abhängigkeit und Requirement-Refs und heißt präzisiert „Schaltbarer Gastzugang zu manuellen Prompt-Tools“; §6.1, `UI-007`, `SEC-002`, §14.1, §15 und §21 werden nachgeführt, und sein veröffentlichtes Detailticket wird ohne Umnummerierung revidiert. Die Blueprintanzahl bleibt 58. Diese Entscheidung beauftragt Plan- und Ticketrevision, nicht die Implementierung oder eine Gate-Abnahme.
 
 **Revision V1.7.11:** Auf ausdrückliche menschliche Freigabe vom 25. September 2026 wird Option 1 aus `docs/AI6-052_PROMPT_TOOLS_ENTSCHEIDUNGSANTRAG.md` aufgenommen. Der neue Blueprint `AI6-052` macht die drei vorhandenen manuellen Prompt-Funktionen unter `/prompts/help` ohne Login nutzbar. Die Ausnahme betrifft genau die projektunabhängige Bedienung des zentralen Promptkatalogs ohne fachliche Datenbankzugriffe und ohne LLM-/Providerwirkung; technische Websessions und CSRF bleiben erhalten, ein datenbankfreier HTTP-Betrieb wird nicht zugesagt. `UI-007` und die enge Ausnahme in `SEC-002` definieren den neuen Zugang. Der veröffentlichte Loginvertrag von `AI6-044` bleibt als Historie erkennbar und wird ausschließlich für diesen Zugang durch `AI6-052` abgelöst; seine übrigen Lieferzusagen, Evidenz-IDs, sein Detailticket und sein Status bleiben unverändert. Geschützte Projekt-, Ticket-, Run-, Agentenprofil-, Administrations- und HumanLoop-Funktionen sowie alle nicht abschaltbaren Kontrollen behalten ihre Grenzen. Der Backlog wächst von 57 auf 58 Blueprints; §14.1, §16 und §21 werden nachgeführt. Diese Freigabe beauftragt Plan und Detailableitung, nicht die Implementierung oder eine Gate-Abnahme.
 
@@ -300,11 +302,11 @@ Die IDs sind stabil. Detaillierte Tickets referenzieren diese IDs unter `spec_re
 - **UI-004** – Die Runansicht zeigt Phase, Sessions, geänderte Dateien, Diff, Checks, Findings, Security-Gate, Pushstatus und Interventionen.
 - **UI-005** – Eine Attention-Inbox zeigt offene Fragen, Freigaben, Limits und Securityentscheidungen mit ihrem Mailstatus.
 - **UI-006** – Das Panel zeigt die freigegebene Projektqueue, blockierende Abhängigkeiten und das nächste startbare Ticket.
-- **UI-007** – Ein globaler, ohne Login erreichbarer Promptarbeitsbereich zeigt statische und dynamische manuelle Prompts mit bearbeitbarer Eingabe, read-only Vorschau und einer expliziten Kopieraktion. Öffentlich sind ausschließlich die ausdrücklich freigegebenen projektunabhängigen Prompt-Funktionen ohne fachliche Datenbankzugriffe und ohne LLM-/Providerwirkung nach `AGT-011` und `SEC-002`; technische Websessions bleiben erhalten. Er ist auf Laptop und Smartphone ohne horizontales Scrollen bedienbar, meldet Clipboard-Erfolg nur nach bestätigtem Browsererfolg und bietet bei verweigerter oder fehlender Clipboard-API stattdessen die vollständig auswählbare Vorschau samt klarer manueller Kopieranweisung; die feste CSP wird weder durch Inline-Script noch durch `unsafe-inline` oder `unsafe-eval` gelockert.
+- **UI-007** – Ein globaler Promptarbeitsbereich zeigt statische und dynamische manuelle Prompts mit bearbeitbarer Eingabe, read-only Vorschau und einer expliziten Kopieraktion. Standardmäßig verlangt er eine vollständige Anmeldung; nur bei ausdrücklich aktiviertem Instanzschalter `AI6_PROMPT_HELP_GUEST_ACCESS` sind ausschließlich die freigegebenen projektunabhängigen Prompt-Funktionen ohne fachliche Datenbankzugriffe und ohne LLM-/Providerwirkung nach `AGT-011` und `SEC-002` auch ohne Login erreichbar; technische Websessions bleiben erhalten. Er ist auf Laptop und Smartphone ohne horizontales Scrollen bedienbar, meldet Clipboard-Erfolg nur nach bestätigtem Browsererfolg und bietet bei verweigerter oder fehlender Clipboard-API stattdessen die vollständig auswählbare Vorschau samt klarer manueller Kopieranweisung; die feste CSP wird weder durch Inline-Script noch durch `unsafe-inline` oder `unsafe-eval` gelockert.
 
 ### 3.10 Sicherheit
 - **SEC-001** – SecurityPolicy besitzt strict als Default sowie development/custom mit sichtbarer, explizit bestätigter Reduktion.
-- **SEC-002** – Webzugriff nutzt projektbezogene Autorisierung; privilegierte Rollen verwenden standardmäßig Passkey/TOTP und Step-up. Die ausdrücklich freigegebenen manuellen Prompt-Funktionen aus `AI6-052` sind als enge Ausnahme ohne Login erreichbar: Sie besitzen keinen Projektbezug, lesen oder verändern keine fachlichen Datenbankdaten und starten keine LLM-/Provideraufrufe. Technische Sessionverwaltung und gegebenenfalls Benutzerprüfung des bestehenden Webstacks bleiben zulässig; Prompt-Eingaben und dynamische Ergebnisse werden dabei nicht gespeichert. Diese Ausnahme gewährt weder Zugriff auf geschützte Funktionen noch eine pauschale Freigabe des gemeinsamen Livewire-Endpunkts und nimmt keine Kontrolle aus `SEC-004` aus.
+- **SEC-002** – Webzugriff nutzt projektbezogene Autorisierung; privilegierte Rollen verwenden standardmäßig Passkey/TOTP und Step-up. Die ausdrücklich freigegebenen manuellen Prompt-Funktionen aus `AI6-052` sind als enge Ausnahme ohne Login erreichbar, jedoch ausschließlich bei ausdrücklich aktiviertem Instanzschalter `AI6_PROMPT_HELP_GUEST_ACCESS`; ohne ihn gilt die vollständige Anmeldung. Die freigegebenen Funktionen besitzen keinen Projektbezug, lesen oder verändern keine fachlichen Datenbankdaten und starten keine LLM-/Provideraufrufe. Technische Sessionverwaltung und gegebenenfalls Benutzerprüfung des bestehenden Webstacks bleiben zulässig; Prompt-Eingaben und dynamische Ergebnisse werden dabei nicht gespeichert. Diese Ausnahme gewährt weder Zugriff auf geschützte Funktionen noch eine pauschale Freigabe des gemeinsamen Livewire-Endpunkts und nimmt keine Kontrolle aus `SEC-004` aus.
 - **SEC-003** – Jede neue autorisierte Websession benötigt standardmäßig einen Code an AI6_LOGIN_CONFIRMATION_EMAIL; die Maßnahme ist nur per Env/Config abschaltbar.
 - **SEC-004** – CSRF, Pfad-/Ref-/JSON-Validierung, Shell-Injection-Schutz, Credentialtrennung, Anti-Replay und sichere Ausgabe sind nicht abschaltbar.
 - **SEC-005** – Agenten- und Checker-Sandbox fallen bei aktivierter Kontrolle geschlossen aus und können nicht durch Projektinhalt gelockert werden.
@@ -515,7 +517,8 @@ Instanzweit und nicht durch Projekte änderbar:
 - Modell-/Effort-/Rollenprofile;
 - Git-Hosts, Protokolle und Ref-Allowlist;
 - Checkprofile und Executable-Allowlist;
-- Mail, Login-Bestätigungsadresse, Retention und Ressourcenlimits.
+- Mail, Login-Bestätigungsadresse, Retention und Ressourcenlimits;
+- der Gastzugangsschalter `AI6_PROMPT_HELP_GUEST_ACCESS` der manuellen Prompt-Hilfe, standardmäßig aus.
 
 Beispiel:
 
@@ -535,6 +538,8 @@ AI6_SECURITY_REQUIRE_HTTPS_OR_PRIVATE_ACCESS=true
 Diese sieben `AI6_SECURITY_REQUIRE_*`- beziehungsweise `AI6_SECURITY_LOGIN_*`-Schlüssel sind die vollständige und abschließende Menge der abschaltbaren Maßnahmen aus §10.2; `AI6_SECURITY_PROFILE` und `AI6_SECURITY_ACKNOWLEDGE_REDUCED_MODE` sind keine Maßnahmen, sondern Profilwahl und Reduktionsbestätigung. Eine achte Maßnahme entsteht nicht ohne Planrevision.
 
 Alle Schutzmaßnahmen sind standardmäßig aktiv. Einzelne abschaltbare Maßnahmen werden nur über `custom`/Env reduziert und bleiben im Panel sowie Doctor sichtbar. Für nicht abschaltbare Invarianten existiert kein Disable-Flag; dazu gehören insbesondere Autorisierung, CSRF, Pfad-/Ref-/JSON-/Hostvalidierung, Shell-Injection-Schutz, Credentialtrennung, Anti-Replay, sichere Ausgabe/Redaction, gehärtetes Git-SSH samt deaktivierten Repository-Hooks, deterministischer Secret-/Provenienz-Preflight und die Bindung von Review bis Push.
+
+`AI6_PROMPT_HELP_GUEST_ACCESS` ist weder eine Maßnahme nach §10.2 noch ein Disable-Flag einer Invariante: Der Schalter aktiviert ausschließlich die in `SEC-002` eng umrissene Gastausnahme für die manuelle Prompt-Hilfe aus `AI6-052`. Ein fehlender, leerer oder abgeschalteter Wert lässt die vollständige Anmeldung bestehen; ein ungültiger Wert wird als Konfigurationsverletzung abgewiesen, die den Schlüssel, aber nicht den Wert nennt. Der Schalter ist für lokale Einzelplatzinstanzen bestimmt; die ausgelieferte Container-Konfiguration reicht ihn nicht durch.
 
 ### 6.2 Projektkonfiguration
 
@@ -1292,7 +1297,7 @@ Erscheint eine neuere Major-, Minor- oder Patchversion einer dieser drei Laufzei
 55. AI6-037 — Migration des bisherigen Ticket-Prompt-Tools
 56. AI6-038 — Realer M169-Pilot und MVP-Abnahme
 57. AI6-051 — Git-Repositories im SHA-1- und SHA-256-Objektformat unterstützen
-58. AI6-052 — Öffentlicher Zugang zu manuellen Prompt-Tools
+58. AI6-052 — Schaltbarer Gastzugang zu manuellen Prompt-Tools
 ```
 
 Die Reihenfolge ist eine gültige Topologie, aber nicht jede unabhängige Arbeit muss künstlich seriell erfolgen. Innerhalb eines Meilensteins dürfen nur Tickets parallel entwickelt werden, deren `depends_on` vollständig erfüllt ist und die nicht denselben noch instabilen Vertrag definieren.
@@ -2175,7 +2180,7 @@ Zulässige Adapter-, Modell-, Rollen- und Effort-Kombinationen sowie den vor jed
 - **Requirement-Refs:** `AGT-008`, `AGT-011`, `UI-001`, `UI-007`, `SEC-004`, `SEC-007`
 - **Erwartete Module:** `Prompts`, `Shared`
 
-**Zugangsvertrag ab V1.7.11:** Der nachfolgend erhaltene ursprüngliche Vertrag verlangte eine vollständige Anmeldung. Ausschließlich diese Zugangsvoraussetzung einschließlich des Gast-Ausschlusses wird durch den Folgeauftrag `AI6-052` abgelöst. Zieltext, übrige Lieferung, Detailticket, veröffentlichte Evidenz-IDs und Status von `AI6-044` bleiben historisch erhalten; daraus folgt keine Gate-Abnahme.
+**Zugangsvertrag ab V1.7.11, präzisiert in V1.7.12:** Der nachfolgend erhaltene ursprüngliche Vertrag verlangte eine vollständige Anmeldung. Ausschließlich diese Zugangsvoraussetzung einschließlich des Gast-Ausschlusses wird durch den Folgeauftrag `AI6-052` abgelöst; seit V1.7.12 bleibt die Anmeldung standardmäßig bestehen und entfällt nur bei ausdrücklich aktiviertem Instanzschalter `AI6_PROMPT_HELP_GUEST_ACCESS`. Zieltext, übrige Lieferung, Detailticket, veröffentlichte Evidenz-IDs und Status von `AI6-044` bleiben historisch erhalten; daraus folgt keine Gate-Abnahme.
 
 **Ziel**
 
@@ -2220,7 +2225,7 @@ Einen globalen authentifizierten Promptarbeitsbereich bereitstellen, der statisc
 - Freie Promptbearbeitung, Prompt-Historie oder Benutzer-/Projekttemplates.
 - Ein zweiter Promptkatalog, Renderer oder providerindividuelle Varianten derselben manuellen Prompts.
 
-### AI6-052 — Öffentlicher Zugang zu manuellen Prompt-Tools
+### AI6-052 — Schaltbarer Gastzugang zu manuellen Prompt-Tools
 
 - **Initialstatus des späteren Detailtickets:** `todo`
 - **Risiko:** `medium`
@@ -2229,40 +2234,46 @@ Einen globalen authentifizierten Promptarbeitsbereich bereitstellen, der statisc
 - **Requirement-Refs:** `AGT-008`, `AGT-011`, `UI-001`, `UI-007`, `SEC-002`, `SEC-004`, `SEC-007`
 - **Erwartete Module:** `Prompts`, `Shared`
 
+**Präzisierung V1.7.12:** Der mit V1.7.11 unbedingt vorgesehene Gastzugang gilt nur noch bei ausdrücklich aktiviertem Instanzschalter `AI6_PROMPT_HELP_GUEST_ACCESS`; standardmäßig bleibt die vollständige Anmeldung Pflicht. ID, Abhängigkeit, Requirement-Refs und die übrigen Lieferzusagen bleiben erhalten; der bisherige Titel lautete „Öffentlicher Zugang zu manuellen Prompt-Tools“.
+
 **Ziel**
 
-Die manuellen Prompt-Tools ohne fachliche Datenbankzugriffe und ohne LLM-Aufrufe für Gäste und angemeldete Benutzer unter der bestehenden Prompt-Hilfe ohne Login nutzbar machen.
+Die manuellen Prompt-Tools ohne fachliche Datenbankzugriffe und ohne LLM-Aufrufe unter der bestehenden Prompt-Hilfe bei ausdrücklich aktiviertem Instanzschalter `AI6_PROMPT_HELP_GUEST_ACCESS` auch für Gäste ohne Login nutzbar machen; standardmäßig bleibt die vollständige Anmeldung Pflicht.
 
 **Deliverables**
 
-- Öffentlicher GET-Zugang unter der bestehenden URL `/prompts/help` und dem bestehenden Routennamen `prompts.help`, mit erreichbarem Navigationseintrag auf der Loginseite und unverändertem Zugang für angemeldete Benutzer.
-- Gastbedienung der beiden statischen manuellen Prompts sowie der dynamischen Fixprompt-Erzeugung aus einer Reviewantwort über den bestehenden HTTP-/Livewire-Weg bis zur Vorschau und Kopieraktion; ausschließlich derselbe zentrale Katalog, Renderer und Extraktor.
-- Genau auf diese manuellen Funktionen begrenzte Zugangsfreigabe. Geschützte Projekt-, Ticket-, Run-, Agentenprofil-, Administrations- und HumanLoop-Funktionen bleiben geschützt; der gemeinsame Livewire-Endpunkt erhält keine pauschale Ausnahme, auch nicht für fremde Komponenten oder gemischte Anfragen.
+- Vertrauenswürdiger boolescher Instanzschalter `AI6_PROMPT_HELP_GUEST_ACCESS` mit genau einer zentralen Auswertung: Ein fehlender, leerer oder abgeschalteter Wert lässt die Anmeldung bestehen; ein ungültiger Wert wird als Konfigurationsverletzung abgewiesen, die den Schlüssel, aber nicht den Wert nennt. Der Schalter ist für lokale Einzelplatzinstanzen bestimmt; die ausgelieferte Container-Konfiguration reicht ihn nicht durch.
+- Bei aktivem Schalter GET-Zugang für Gäste unter der bestehenden URL `/prompts/help` und dem bestehenden Routennamen `prompts.help` mit erreichbarem Navigationseintrag auf der Loginseite; bei inaktivem Schalter unveränderte Anmeldepflicht ohne Gasteinstieg. Angemeldete Benutzer erreichen die Seite in beiden Zuständen.
+- Bei aktivem Schalter Gastbedienung der beiden statischen manuellen Prompts sowie der dynamischen Fixprompt-Erzeugung aus einer Reviewantwort über den bestehenden HTTP-/Livewire-Weg bis zur Vorschau und Kopieraktion; ausschließlich derselbe zentrale Katalog, Renderer und Extraktor.
+- Genau auf diese manuellen Funktionen begrenzte Zugangsfreigabe. Geschützte Projekt-, Ticket-, Run-, Agentenprofil-, Administrations- und HumanLoop-Funktionen bleiben in beiden Schalterzuständen geschützt; der gemeinsame Livewire-Endpunkt erhält keine pauschale Ausnahme, auch nicht für fremde Komponenten oder gemischte Anfragen.
 - Keine fachlichen Datenbankzugriffe, Queuejobs, Git-, Prozess-, Mail- oder Provideraufrufe der Prompt-Funktionen und keine Speicherung von Eingaben oder dynamischen Ergebnissen in Datenbank, Session, Cache oder Log. Technische Websessions für Livewire/CSRF und gegebenenfalls Benutzerprüfung im bestehenden Webstack bleiben zulässig und werden im Nachweis getrennt betrachtet.
-- Unveränderte zentrale UTF-8-/Redaction-, Größen-, Marker- und Ausgabekontrollen, CSRF, signierte Livewire-Snapshots, CSP sowie Host- und HTTPS-/Private-Access-Prüfung. Die neue Zugriffsfähigkeit ist keine Sicherheitsreduktion und besitzt keinen Abschaltschalter für diese Kontrollen.
-- Gast-Browsernachweis für Kopieren, ehrlichen Clipboard-Fallback und mobile Bedienung sowie Dokumentation der öffentlichen URL und der fortbestehenden technischen Sessionabhängigkeit.
+- Unveränderte zentrale UTF-8-/Redaction-, Größen-, Marker- und Ausgabekontrollen, CSRF, signierte Livewire-Snapshots, CSP sowie Host- und HTTPS-/Private-Access-Prüfung. Die neue Zugriffsfähigkeit ist keine Sicherheitsreduktion und besitzt keinen Abschaltschalter für diese Kontrollen; der Instanzschalter steuert ausschließlich den Gastzugang zur Prompt-Hilfe.
+- Gast-Browsernachweis bei aktivem Schalter für Kopieren, ehrlichen Clipboard-Fallback und mobile Bedienung sowie Dokumentation des Schalters, seines Standardzustands, der ohne Anmeldung erreichbaren URL und der fortbestehenden technischen Sessionabhängigkeit.
 
 **Akzeptanzvertrag**
 
-- Ein frischer Gast erreicht die vollständige Prompt-Hilfe ohne Loginumleitung; angemeldete Benutzer erreichen sie weiterhin. Der öffentliche Einstieg ist auf der Loginseite sichtbar.
-- Ein realer Gast-GET mit anschließendem gültigem Livewire-POST erzeugt ausschließlich den zentral gerenderten dynamischen Prompt; beide statischen Vorschauen stimmen mit den Katalogbytes überein.
-- Ohne vollständige Anmeldung entstehen weder geschützte Datenzugriffe noch geschützte Aktionen über gewöhnliche Routen, fremde oder manipulierte Komponentensnapshots oder gemischte Livewire-Anfragen. Eine begonnene oder abgelaufene Anmeldung gewährt ebenfalls keine solchen Rechte.
+- Ohne aktiven Schalter verhalten sich Route, Navigation und Livewire-Aktualisierung der Prompt-Hilfe wie vor `AI6-052`: Gäste werden zur Anmeldung geleitet beziehungsweise abgewiesen, die Loginseite zeigt keinen Gasteinstieg, und die öffentliche Routeninventur bleibt unverändert. Ein ungültiger Schalterwert schaltet den Gastzugang nicht ein.
+- Bei aktivem Schalter erreicht ein frischer Gast die vollständige Prompt-Hilfe ohne Loginumleitung, und der Gasteinstieg ist auf der Loginseite sichtbar; angemeldete Benutzer erreichen sie in beiden Zuständen.
+- Bei aktivem Schalter erzeugt ein realer Gast-GET mit anschließendem gültigem Livewire-POST ausschließlich den zentral gerenderten dynamischen Prompt; beide statischen Vorschauen stimmen mit den Katalogbytes überein.
+- Ohne vollständige Anmeldung entstehen in beiden Schalterzuständen weder geschützte Datenzugriffe noch geschützte Aktionen über gewöhnliche Routen, fremde oder manipulierte Komponentensnapshots oder gemischte Livewire-Anfragen. Eine begonnene oder abgelaufene Anmeldung gewährt ebenfalls keine solchen Rechte.
 - Gültige und ungültige Gastverarbeitung bleiben ohne fachliche Datenbankzugriffe und ohne ausgehende Wirkungen; eingegebene Reviewantworten und dynamische Ergebnisse werden weder gespeichert noch geloggt. Technische Session-/Benutzerzugriffe allein sind kein Verstoß und dürfen nicht als datenbankfreier Betrieb ausgegeben werden.
 - Die bestehenden Fehler-, Redaction- und Grenzfälle liefern auch für Gäste sichere Ausgaben ohne Teilprompt oder falschen Kopiererfolg; `Nichts zu fixen.` bleibt ein Endzustand ohne Folgeprompt. CSRF-Verletzungen und manipulierte Snapshots werden abgewiesen.
-- Die feste CSP und übrigen HTTP-Kontrollen gelten unverändert. Kopieraktion, Fallback-Selektion und Laptop-/Smartphoneansicht funktionieren mit frischer Gastsitzung; übersprungene Browser-Smokes gelten nicht als bestanden.
+- Die feste CSP und übrigen HTTP-Kontrollen gelten unverändert. Kopieraktion, Fallback-Selektion und Laptop-/Smartphoneansicht funktionieren bei aktivem Schalter mit frischer Gastsitzung; übersprungene Browser-Smokes gelten nicht als bestanden.
 
 **Mindestens zu erzeugende Testfälle**
 
-- Routen-, Navigations- und tatsächlicher HTTP-/Livewire-Erfolgstest für Gast sowie Regression des angemeldeten Zugangs.
+- Schaltertests für fehlenden, leeren, abgeschalteten, aktiven und ungültigen Wert.
+- Routen-, Navigations- und tatsächlicher HTTP-/Livewire-Erfolgstest für Gäste bei aktivem Schalter, Gast-Negativtests bei inaktivem Schalter sowie Regression des angemeldeten Zugangs.
 - Negativtests für geschützte Routen, fehlenden/fremden CSRF-Nachweis, manipulierte und fremde geschützte Komponentensnapshots sowie gemischte Anfragen mit einer öffentlichen und einer geschützten Komponente.
 - Beobachtung fachlicher Lese- und Schreibzugriffe und ausgehender Wirkungen während gültiger und ungültiger Gastverarbeitung; ein unveränderter Tabellenzähler allein belegt keine Abwesenheit von Lesezugriffen. Technische Sessionverwaltung wird gesondert ausgewiesen.
 - Regressionen für Katalogbytes, terminale Marker, leere/mehrfache/fehlende Abschnitte, ungültiges UTF-8, zentrale Redaction, sichere HTML-Ausgabe, zulässige Höchstgröße und ein Byte darüber sowie `Nichts zu fixen.`.
-- Exakte öffentliche Routeninventur, bestehende HTTP-/CSRF-Architekturprüfungen und Gast-Browser-Smoke hinter dem bestehenden expliziten Flag für statische und dynamische Ausgabe, Clipboard-Erfolg, verweigerten Zugriff, vollständige Fallback-Selektion und mobile Breite.
+- Exakte öffentliche Routeninventur im Standardzustand, bestehende HTTP-/CSRF-Architektur- und Container-Umgebungsprüfungen sowie Gast-Browser-Smoke bei aktivem Schalter hinter dem bestehenden expliziten Flag für statische und dynamische Ausgabe, Clipboard-Erfolg, verweigerten Zugriff, vollständige Fallback-Selektion und mobile Breite.
 
 **Nicht Teil dieses Tickets**
 
 - Betrieb ohne Datenbank oder ein neuer Session-/Transportvertrag; technische Sessions und der zentrale serverseitige Renderer bleiben erhalten.
 - Öffentliche Ticket-, Projekt-, Run-, Agentenprofil-, Administrations- oder HumanLoop-Daten und -Aktionen sowie eine Veröffentlichung des Legacy-Backends `ticket-prompt/api.php`.
+- Eine Weitergabe des Schalters über die Container-Konfiguration, seine Führung als Maßnahme nach §10.2 oder im Sicherheitsbanner sowie eine Kopplung an `APP_DEBUG` oder `APP_ENV`.
 - Neue Promptinhalte, ein zweiter Katalog/Renderer, LLM-Ausführung, Prompt-Historie oder automatische Steuerung der Desktop-Apps.
 - Änderungen am Detailticket, Status oder manuellen Abnahmegate von `AI6-044`.
 
@@ -4355,4 +4366,4 @@ Der MVP ist erreicht, wenn:
 
 `AI6-051` erweitert einen bestehenden Git-Objektformatvertrag atomar über seine Verbraucher. Die in V1.7.10 ausdrücklich begrenzte Modul-Ausnahme erlaubt keine zusätzlichen Fachabläufe; ein allein freigeschalteter SHA-1-Clone ohne funktionsfähige nachgelagerte Bindungen wäre keine auslieferbare Fähigkeit.
 
-`AI6-052` erweitert den bestehenden manuellen Benutzerfluss aus `AI6-044` um genau eine neue Zugriffsfähigkeit: Nutzung ohne Login bei weiterhin geschützten fachlichen Daten und Aktionen. Technische Websessions, zentrale Promptverarbeitung und Sicherheitskontrollen bleiben erhalten; ein neuer Session- oder Transportvertrag gehört nicht dazu.
+`AI6-052` erweitert den bestehenden manuellen Benutzerfluss aus `AI6-044` um genau eine neue, standardmäßig abgeschaltete Zugriffsfähigkeit: Nutzung ohne Login bei ausdrücklich aktiviertem Instanzschalter und weiterhin geschützten fachlichen Daten und Aktionen. Schalter und Gastzugang bilden eine untrennbare Grenze und bleiben deshalb ein Blueprint. Technische Websessions, zentrale Promptverarbeitung und Sicherheitskontrollen bleiben erhalten; ein neuer Session- oder Transportvertrag gehört nicht dazu.

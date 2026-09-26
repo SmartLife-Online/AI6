@@ -399,6 +399,7 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Prompts/ManualFindingListExtractor.php',
             'app/AI6/Prompts/PromptCatalog.php',
             'app/AI6/Prompts/PromptEntry.php',
+            'app/AI6/Prompts/PromptHelpGuestAccess.php',
             'app/AI6/Prompts/PromptRenderRequest.php',
             'app/AI6/Prompts/PromptRenderer.php',
             'app/AI6/Prompts/PromptRenderingError.php',

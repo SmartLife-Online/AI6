@@ -16,6 +16,7 @@ use App\AI6\Projects\Http\ProjectConfigurationController;
 use App\AI6\Projects\Http\ProjectController;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Prompts\Livewire\PromptHelp;
+use App\AI6\Prompts\PromptHelpGuestAccess;
 use App\AI6\Reviews\FindingDispositionController;
 use App\AI6\Runs\ApprovalQueueController;
 use App\AI6\Runs\ApprovalStatusPage;
@@ -40,10 +41,18 @@ Route::middleware('guest')->group(function (): void {
     Route::post('/login', [LoginController::class, 'store'])->name('login.store');
 });
 
-Route::middleware('auth')->group(function (): void {
+$promptHelpGuestAccess = app(PromptHelpGuestAccess::class)->enabled();
+
+if ($promptHelpGuestAccess) {
+    Route::get('/prompts/help', PromptHelp::class)->name('prompts.help');
+}
+
+Route::middleware('auth')->group(function () use ($promptHelpGuestAccess): void {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
     Route::get('/agents/profiles', AgentProfileController::class)->name('agents.profiles');
-    Route::get('/prompts/help', PromptHelp::class)->name('prompts.help');
+    if (! $promptHelpGuestAccess) {
+        Route::get('/prompts/help', PromptHelp::class)->name('prompts.help');
+    }
 
     Route::prefix('auth')->name('auth.')->group(function (): void {
         Route::get('/factor', [PrimaryAuthenticationController::class, 'factor'])

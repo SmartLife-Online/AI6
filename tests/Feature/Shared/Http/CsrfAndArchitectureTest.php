@@ -29,6 +29,7 @@ final class CsrfAndArchitectureTest extends AuthFeatureTestCase
             'AI6/HumanLoop/HumanRequestDetailPage.php',
             'AI6/Tickets/Livewire/TicketDetail.php',
             'AI6/Tickets/Livewire/TicketList.php',
+            'AI6/Prompts/Livewire/PromptHelp.php',
         ]);
         $checked = [];
         $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator(app_path('AI6')));

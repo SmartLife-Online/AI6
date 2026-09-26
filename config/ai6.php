@@ -1,5 +1,7 @@
 <?php
 
+use Illuminate\Support\Env;
+
 // Apache exposes no PHP_BINARY; child processes still require the fixed CLI executable.
 $phpCliBinary = PHP_SAPI === 'cli'
     ? PHP_BINARY
@@ -264,6 +266,15 @@ return [
     ],
     'manual_prompt_help' => [
         'max_review_answer_bytes' => 262144,
+        /*
+         * Guest access to the manual prompt help is meant for local
+         * single-user instances only and stays off unless explicitly set.
+         * Compose does not pass this variable to any container. The raw value
+         * bypasses env() on purpose: env() would turn (true), null, empty and
+         * quoted literals into PHP values before PromptHelpGuestAccess can
+         * refuse them as values outside the accepted literal set.
+         */
+        'guest_access' => Env::getRepository()->get('AI6_PROMPT_HELP_GUEST_ACCESS'),
     ],
     'agent_profiles' => [
         /*
