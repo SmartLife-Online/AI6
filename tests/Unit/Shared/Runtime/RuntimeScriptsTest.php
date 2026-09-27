@@ -9,6 +9,26 @@ use PHPUnit\Framework\TestCase;
 
 final class RuntimeScriptsTest extends TestCase
 {
+    public function test_init_provisions_worker_storage_without_weakening_the_managed_root(): void
+    {
+        $branch = $this->branch($this->read('docker/entrypoint.sh'), 'init');
+        self::assertStringContainsString('chown root:root "$managed_root"', $branch);
+        self::assertStringContainsString('chmod 0755 "$managed_root"', $branch);
+        $check = '/opt/ai6/docker/provision-worker-storage.sh "$managed_root" --check-legacy';
+        self::assertStringContainsString($check, $branch);
+        self::assertLessThan(strpos($branch, 'mkdir '), strpos($branch, $check));
+        self::assertStringContainsString('/opt/ai6/docker/provision-worker-storage.sh "$managed_root"'."\n", $branch);
+        self::assertLessThan(strrpos($branch, 'provision-worker-storage.sh'), strpos($branch, 'chmod 0755 "$managed_root"'));
+        self::assertStringNotContainsString('--relocate-credentials', $branch);
+        $helper = $this->read('docker/provision-worker-storage.sh');
+        self::assertStringContainsString('chown -R 10001:10001 "$credentials"', $helper);
+        self::assertStringContainsString('chown 10001:10001 "$backups"', $helper);
+        self::assertStringContainsString('chmod 0700 "$credentials" "$backups"', $helper);
+        self::assertStringNotContainsString('effect-locks', $helper);
+        self::assertStringNotContainsString('rm ', $helper);
+        self::assertStringNotContainsString('artisan', $helper);
+    }
+
     public function test_image_discovers_packages_as_runtime_user_after_sealing_code(): void
     {
         $dockerfile = $this->read('Dockerfile');
@@ -187,9 +207,10 @@ final class RuntimeScriptsTest extends TestCase
     {
         $entrypoint = $this->read('docker/entrypoint.sh');
         $start = strpos($entrypoint, '        for provider_directory');
-        $end = strpos($entrypoint, '        managed_root=');
+        $end = strpos($entrypoint, '        effect_lock_directory=');
         self::assertIsInt($start);
         self::assertIsInt($end);
+        self::assertGreaterThan($start, $end);
         $provisioning = substr($entrypoint, $start, $end - $start);
         self::assertStringContainsString('chown 10002:10001 "$provider_directory"', $provisioning);
         self::assertStringContainsString('chmod 0700 /var/lib/ai6/provider-store', $provisioning);

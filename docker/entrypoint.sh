@@ -5,6 +5,8 @@ role="${1:-}"
 
 case "$role" in
     init)
+        managed_root="${AI6_MANAGED_PROJECT_ROOT:-/var/lib/ai6/managed}"
+        /opt/ai6/docker/provision-worker-storage.sh "$managed_root" --check-legacy
         for provider_directory in /var/lib/ai6/provider-store /var/lib/ai6/provider-reports /var/lib/ai6/provider-presence; do
             test ! -L "$provider_directory"
             mkdir -p "$provider_directory"
@@ -12,7 +14,6 @@ case "$role" in
         done
         chmod 0700 /var/lib/ai6/provider-store
         chmod 0755 /var/lib/ai6/provider-reports /var/lib/ai6/provider-presence
-        managed_root="${AI6_MANAGED_PROJECT_ROOT:-/var/lib/ai6/managed}"
         effect_lock_directory="${AI6_EFFECT_LOCK_DIRECTORY:-/var/lib/ai6/managed/effect-locks}"
         effect_lock_count="${AI6_EFFECT_LOCK_OBJECT_COUNT:-64}"
         effect_lock_owner_uid="${AI6_EFFECT_LOCK_OWNER_UID:-0}"
@@ -31,13 +32,15 @@ case "$role" in
             ''|*[!0-9]*) printf '%s\n' 'AI6_EFFECT_LOCK_OWNER_UID must be a non-negative integer.' >&2; exit 78 ;;
         esac
         mkdir -p /var/lib/ai6/database /opt/ai6/storage/app/private /opt/ai6/storage/app/public /opt/ai6/storage/framework/cache/data /opt/ai6/storage/framework/sessions /opt/ai6/storage/framework/testing /opt/ai6/storage/framework/views /opt/ai6/storage/logs
-        mkdir -p "$managed_root/.control-staging" "$managed_root/deploy-keys" "$effect_lock_directory"
+        test ! -L "$managed_root"
+        mkdir -p "$managed_root/.control-staging" "$effect_lock_directory"
         chown root:root "$managed_root"
         chown "$effect_lock_owner_uid:0" "$effect_lock_directory"
         chmod 0755 "$managed_root"
         chmod 0555 "$effect_lock_directory"
-        chown ai6:ai6 "$managed_root/.control-staging" "$managed_root/deploy-keys"
-        chmod 0700 "$managed_root/.control-staging" "$managed_root/deploy-keys"
+        chown ai6:ai6 "$managed_root/.control-staging"
+        chmod 0700 "$managed_root/.control-staging"
+        /opt/ai6/docker/provision-worker-storage.sh "$managed_root"
         lock_index=1
         original_umask="$(umask)"
         # A crash between object creation and the chmod below must never leave a

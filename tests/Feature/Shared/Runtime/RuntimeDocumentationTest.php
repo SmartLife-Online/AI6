@@ -6,6 +6,54 @@ use PHPUnit\Framework\TestCase;
 
 final class RuntimeDocumentationTest extends TestCase
 {
+    public function test_backup_restore_documents_the_offline_recovery_contract_and_open_gate(): void
+    {
+        $readme = (string) file_get_contents(dirname(__DIR__, 4).'/README.md');
+        self::assertSame(1, preg_match('/^## Backup, Restore, Rotation und Disaster Recovery\R(.*?)(?=^## |\z)/ms', $readme, $matches));
+        foreach ([
+            'ruhende Instanz auf demselben Software- und Schemastand',
+            '/var/lib/ai6/managed/credentials', '/var/lib/ai6/managed/backups',
+            '`restore_target_not_writable`', '`backup_shared_storage_path_overlap`',
+            'ai6:relocate-credentials --check', 'ai6:relocate-credentials',
+            'provision-worker-storage.sh', 'deploy_key_reference',
+            '--relocate-credentials', 'worker_storage_legacy_credentials', 'Exit 78',
+            'Backup unvollständig', 'Ein Verzeichnis ohne Manifest', 'Kopien privater Deploy-Keys',
+            'gelöscht werden',
+            'docker compose stop caddy app worker scheduler agent checker',
+            'docker compose run --rm --no-deps --entrypoint php worker artisan ai6:backup',
+            'docker compose run --rm --no-deps --entrypoint php worker artisan ai6:restore',
+            '`--no-deps`', 'keine Migration', '`VACUUM INTO`', '`manifest.json`',
+            '`database.sqlite`', '`run-artifacts/`', '`managed/deploy-keys/`', '`managed/known_hosts`',
+            '`.env` als Schlüsselpaket', '**Getrennt zu sichern:**', '`APP_KEY`, `APP_PREVIOUS_KEYS`, `AI6_REDACTION_KEYS`',
+            'Provider-Store `ai6_provider_store` liegt nicht im Backup', 'Clone-Operation',
+            'Off-Host-Kopie', 'sieben erfolgreichen Tagessicherungen und vier Wochensicherungen',
+            'Backupaufbewahrung ist nicht die Live-Retention', 'Integrität, keine Authentizität',
+            'frischen Instanz ohne die ursprünglichen Volumes', 'Image-Digest', 'getrennter Schritt',
+            'Keine Atomarität über mehrere Bäume', 'Restore unvollständig', 'Rollen gestoppt lassen',
+            'alle zusammengehörigen `.pre-restore-*`-Kopien desselben Zeitstempels',
+            'alle `sessions` und `login_confirmations`', 'genau einmal `RunRetentionSweep::sweep()`',
+            'Abgelaufene Rohdaten kehren nach einem Restore nicht zurück', 'Artefaktdownload (410)',
+            'Tombstones bleiben erhalten', 'Control-Branch', 'offene Wirkungen', 'Zugangsrechte und Recovery-Codes',
+            '`ai6:reissue-recovery-codes`', 'Erst nach dieser Wiederanlaufprüfung die Rollen starten',
+            'genau an `app` und `worker`', 'bloßes Wechseln des aktiven Schlüssels verschlüsselt vorhandene Daten nicht neu',
+            'alte Einträge einschließlich Material und Version', 'AI6-049/MG-01 bleibt offen',
+            'docs/AI6-049_MG-01_ABNAHMEPROTOKOLL.md', 'Automatisierte Tests und Windows-Läufe ersetzen diesen Nachweis nicht',
+        ] as $statement) {
+            self::assertStringContainsString($statement, $matches[1]);
+        }
+        self::assertStringContainsString('sind in `AI6-049` umgesetzt; siehe Abschnitt „Backup, Restore, Rotation und Disaster Recovery“', $readme);
+        self::assertStringNotContainsString('Backup/Restore und der Nachweis gegen die Wiederauferstehung gelöschter Rohdaten folgen in `AI6-036`', $readme);
+
+        $gate = (string) file_get_contents(dirname(__DIR__, 4).'/docs/AI6-049_MG-01_ABNAHMEPROTOKOLL.md');
+        foreach (['Ergebnisfreie Vorlage', 'Implementierungscommit', 'Image-Digest', 'Quellhost', 'Frischer Zielhost',
+            'Prüfperson', 'Unterschrift', 'weder ursprüngliche Volumes', 'Session', 'Git-Zugriff', 'APP_KEY',
+            'Tombstone', 'Zweiter Sweep verändert nichts'] as $statement) {
+            self::assertStringContainsString($statement, $gate);
+        }
+        self::assertStringContainsString('| Gesamtergebnis (bestanden / nicht bestanden) | |', $gate);
+        self::assertStringContainsString('| Unterschrift der Prüfperson | |', $gate);
+    }
+
     public function test_grok_documents_the_single_transport_and_separate_open_gate(): void
     {
         $readme = (string) file_get_contents(dirname(__DIR__, 4).'/README.md');

@@ -581,6 +581,12 @@ final class ScaffoldStructureTest extends TestCase
             'app/AI6/Shared/Markdown/ControlSequenceSanitizer.php',
             'app/AI6/Shared/Markdown/SafeMarkdownRenderer.php',
             'app/AI6/Shared/Markdown/SafeTextRenderer.php',
+            'app/AI6/Shared/Operations/BackupCommand.php',
+            'app/AI6/Shared/Operations/BackupException.php',
+            'app/AI6/Shared/Operations/BackupManifest.php',
+            'app/AI6/Shared/Operations/BackupSet.php',
+            'app/AI6/Shared/Operations/RelocateCredentialsCommand.php',
+            'app/AI6/Shared/Operations/RestoreCommand.php',
             'app/AI6/Shared/Process/AgentProcessScope.php',
             'app/AI6/Shared/Process/BlockedControlProcess.php',
             'app/AI6/Shared/Process/BlockedProcessStartResult.php',
@@ -751,6 +757,7 @@ final class ScaffoldStructureTest extends TestCase
         self::assertIsArray($lines);
 
         foreach ([
+            '# APP_PREVIOUS_KEYS=',
             'SESSION_DRIVER=database',
             'CACHE_STORE=file',
             'QUEUE_CONNECTION=database',
@@ -761,7 +768,8 @@ final class ScaffoldStructureTest extends TestCase
             'AI6_HTTP_TRUSTED_PROXIES=',
             'AI6_HTTP_SESSION_SAME_SITE=lax',
             'AI6_WORKER_HEARTBEAT_MAX_AGE=75',
-            'AI6_CONTROL_OPERATION_KNOWN_HOSTS_FILE=/var/lib/ai6/managed/known_hosts',
+            'AI6_DEPLOY_KEY_ROOT=/var/lib/ai6/managed/credentials/deploy-keys',
+            'AI6_CONTROL_OPERATION_KNOWN_HOSTS_FILE=/var/lib/ai6/managed/credentials/known_hosts',
             'AI6_CONTROL_OPERATION_MANAGED_REF_ALLOWLIST=refs/heads/main',
             'AI6_CONTROL_OPERATION_STALE_SECONDS=300',
             'AI6_CONTROL_OPERATION_RECONCILIATION_BUDGET=8',
@@ -771,6 +779,47 @@ final class ScaffoldStructureTest extends TestCase
 
         self::assertNotContains('DB_DATABASE=/var/lib/ai6/database/database.sqlite', $lines);
         self::assertNotContains('AI6_EXECUTION_DIRECTORY=/var/lib/ai6/executions', $lines);
+    }
+
+    public function test_backup_restore_evidence_files_exist(): void
+    {
+        foreach ([
+            'docs/AI6-049_MG-01_ABNAHMEPROTOKOLL.md',
+            'tests/Feature/Shared/Operations/OperationsTestCase.php',
+            'tests/Feature/Shared/Operations/BackupFilesystemTest.php',
+            'tests/Feature/Shared/Operations/BackupRestoreTest.php',
+            'tests/Feature/Shared/Operations/RestoreRetentionTest.php',
+            'tests/Feature/Shared/Operations/CredentialRelocationTest.php',
+            'tests/Unit/Shared/Runtime/WorkerStorageProvisioningTest.php',
+            'docker/provision-worker-storage.sh',
+        ] as $path) {
+            self::assertFileExists($this->path($path));
+        }
+    }
+
+    #[DataProvider('privateCredentialDefaults')]
+    public function test_unset_environment_uses_private_credential_defaults(string $key, string $expected): void
+    {
+        $process = new Process([PHP_BINARY, '-r', <<<'PHP'
+require 'vendor/autoload.php';
+require 'bootstrap/app.php';
+$config = require 'config/ai6.php';
+echo $config['control_operations'][$argv[1]];
+PHP, $key], $this->path(), [
+            'AI6_DEPLOY_KEY_ROOT' => false,
+            'AI6_CONTROL_OPERATION_KNOWN_HOSTS_FILE' => false,
+        ]);
+        $process->mustRun();
+        self::assertSame($expected, $process->getOutput());
+    }
+
+    /** @return array<string, array{string, string}> */
+    public static function privateCredentialDefaults(): array
+    {
+        return [
+            'deploy keys' => ['key_root', '/var/lib/ai6/managed/credentials/deploy-keys'],
+            'known hosts' => ['known_hosts_file', '/var/lib/ai6/managed/credentials/known_hosts'],
+        ];
     }
 
     public function test_framework_runtime_files_are_ignored(): void

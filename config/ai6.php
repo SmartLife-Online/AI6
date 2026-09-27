@@ -233,10 +233,10 @@ return [
     ],
     'control_operations' => [
         'managed_root' => env('AI6_MANAGED_PROJECT_ROOT', '/var/lib/ai6/managed'),
-        'key_root' => env('AI6_DEPLOY_KEY_ROOT', '/var/lib/ai6/managed/deploy-keys'),
+        'key_root' => env('AI6_DEPLOY_KEY_ROOT', '/var/lib/ai6/managed/credentials/deploy-keys'),
         'ssh_keygen_binary' => env('AI6_SSH_KEYGEN_BINARY', '/usr/bin/ssh-keygen'),
         'ssh_keygen_wrapper' => base_path('app/AI6/Git/generate-deploy-key.sh'),
-        'known_hosts_file' => env('AI6_CONTROL_OPERATION_KNOWN_HOSTS_FILE', '/var/lib/ai6/managed/known_hosts'),
+        'known_hosts_file' => env('AI6_CONTROL_OPERATION_KNOWN_HOSTS_FILE', '/var/lib/ai6/managed/credentials/known_hosts'),
         'managed_ref_allowlist' => env('AI6_CONTROL_OPERATION_MANAGED_REF_ALLOWLIST', 'refs/heads/main'),
         'lease_seconds' => env('AI6_CONTROL_OPERATION_LEASE_SECONDS', '120'),
         'heartbeat_seconds' => env('AI6_CONTROL_OPERATION_HEARTBEAT_SECONDS', '30'),

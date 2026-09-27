@@ -17,6 +17,9 @@ use App\AI6\Shared\Http\BlockPersistentLoginCookies;
 use App\AI6\Shared\Http\ContentSecurityPolicy;
 use App\AI6\Shared\Http\EnforceHttpsOrPrivateAccess;
 use App\AI6\Shared\Http\ResolveTrustedProxies;
+use App\AI6\Shared\Operations\BackupCommand;
+use App\AI6\Shared\Operations\RelocateCredentialsCommand;
+use App\AI6\Shared\Operations\RestoreCommand;
 use App\AI6\Shared\Runtime\RuntimeHealthCommand;
 use App\AI6\Shared\Runtime\RuntimeHeartbeat;
 use App\AI6\Shared\Runtime\RuntimeSelfTestCommand;
@@ -51,6 +54,9 @@ return Application::configure(basePath: dirname(__DIR__))
         ReissueRecoveryCodesCommand::class,
         DoctorCommand::class,
         InstallCommand::class,
+        BackupCommand::class,
+        RelocateCredentialsCommand::class,
+        RestoreCommand::class,
         RuntimeHealthCommand::class,
         RuntimeSelfTestCommand::class,
         ReprojectUnparsedTicketsCommand::class,

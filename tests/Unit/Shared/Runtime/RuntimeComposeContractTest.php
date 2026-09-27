@@ -100,7 +100,7 @@ final class RuntimeComposeContractTest extends TestCase
             'AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF',
             'AI6_COPILOT_BINARY', 'AI6_COPILOT_PINNED_VERSION', 'AI6_COPILOT_CAPABILITY_EVIDENCE', 'AI6_GROK_BINARY', 'AI6_GROK_PINNED_VERSION', 'AI6_GROK_CAPABILITY_EVIDENCE',
             'AI6_GIT_ALLOWED_HOSTS', 'AI6_GIT_ALLOWED_REMOTE_PATHS', 'AI6_GIT_ALLOWED_REF_PATTERNS', 'AI6_GIT_PINNED_HOST_KEYS',
-            'AI6_RUNTIME_ROLE', 'APP_DEBUG', 'APP_ENV', 'APP_KEY', 'APP_NAME', 'APP_URL', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',
+            'AI6_RUNTIME_ROLE', 'APP_DEBUG', 'APP_ENV', 'APP_KEY', 'APP_PREVIOUS_KEYS', 'APP_NAME', 'APP_URL', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',
             'DB_CONNECTION', 'DB_DATABASE', 'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE',
             'DB_SYNCHRONOUS', 'LOG_CHANNEL', 'QUEUE_CONNECTION', 'SESSION_DRIVER',
         ],
@@ -120,7 +120,7 @@ final class RuntimeComposeContractTest extends TestCase
             'AI6_COPILOT_BINARY', 'AI6_COPILOT_PINNED_VERSION', 'AI6_COPILOT_CAPABILITY_EVIDENCE', 'AI6_GROK_BINARY', 'AI6_GROK_PINNED_VERSION', 'AI6_GROK_CAPABILITY_EVIDENCE',
             'AI6_EXECUTION_DIRECTORY', 'AI6_GIT_ALLOWED_HOSTS', 'AI6_GIT_ALLOWED_REMOTE_PATHS', 'AI6_GIT_ALLOWED_REF_PATTERNS',
             'AI6_GIT_PINNED_HOST_KEYS', 'AI6_HEARTBEAT_DIRECTORY', 'AI6_HEARTBEAT_MAX_AGE', 'AI6_RUNTIME_ROLE',
-            'AI6_WORKER_TIMEOUT', 'APP_DEBUG', 'APP_ENV', 'APP_KEY', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',
+            'AI6_WORKER_TIMEOUT', 'APP_DEBUG', 'APP_ENV', 'APP_KEY', 'APP_PREVIOUS_KEYS', 'CACHE_STORE', 'DB_BUSY_TIMEOUT',
             'DB_CONNECTION', 'DB_DATABASE', 'DB_FOREIGN_KEYS', 'DB_JOURNAL_MODE',
             'DB_QUEUE_RETRY_AFTER', 'DB_SYNCHRONOUS', 'LOG_CHANNEL', 'QUEUE_CONNECTION',
         ],
@@ -489,6 +489,20 @@ final class RuntimeComposeContractTest extends TestCase
         }
     }
 
+    public function test_previous_application_keys_reach_exactly_app_and_worker(): void
+    {
+        $receivers = [];
+        foreach ($this->services() as $role => $service) {
+            if (array_key_exists('APP_PREVIOUS_KEYS', $service['environment'] ?? [])) {
+                $receivers[] = $role;
+                self::assertSame('${APP_PREVIOUS_KEYS:-}', $service['environment']['APP_PREVIOUS_KEYS']);
+                self::assertArrayHasKey('APP_KEY', $service['environment']);
+            }
+        }
+        sort($receivers);
+        self::assertSame(['app', 'worker'], $receivers);
+    }
+
     public function test_http_hardening_configuration_reaches_only_the_app_role(): void
     {
         $compose = $this->compose();
@@ -590,6 +604,9 @@ final class RuntimeComposeContractTest extends TestCase
     public function test_effect_locks_exist_only_on_the_shared_managed_volume_with_unprivileged_workers(): void
     {
         $services = $this->services();
+        self::assertSame('/var/lib/ai6/managed/credentials/deploy-keys', $services['worker']['environment']['AI6_DEPLOY_KEY_ROOT']);
+        self::assertSame('${AI6_CONTROL_OPERATION_KNOWN_HOSTS_FILE:-/var/lib/ai6/managed/credentials/known_hosts}',
+            $services['worker']['environment']['AI6_CONTROL_OPERATION_KNOWN_HOSTS_FILE']);
         self::assertSame('0:0', $services['init']['user'] ?? null);
         self::assertArrayNotHasKey('user', $services['worker']);
         self::assertArrayNotHasKey('privileged', $services['worker']);
