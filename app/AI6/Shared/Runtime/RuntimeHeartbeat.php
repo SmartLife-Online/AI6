@@ -53,6 +53,26 @@ final class RuntimeHeartbeat
         return $this->readBootId();
     }
 
+    /** @return array{healthy: bool, age: int|null, max_age: string} */
+    public static function statusFromEnvironment(string $role): array
+    {
+        $directory = getenv('AI6_HEARTBEAT_DIRECTORY');
+        $maxAge = getenv('AI6_HEARTBEAT_MAX_AGE');
+        if (! is_string($directory) || $directory === ''
+            || ! is_string($maxAge) || preg_match('/\A[1-9][0-9]*\z/D', $maxAge) !== 1
+        ) {
+            throw new RuntimeException('The heartbeat environment is invalid.');
+        }
+
+        try {
+            $status = (new self($directory))->status($role, (int) $maxAge);
+        } catch (RuntimeException) {
+            $status = ['healthy' => false, 'age' => null];
+        }
+
+        return [...$status, 'max_age' => $maxAge];
+    }
+
     /** @return array{healthy: bool, age: int|null} */
     public function status(string $role, int $maxAge, ?int $now = null): array
     {

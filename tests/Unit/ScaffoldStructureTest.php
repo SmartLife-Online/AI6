@@ -781,6 +781,24 @@ final class ScaffoldStructureTest extends TestCase
         self::assertNotContains('AI6_EXECUTION_DIRECTORY=/var/lib/ai6/executions', $lines);
     }
 
+    public function test_installation_doctor_and_apparmor_evidence_files_exist(): void
+    {
+        foreach ([
+            'tests/Feature/Shared/Doctor/DoctorOptionsTest.php',
+            'tests/Feature/Shared/Doctor/InstallCommandTest.php',
+            'tests/Feature/Shared/Doctor/OperationalDoctorChecksTest.php',
+            'docs/AI6-036_VERIFIKATION.md',
+            'docs/AI6-036_NAMESPACE_ENTSCHEIDUNG.md',
+            'docs/AI6-036_MG-01_ABNAHMEPROTOKOLL.md',
+            'docker/apparmor/ai6-container-base',
+            'docker/apparmor/ai6-execution',
+            'docker/apparmor/LICENSE.moby',
+            'tests/Fixtures/Runtime/ExecutionRoleProtectedPaths.php',
+        ] as $path) {
+            self::assertFileExists($this->path($path));
+        }
+    }
+
     public function test_backup_restore_evidence_files_exist(): void
     {
         foreach ([

@@ -841,8 +841,8 @@
         "reason": "Gate aus dem gebundenen Ticket über RunOrchestrator::prepareGates erzeugen; die direkte Anlage umgeht den Producer.",
         "source": {
             "target": "RunGate",
-            "code": "\\App\\AI6\\Runs\\Models\\RunGate::query()->create(['id' => (string) \\Illuminate\\Support\\Str::uuid(), 'run_id' => $run->id, 'gate_id' => 'MG-01', 'kind' => \\App\\AI6\\Runs\\GateKind::MANUAL, 'state' => \\App\\AI6\\Runs\\GateState::OPEN, 'blocks_candidate' => true, 'blocks_final_commit' => true, 'blocks_push' => true, 'ticket_contract_sha256' => (string) $run->ticket_contract_sha256])",
-            "context_sha256": "35a9be4a75817f8fb8bba30a1402d3a98c048053fef17f9acbd9d29c45a50ab2"
+            "code": "\\App\\AI6\\Runs\\Models\\RunGate::query()->create(['id' => (string) \\Illuminate\\Support\\Str::uuid(), 'run_id' => $run->id, 'gate_id' => 'MG-01', 'kind' => \\App\\AI6\\Runs\\GateKind::MANUAL, 'state' => \\App\\AI6\\Runs\\GateState::OPEN, 'blocks_candidate' => true, 'blocks_final_commit' => true, 'blocks_push' => true, 'ticket_contract_sha256' => \\App\\AI6\\Runs\\Models\\TicketApproval::query()->findOrFail($run->ticket_approval_id)->ticket_contract_sha256])",
+            "context_sha256": "30bf5dcab03572a96423d2047defce48c1ab576f7b9829cfee696161eeaa0792"
         }
     },
     "tests/Feature/Runs/ReviewOnlyExecutionTest.php::test_a_cancelled_review_only_run_publishes_no_report#1": {

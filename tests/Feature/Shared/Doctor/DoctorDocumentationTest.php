@@ -6,6 +6,48 @@ use PHPUnit\Framework\TestCase;
 
 final class DoctorDocumentationTest extends TestCase
 {
+    public function test_install_access_upgrade_and_open_gates_are_documented(): void
+    {
+        $root = dirname(__DIR__, 4);
+        $readme = (string) file_get_contents($root.'/README.md');
+        foreach ([
+            'docker compose exec app php artisan ai6:install',
+            'docker compose exec worker php artisan ai6:doctor --security --all-processes --require-strict',
+            'openssl rand -base64 32', 'AI6_REDACTION_KEYS', 'Bootstrap',
+            'ssh -N -L 127.0.0.1:<port>:127.0.0.1:<port> <tunnelbenutzer>@<host>',
+            'lokaler und entfernter Port müssen identisch und gleich `AI6_HTTP_PORT` sein',
+            'Match User <tunnelbenutzer>', 'AllowTcpForwarding local', 'PermitOpen 127.0.0.1:<port>',
+            'PermitTTY no', 'ForceCommand /bin/false', 'AllowAgentForwarding no', 'X11Forwarding no', 'PermitTunnel no',
+            'Referenz ohne Abnahme', 'AI6_APP_URL=https://<hostname>', '`Host` und `X-Forwarded-Proto`',
+            '`trusted_proxies`', 'erneute Passkey-Registrierung',
+            '### Upgrade', 'null Fehlern und null übersprungenen Nachweisen',
+            'docker compose stop caddy app worker scheduler agent checker',
+            'docker compose up --no-deps --force-recreate --exit-code-from init init',
+            'Rootless-Betrieb und Härtungsempfehlungen', 'UNGEPRÜFT',
+            'security_review_adapter_fake', 'AI6_AGENT_SECURITY_REVIEW_PROFILE',
+            'AI6-033/MG-01', 'AI6-041/MG-01', 'AI6-048/MG-01',
+            'Linux-Checkout desselben Commits', 'AI6-049',
+            'git_allowlist_empty', 'kein erlaubter Restbefund',
+            'sudo apparmor_parser -r /etc/apparmor.d/ai6-execution',
+            'ai6-agent-v1', 'ai6-checker-v1', 'Enforce-Modus',
+            'systempaths=unconfined', 'Hardlinks auf geschützte Ziele',
+            'Hosts ohne AppArmor werden nicht unterstützt', 'apparmor_confined',
+            '/proc/self/attr/current', 'ai6-agent-v1 (enforce)', 'ai6-checker-v1 (enforce)',
+        ] as $required) {
+            self::assertStringContainsString($required, $readme);
+        }
+        $environment = (string) file_get_contents($root.'/.env.example');
+        self::assertStringContainsString('APP_URL=http://localhost', $environment);
+        self::assertStringContainsString('# AI6_APP_URL=', $environment);
+        self::assertDoesNotMatchRegularExpression('/base64:[A-Za-z0-9+\/=]{20,}/', $environment);
+        self::assertDoesNotMatchRegularExpression('/base64:[A-Za-z0-9+\/=]{20,}/', $readme);
+        $protocol = (string) file_get_contents($root.'/docs/AI6-036_MG-01_ABNAHMEPROTOKOLL.md');
+        foreach (['leeren Volumes', 'Image-Digest:', 'Exitcode:', 'Unterschrift:', 'Remote-Kommando', 'SFTP', 'anderes Weiterleitungsziel', 'Remote-Weiterleitung', 'AppArmor aktiv', 'nach README installiert', 'aa-status', '/proc/self/attr/current', 'ai6-agent-v1 (enforce)', 'ai6-checker-v1 (enforce)', 'Login-Verzeichnis rw', 'auth.json', 'Credential-Projektion ro', 'Input ro/Output rw', '/run/ai6/provider-private', 'permission denied', 'keine erlaubten Restbefunde'] as $required) {
+            self::assertStringContainsString($required, $protocol);
+        }
+        self::assertStringNotContainsString('- [x]', $protocol);
+    }
+
     public function test_readme_and_environment_example_document_the_complete_security_contract(): void
     {
         $root = dirname(__DIR__, 4);

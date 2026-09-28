@@ -177,7 +177,7 @@ final class DoctorCommandTest extends TestCase
             'schema' => 'ai6.checker-attestation.v1', 'checker_boot_id' => str_repeat('a', 32),
             'recorded_at' => time(), 'role' => 'checker', 'input_read_only' => true,
             'output_separate' => true, 'workspace_private' => true, 'container_read_only' => true,
-            'network_isolated' => true, 'namespace_tooling' => true, 'profiles_executable' => true,
+            'network_isolated' => true, 'apparmor_confined' => true, 'namespace_tooling' => true, 'profiles_executable' => true,
             'profile_programs' => ['php-targeted' => true],
         ];
         file_put_contents($this->checkerRuntime.'/output/attestations/checker.json', json_encode($document, JSON_THROW_ON_ERROR)."\n");

@@ -161,10 +161,12 @@ use App\AI6\Shared\Process\ControlProcessRunner;
 use App\AI6\Shared\Process\EffectLock;
 use App\AI6\Shared\Process\ExecutionMailboxCommand;
 use App\AI6\Shared\Process\ExecutionMailboxFactory;
+use App\AI6\Shared\Process\NativeProcessRuntimeProbe;
 use App\AI6\Shared\Process\ProcessConfiguration;
 use App\AI6\Shared\Process\ProcessConfigurationFactory;
 use App\AI6\Shared\Process\ProcessIsolationBoundary;
 use App\AI6\Shared\Process\ProcessPolicyRegistry;
+use App\AI6\Shared\Process\ProcessRuntimeProbe;
 use App\AI6\Shared\Redaction\RedactionFingerprintGenerator;
 use App\AI6\Shared\Redaction\RedactionKeyring;
 use App\AI6\Shared\Redaction\RedactionKeyringFactory;
@@ -314,6 +316,7 @@ final class AI6ServiceProvider extends ServiceProvider
         $this->app->singleton(FindingVerificationRound::class);
         $this->app->singleton(ReviewStallFingerprint::class);
         $this->app->singleton(CredentialRevisionRegistry::class, static fn (): CredentialRevisionRegistry => CredentialRevisionRegistry::fromConfiguredValues());
+        $this->app->singleton(ProcessRuntimeProbe::class, NativeProcessRuntimeProbe::class);
         $this->app->singleton(ProviderCapabilityPublisher::class);
         $this->app->singleton(ProviderBinaryDigest::class);
         $this->app->singleton(

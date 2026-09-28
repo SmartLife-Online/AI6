@@ -4,6 +4,7 @@ namespace Tests\Unit\Agents;
 
 use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentRole;
+use App\AI6\Agents\CredentialProjectionException;
 use App\AI6\Agents\GitHubCopilotCliConfiguration;
 use App\AI6\Agents\ProviderBinaryDigest;
 use App\AI6\Agents\ProviderCapabilityPublisher;
@@ -11,6 +12,10 @@ use App\AI6\Agents\ProviderCapabilityReport;
 use App\AI6\Agents\ProviderCredentialStore;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Reviews\VerifierCandidatePoolFactory;
+use App\AI6\Shared\Process\ExecutionRole;
+use App\AI6\Shared\Process\ProcessRuntimeProbe;
+use App\AI6\Shared\Process\ProcessStartRejectedException;
+use Illuminate\Support\Facades\Artisan;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Fixtures\Agents\BuildsProviderOnboarding;
 use Tests\TestCase;
@@ -31,6 +36,67 @@ final class ProviderOnboardingEvidenceTest extends TestCase
         config(['ai6.agent_profiles' => $profiles]);
         $this->app->forgetInstance(AgentProfileRegistry::class);
         $this->seedProviderReports();
+    }
+
+    public function test_start_publishes_the_validated_boot_only_with_agent_confinement(): void
+    {
+        $boot = str_repeat('c', 32);
+        app(ProviderCapabilityPublisher::class)->start($boot);
+        self::assertSame($boot."\n", file_get_contents($this->onboardingRoot.'/presence/boot-id'));
+        app(ProviderCapabilityPublisher::class)->pulse($boot);
+        self::assertSame($boot, app(ProviderCapabilityReport::class)->boot());
+    }
+
+    public function test_invalid_boot_cannot_replace_presence_even_when_confined(): void
+    {
+        $before = file_get_contents($this->onboardingRoot.'/presence/boot-id');
+        try {
+            app(ProviderCapabilityPublisher::class)->start('invalid');
+            self::fail('Invalid boot identity accepted.');
+        } catch (CredentialProjectionException $exception) {
+            self::assertSame('The provider supervisor boot is invalid.', $exception->getMessage());
+        }
+        self::assertSame($before, file_get_contents($this->onboardingRoot.'/presence/boot-id'));
+    }
+
+    #[DataProvider('presenceOperations')]
+    public function test_lost_agent_confinement_cannot_publish_presence(string $operation): void
+    {
+        $beforeBoot = file_get_contents($this->onboardingRoot.'/presence/boot-id');
+        $beforeHeartbeat = file_get_contents($this->onboardingRoot.'/presence/heartbeat.json');
+        $runtime = $this->createMock(ProcessRuntimeProbe::class);
+        $runtime->expects(self::once())->method('apparmorConfined')
+            ->with(ExecutionRole::AGENT)->willReturn(false);
+        $publisher = new ProviderCapabilityPublisher(app(ProviderCredentialStore::class), app(ProviderCapabilityReport::class), $runtime);
+
+        try {
+            $publisher->{$operation}(str_repeat('a', 32));
+            self::fail('An unconfined agent must not publish presence.');
+        } catch (ProcessStartRejectedException $exception) {
+            self::assertSame('The agent AppArmor confinement is unavailable.', $exception->getMessage());
+        }
+        self::assertSame($beforeBoot, file_get_contents($this->onboardingRoot.'/presence/boot-id'));
+        self::assertSame($beforeHeartbeat, file_get_contents($this->onboardingRoot.'/presence/heartbeat.json'));
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function presenceOperations(): iterable
+    {
+        yield 'boot presence' => ['start'];
+        yield 'presence heartbeat' => ['pulse'];
+    }
+
+    public function test_unconfined_agent_mailbox_stops_before_presence_or_heartbeat(): void
+    {
+        config(['ai6.runtime_role' => 'agent']);
+        $runtime = $this->createMock(ProcessRuntimeProbe::class);
+        $runtime->expects(self::once())->method('apparmorConfined')
+            ->with(ExecutionRole::AGENT)->willReturn(false);
+        $this->app->instance(ProcessRuntimeProbe::class, $runtime);
+        $before = file_get_contents($this->onboardingRoot.'/presence/heartbeat.json');
+        self::assertSame(1, Artisan::call('ai6:execution-mailbox', ['role' => 'agent', '--once' => true]));
+        self::assertStringContainsString('The agent AppArmor confinement is unavailable.', Artisan::output());
+        self::assertSame($before, file_get_contents($this->onboardingRoot.'/presence/heartbeat.json'));
     }
 
     public function test_copilot_model_evidence_is_independent_but_logout_is_shared(): void

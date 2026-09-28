@@ -359,7 +359,7 @@
       "read_only": true,
       "user": "10002:10001",
       "cap_drop": ["ALL"],
-      "security_opt": ["no-new-privileges:true", "seccomp=./docker/agent-seccomp-moby-29.6.1.json"],
+      "security_opt": ["no-new-privileges:true", "seccomp=./docker/agent-seccomp-moby-29.6.1.json", "apparmor=ai6-agent-v1", "systempaths=unconfined"],
       "environment": {
         "AI6_AGENT_EXECUTION_ROOT": "/var/lib/ai6/agent-executions",
         "AI6_AGENT_OUTPUT_ROOT": "/var/lib/ai6/agent-outputs",
@@ -407,7 +407,7 @@
       "read_only": true,
       "user": "10003:10001",
       "network_mode": "none",
-      "security_opt": ["seccomp=./docker/checker-seccomp-moby-29.6.1.json"],
+      "security_opt": ["seccomp=./docker/checker-seccomp-moby-29.6.1.json", "apparmor=ai6-checker-v1", "systempaths=unconfined"],
       "environment": {
         "AI6_CHECKER_EXECUTION_ROOT": "/var/lib/ai6/checker-executions",
         "AI6_CHECKER_OUTPUT_ROOT": "/var/lib/ai6/checker-outputs",

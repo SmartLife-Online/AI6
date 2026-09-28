@@ -3,6 +3,9 @@
 namespace Tests\Feature\Runs;
 
 use App\AI6\Agents\AgentAdapter;
+use App\AI6\Agents\AgentExecutionProcessor;
+use App\AI6\Agents\AgentExecutionRunner;
+use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentScenario;
 use App\AI6\Agents\CredentialRevisionRegistry;
 use App\AI6\Agents\ExecutionHomeManager;
@@ -21,17 +24,21 @@ use App\AI6\Projects\Models\Project;
 use App\AI6\Reviews\Models\Finding;
 use App\AI6\Reviews\Models\ReviewResult;
 use App\AI6\Reviews\ReviewRound;
+use App\AI6\Reviews\VerifierCandidatePoolFactory;
 use App\AI6\Runs\ApprovalSelection;
+use App\AI6\Runs\ApprovalSnapshotFactory;
 use App\AI6\Runs\ExecutionJobState;
 use App\AI6\Runs\ExecutionStepType;
 use App\AI6\Runs\GateKind;
 use App\AI6\Runs\GateState;
 use App\AI6\Runs\InstructionBindingVerifier;
 use App\AI6\Runs\InstructionCandidateSource;
+use App\AI6\Runs\Models\ExecutionJob;
 use App\AI6\Runs\Models\Run;
 use App\AI6\Runs\Models\RunArtifact;
 use App\AI6\Runs\Models\RunEvent;
 use App\AI6\Runs\Models\RunGate;
+use App\AI6\Runs\Models\TicketApproval;
 use App\AI6\Runs\ReviewOnlyCompletionMode;
 use App\AI6\Runs\RunArtifactKind;
 use App\AI6\Runs\RunArtifactRoot;
@@ -54,6 +61,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Feature\Git\AssertsGitObjectGuards;
 use Tests\Feature\Git\BuildsRunWorkspaceGitFixture;
 use Tests\Feature\Tickets\TicketUiTestCase;
+use Tests\Fixtures\Agents\BuildsProviderOnboarding;
 
 /**
  * TC-04, TC-06 and TC-10 of AI6-040: the review-only run executes prepare,
@@ -64,8 +72,11 @@ final class ReviewOnlyExecutionTest extends TicketUiTestCase
 {
     use AssertsGitObjectGuards;
     use BuildsImplementationTurnFixture;
+    use BuildsProviderOnboarding;
     use BuildsReviewOnlyRunFixture;
     use BuildsRunWorkspaceGitFixture;
+
+    private bool $independentVerifier = false;
 
     protected function setUp(): void
     {
@@ -83,6 +94,10 @@ final class ReviewOnlyExecutionTest extends TicketUiTestCase
 
     protected function approvalSelection(?User $attentionUser = null): ApprovalSelection
     {
+        if ($this->independentVerifier) {
+            $this->seedProviderReports();
+        }
+
         return $this->reviewOnlySelection($attentionUser);
     }
 
@@ -169,6 +184,7 @@ final class ReviewOnlyExecutionTest extends TicketUiTestCase
         $this->app->instance(SecurityPolicy::class, $policy);
 
         $prepared = $this->preparedReviewOnlyRun('AI6-032-PROFILE-'.strtoupper($profile->value));
+        self::assertSame([], $prepared['run']->config_snapshot['values']['checks']['before_review']);
         $run = $this->prepareAndCheck($prepared);
         $this->bindReviewAdapter(AgentScenario::SUCCESS);
         $this->assertStepSucceeded($this->executeReviewOnlyStep($run, ExecutionStepType::REVIEW));
@@ -181,7 +197,13 @@ final class ReviewOnlyExecutionTest extends TicketUiTestCase
         self::assertSame($disabledMeasures, $policy->disabledMeasures());
         $this->assertFlaglessBoundaries($profile);
         self::assertSame(1, ReviewResult::query()->where('run_id', $run->id)->count());
-        self::assertSame(1, CheckResultRecord::query()->where('run_id', $run->id)->count());
+        // This fixture binds no check profiles. The workflow still executes
+        // exactly one check step and establishes checkpoint-bound readiness;
+        // individual profile results belong to the bound-profile test below.
+        self::assertSame(1, ExecutionJob::query()->where('run_id', $run->id)
+            ->where('step_type', ExecutionStepType::CHECK->value)
+            ->where('state', ExecutionJobState::SUCCEEDED->value)->count());
+        self::assertSame(0, CheckResultRecord::query()->where('run_id', $run->id)->count());
     }
 
     /** @param list<SecurityMeasure> $disabledMeasures */
@@ -283,7 +305,17 @@ final class ReviewOnlyExecutionTest extends TicketUiTestCase
     public function test_review_findings_stay_visible_and_never_open_a_fix_phase(): void
     {
         $this->requiresPosixEffectRuntime();
+        // Bind an independent verifier before approval; the source and the
+        // implementation both use fake and cannot verify their own findings.
+        config(['ai6.agent_profiles.grok-cli-review.capability_status' => 'available']);
+        foreach ([AgentProfileRegistry::class, VerifierCandidatePoolFactory::class, ApprovalSnapshotFactory::class] as $binding) {
+            $this->app->forgetInstance($binding);
+        }
+        // Evidence includes the execution roots configured by the managed
+        // fixture, so publish it at selection time, immediately before approval.
+        $this->independentVerifier = true;
         $prepared = $this->preparedReviewOnlyRun('AI6-040-E2E-FINDINGS');
+        self::assertContains('grok_cli', array_column($prepared['run']->agent_profile_snapshot['verifier_candidates'], 'provider_profile'));
         $run = $this->prepareAndCheck($prepared);
 
         $this->bindReviewAdapter(AgentScenario::FINDINGS);
@@ -291,6 +323,16 @@ final class ReviewOnlyExecutionTest extends TicketUiTestCase
         self::assertGreaterThan(0, Finding::query()->where('run_id', $run->id)->count());
         self::assertNotSame(RunPhase::FIX, $run->fresh()?->phase, 'A review-only run never enters the fix phase.');
 
+        $this->bindReviewAdapter(AgentScenario::SUCCESS);
+        $verificationJob = $this->executeReviewOnlyStep($run, ExecutionStepType::VERIFY);
+        self::assertSame(ExecutionJobState::SUCCEEDED, $verificationJob->state,
+            'Run wait: '.($run->fresh()?->wait_reason->value ?? 'none')
+            .'; verification outcomes: '.ReviewResult::query()->where('run_id', $run->id)
+                ->where('role', 'finding_verification')->pluck('invocation_outcome')->implode(', '));
+        $verification = ReviewResult::query()->where('run_id', $run->id)->where('role', 'finding_verification')->sole();
+        self::assertSame('grok_cli', $verification->provider_profile);
+        self::assertSame('confirmed', $verification->verification_assessment);
+        self::assertNotSame(RunPhase::FIX, $run->fresh()?->phase);
         $this->assertStepSucceeded($this->executeReviewOnlyStep($run, ExecutionStepType::REPORT));
         $report = $this->decodedReport($run);
         self::assertNotEmpty($report['findings']);
@@ -317,7 +359,7 @@ final class ReviewOnlyExecutionTest extends TicketUiTestCase
             'id' => (string) Str::uuid(), 'run_id' => $run->id, 'gate_id' => 'MG-01',
             'kind' => GateKind::MANUAL, 'state' => GateState::OPEN,
             'blocks_candidate' => true, 'blocks_final_commit' => true, 'blocks_push' => true,
-            'ticket_contract_sha256' => (string) $run->ticket_contract_sha256,
+            'ticket_contract_sha256' => TicketApproval::query()->findOrFail($run->ticket_approval_id)->ticket_contract_sha256,
         ]);
 
         $job = $this->executeReviewOnlyStep($run->fresh() ?? $run, ExecutionStepType::REPORT);
@@ -616,6 +658,8 @@ final class ReviewOnlyExecutionTest extends TicketUiTestCase
             ExecutionHomeManager::class,
             InstructionBindingVerifier::class,
             ReviewRound::class,
+            AgentExecutionRunner::class,
+            AgentExecutionProcessor::class,
         ] as $binding) {
             $this->app->forgetInstance($binding);
         }

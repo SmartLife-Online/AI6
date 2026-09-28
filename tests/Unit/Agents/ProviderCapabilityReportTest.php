@@ -144,6 +144,72 @@ final class ProviderCapabilityReportTest extends TestCase
         $reports->generation('codex_cli');
     }
 
+    public function test_presence_exposes_the_verified_timestamp_and_observes_a_new_pulse(): void
+    {
+        config(['ai6.provider_onboarding.presence_max_age_seconds' => 60]);
+        $reports = app(ProviderCapabilityReport::class);
+        $path = $this->root.'/presence/heartbeat.json';
+        foreach ([time() - 11, time() - 4] as $recordedAt) {
+            $bytes = json_encode(['boot_id' => $this->boot, 'recorded_at' => $recordedAt], JSON_THROW_ON_ERROR);
+            file_put_contents($path, $bytes);
+            self::assertSame(['boot_id' => $this->boot, 'recorded_at' => $recordedAt], $reports->presence());
+            self::assertSame($this->boot, $reports->boot());
+            self::assertSame($bytes, file_get_contents($path));
+        }
+    }
+
+    public function test_waiving_freshness_keeps_the_current_boot_id_for_active_turns(): void
+    {
+        $recordedAt = time() - 3600;
+        file_put_contents($this->root.'/presence/heartbeat.json', json_encode(['boot_id' => $this->boot, 'recorded_at' => $recordedAt], JSON_THROW_ON_ERROR));
+        $currentBoot = bin2hex(random_bytes(16));
+        file_put_contents($this->root.'/presence/boot-id', $currentBoot);
+        $reports = app(ProviderCapabilityReport::class);
+        self::assertSame($currentBoot, $reports->boot(false));
+        self::assertSame(['boot_id' => $currentBoot, 'recorded_at' => $recordedAt], $reports->presence(false));
+        $this->expectException(CredentialProjectionException::class);
+        $reports->presence();
+    }
+
+    /** @return list<array{string, bool}> */
+    public static function invalidPresence(): array
+    {
+        return [
+            ['boot_file', true], ['boot_file', false],
+            ['pulse_boot', true], ['pulse_boot', false],
+            ['timestamp_type', true], ['timestamp_type', false],
+            ['future', true], ['future', false],
+            ['extra_field', true], ['extra_field', false],
+            ['expired', true], ['foreign_boot', true],
+        ];
+    }
+
+    #[DataProvider('invalidPresence')]
+    public function test_presence_and_boot_keep_the_same_validation(string $corruption, bool $fresh): void
+    {
+        $pulse = ['boot_id' => $this->boot, 'recorded_at' => time()];
+        match ($corruption) {
+            'boot_file' => file_put_contents($this->root.'/presence/boot-id', 'private-invalid-boot'),
+            'pulse_boot' => $pulse['boot_id'] = 'private-invalid-boot',
+            'timestamp_type' => $pulse['recorded_at'] = (string) time(),
+            'future' => $pulse['recorded_at'] = time() + 600,
+            'extra_field' => $pulse['private-extra'] = true,
+            'expired' => $pulse['recorded_at'] = time() - 3600,
+            'foreign_boot' => $pulse['boot_id'] = bin2hex(random_bytes(16)),
+            default => throw new \LogicException('Unknown presence fixture.'),
+        };
+        file_put_contents($this->root.'/presence/heartbeat.json', json_encode($pulse, JSON_THROW_ON_ERROR));
+        $reports = app(ProviderCapabilityReport::class);
+        foreach (['presence', 'boot'] as $method) {
+            try {
+                $reports->{$method}($fresh);
+                self::fail('Invalid presence was accepted by '.$method.'.');
+            } catch (CredentialProjectionException $exception) {
+                self::assertSame('The current agent boot is unavailable.', $exception->getMessage());
+            }
+        }
+    }
+
     public function test_wrong_role_and_invalid_credentials_leave_store_and_generation_unchanged(): void
     {
         config(['ai6.runtime_role' => 'worker']);

@@ -3,10 +3,13 @@
 namespace Tests\Unit\Shared\Runtime;
 
 use App\AI6\Shared\Http\EnforceHttpsOrPrivateAccess;
+use App\AI6\Shared\Process\ExecutionRole;
+use App\AI6\Shared\Process\NativeProcessRuntimeProbe;
 use App\AI6\Shared\Runtime\RuntimeHeartbeat;
 use App\AI6\Shared\Security\SecurityMeasure;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\IpUtils;
+use Tests\Fixtures\Runtime\ExecutionRoleProtectedPaths;
 
 final class RuntimeComposeContractTest extends TestCase
 {
@@ -271,12 +274,97 @@ final class RuntimeComposeContractTest extends TestCase
         self::assertMatchesRegularExpression('/\Acaddy:2\.10\.2-alpine@sha256:[0-9a-f]{64}\z/D', $services['caddy']['image'] ?? '');
     }
 
+    public function test_apparmor_profiles_compose_and_native_labels_have_one_closed_contract(): void
+    {
+        $this->assertApparmorReplacementPaths((string) file_get_contents(dirname(__DIR__, 4).'/docker/apparmor/ai6-container-base'));
+        $bytes = (string) file_get_contents(dirname(__DIR__, 4).'/docker/apparmor/ai6-execution');
+        preg_match_all('/^[ \t]*profile[ \t]+([^\s{]+)/m', $bytes, $declarations);
+        $declaredNames = $declarations[1];
+        sort($declaredNames);
+        self::assertSame(['ai6-agent-v1', 'ai6-checker-v1'], $declaredNames);
+        preg_match_all('/^profile\s+(\S+)\s+[^\n]*\{\s*\n(.*?)^\}/ms', $bytes, $matches, PREG_SET_ORDER);
+        $profiles = [];
+        foreach ($matches as $match) {
+            self::assertArrayNotHasKey($match[1], $profiles);
+            self::assertMatchesRegularExpression('/^\s*include <abstractions\/ai6-container-base>\s*$/m', $match[2]);
+            $profiles[$match[1]] = true;
+        }
+        $names = array_keys($profiles);
+        sort($names);
+        self::assertSame(['ai6-agent-v1', 'ai6-checker-v1'], $names);
+        $services = $this->services();
+        foreach (ExecutionRole::cases() as $role) {
+            $options = $services[$role->value]['security_opt'];
+            $apparmor = array_values(array_filter($options, static fn (string $option): bool => str_starts_with($option, 'apparmor=')));
+            self::assertSame(['apparmor=ai6-'.$role->value.'-v1'], $apparmor);
+            $profile = substr($apparmor[0], strlen('apparmor='));
+            self::assertArrayHasKey($profile, $profiles);
+            self::assertSame($profile.' (enforce)', NativeProcessRuntimeProbe::apparmorLabel($role));
+            self::assertContains('systempaths=unconfined', $options);
+        }
+        foreach ($services as $service) {
+            $options = $service['security_opt'] ?? [];
+            if (in_array('systempaths=unconfined', $options, true)) {
+                $apparmor = array_values(array_filter($options, static fn (string $option): bool => str_starts_with($option, 'apparmor=')));
+                self::assertCount(1, $apparmor);
+                self::assertArrayHasKey(substr($apparmor[0], strlen('apparmor=')), $profiles);
+            }
+        }
+    }
+
+    private function assertApparmorReplacementPaths(string $abstraction): void
+    {
+        self::assertCount(12, ExecutionRoleProtectedPaths::MASKED);
+        self::assertCount(5, ExecutionRoleProtectedPaths::READONLY);
+        self::assertCount(17, array_unique([...ExecutionRoleProtectedPaths::MASKED, ...ExecutionRoleProtectedPaths::READONLY]));
+        $denied = [];
+        $linkTargets = [];
+        foreach (preg_split('/\R/', $abstraction) ?: [] as $line) {
+            if (preg_match('~\Adeny (/\S+) ([a-z]+),\z~D', trim($line), $match) === 1) {
+                foreach ($this->expandApparmorAlternatives($match[1]) as $path) {
+                    $denied[$path] = ($denied[$path] ?? '').$match[2];
+                }
+            }
+            if (preg_match('~\Adeny link /\*\* -> (/\S+),\z~D', trim($line), $match) === 1) {
+                foreach ($this->expandApparmorAlternatives($match[1]) as $path) {
+                    $linkTargets[$path] = true;
+                }
+            }
+        }
+        foreach (['rwklmx' => ExecutionRoleProtectedPaths::MASKED, 'wkl' => ExecutionRoleProtectedPaths::READONLY] as $permissions => $paths) {
+            foreach ($paths as $path) {
+                foreach ([$path, $path.'/**', '/**'.$path, '/**'.$path.'/**'] as $protected) {
+                    foreach (str_split($permissions) as $permission) {
+                        self::assertStringContainsString($permission, $denied[$protected] ?? '', 'Missing deny '.$permission.' for '.$protected);
+                    }
+                    self::assertArrayHasKey($protected, $linkTargets, 'Missing link-target deny for '.$protected);
+                }
+            }
+        }
+    }
+
+    /** Expand literal brace alternatives only; native AppArmor semantics remain smoke-tested.
+     * @return list<string>
+     */
+    private function expandApparmorAlternatives(string $pattern): array
+    {
+        if (preg_match('/\{([^{}]*)\}/', $pattern, $match, PREG_OFFSET_CAPTURE) !== 1) {
+            return [$pattern];
+        }
+        $expanded = [];
+        foreach (explode(',', $match[1][0]) as $alternative) {
+            array_push($expanded, ...$this->expandApparmorAlternatives(substr_replace($pattern, $alternative, $match[0][1], strlen($match[0][0]))));
+        }
+
+        return $expanded;
+    }
+
     public function test_only_checker_uses_the_version_bound_namespace_seccomp_policy(): void
     {
         $services = $this->services();
         $policyPath = './docker/checker-seccomp-moby-29.6.1.json';
 
-        self::assertSame(['seccomp='.$policyPath], $services['checker']['security_opt'] ?? null);
+        self::assertSame(['seccomp='.$policyPath, 'apparmor=ai6-checker-v1', 'systempaths=unconfined'], $services['checker']['security_opt'] ?? null);
 
         foreach ($services as $name => $service) {
             self::assertArrayNotHasKey('cap_add', $service, $name.' must not add Linux capabilities.');
@@ -287,7 +375,7 @@ final class RuntimeComposeContractTest extends TestCase
         }
 
         self::assertSame(['ALL'], $services['agent']['cap_drop']);
-        self::assertSame(['no-new-privileges:true', 'seccomp=./docker/agent-seccomp-moby-29.6.1.json'], $services['agent']['security_opt']);
+        self::assertSame(['no-new-privileges:true', 'seccomp=./docker/agent-seccomp-moby-29.6.1.json', 'apparmor=ai6-agent-v1', 'systempaths=unconfined'], $services['agent']['security_opt']);
         $agentPolicy = json_decode((string) file_get_contents(dirname(__DIR__, 4).'/docker/agent-seccomp-moby-29.6.1.json'), true, 512, JSON_THROW_ON_ERROR);
         self::assertSame('SCMP_ACT_ERRNO', $agentPolicy['defaultAction']);
         $checkerPolicy = json_decode((string) file_get_contents(dirname(__DIR__, 4).'/docker/checker-seccomp-moby-29.6.1.json'), true, 512, JSON_THROW_ON_ERROR);

@@ -42,6 +42,17 @@ final class CheckerRuntimeDoctorCheckTest extends TestCase
         self::assertSame(['Fehler' => 'checker_attestation_stale_or_invalid'], $check->run()->details);
     }
 
+    public function test_a_legacy_attestation_without_confinement_evidence_fails_closed(): void
+    {
+        $this->writeAttestation(time());
+        $path = $this->root.'/output/attestations/checker.json';
+        $document = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
+        unset($document['apparmor_confined']);
+        file_put_contents($path, json_encode($document, JSON_THROW_ON_ERROR));
+
+        self::assertSame(['Fehler' => 'checker_attestation_stale_or_invalid'], (new CheckerRuntimeDoctorCheck)->run()->details);
+    }
+
     public function test_a_fresh_complete_attestation_passes(): void
     {
         $this->writeAttestation(time());
@@ -84,7 +95,7 @@ final class CheckerRuntimeDoctorCheckTest extends TestCase
     /** @return iterable<string, array{string}> */
     public static function runtimePromises(): iterable
     {
-        foreach (['input_read_only', 'output_separate', 'workspace_private', 'container_read_only', 'network_isolated', 'namespace_tooling', 'profiles_executable'] as $promise) {
+        foreach (['input_read_only', 'output_separate', 'workspace_private', 'container_read_only', 'network_isolated', 'apparmor_confined', 'namespace_tooling', 'profiles_executable'] as $promise) {
             yield $promise => [$promise];
         }
     }
@@ -96,7 +107,7 @@ final class CheckerRuntimeDoctorCheckTest extends TestCase
             'schema' => 'ai6.checker-attestation.v1', 'checker_boot_id' => str_repeat('b', 32),
             'recorded_at' => $recordedAt, 'role' => 'checker', 'input_read_only' => true,
             'output_separate' => true, 'workspace_private' => true, 'container_read_only' => true,
-            'network_isolated' => true, 'namespace_tooling' => true, 'profiles_executable' => true,
+            'network_isolated' => true, 'apparmor_confined' => true, 'namespace_tooling' => true, 'profiles_executable' => true,
             'profile_programs' => ['php-targeted' => true],
         ];
         file_put_contents($this->root.'/output/attestations/checker.json', json_encode(array_replace($document, $overrides), JSON_THROW_ON_ERROR)."\n");

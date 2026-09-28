@@ -27,7 +27,7 @@ final readonly class CheckerRuntimeDoctorCheck implements DoctorCheck
         } catch (JsonException) {
             return new DoctorCheckResult(false, ['Fehler' => 'checker_attestation_invalid']);
         }
-        $keys = ['schema', 'checker_boot_id', 'recorded_at', 'role', 'input_read_only', 'output_separate', 'workspace_private', 'container_read_only', 'network_isolated', 'namespace_tooling', 'profiles_executable', 'profile_programs'];
+        $keys = ['schema', 'checker_boot_id', 'recorded_at', 'role', 'input_read_only', 'output_separate', 'workspace_private', 'container_read_only', 'network_isolated', 'apparmor_confined', 'namespace_tooling', 'profiles_executable', 'profile_programs'];
         if (! is_array($document) || array_keys($document) !== $keys
             || $document['schema'] !== 'ai6.checker-attestation.v1' || $document['role'] !== 'checker'
             || ! is_string($document['checker_boot_id']) || preg_match('/\A[0-9a-f]{32}\z/D', $document['checker_boot_id']) !== 1
@@ -35,7 +35,7 @@ final readonly class CheckerRuntimeDoctorCheck implements DoctorCheck
             || time() - $document['recorded_at'] > (int) config('ai6.checks.runtime.attestation_max_age_seconds', 15)) {
             return new DoctorCheckResult(false, ['Fehler' => 'checker_attestation_stale_or_invalid']);
         }
-        foreach (array_slice($keys, 4, 7) as $promise) {
+        foreach (array_slice($keys, 4, 8) as $promise) {
             if (($document[$promise] ?? null) !== true) {
                 return new DoctorCheckResult(false, ['Fehler' => 'checker_attestation_'.$promise]);
             }

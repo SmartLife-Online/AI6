@@ -3,6 +3,7 @@
 namespace Tests\Unit\Shared\Process;
 
 use App\AI6\Shared\Process\ControlProcessRunner;
+use App\AI6\Shared\Process\ExecutionRole;
 use App\AI6\Shared\Process\ProcessIsolationBoundary;
 use App\AI6\Shared\Process\ProcessIsolationVerifier;
 use App\AI6\Shared\Process\ProcessOutcome;
@@ -34,6 +35,11 @@ final class CheckerRuntimePromiseRejectionTest extends TestCase
         {
             /** @param array<string, bool> $states */
             public function __construct(private array $states) {}
+
+            public function apparmorConfined(ExecutionRole $role): bool
+            {
+                return $this->states['apparmor_confined'];
+            }
 
             public function checkerRuntimePromises(): array
             {
@@ -87,7 +93,7 @@ final class CheckerRuntimePromiseRejectionTest extends TestCase
     /** @return iterable<string, array{string}> */
     public static function promises(): iterable
     {
-        foreach (['input_read_only', 'output_separate', 'workspace_private', 'container_read_only', 'network_isolated', 'namespace_tooling'] as $promise) {
+        foreach (['input_read_only', 'output_separate', 'workspace_private', 'container_read_only', 'network_isolated', 'apparmor_confined', 'namespace_tooling'] as $promise) {
             yield $promise => [$promise];
         }
     }

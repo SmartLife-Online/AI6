@@ -3,6 +3,7 @@
 namespace Tests\Unit\Runs;
 
 use App\AI6\Runs\Console\FakeAgentReleaseGateCommand;
+use App\AI6\Shared\Doctor\TicketManifestDoctorCheck;
 use App\AI6\Shared\Process\ControlProcessRunner;
 use App\AI6\Shared\Process\ProcessOutcome;
 use App\AI6\Shared\Process\ProcessRequest;
@@ -10,6 +11,7 @@ use App\AI6\Shared\Process\ProcessResult;
 use Closure;
 use Illuminate\Console\OutputStyle;
 use Illuminate\Support\Facades\Artisan;
+use PHPUnit\Framework\Assert;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\BufferedOutput;
@@ -20,6 +22,45 @@ final class ReleaseGateCommandTest extends TestCase
 {
     /** @var list<ProcessRequest> */
     private array $requests = [];
+
+    public function test_manifest_output_precedes_tests_and_drift_starts_no_test(): void
+    {
+        $this->fakeResults();
+        Artisan::call('ai6:release-gate');
+        $output = Artisan::output();
+        $manifestPosition = strpos($output, 'Ticketmanifest: OK');
+        $testPosition = strpos($output, 'Tests: 1 passed');
+        self::assertNotFalse($manifestPosition);
+        self::assertNotFalse($testPosition);
+        self::assertLessThan($testPosition, $manifestPosition);
+
+        $transport = new class
+        {
+            public int $calls = 0;
+
+            public function run(ProcessRequest $request): ProcessResult
+            {
+                $this->calls++;
+                Assert::assertSame('ticket-manifest', $request->redactionContext->identifier);
+
+                return new ProcessResult(ProcessOutcome::FAILED, 1, '', '', 0);
+            }
+        };
+        $this->app->instance(ControlProcessRunner::class, $transport);
+        self::assertSame(1, Artisan::call('ai6:release-gate'));
+        $output = Artisan::output();
+        self::assertSame(1, $transport->calls);
+        self::assertStringContainsString('manifest_drift', $output);
+        self::assertStringNotContainsString('Tests:', $output);
+        foreach (FakeAgentReleaseGateCommand::testSelections() as [$path]) {
+            self::assertStringNotContainsString($path, $output);
+        }
+
+        $this->app->instance(TicketManifestDoctorCheck::class, new TicketManifestDoctorCheck(base_path('tests')));
+        self::assertSame(1, Artisan::call('ai6:release-gate'));
+        self::assertStringContainsString('manifest_source_unavailable', Artisan::output());
+        self::assertSame(1, $transport->calls);
+    }
 
     public function test_the_registered_command_runs_exactly_the_bound_release_suite(): void
     {
@@ -161,6 +202,34 @@ final class ReleaseGateCommandTest extends TestCase
         } finally {
             unlink($script);
             putenv(is_string($previous) ? 'AI6_RELEASE_GATE_CANARY='.$previous : 'AI6_RELEASE_GATE_CANARY');
+        }
+    }
+
+    public function test_only_an_explicit_worker_fixture_path_reaches_the_cleared_test_child(): void
+    {
+        $runner = $this->app->make(ControlProcessRunner::class);
+        $name = 'AI6_EFFECT_LOCK_SECURITY_FIXTURE_DIRECTORY';
+        $previous = getenv($name);
+        $script = tempnam(sys_get_temp_dir(), 'ai6-release-fixture-');
+        self::assertIsString($script);
+        try {
+            file_put_contents($script, '<?php echo json_encode(getenv("AI6_EFFECT_LOCK_SECURITY_FIXTURE_DIRECTORY"));');
+            foreach ([false, '', sys_get_temp_dir().'/worker fixture'] as $value) {
+                putenv($value === false ? $name : $name.'='.$value);
+                $this->requests = [];
+                $this->fakeResults();
+                Artisan::call('ai6:release-gate');
+                $request = $this->requests[1];
+                self::assertNotContains($name, $request->environmentAllowlist);
+                $command = $request->command;
+                $command[3] = $script;
+                $result = $runner->run(new ProcessRequest($command, $request->workingDirectory, $request->environmentAllowlist, $request->environment, $request->redactionContext));
+                self::assertSame(ProcessOutcome::SUCCEEDED, $result->outcome, $result->errorOutput);
+                self::assertSame($value === '' ? false : $value, json_decode($result->output, true, flags: JSON_THROW_ON_ERROR));
+            }
+        } finally {
+            unlink($script);
+            putenv(is_string($previous) ? $name.'='.$previous : $name);
         }
     }
 

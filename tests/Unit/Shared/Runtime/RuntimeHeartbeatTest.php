@@ -7,6 +7,7 @@ use Illuminate\Queue\Events\Looping;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -124,6 +125,27 @@ final class RuntimeHeartbeatTest extends TestCase
         } finally {
             DB::setDefaultConnection($originalDefault);
         }
+    }
+
+    #[DataProvider('invalidEnvironment')]
+    public function test_health_command_rejects_invalid_environment(string $key, string $value): void
+    {
+        (new RuntimeHeartbeat($this->directory))->write('worker');
+        putenv($key.'='.$value);
+        self::assertSame(1, Artisan::call('ai6:runtime-health', ['--role' => 'worker']));
+        self::assertStringContainsString('Alter unbekannt, Frist unbekannt', Artisan::output());
+    }
+
+    /** @return list<array{string, string}> */
+    public static function invalidEnvironment(): array
+    {
+        return [
+            ['AI6_HEARTBEAT_DIRECTORY', ''],
+            ['AI6_HEARTBEAT_MAX_AGE', ''],
+            ['AI6_HEARTBEAT_MAX_AGE', '0'],
+            ['AI6_HEARTBEAT_MAX_AGE', '01'],
+            ['AI6_HEARTBEAT_MAX_AGE', 'invalid'],
+        ];
     }
 
     public function test_health_command_returns_failure_for_missing_stale_and_foreign_boot_ids(): void

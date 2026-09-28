@@ -30,6 +30,7 @@ final class SecurityBootstrapTest extends TestCase
             'workspace_private' => true,
             'container_read_only' => true,
             'network_isolated' => true,
+            'apparmor_confined' => true,
             'namespace_tooling' => true,
             'profiles_executable' => true,
             'profile_programs' => ['php-targeted' => true],

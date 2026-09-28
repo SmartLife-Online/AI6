@@ -1,0 +1,72 @@
+# Execution-role profiles paired with systempaths=unconfined in Compose.
+# Install the shared abstraction first. Unlisted mounts stay denied.
+# Scope and evidence: docs/AI6-036_NAMESPACE_ENTSCHEIDUNG.md and verification.
+abi <abi/3.0>,
+include <tunables/global>
+
+profile ai6-checker-v1 flags=(attach_disconnected,mediate_deleted) {
+  include <abstractions/ai6-container-base>
+  signal (send,receive) peer=ai6-checker-v1,
+  ptrace (trace,tracedby,read,readby) peer=ai6-checker-v1,
+
+  # unshare --mount --mount-proc and the fixed checker wrapper.
+  mount options=(rprivate) -> /,
+  mount options=(rprivate) -> /proc/,
+  mount fstype=proc options=(rw,nosuid,nodev,noexec) proc -> /proc/,
+  mount fstype=tmpfs options=(rw,nosuid,nodev,noexec) tmpfs -> /var/lib/ai6/checker-{executions,outputs}/,
+  mount fstype=tmpfs options=(rw,nosuid,nodev,noexec) tmpfs -> /run/ai6/heartbeat/checker/,
+}
+
+profile ai6-agent-v1 flags=(attach_disconnected,mediate_deleted) {
+  include <abstractions/ai6-container-base>
+  signal (send,receive) peer=ai6-agent-v1,
+  ptrace (trace,tracedby,read,readby) peer=ai6-agent-v1,
+
+  # Bubblewrap builds its empty root at /tmp, then pivots twice.
+  mount options=(rw,rslave,silent) -> /,
+  mount fstype=tmpfs options=(rw,nosuid,nodev) tmpfs -> /tmp/,
+  mount options=(rw,rbind,silent) /tmp/newroot/ -> /tmp/newroot/,
+  pivot_root oldroot=/tmp/oldroot/ /tmp/,
+  mount options=(rw,rbind,silent) /oldroot/proc/ -> /proc/,
+  mount options=(rw,rbind) /oldroot/usr/ -> /newroot/usr/,
+  mount options=(ro,nosuid,nodev,remount,bind,silent,relatime) -> /newroot/usr/,
+  mount fstype=proc options=(rw,nosuid,nodev,noexec) proc -> /newroot/proc/,
+  mount fstype=tmpfs options=(rw,nosuid,nodev) tmpfs -> /newroot/{dev,tmp}/,
+  mount options=(rw,rbind) /oldroot/dev/{null,zero,full,random,urandom,tty} -> /newroot/dev/{null,zero,full,random,urandom,tty},
+  mount options=(rw,nosuid,remount,bind,silent) -> /newroot/dev/{null,zero,full,random,urandom,tty},
+  mount fstype=devpts options=(rw,nosuid,noexec) devpts -> /newroot/dev/pts/,
+  mount options=(ro,nosuid,nodev,remount,bind,silent,relatime) -> /newroot/,
+  # Existing AgentProcessScope::command projections, approved decision item 5.
+  # Fixed files visible inside the container, including Docker-managed DNS/hosts.
+  # This does not allow the host's /etc directory as a mount source.
+  mount options=(rw,rbind) /oldroot/etc/ssl/ -> /newroot/etc/ssl/,
+  mount options=(rw,rbind) /oldroot/etc/ld.so.cache -> /newroot/etc/ld.so.cache,
+  mount options=(rw,rbind) /oldroot/etc/resolv.conf -> /newroot/etc/resolv.conf,
+  mount options=(rw,rbind) /oldroot/etc/hosts -> /newroot/etc/hosts,
+  mount options=(rw,rbind) /oldroot/etc/nsswitch.conf -> /newroot/etc/nsswitch.conf,
+  mount options=(rw,rbind) /oldroot/etc/passwd -> /newroot/etc/passwd,
+  mount options=(rw,rbind) /oldroot/etc/group -> /newroot/etc/group,
+  mount options=(ro,nosuid,nodev,remount,bind,silent,relatime) -> /newroot/etc/{ssl/,ld.so.cache,resolv.conf,hosts,nsswitch.conf,passwd,group},
+  mount options=(ro,nosuid,nodev,remount,bind,silent,relatime) -> /newroot/etc/ssl/**,
+  # Only individual server-created turn homes/outputs, never mailbox roots.
+  mount options=(rw,rbind) /oldroot/var/lib/ai6/agent-executions/*-*-*/ -> /newroot/var/lib/ai6/agent-executions/*-*-*/,
+  mount options=(ro,nosuid,nodev,noexec,remount,bind,silent,relatime) -> /newroot/var/lib/ai6/agent-executions/*-*-*/,
+  mount options=(rw,rbind) /oldroot/var/lib/ai6/agent-outputs/*-*-*/ -> /newroot/var/lib/ai6/agent-outputs/*-*-*/,
+  mount options=(rw,nosuid,nodev,noexec,remount,bind,silent,relatime) -> /newroot/var/lib/ai6/agent-outputs/*-*-*/,
+  # Existing provider scope producers: individual private children only.
+  # Never permit private_root itself, sibling trees or arbitrary file sources.
+  mount options=(rw,rbind) /oldroot/run/ai6/provider-private/projection-*/ -> /newroot/run/ai6/provider-private/projection-*/,
+  mount options=(ro,nosuid,nodev,noexec,remount,bind,silent,relatime) -> /newroot/run/ai6/provider-private/projection-*/,
+  mount options=(rw,rbind) /oldroot/run/ai6/provider-private/login-*/ -> /newroot/run/ai6/provider-private/login-*/,
+  mount options=(rw,nosuid,nodev,noexec,remount,bind,silent,relatime) -> /newroot/run/ai6/provider-private/login-*/,
+  mount options=(rw,rbind) /oldroot/run/ai6/provider-private/login-*/auth.json -> /newroot/run/ai6/provider-private/login-*/auth.json,
+  mount options=(ro,nosuid,nodev,noexec,remount,bind,silent,relatime) -> /newroot/run/ai6/provider-private/login-*/auth.json,
+  mount options=(rw,rbind) /oldroot/run/ai6/provider-private/probe-*/inputs/doctor-new-*/ -> /newroot/run/ai6/provider-private/probe-*/inputs/doctor-new-*/,
+  mount options=(ro,nosuid,nodev,noexec,remount,bind,silent,relatime) -> /newroot/run/ai6/provider-private/probe-*/inputs/doctor-new-*/,
+  mount options=(rw,rbind) /oldroot/run/ai6/provider-private/probe-*/outputs/doctor-new-*/ -> /newroot/run/ai6/provider-private/probe-*/outputs/doctor-new-*/,
+  mount options=(rw,nosuid,nodev,noexec,remount,bind,silent,relatime) -> /newroot/run/ai6/provider-private/probe-*/outputs/doctor-new-*/,
+  mount options=(rw,rprivate,silent) -> /oldroot/,
+  umount /oldroot/,
+  pivot_root oldroot=/newroot/ /newroot/,
+  umount /,
+}

@@ -88,6 +88,19 @@ final readonly class ProviderCapabilityReport
     /** Independent supervisor presence is never derived from a report or turn output. */
     public function boot(bool $fresh = true): string
     {
+        return $this->presence($fresh)['boot_id'];
+    }
+
+    /**
+     * Read the current supervisor boot and its observed heartbeat timestamp.
+     * Waiving freshness preserves the active-turn boot() contract.
+     *
+     * @return array{boot_id: string, recorded_at: int}
+     *
+     * @phpstan-impure
+     */
+    public function presence(bool $fresh = true): array
+    {
         $root = ProviderOnboarding::path('presence_root');
         $boot = trim(AgentExecutionProcessor::readBytes($root.'/boot-id', 64));
         $pulse = $this->json->decode(AgentExecutionProcessor::readBytes($root.'/heartbeat.json', 512), new RedactionContext('provider', null, 'presence'));
@@ -99,7 +112,7 @@ final readonly class ProviderCapabilityReport
             throw new CredentialProjectionException('The current agent boot is unavailable.');
         }
 
-        return $boot;
+        return ['boot_id' => $boot, 'recorded_at' => $pulse['recorded_at']];
     }
 
     /** Ongoing turns check revocation, independently of capability/presence expiry. */

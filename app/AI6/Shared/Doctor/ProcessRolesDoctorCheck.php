@@ -20,22 +20,14 @@ final readonly class ProcessRolesDoctorCheck implements DoctorCheck
     {
         $identity = $this->identityFactory->fromConfiguredValues();
         $role = $identity->runtimeRole;
-        $details = ['Rolle' => $role === '' ? 'unbekannt' : $role];
+        $details = ['Rolle' => $this->safeRole($role)];
         $passed = true;
 
-        if (! in_array($role, ['worker', 'scheduler', 'agent', 'checker'], true)
-            || $identity->heartbeatDirectory === ''
-            || ! is_string(getenv('AI6_HEARTBEAT_MAX_AGE'))
-            || preg_match('/\A[1-9][0-9]*\z/D', (string) getenv('AI6_HEARTBEAT_MAX_AGE')) !== 1
-        ) {
-            $details['Heartbeat'] = 'FEHLER (Rolle '.$this->safeRole($role).')';
-            $passed = false;
+        if ($identity->heartbeatDirectory === '' && $role === 'app') {
+            $details['Heartbeat'] = 'nicht vorgesehen (Rolle app; HTTP-Healthcheck)';
         } else {
             try {
-                $status = (new RuntimeHeartbeat($identity->heartbeatDirectory))->status(
-                    $role,
-                    (int) getenv('AI6_HEARTBEAT_MAX_AGE'),
-                );
+                $status = RuntimeHeartbeat::statusFromEnvironment($role);
             } catch (Throwable) {
                 $status = ['healthy' => false, 'age' => null];
             }
@@ -51,16 +43,19 @@ final readonly class ProcessRolesDoctorCheck implements DoctorCheck
             // only when this optional role check actually runs, so Laravel can still
             // discover console commands such as `migrate --help` before the keyring
             // bootstrap is available.
-            app(ProviderCapabilityReport::class)->boot();
-            $details['Agentpräsenz'] = 'OK (Lebendigkeit)';
+            $presence = app(ProviderCapabilityReport::class)->presence();
+            $details['Agentpräsenz'] = 'OK (Lebendigkeit; Alter '.(time() - $presence['recorded_at']).'s)';
         } catch (Throwable) {
             $details['Agentpräsenz'] = 'FEHLER (Rolle agent)';
             $passed = false;
         }
 
-        foreach (['scheduler', 'app'] as $unobservableRole) {
+        foreach (['worker', 'scheduler', 'app'] as $unobservableRole) {
             if ($unobservableRole !== $role) {
-                $details['Rolle '.$unobservableRole] = 'UNGEPRÜFT (ai6:runtime-health --role='.$unobservableRole.')';
+                $command = $unobservableRole === 'app'
+                    ? 'docker compose exec app /opt/ai6/docker/healthcheck.sh app'
+                    : 'docker compose exec '.$unobservableRole.' php artisan ai6:runtime-health --role='.$unobservableRole;
+                $details['Rolle '.$unobservableRole] = 'UNGEPRÜFT ('.$command.')';
             }
         }
 
@@ -69,6 +64,6 @@ final readonly class ProcessRolesDoctorCheck implements DoctorCheck
 
     private function safeRole(string $role): string
     {
-        return $role === '' ? 'unbekannt' : $role;
+        return in_array($role, ['app', 'worker', 'scheduler', 'agent', 'checker'], true) ? $role : 'unbekannt';
     }
 }

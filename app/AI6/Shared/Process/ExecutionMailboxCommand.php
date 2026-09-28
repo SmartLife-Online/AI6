@@ -28,6 +28,12 @@ final class ExecutionMailboxCommand extends Command
             return self::INVALID;
         }
 
+        if ($role === ExecutionRole::AGENT && ! app(ProcessRuntimeProbe::class)->apparmorConfined($role)) {
+            $this->components->error('The agent AppArmor confinement is unavailable.');
+
+            return self::FAILURE;
+        }
+
         $root = config('ai6.execution_mailboxes.'.$role->value.'_root');
         $heartbeatDirectory = getenv('AI6_HEARTBEAT_DIRECTORY');
         $interval = getenv('AI6_HEARTBEAT_INTERVAL');
@@ -48,6 +54,14 @@ final class ExecutionMailboxCommand extends Command
 
         $providerReady = false;
         if ($role === ExecutionRole::AGENT) {
+            try {
+                app(ProviderCapabilityPublisher::class)->start($bootId);
+            } catch (Throwable $exception) {
+                report($exception);
+                $this->components->error('Die Agent-Präsenz konnte nicht sicher initialisiert werden.');
+
+                return self::FAILURE;
+            }
             try {
                 app(ProviderCredentialStore::class)->recover();
                 $providerReady = true;
@@ -118,6 +132,9 @@ final class ExecutionMailboxCommand extends Command
 
     private function heartbeat(string $directory, ExecutionRole $role, string $bootId, int $pending): void
     {
+        if ($role === ExecutionRole::AGENT && ! app(ProcessRuntimeProbe::class)->apparmorConfined($role)) {
+            throw new ProcessStartRejectedException('The agent AppArmor confinement is unavailable.');
+        }
         $document = json_encode([
             'role' => $role->value,
             'boot_id' => $bootId,

@@ -97,15 +97,20 @@ final class DoctorCommand extends Command
 
             foreach ($labels as $label) {
                 $result = $results[$label] ?? null;
-                if ($result?->passed === true) {
+                $notResponsible = ($result?->details['Zuständigkeit'] ?? null) === 'nicht zuständig';
+                if ($result?->passed === true && ! $notResponsible) {
                     continue;
                 }
 
                 $passed = false;
                 $reason = $result === null
                     ? 'Prüfung nicht ausgeführt'
-                    : ($result->details['Fehler'] ?? 'Prüfung nicht bestanden');
-                $this->line(sprintf('  Sicherheitsmaßnahme %s: FEHLER (%s: %s)', $measure->value, $label, $reason));
+                    : ($result->details['Fehler'] ?? $result->details['Grund'] ?? implode('; ', array_map(
+                        static fn (string $name, string $value): string => $name.': '.$value,
+                        array_keys($result->details),
+                        array_values($result->details),
+                    )));
+                $this->line(sprintf('  Sicherheitsmaßnahme %s: FEHLER (%s: %s)', $measure->value, $label, $notResponsible ? 'nicht zuständig in dieser Rolle' : $reason));
             }
         }
 

@@ -4,6 +4,20 @@ namespace App\AI6\Shared\Process;
 
 final readonly class NativeProcessRuntimeProbe implements ProcessRuntimeProbe
 {
+    public static function apparmorLabel(ExecutionRole $role): string
+    {
+        return 'ai6-'.$role->value.'-v1 (enforce)';
+    }
+
+    public function apparmorConfined(ExecutionRole $role): bool
+    {
+        // Read the kernel's current process label, never a configured promise.
+        $label = @file_get_contents('/proc/self/attr/current');
+        $expected = self::apparmorLabel($role);
+
+        return $label === $expected || $label === $expected."\n";
+    }
+
     public function checkerRuntimePromises(): array
     {
         $input = config('ai6.execution_mailboxes.checker_root');
@@ -27,6 +41,7 @@ final readonly class NativeProcessRuntimeProbe implements ProcessRuntimeProbe
             'network_isolated' => DIRECTORY_SEPARATOR === '/'
                 && is_dir('/sys/class/net')
                 && array_values(array_diff(scandir('/sys/class/net') ?: [], ['.', '..', 'lo'])) === [],
+            'apparmor_confined' => $this->apparmorConfined(ExecutionRole::CHECKER),
             'namespace_tooling' => is_string($unshare) && is_string($wrapper)
                 && $this->fixedExecutable($unshare) && $this->fixedExecutable($wrapper)
                 && $this->fixedExecutable('/usr/bin/mount') && $this->fixedExecutable('/usr/bin/find')

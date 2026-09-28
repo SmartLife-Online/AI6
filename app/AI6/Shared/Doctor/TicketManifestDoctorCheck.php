@@ -38,7 +38,8 @@ final readonly class TicketManifestDoctorCheck implements DoctorCheck
         if (! $result->succeeded()) {
             return new DoctorCheckResult(false, [
                 'Fehler' => 'manifest_drift',
-                'Exitcode' => (string) ($result->exitCode ?? 1),
+                'Exitcode' => $result->exitCode === null ? 'keiner' : (string) $result->exitCode,
+                ...($result->exitCode === null ? ['Prozessergebnis' => $result->outcome->value] : []),
             ]);
         }
 

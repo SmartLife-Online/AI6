@@ -33,17 +33,17 @@ final class InstallCommand extends Command
         $passed = $this->step(
             'APP_KEY',
             $this->hasApplicationKey(),
-            'APP_KEY setzen, zum Beispiel mit `openssl rand -base64 32`.',
+            'APP_KEY=base64:$(openssl rand -base64 32) erzeugen und den resultierenden Wert in `.env` setzen.',
         );
 
         [$databasePassed, $databaseNext] = $this->databaseStatus();
         $passed = $this->step('Datenbank und Migrationen', $databasePassed, $databaseNext) && $passed;
 
-        $administratorExists = $this->administratorExists();
+        [$administratorExists, $administratorNext] = $this->administratorStatus();
         $passed = $this->step(
             'Erster Administrator',
             $administratorExists,
-            'docker compose exec app php artisan ai6:create-admin admin@example.com --name="AI6 Administrator"',
+            $administratorNext,
         ) && $passed;
 
         $confirmationRequired = $this->policy->isEnabled(SecurityMeasure::LOGIN_EMAIL_CONFIRMATION);
@@ -88,19 +88,27 @@ final class InstallCommand extends Command
         }
     }
 
-    private function administratorExists(): bool
+    /** @return array{bool, string} */
+    private function administratorStatus(): array
     {
+        $bootstrap = 'docker compose exec app php artisan ai6:create-admin admin@example.com --name="AI6 Administrator"';
         try {
-            return User::query()->exists();
+            $activeAdministrator = User::query()->where('is_global_admin', true)->where('is_active', true)->exists();
+
+            return [$activeAdministrator, User::query()->exists()
+                ? 'Bootstrap abgeschlossen; bestehendes Administratorkonto reaktivieren.'
+                : $bootstrap];
         } catch (Throwable) {
-            return false;
+            return [false, 'Nach erfolgreicher Datenbankprüfung: '.$bootstrap];
         }
     }
 
     private function step(string $label, bool $passed, string $next, ?string $note = null): bool
     {
         $this->line($label.': '.($passed ? 'OK' : 'FEHLT'));
-        $this->line('  Nächster Schritt: '.$next);
+        if (! $passed) {
+            $this->line('  Nächster Schritt: '.$next);
+        }
         if ($note !== null) {
             $this->line('  Hinweis: '.$note);
         }

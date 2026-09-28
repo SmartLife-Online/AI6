@@ -6,6 +6,9 @@ use App\AI6\Shared\Doctor\CodexCliDoctorCheck;
 use App\AI6\Shared\Doctor\DoctorCheckResult;
 use App\AI6\Shared\Doctor\GitHubCopilotCliDoctorCheck;
 use App\AI6\Shared\Doctor\GrokCliDoctorCheck;
+use App\AI6\Shared\Process\ExecutionRole;
+use App\AI6\Shared\Process\ProcessRuntimeProbe;
+use App\AI6\Shared\Process\ProcessStartRejectedException;
 use Throwable;
 
 /** Native checks run here, never in the web/worker Doctor readers. */
@@ -15,11 +18,20 @@ final class ProviderCapabilityPublisher
 
     private ?\Closure $roleHeartbeat = null;
 
-    public function __construct(private readonly ProviderCredentialStore $store, private readonly ProviderCapabilityReport $reports) {}
+    public function __construct(private readonly ProviderCredentialStore $store, private readonly ProviderCapabilityReport $reports, private readonly ProcessRuntimeProbe $runtime) {}
+
+    public function start(string $bootId): void
+    {
+        $this->assertConfined();
+        if (preg_match('/\A[0-9a-f]{32}\z/D', $bootId) !== 1) {
+            throw new CredentialProjectionException('The provider supervisor boot is invalid.');
+        }
+        $this->store->atomic(ProviderOnboarding::path('presence_root').'/boot-id', $bootId."\n", 0644);
+    }
 
     public function pulse(string $bootId): void
     {
-        ProviderOnboarding::assertAgent();
+        $this->assertConfined();
         $root = ProviderOnboarding::path('presence_root');
         if (trim(AgentExecutionProcessor::readBytes($root.'/boot-id', 64)) !== $bootId) {
             throw new CredentialProjectionException('The provider supervisor boot changed.');
@@ -33,6 +45,14 @@ final class ProviderCapabilityPublisher
             } finally {
                 $this->roleHeartbeat = $heartbeat;
             }
+        }
+    }
+
+    private function assertConfined(): void
+    {
+        ProviderOnboarding::assertAgent();
+        if (! $this->runtime->apparmorConfined(ExecutionRole::AGENT)) {
+            throw new ProcessStartRejectedException('The agent AppArmor confinement is unavailable.');
         }
     }
 

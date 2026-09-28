@@ -220,10 +220,8 @@ final class RuntimeScriptsTest extends TestCase
         self::assertStringNotContainsString('/token', $provisioning);
         $role = $this->read('docker/role-process.sh');
         self::assertStringContainsString('boot_id="$(od -An -N16 -tx1 /dev/urandom', $role);
-        self::assertStringContainsString('presence=/var/lib/ai6/provider-presence', $role);
-        self::assertStringContainsString('printf \'%s\n\' "$boot_id" > "$presence/boot-id.tmp"', $role);
-        self::assertStringContainsString('chmod 0644 "$presence/boot-id.tmp"', $role);
-        self::assertStringContainsString('mv "$presence/boot-id.tmp" "$presence/boot-id"', $role);
+        // Presence is published by the PHP supervisor only after its kernel confinement check.
+        self::assertStringNotContainsString('$presence/boot-id', $role);
     }
 
     public function test_image_and_sqlite_sources_are_pinned_and_code_runs_unprivileged(): void
@@ -336,6 +334,12 @@ final class RuntimeScriptsTest extends TestCase
         self::assertContains('!docs/AI6_IMPLEMENTATION_PLAN.md', $lines);
         self::assertContains('!docs/AI6_TICKET_MANIFEST.yaml', $lines);
         self::assertContains('!scripts/generate-ticket-manifest.php', $lines);
+        self::assertSame([
+            '!.env.example',
+            '!docs/AI6_IMPLEMENTATION_PLAN.md',
+            '!docs/AI6_TICKET_MANIFEST.yaml',
+            '!scripts/generate-ticket-manifest.php',
+        ], array_values(array_filter($lines, static fn (string $line): bool => str_starts_with($line, '!'))));
     }
 
     public function test_composer_contract_and_installed_packages_match_the_ai6_008_platform_contract(): void

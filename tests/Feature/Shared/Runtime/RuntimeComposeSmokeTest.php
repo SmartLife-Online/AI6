@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\DB;
 use Symfony\Component\Process\Process;
 use Tests\Feature\Checks\BuildsCheckFixture;
 use Tests\Feature\Tickets\TicketUiTestCase;
+use Tests\Fixtures\Runtime\ExecutionRoleProtectedPaths;
 
 final class RuntimeComposeSmokeTest extends TicketUiTestCase
 {
@@ -84,6 +85,8 @@ final class RuntimeComposeSmokeTest extends TicketUiTestCase
             $this->waitForServiceState($service, static fn (string $state): bool => str_ends_with($state, '|healthy'), 180);
         }
 
+        $this->assertUnconfinedRolesFailClosed();
+        $this->assertAgentPresenceFailureIsContained();
         $this->assertMailboxAndIsolationBoundaries();
 
         $this->assertManagedEffectLocksAreImmutableAcrossInit();
@@ -191,9 +194,233 @@ final class RuntimeComposeSmokeTest extends TicketUiTestCase
         }, 60, 'Genau ein Worker-Nachweis und ein bootgebundener Scheduler-Nachweis wurden nicht innerhalb der Frist sichtbar.');
     }
 
+    private function assertUnconfinedRolesFailClosed(): void
+    {
+        $image = $this->compose(['images', '-q', 'agent'], 30);
+        $image->mustRun();
+        $imageId = trim($image->getOutput());
+        self::assertMatchesRegularExpression('/\A(?:sha256:)?[a-f0-9]{12,64}\z/D', $imageId);
+        // No host mounts, credentials, network or capabilities: only a disposable
+        // instance of the test image and fresh tmpfs. Read the real kernel label.
+        $code = <<<'PHP'
+require '/opt/ai6/vendor/autoload.php';
+$app = require '/opt/ai6/bootstrap/app.php';
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+$probe = new App\AI6\Shared\Process\NativeProcessRuntimeProbe;
+$label = file_get_contents('/proc/self/attr/current');
+if ($label !== "unconfined\n" && $label !== 'unconfined') { throw new RuntimeException('Unexpected negative-test label'); }
+foreach (App\AI6\Shared\Process\ExecutionRole::cases() as $role) {
+    if ($probe->apparmorConfined($role)) { throw new RuntimeException('Unconfined role accepted'); }
+}
+mkdir('/tmp/presence', 0755);
+mkdir('/run/ai6/heartbeat/agent', 0700, true);
+$boot = str_repeat('a', 32);
+file_put_contents('/run/ai6/heartbeat/agent/boot-id', $boot);
+putenv('AI6_HEARTBEAT_DIRECTORY=/run/ai6/heartbeat/agent');
+putenv('AI6_HEARTBEAT_INTERVAL=1');
+config(['ai6.runtime_role' => 'agent', 'ai6.provider_onboarding.presence_root' => '/tmp/presence']);
+$exit = Illuminate\Support\Facades\Artisan::call('ai6:execution-mailbox', ['role' => 'agent', '--once' => true]);
+if ($exit !== 1 || !str_contains(Illuminate\Support\Facades\Artisan::output(), 'The agent AppArmor confinement is unavailable.')) {
+    throw new RuntimeException('Unconfined agent mailbox did not fail closed');
+}
+foreach (['start', 'pulse'] as $operation) {
+    try {
+        $app->make(App\AI6\Agents\ProviderCapabilityPublisher::class)->{$operation}($boot);
+        throw new RuntimeException('Unconfined agent published presence');
+    } catch (App\AI6\Shared\Process\ProcessStartRejectedException $expected) {
+        if ($expected->getMessage() !== 'The agent AppArmor confinement is unavailable.') { throw $expected; }
+    }
+}
+if (glob('/tmp/presence/*') !== [] || file_exists('/run/ai6/heartbeat/agent/heartbeat.json')) {
+    throw new RuntimeException('Unconfined agent wrote presence or heartbeat');
+}
+config(['ai6.runtime_role' => 'checker']);
+$promises = $probe->checkerRuntimePromises();
+if (array_keys(array_filter($promises, static fn ($value) => !$value)) !== ['apparmor_confined']) {
+    throw new RuntimeException('Negative fixture must fail only the real AppArmor promise: '.json_encode($promises));
+}
+$app->make(App\AI6\Checks\CheckerRuntimeAttestation::class)->publish($boot);
+$doctor = (new App\AI6\Shared\Doctor\CheckerRuntimeDoctorCheck)->run();
+if ($doctor->passed || $doctor->details !== ['Fehler' => 'checker_attestation_apparmor_confined']) {
+    throw new RuntimeException('Doctor accepted the unconfined checker');
+}
+mkdir('/var/lib/ai6/checker-outputs/result');
+mkdir('/var/lib/ai6/checker-outputs/artifact');
+$marker = '/var/lib/ai6/checker-workspace/program-started';
+$result = $app->make(App\AI6\Shared\Process\ControlProcessRunner::class)->run(new App\AI6\Shared\Process\ProcessRequest(
+    [PHP_BINARY, '-r', 'file_put_contents($argv[1], "started");', $marker],
+    '/var/lib/ai6/checker-workspace', [], [],
+    new App\AI6\Shared\Redaction\RedactionContext('checker', null, 'apparmor-negative'),
+    policy: App\AI6\Shared\Process\ProcessPolicyName::CHECKER,
+    resultDirectory: '/var/lib/ai6/checker-outputs/result',
+    artifactDirectory: '/var/lib/ai6/checker-outputs/artifact',
+));
+if ($result->outcome !== App\AI6\Shared\Process\ProcessOutcome::START_REJECTED
+    || !str_contains($result->errorOutput, 'apparmor_confined') || file_exists($marker)) {
+    throw new RuntimeException('Unconfined checker was not rejected before program start');
+}
+echo 'unconfined: agent-presence-blocked, agent-heartbeat-blocked, checker-start-blocked, doctor-red';
+PHP;
+        $negative = new Process([
+            'docker', 'run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
+            '--security-opt', 'no-new-privileges:true', '--security-opt', 'apparmor=unconfined',
+            '--security-opt', 'systempaths=unconfined', '--user', '10002:10001',
+            '--tmpfs', '/tmp:rw,nosuid,nodev,noexec,mode=1777',
+            '--tmpfs', '/run:rw,nosuid,nodev,noexec,mode=1777',
+            '--tmpfs', '/var/lib/ai6/checker-executions:ro,nosuid,nodev,noexec,mode=755',
+            '--tmpfs', '/var/lib/ai6/checker-outputs:rw,nosuid,nodev,noexec,mode=777',
+            '--tmpfs', '/var/lib/ai6/checker-workspace:rw,nosuid,nodev,noexec,mode=777',
+            '-e', 'APP_ENV=testing', '-e', 'APP_KEY='.$this->appKey,
+            '-e', 'AI6_RUNTIME_ROLE=agent', '--entrypoint', 'php', $imageId, '-r', $code,
+        ]);
+        $negative->setTimeout(30);
+        $negative->mustRun();
+        self::assertSame('unconfined: agent-presence-blocked, agent-heartbeat-blocked, checker-start-blocked, doctor-red', $negative->getOutput());
+    }
+
+    private function assertAgentPresenceFailureIsContained(): void
+    {
+        $image = $this->compose(['images', '-q', 'agent'], 30);
+        $image->mustRun();
+        $code = <<<'PHP'
+require '/opt/ai6/vendor/autoload.php';
+$app = require '/opt/ai6/bootstrap/app.php';
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+if (!(new App\AI6\Shared\Process\NativeProcessRuntimeProbe)->apparmorConfined(App\AI6\Shared\Process\ExecutionRole::AGENT)) {
+    throw new RuntimeException('The startup failure fixture must be confined');
+}
+mkdir('/tmp/presence', 0700);
+mkdir('/tmp/mailbox', 0700);
+mkdir('/run/ai6/heartbeat/agent', 0700, true);
+file_put_contents('/run/ai6/heartbeat/agent/boot-id', str_repeat('a', 32));
+file_put_contents('/tmp/canary', 'unchanged');
+symlink('/tmp/canary', '/tmp/presence/boot-id');
+putenv('AI6_HEARTBEAT_DIRECTORY=/run/ai6/heartbeat/agent');
+putenv('AI6_HEARTBEAT_INTERVAL=1');
+config(['ai6.provider_onboarding.presence_root' => '/tmp/presence', 'ai6.execution_mailboxes.agent_root' => '/tmp/mailbox']);
+config(['logging.default' => 'single', 'logging.channels.single.path' => '/tmp/start-failure.log']);
+$exit = Illuminate\Support\Facades\Artisan::call('ai6:execution-mailbox', ['role' => 'agent', '--once' => true]);
+$output = Illuminate\Support\Facades\Artisan::output();
+if ($exit !== 1 || !str_contains($output, 'Die Agent-Präsenz konnte nicht sicher initialisiert werden.')
+    || str_contains($output, 'CredentialProjectionException') || str_contains($output, '/tmp/')
+    || file_get_contents('/tmp/canary') !== 'unchanged' || !is_link('/tmp/presence/boot-id')
+    || glob('/tmp/presence/*') !== ['/tmp/presence/boot-id']
+    || glob('/run/ai6/heartbeat/agent/*') !== ['/run/ai6/heartbeat/agent/boot-id']) {
+    throw new RuntimeException('Presence startup failure was not contained');
+}
+echo 'presence-start-failure: exit-1, value-free-error, no-presence-or-heartbeat';
+PHP;
+        $probe = new Process([
+            'docker', 'run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
+            '--security-opt', 'no-new-privileges:true', '--security-opt', 'apparmor=ai6-agent-v1',
+            '--security-opt', 'systempaths=unconfined', '--user', '10002:10001',
+            '--tmpfs', '/tmp:rw,nosuid,nodev,noexec,mode=1777',
+            '--tmpfs', '/run:rw,nosuid,nodev,noexec,mode=1777',
+            '-e', 'APP_ENV=testing', '-e', 'APP_KEY='.$this->appKey,
+            '-e', 'AI6_RUNTIME_ROLE=agent', '--entrypoint', 'php', trim($image->getOutput()), '-r', $code,
+        ]);
+        $probe->setTimeout(30);
+        $probe->mustRun();
+        self::assertSame('presence-start-failure: exit-1, value-free-error, no-presence-or-heartbeat', $probe->getOutput());
+    }
+
+    /** @param array<string, mixed> $home */
+    private function assertPrivateProviderProjections(array $home): void
+    {
+        // Exercise the actual scope producers, with synthetic credentials only.
+        // Reflection reaches the login filesystem boundary without an OAuth call.
+        $code = <<<'PHP'
+require '/opt/ai6/vendor/autoload.php';
+$app = require '/opt/ai6/bootstrap/app.php';
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+$home = new App\AI6\Agents\ExecutionHome(...json_decode($argv[1], true, flags: JSON_THROW_ON_ERROR));
+$store = $app->make(App\AI6\Agents\ProviderCredentialStore::class);
+$private = App\AI6\Agents\ProviderOnboarding::path('private_root');
+$canary = $private.'/smoke-sibling';
+file_put_contents($canary, 'supervisor-only');
+$auth = '{"OPENAI_API_KEY":"synthetic-smoke-no-provider-access"}';
+$run = function (string $cwd, array $readOnly, array $writable, ?string $authFile = null) use ($app, $canary, $auth): void {
+    $payload = <<<'INNER'
+$spec = json_decode($argv[1], true, flags: JSON_THROW_ON_ERROR);
+if (trim(file_get_contents('/proc/self/attr/current')) !== 'ai6-agent-v1 (enforce)') { throw new RuntimeException('Lost profile'); }
+foreach ([$spec['canary'], '/var/lib/ai6/provider-store', '/var/lib/ai6/provider-reports', '/run/ai6/heartbeat/agent', '/opt/ai6'] as $foreign) {
+    if (file_exists($foreign)) { throw new RuntimeException('Supervisor state exposed'); }
+}
+foreach ($spec['readOnly'] as $path) {
+    // chmod fails on a read-only mount even when DAC alone would permit it.
+    if (!file_exists($path) || @chmod($path, 0700) || @file_put_contents(is_dir($path) ? $path.'/forbidden' : $path, 'x') !== false) {
+        throw new RuntimeException('Projection is not read-only');
+    }
+}
+foreach ($spec['writable'] as $path) {
+    if (file_put_contents($path.'/allowed', 'x') !== 1) { throw new RuntimeException('Output is not writable'); }
+}
+if ($spec['authFile'] !== null && hash('sha256', file_get_contents($spec['authFile'])) !== $spec['authHash']) {
+    throw new RuntimeException('Synthetic auth projection changed');
+}
+echo 'private-scope-ok';
+INNER;
+    $spec = json_encode(compact('readOnly', 'writable', 'authFile', 'canary') + ['authHash' => hash('sha256', $auth)], JSON_THROW_ON_ERROR);
+    $result = $app->make(App\AI6\Shared\Process\ControlProcessRunner::class)->run(new App\AI6\Shared\Process\ProcessRequest(
+        ['/usr/local/bin/php', '-r', $payload, $spec], $cwd, [], [],
+        new App\AI6\Shared\Redaction\RedactionContext('provider', null, 'private-projection-smoke'),
+    ));
+    if (!$result->succeeded() || $result->output !== 'private-scope-ok') {
+        throw new RuntimeException('Private scope failed: '.$result->outcome->value.' '.$result->errorOutput);
+    }
+};
+try {
+    $store->replace('codex_cli', $auth);
+    $store->withProjection($home, 'codex_cli', $store->generation('codex_cli'), function ($projected) use ($run): void {
+        if (!preg_match('~/projection-[a-f0-9]{32}$~D', $projected->authDirectory)) { throw new RuntimeException('Unexpected projection source'); }
+        $run($projected->workspace, [$projected->root, $projected->authDirectory], [$projected->outputRoot], $projected->authDirectory.'/auth.json');
+    });
+    echo 'projection-ro-ok|';
+    $temporary = new ReflectionMethod(App\AI6\Agents\ProviderLogin::class, 'temporary');
+    $login = $app->make(App\AI6\Agents\ProviderLogin::class);
+    $temporary->invoke($login, function ($root) use ($run): void { $run($root, [], [$root]); });
+    $temporary->invoke($login, function ($root) use ($run): void {
+        if (!preg_match('~/login-[a-f0-9]{32}$~D', $root)) { throw new RuntimeException('Unexpected login source'); }
+        $run($root, [$root.'/auth.json'], [$root], $root.'/auth.json');
+    }, $auth);
+    echo 'login-rw-auth-ro-ok|';
+    $app->make(App\AI6\Agents\ExecutionHomeManager::class)->withProbeHome('codex_cli', 'codex-cli-v1', function ($probe) use ($run): void {
+        if (!preg_match('~/probe-[a-f0-9]{32}/inputs/doctor-new-[a-f0-9]{16}$~D', $probe->root)
+            || !preg_match('~/probe-[a-f0-9]{32}/outputs/doctor-new-[a-f0-9]{16}$~D', $probe->outputRoot)) {
+            throw new RuntimeException('Unexpected probe source');
+        }
+        $run($probe->workspace, [$probe->root], [$probe->outputRoot]);
+    });
+    echo 'probe-input-ro-output-rw-ok';
+} finally {
+    $store->replace('codex_cli', null);
+    unlink($canary);
+}
+if (glob($private.'/projection-*') !== [] || glob($private.'/login-*') !== [] || glob($private.'/probe-*') !== []) {
+    throw new RuntimeException('Private projection cleanup failed');
+}
+PHP;
+        $probe = $this->compose(['exec', '-T', 'agent', 'php', '-r', $code, json_encode($home, JSON_THROW_ON_ERROR)], 30);
+        $probe->mustRun();
+        self::assertSame('projection-ro-ok|login-rw-auth-ro-ok|probe-input-ro-output-rw-ok', $probe->getOutput());
+    }
+
     private function assertMailboxAndIsolationBoundaries(): void
     {
         foreach (['agent' => '10002', 'checker' => '10003'] as $role => $uid) {
+            $profile = $this->compose(['exec', '-T', $role, 'cat', '/proc/self/attr/current'], 30);
+            $profile->mustRun();
+            self::assertSame('ai6-'.$role.'-v1 (enforce)', trim($profile->getOutput()));
+            $confinement = $this->compose(['exec', '-T', $role, 'php', '-r',
+                'require "/opt/ai6/vendor/autoload.php"; $probe = new App\AI6\Shared\Process\NativeProcessRuntimeProbe; echo json_encode([$probe->apparmorConfined(App\AI6\Shared\Process\ExecutionRole::AGENT), $probe->apparmorConfined(App\AI6\Shared\Process\ExecutionRole::CHECKER)]);',
+            ], 30);
+            $confinement->mustRun();
+            self::assertSame($role === 'agent' ? '[true,false]' : '[false,true]', $confinement->getOutput());
+            $fixture = '/var/lib/ai6/'.$role.'-outputs/path-protection-new';
+            $this->seedPathProtectionFixture($fixture);
+            $paths = $this->compose(['exec', '-T', $role, 'php', '-r', $this->pathProtectionProbe(), $fixture], 30);
+            $paths->mustRun();
+            self::assertSame('path-protection-ok', $paths->getOutput());
             $identity = $this->compose(['exec', '-T', $role, 'sh', '-c', 'printf "%s|%s" "$(id -u)" "$(id -g)"'], 30);
             $identity->mustRun();
             self::assertSame($uid.'|10001', trim($identity->getOutput()));
@@ -246,6 +473,14 @@ if (! is_writable(getcwd())) {
     fwrite(STDERR, "workspace-not-writable\n");
     exit(13);
 }
+$status = file_get_contents('/proc/self/status');
+foreach (['CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb'] as $capability) {
+    if (preg_match('/^'.$capability.':\s+0+$/m', $status) !== 1) { throw new RuntimeException('Remaining checker capability: '.$capability); }
+}
+$attempt = proc_open(['/usr/bin/unshare', '--user', '--map-root-user', '--mount', '/usr/bin/umount', $roots[0]], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+if (!is_resource($attempt)) { throw new RuntimeException('Nested namespace probe did not start'); }
+foreach ($pipes as $pipe) { stream_get_contents($pipe); fclose($pipe); }
+if (proc_close($attempt) === 0) { throw new RuntimeException('Nested namespace exposed the hidden mailbox'); }
 fwrite(STDOUT, 'checker-wrapper-ok');
 PHP;
         $namespaceProbe = $this->compose([
@@ -260,6 +495,14 @@ PHP;
         ], 30);
         $namespaceProbe->mustRun();
         self::assertSame('checker-wrapper-ok', trim($namespaceProbe->getOutput()));
+
+        $protectedNamespace = $this->compose([
+            'exec', '-T', 'checker', '/usr/bin/unshare', '--user', '--map-root-user', '--mount', '--pid', '--fork', '--mount-proc',
+            '/usr/local/bin/php', '-r', $this->pathProtectionProbe(), '/var/lib/ai6/checker-outputs/path-protection-new',
+        ], 30);
+        $protectedNamespace->mustRun();
+        self::assertSame('path-protection-ok', $protectedNamespace->getOutput());
+        $this->assertForbiddenNamespaceMounts();
 
         $this->assertCheckerPromisesRejectBeforeProgram();
         $this->assertRealCheckerExecutionRoundTrip();
@@ -299,6 +542,41 @@ PHP;
             self::assertIsString($home[$key] ?? null);
         }
 
+        $this->seedPathProtectionFixture($home['outputRoot'].'/path-protection');
+        $agentProbeCode = <<<'PHP'
+require '/opt/ai6/vendor/autoload.php';
+$app = require '/opt/ai6/bootstrap/app.php';
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+$home = json_decode($argv[1], true, flags: JSON_THROW_ON_ERROR);
+$request = new App\AI6\Shared\Process\ProcessRequest(
+    ['/usr/local/bin/php', '-r', $argv[2], $home['outputRoot'].'/path-protection', $home['workspace'], $home['outputRoot']],
+    $home['workspace'], [], [], new App\AI6\Shared\Redaction\RedactionContext('project', 'run', 'namespace-smoke'),
+);
+$scope = new App\AI6\Shared\Process\AgentProcessScope([$home['root']], [$home['outputRoot']]);
+$process = new Symfony\Component\Process\Process($scope->command($request), $home['workspace']);
+$process->setTimeout(20);
+$process->mustRun();
+echo $process->getOutput();
+PHP;
+        $agentPayload = $this->pathProtectionProbe().<<<'PHP'
+foreach (['/opt/ai6', '/var/lib/ai6/provider-store', '/var/lib/ai6/provider-reports', '/run/ai6/provider-private', '/run/ai6/heartbeat/agent', '/var/lib/ai6/agent-executions/requests', '/var/lib/ai6/agent-outputs/path-protection-new'] as $foreign) {
+    if (file_exists($foreign)) { throw new RuntimeException('Foreign projection visible: '.$foreign); }
+}
+if (!is_file($argv[2].'/source.php') || @file_put_contents($argv[2].'/forbidden', 'x') !== false
+    || @file_put_contents('/forbidden', 'x') !== false || file_put_contents($argv[3].'/allowed', 'x') !== 1) {
+    throw new RuntimeException('The sealed input/output boundary failed.');
+}
+$status = file_get_contents('/proc/self/status');
+foreach (['CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb'] as $capability) {
+    if (preg_match('/^'.$capability.':\s+0+$/m', $status) !== 1) { throw new RuntimeException('Remaining capability: '.$capability); }
+}
+echo '|agent-scope-ok';
+PHP;
+        $agentScope = $this->compose(['exec', '-T', 'agent', 'php', '-r', $agentProbeCode, json_encode($home, JSON_THROW_ON_ERROR), $agentPayload], 30);
+        $agentScope->mustRun();
+        self::assertSame('path-protection-ok|agent-scope-ok', $agentScope->getOutput());
+        $this->assertPrivateProviderProjections($home);
+
         $this->waitUntil(function (): bool {
             $heartbeat = $this->compose(['exec', '-T', 'agent', 'cat', '/run/ai6/heartbeat/agent/heartbeat.json'], 30);
             if ($heartbeat->run() !== 0) {
@@ -335,6 +613,112 @@ PHP;
             $removed = $this->compose(['exec', '-T', 'worker', 'test', '!', '-e', $removedRoot], 30);
             $removed->mustRun();
         }
+    }
+
+    private function assertForbiddenNamespaceMounts(): void
+    {
+        foreach ([
+            ['-t', 'tmpfs', '-o', 'nosuid,nodev,noexec', 'tmpfs', '/etc'],
+            ['--bind', '/proc', '/tmp'],
+            ['--bind', '/var/lib/ai6/checker-outputs', '/tmp'],
+            ['-o', 'remount,rw', '/proc/sys'],
+        ] as $arguments) {
+            $probe = $this->compose([
+                'exec', '-T', 'checker', '/usr/bin/unshare', '--user', '--map-root-user', '--mount', '--pid', '--fork', '--mount-proc',
+                '/usr/bin/mount', ...$arguments,
+            ], 30);
+            self::assertSame(32, $probe->run(), 'Expected mount failure: '.$probe->getErrorOutput());
+        }
+        foreach ([
+            ['/', '/host'],
+            ['/var/lib/ai6/provider-store', '/credentials'],
+            ['/run/ai6/provider-private', '/private'],
+            ['/run/ai6/provider-private', '/run/ai6/provider-private'],
+            ['/var/lib/ai6/agent-executions', '/mailbox'],
+            ['/proc', '/var/lib/ai6/agent-outputs/path-protection-new'],
+        ] as [$source, $target]) {
+            $probe = $this->compose([
+                'exec', '-T', 'agent', '/usr/bin/bwrap', '--die-with-parent', '--unshare-user', '--unshare-pid', '--unshare-ipc', '--unshare-uts',
+                '--cap-drop', 'ALL', '--new-session', '--ro-bind', '/usr', '/usr', '--bind', $source, $target, '--', '/usr/bin/true',
+            ], 30);
+            self::assertNotSame(0, $probe->run(), 'A forbidden agent projection succeeded.');
+            self::assertStringContainsString('permission denied', strtolower($probe->getErrorOutput()));
+        }
+    }
+
+    private function seedPathProtectionFixture(string $root): void
+    {
+        $seed = <<<'PHP'
+$root = $argv[1];
+$paths = json_decode($argv[2], true, flags: JSON_THROW_ON_ERROR);
+foreach (['', '/oldroot', '/newroot', '/tmp/oldroot'] as $alias) {
+    foreach ($paths as $path) {
+        foreach (['files'.$alias.$path, 'trees'.$alias.$path.'/probe'] as $relative) {
+            $file = $root.'/'.$relative;
+            if (!is_dir(dirname($file)) && !mkdir(dirname($file), 0777, true)) { throw new RuntimeException('Fixture directory'); }
+            file_put_contents($file, 'synthetic-path-canary');
+            chmod($file, 0666);
+        }
+    }
+
+
+}
+chmod($root, 0777);
+file_put_contents($root.'/control', 'synthetic-path-canary');
+chmod($root.'/control', 0666);
+PHP;
+        $prepare = $this->compose(['exec', '-T', 'worker', 'php', '-r', $seed, $root, json_encode([...ExecutionRoleProtectedPaths::MASKED, ...ExecutionRoleProtectedPaths::READONLY], JSON_THROW_ON_ERROR)], 30);
+        $prepare->mustRun();
+        // This positive oracle proves every synthetic file exists and is
+        // readable/writable before the confined role tests the same bytes.
+        $baseline = $this->compose(['exec', '-T', 'worker', 'php', '-r', $this->pathProtectionProbe(), $root, 'baseline'], 30);
+        $baseline->mustRun();
+        self::assertSame('path-protection-ok', $baseline->getOutput());
+    }
+
+    private function pathProtectionProbe(): string
+    {
+        return '$masked = '.var_export(ExecutionRoleProtectedPaths::MASKED, true).'; $readonly = '.var_export(ExecutionRoleProtectedPaths::READONLY, true).';'.<<<'PHP'
+$root = $argv[1];
+$baseline = ($argv[2] ?? '') === 'baseline';
+$control = @fopen($root.'/control', 'r+');
+if ($control === false) { throw new RuntimeException('Positive control unavailable'); }
+fclose($control);
+if (!link($root.'/control', $root.'/control-link') || !rename($root.'/control-link', $root.'/control-renamed')) {
+    throw new RuntimeException('Link/rename positive control unavailable');
+}
+unlink($root.'/control-renamed');
+foreach (['', '/oldroot', '/newroot', '/tmp/oldroot'] as $alias) {
+    foreach (array_merge($masked, $readonly) as $path) {
+        $maskedPath = in_array($path, $masked, true);
+        foreach (['files'.$alias.$path, 'trees'.$alias.$path.'/probe'] as $relative) {
+            $file = $root.'/'.$relative;
+            foreach (['r', 'r+'] as $mode) {
+                $handle = @fopen($file, $mode);
+                $allowed = $baseline || (!$maskedPath && $mode === 'r');
+                if (($handle !== false) !== $allowed) { throw new RuntimeException('Path boundary: '.$mode.' '.$relative); }
+                if (is_resource($handle)) { fclose($handle); }
+            }
+            if (!$baseline && (@link($file, $root.'/escaped-link') || @rename($file, $root.'/escaped-rename'))) {
+                throw new RuntimeException('Path escaped by link/rename: '.$relative);
+            }
+        }
+    }
+}
+if (!$baseline) {
+    foreach ($masked as $path) {
+        foreach ([$path, '/proc/self/root'.$path] as $alias) {
+            if (is_dir($alias) ? @scandir($alias) !== false : @fopen($alias, 'r') !== false) {
+                throw new RuntimeException('Real masked path readable: '.$alias);
+            }
+        }
+    }
+    foreach (['/proc/sys/kernel/hostname', '/proc/sysrq-trigger', '/proc/irq/default_smp_affinity'] as $path) {
+        if (@fopen($path, 'r+') !== false) { throw new RuntimeException('Real readonly path writable: '.$path); }
+    }
+}
+echo 'path-protection-ok';
+PHP;
     }
 
     private function assertRealCheckerExecutionRoundTrip(): void
@@ -510,7 +894,7 @@ $cleanup = static function (string $root): void {
 
     @rmdir($root);
 };
-$names = ['input_read_only', 'output_separate', 'workspace_private', 'container_read_only', 'network_isolated', 'namespace_tooling'];
+$names = ['input_read_only', 'output_separate', 'workspace_private', 'container_read_only', 'network_isolated', 'apparmor_confined', 'namespace_tooling'];
 try {
     foreach ([$workspace, $output.'/result', $output.'/artifact'] as $directory) {
         if (! mkdir($directory, 0770, true)) { throw new RuntimeException('promise-test-directory'); }
@@ -526,6 +910,7 @@ try {
         $states[$violated] = false;
         $runtime = new class($states) implements App\AI6\Shared\Process\ProcessRuntimeProbe {
             public function __construct(private array $states) {}
+            public function apparmorConfined(App\AI6\Shared\Process\ExecutionRole $role): bool { return $this->states['apparmor_confined']; }
             public function checkerRuntimePromises(): array { return $this->states; }
             public function mountOptions(string $path): array { return ['rw', 'nosuid', 'nodev', 'noexec']; }
         };

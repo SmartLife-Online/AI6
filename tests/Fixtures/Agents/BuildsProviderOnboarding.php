@@ -15,7 +15,10 @@ use App\AI6\Shared\Doctor\DoctorCheckResult;
 use App\AI6\Shared\Doctor\GitHubCopilotCliDoctorCheck;
 use App\AI6\Shared\Doctor\GrokCliDoctorCheck;
 use App\AI6\Shared\Process\ControlProcessRunner;
+use App\AI6\Shared\Process\ExecutionRole;
+use App\AI6\Shared\Process\NativeProcessRuntimeProbe;
 use App\AI6\Shared\Process\ProcessPolicyRegistry;
+use App\AI6\Shared\Process\ProcessRuntimeProbe;
 use Illuminate\Filesystem\Filesystem;
 use PHPUnit\Framework\Attributes\After;
 
@@ -32,6 +35,26 @@ trait BuildsProviderOnboarding
 
     private function createOnboardingFixture(): void
     {
+        // Synthetic supervisor evidence; native confinement is proved by the Compose smoke.
+        $runtime = new class implements ProcessRuntimeProbe
+        {
+            public function apparmorConfined(ExecutionRole $role): bool
+            {
+                return $role === ExecutionRole::AGENT;
+            }
+
+            public function checkerRuntimePromises(): array
+            {
+                return (new NativeProcessRuntimeProbe)->checkerRuntimePromises();
+            }
+
+            public function mountOptions(string $path): array
+            {
+                return (new NativeProcessRuntimeProbe)->mountOptions($path);
+            }
+        };
+        $this->app->instance(ProcessRuntimeProbe::class, $runtime);
+        $this->app->forgetInstance(ProviderCapabilityPublisher::class);
         $this->onboardingRoot = str_replace('\\', '/', (string) realpath(sys_get_temp_dir())).'/ai6-onboarding-'.bin2hex(random_bytes(8));
         foreach (['store', 'reports', 'presence', 'private'] as $name) {
             self::assertTrue(mkdir($this->onboardingRoot.'/'.$name, 0700, true));

@@ -115,10 +115,15 @@ final class FakeAgentReleaseGateCommand extends Command
                 $environment[$name] = $value;
             }
         }
+        $testEnvironment = self::TEST_ENVIRONMENT;
+        $workerFixture = getenv('AI6_EFFECT_LOCK_SECURITY_FIXTURE_DIRECTORY');
+        if (is_string($workerFixture) && $workerFixture !== '') {
+            $testEnvironment['AI6_EFFECT_LOCK_SECURITY_FIXTURE_DIRECTORY'] = $workerFixture;
+        }
         // Fixed server-owned PHP bootstrap, never repository/provider input.
         // Test variables are established inside the cleared child environment,
         // before Artisan boots, without widening the control-policy allowlist.
-        $bootstrap = '$environment = '.var_export(self::TEST_ENVIRONMENT, true).';'
+        $bootstrap = '$environment = '.var_export($testEnvironment, true).';'
             .'foreach ($environment as $name => $value) { putenv($name."=".$value); $_ENV[$name] = $_SERVER[$name] = $value; }'
             .'array_shift($argv); $argc = count($argv); $_SERVER["argv"] = $argv; $_SERVER["argc"] = $argc; require $argv[0];';
         $skipped = 0;
