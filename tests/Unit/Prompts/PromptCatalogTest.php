@@ -91,15 +91,16 @@ final class PromptCatalogTest extends TestCase
         return $files;
     }
 
-    public function test_nine_catalog_entries_render_byte_identically_against_the_golden_fixture(): void
+    public function test_ten_catalog_entries_render_byte_identically_against_the_golden_fixture(): void
     {
         $fixture = $this->fixture();
         $catalog = $this->app->make(PromptCatalog::class);
         $renderer = $this->app->make(PromptRenderer::class);
 
+        self::assertSame('3', $catalog->version);
         self::assertSame($fixture['catalog_version'], $catalog->version);
         self::assertSame(
-            ['finding_verification', 'fix', 'human_response', 'implementation', 'manual_finding_list_fix', 'manual_foreign_fix_review', 'manual_own_review_fix', 'quality_review', 'security_review'],
+            ['finding_verification', 'fix', 'human_response', 'implementation', 'manual_finding_list_fix', 'manual_foreign_fix_review', 'manual_own_review_fix', 'manual_review', 'quality_review', 'security_review'],
             array_column($catalog->entries(), 'id'),
         );
         self::assertSame(array_keys($fixture['entries']), array_column($catalog->entries(), 'id'));
@@ -118,6 +119,28 @@ final class PromptCatalogTest extends TestCase
         }
     }
 
+    public function test_version_two_prompt_bytes_remain_unchanged(): void
+    {
+        // SHA-256 of each rendered prompt in the replaced catalog-v2.json fixture.
+        $expected = [
+            'finding_verification' => 'e0a84c3e0f2162db663821d8affa4d65160466cf44d1ff4210c76f73a6904276',
+            'fix' => '528d3052e170a9abe8d8fb716c24743c0e9509b9766c201b2a598d25552e28b3',
+            'human_response' => '2bbf4169d74a113069dab1c03dd912b3967e90336b99848e85a22f88f2c4e490',
+            'implementation' => 'dfcf0b92303a3b4bd1f410dd813dc03ec2f3c729e99f95755a15de31cf7c711c',
+            'manual_finding_list_fix' => 'd47278a0b4e461e96860528185bd2283279a48b5ea0d99929b1de7c2a89320d8',
+            'manual_foreign_fix_review' => '6cc81168f0c2bb9a4a51baada630cdac0c44e0d6a9f4854a3ba29f125e9de94f',
+            'manual_own_review_fix' => '72622285ca1d2a06fa76fb0a0add7a3f270835b162061f7b44e166796616a6c0',
+            'quality_review' => 'ea340e51c0b72b748a46df9ee3a4f5ca9dfa1953d8f65a42576c489df9f0dd5f',
+            'security_review' => '38cebffa5e8144ece93abfd2a386d434eca85608b91172c59fa74821de4fb973',
+        ];
+        $fixture = $this->fixture();
+        $renderer = $this->app->make(PromptRenderer::class);
+        foreach ($expected as $id => $hash) {
+            $variables = $fixture['entries'][$id]['variables'] ?? ['context' => $fixture['context']];
+            self::assertSame($hash, hash('sha256', $renderer->render($id, new PromptVariables($variables), $this->context())), $id);
+        }
+    }
+
     public function test_catalog_and_review_profile_versions_invalidate_only_authorized_snapshots(): void
     {
         $base = PromptCatalog::defaults();
@@ -129,11 +152,11 @@ final class PromptCatalogTest extends TestCase
         $first = $this->renderer($base)->snapshot([$request], $this->context());
         $entryChanged = $base->withEntry(
             new PromptEntry('quality_review', '2', $base->entry('quality_review')->template."\nVersionierter Zusatz.", ['context']),
-            '3',
+            '4',
         );
         $profileChanged = $base->withReviewProfile(
             new ReviewPromptProfile('architecture', '2', 'Architektur', 'Geänderter autorisierter Fokus.'),
-            '3',
+            '4',
         );
 
         self::assertNotSame($first->hash, $this->renderer($entryChanged)->snapshot([$request], $this->context())->hash);
@@ -187,7 +210,7 @@ final class PromptCatalogTest extends TestCase
             }
         }
 
-        $extended = $catalog->withEntry(new PromptEntry('test_extension', '1', 'Test: {{context}}', ['context']), '3');
+        $extended = $catalog->withEntry(new PromptEntry('test_extension', '1', 'Test: {{context}}', ['context']), '4');
         self::assertSame(
             'Test: erweitert',
             $this->renderer($extended)->render(
@@ -324,7 +347,7 @@ final class PromptCatalogTest extends TestCase
     /** @return array<string, mixed> */
     private function fixture(): array
     {
-        $content = file_get_contents(dirname(__DIR__, 2).'/Fixtures/Prompts/catalog-v2.json');
+        $content = file_get_contents(dirname(__DIR__, 2).'/Fixtures/Prompts/catalog-v3.json');
         self::assertNotFalse($content);
 
         return json_decode($content, true, 512, JSON_THROW_ON_ERROR);

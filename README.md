@@ -762,7 +762,28 @@ Auch der historische Unparsed-Backfill ohne `--project-config` verwendet `ticket
 
 Alle Runtimeprofile beginnen mit deaktivierten MCP-Servern, Plugins, Skills, Hooks, Commands, Agentdefinitionen und externen Helpern. Eine Erweiterung kann ausschließlich durch eine Änderung der vertrauenswürdigen Serverkonfiguration in die abschließende Liste gelangen. Version, effektive Adapterflags, Permissions und Erweiterungslisten werden über die Domäne `AI6-PROVIDER-RUNTIME-PROFILE-V1` und die zentrale kanonische JSON-Naht mit SHA-256 gebunden.
 
-Der zentrale Promptkatalog besitzt die Katalogversion `1` und genau einen `PromptRenderer`. Seine sechs Zwecke sind `implementation`, `quality_review`, `fix`, `finding_verification`, `security_review` und `human_response`. Die spezialisierten Reviewprofile decken Ticket-/AC-Treue, funktionale Korrektheit, Security, Datenbank/Migrationen, Concurrency, Performance, Tests, Architektur und API-Verträge ab. Katalogeinträge und Reviewprofile tragen eigene Versionen. Ein Prompt-Snapshot enthält Katalogversion, ausgewählte Reviewprofile und gerenderte Promptbytes; sein SHA-256 verwendet die Domäne `AI6-PROMPT-SNAPSHOT-V1` und kanonisches JSON. Providerindividuelle Templates oder ein zweiter Renderer existieren nicht.
+Der zentrale Promptkatalog besitzt die Katalogversion `3` und genau einen `PromptRenderer`. Seine sechs Run-Zwecke sind `implementation`, `quality_review`, `fix`, `finding_verification`, `security_review` und `human_response`; hinzu kommen die vier manuellen Einträge `manual_own_review_fix`, `manual_foreign_fix_review`, `manual_finding_list_fix` und `manual_review`. Die spezialisierten Reviewprofile decken Ticket-/AC-Treue, funktionale Korrektheit, Security, Datenbank/Migrationen, Concurrency, Performance, Tests, Architektur und API-Verträge ab. Katalogeinträge und Reviewprofile tragen eigene Versionen. Ein Prompt-Snapshot enthält Katalogversion, ausgewählte Reviewprofile und gerenderte Promptbytes; sein SHA-256 verwendet die Domäne `AI6-PROMPT-SNAPSHOT-V1` und kanonisches JSON. Providerindividuelle Templates oder ein zweiter Renderer existieren nicht.
+
+### Zuordnung des bisherigen Ticket-Prompt-Tools (AI6-037, erste Etappe)
+
+Die Prompt-Hilfe unter `/prompts/help` zeigt `manual_review` als dritte statische Karte mit derselben Vorschau- und Kopieraktion. Nach dem Kopieren wird der wörtliche Platzhalter `tickets/<TICKET-ID>.md` ersetzt. Der Review endet mit `### Fix-Liste` und einer kopierfertigen Liste oder `Nichts zu fixen.`; die Antwort kann anschließend im bestehenden Fix-Listen-Feld verarbeitet werden. Der oben dokumentierte Anmelde- und Gastzugangsvertrag bleibt unverändert.
+
+| Bisheriger Prompt | Zuordnung | Zentraler Eintrag |
+|---|---|---|
+| Review-Prompt aus `ticket-prompt/index.html` | Inhalt übernommen | `manual_review` |
+| Statischer Fix-Prompt aus `ticket-prompt/index.html` | Anwendungsfall abgelöst ohne Inhaltsübernahme | `manual_own_review_fix` |
+| Fix-Listen-Ablauf des Review-Prompts | Anwendungsfall abgelöst ohne Inhaltsübernahme | `manual_finding_list_fix` |
+| `ai/prompts/implementierung_master_prompt.md` | Anwendungsfall abgelöst ohne Inhaltsübernahme | `implementation` |
+| `ai/prompts/implementierung_kleines_ticket_prompt.md` | Anwendungsfall abgelöst ohne Inhaltsübernahme | `implementation` |
+| `ai/prompts/implementierung_planungs_prompt.md` | Anwendungsfall abgelöst ohne Inhaltsübernahme | `implementation` |
+
+Die Implementierungsvorlagen werden damit fachlich dem Run-Eintrag zugeordnet; ihr Inhalt wird nicht in Run-Prompts kopiert. Die bisherigen Werkzeuge unter `ticket-prompt/`, `ai/prompts/` und `tools/` sind zur Ablösung vorgesehen und bleiben unverändert erhalten. Nur die Abschaltung des regulären Legacy-Lesers gehört zur gesondert freizugebenden Phase B von AI6-038. Die Entfernung der Verzeichnisse bleibt eine gesonderte menschliche Entscheidung und erfolgt in einem eigenen Commit außerhalb des Pilotcodes. `tickets/README.md` und andere Statusindizes sind reine Ansichten; ausschließlich die Ticketdatei ist Statusquelle.
+
+Version 3 ergänzt nur den Review-Prompt; die Promptbytes der neun Alteinträge bleiben unverändert. Weil die Katalogversion in jeden Snapshot-Hash und der Katalog in den Trusted-Binding-Fingerprint eingeht, ändern sich dennoch die Snapshot-Hashes. `QueueReevaluation` erkennt die geänderte Bindung und plant die erneute Bewertung freigegebener Queue-Einträge.
+
+Der Migrationsteil ist noch nicht geliefert: `ai6:tickets:migrate-legacy` steht noch nicht zur Verfügung. Voraussetzung ist ein menschlich benannter realer Legacy-Korpus mit Projekt, Verzeichnis, Dateianzahl und freigegebener echter, gegebenenfalls redigierter Beispieldatei. Der V1-Bestand von AI6 und das synthetische M169-Negativfixture ersetzen diesen Input nicht. AC-01 bis AC-07 und MG-01 bleiben offen; die ergebnisfreie Vorlage liegt in `docs/AI6-037_MG-01_ABNAHMEPROTOKOLL.md`. Die Promptetappe ist keine vollständige Ticketabnahme. Der erste V1-Pilot von AI6-038 benötigt diese Migration nicht; sein späterer Cutoff verlangt die gelieferte Migration und die signierten Gates AI6-037/MG-01 sowie AI6-038/MG-03.
+
+### Native Instruktionsgrenzen
 
 Native Instruktionskandidaten werden als bereits typisierte Ergebnisliste übergeben; der Resolver liest weder Git noch Dateisystem oder Prozesse. Ausschließlich serverseitig konfigurierte Discoverynamen, Rangfolge und Geltungsbereiche sind zulässig. Host-/Parentquellen, fehlende Dateien, Symlinks, absolute oder traversierende Pfade, unbekannte Discoverynamen, ungültiges UTF-8, kanonische Duplikate und Importzyklen schließen ohne Teilsnapshot. Effektiver Inhalt passiert vor Importauswertung und Hashbildung den zentralen `Redactor`; `AI6-INSTRUCTION-SNAPSHOT-V1` bindet Providerprofil, Reihenfolge, Geltungsbereich, Pfad, Blob-SHA, Imports, den SHA-256 des effektiven Inhalts je Eintrag und die tatsächlich verwendeten redigierten Bytes.
 

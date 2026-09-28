@@ -1,6 +1,6 @@
 schema: ai6.ticket-manifest.v1
 source: docs/AI6_IMPLEMENTATION_PLAN.md
-plan_revision: "V1.7.12"
+plan_revision: "V1.7.13"
 blueprint_count: 58
 blueprints:
   - id: "AI6-001"
@@ -452,12 +452,12 @@ blueprints:
     depends_on: ["AI6-007", "AI6-008", "AI6-009", "AI6-016", "AI6-032"]
     requirement_refs: ["TKT-003", "TKT-005", "TKT-011", "OPS-005"]
   - id: "AI6-038"
-    title: "Realer M169-Pilot und MVP-Abnahme"
+    title: "Realer AI6-Pilot und MVP-Abnahme"
     milestone: "M7"
     initial_status: "todo"
     risk: "high"
     kind: "spike"
-    depends_on: ["AI6-032", "AI6-035", "AI6-036", "AI6-037", "AI6-049", "AI6-050"]
+    depends_on: ["AI6-032", "AI6-035", "AI6-036", "AI6-049", "AI6-050"]
     requirement_refs: ["PROD-001", "AGT-001", "RUN-010", "REV-001", "HUM-002", "RUN-009", "OPS-005"]
   - id: "AI6-051"
     title: "Git-Repositories im SHA-1- und SHA-256-Objektformat unterstützen"

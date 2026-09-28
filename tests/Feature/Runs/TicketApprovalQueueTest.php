@@ -22,6 +22,7 @@ use App\AI6\Projects\Models\Project;
 use App\AI6\Projects\Models\TicketReadModel;
 use App\AI6\Projects\ProjectRole;
 use App\AI6\Projects\TicketReadModelRedactionState;
+use App\AI6\Prompts\PromptCatalog;
 use App\AI6\Reviews\ReviewerSlotFactory;
 use App\AI6\Runs\ApprovalLimits;
 use App\AI6\Runs\ApprovalSelection;
@@ -110,7 +111,7 @@ final class TicketApprovalQueueTest extends TicketUiTestCase
         self::assertSame('prepared', $approval->saga_phase);
         self::assertSame('pending_approval_effect', $approval->queue_state);
         self::assertCount(17, $approval->limits_snapshot);
-        self::assertSame('2', $approval->prompt_snapshot['catalog_version']);
+        self::assertSame(PromptCatalog::VERSION, $approval->prompt_snapshot['catalog_version']);
         self::assertSame('1', $approval->prompt_snapshot['fix_prompt_binding']['entry_version']);
         self::assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/D', $approval->prompt_snapshot['fix_prompt_binding']['template_sha256']);
         self::assertArrayHasKey('fix', $approval->prompt_snapshot['rendered_prompts']);

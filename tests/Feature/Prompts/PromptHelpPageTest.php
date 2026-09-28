@@ -41,6 +41,7 @@ final class PromptHelpPageTest extends AuthFeatureTestCase
      */
     private const DEFAULT_STATE_TESTS = [
         'test_without_the_switch_the_page_keeps_its_login_requirement',
+        'test_manual_review_is_the_third_static_card_for_an_authenticated_user',
     ];
 
     protected function setUp(): void
@@ -251,7 +252,7 @@ final class PromptHelpPageTest extends AuthFeatureTestCase
         $own = $catalog->entry(PromptHelp::OWN_ENTRY_ID);
         $this->app->instance(PromptCatalog::class, $catalog->withEntry(
             new PromptEntry($own->id, '2', $own->template, $own->requiredVariables, ''),
-            '3',
+            '4',
         ));
 
         Livewire::actingAs($this->createUser());
@@ -289,6 +290,19 @@ final class PromptHelpPageTest extends AuthFeatureTestCase
         self::assertStringContainsString('data-prompt-copy="static-foreign-preview"', $html);
         self::assertStringContainsString('/assets/prompt-help.js', $html);
         self::assertStringContainsString('Katalogversion '.$this->app->make(PromptCatalog::class)->version, $html);
+    }
+
+    public function test_manual_review_is_the_third_static_card_for_an_authenticated_user(): void
+    {
+        $expected = $this->app->make(PromptRenderer::class)->render('manual_review', new PromptVariables([]), $this->context());
+        $page = $this->actingAs($this->createUser())->get(route('prompts.help'))->assertOk();
+        $page->assertSeeInOrder(['id="static-own-preview"', 'id="static-foreign-preview"', 'id="static-review-preview"', 'id="review-answer"'], false);
+        $html = (string) $page->getContent();
+        self::assertSame(1, preg_match('/<textarea id="static-review-preview"[^>]*readonly[^>]*>(.*?)<\/textarea>/s', $html, $matches));
+        self::assertSame($expected, html_entity_decode($matches[1], ENT_QUOTES | ENT_HTML5));
+        self::assertStringContainsString('data-prompt-copy="static-review-preview"', $html);
+        self::assertStringContainsString('Ticketumsetzung prüfen und Fix-Liste erstellen', $html);
+        self::assertStringContainsString('tickets/&lt;TICKET-ID&gt;.md', $html);
     }
 
     public function test_valid_review_answer_renders_only_the_terminal_list_once(): void

@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Prompts;
 
+use App\AI6\Prompts\ManualFindingListExtractor;
 use App\AI6\Prompts\PromptCatalog;
 use App\AI6\Prompts\PromptRenderer;
 use App\AI6\Prompts\PromptRenderRequest;
@@ -22,6 +23,7 @@ final class ManualPromptCatalogTest extends TestCase
             'manual_own_review_fix' => 'Eigenen Reviewbefund beheben und re-reviewen',
             'manual_foreign_fix_review' => 'Fremde Fixes read-only prüfen und re-reviewen',
             'manual_finding_list_fix' => 'Findings aus einer Reviewantwort prüfen und beheben',
+            'manual_review' => 'Ticketumsetzung prüfen und Fix-Liste erstellen',
         ];
 
         foreach ($expected as $id => $displayName) {
@@ -54,10 +56,62 @@ final class ManualPromptCatalogTest extends TestCase
         self::assertCount(1, array_filter($catalogFiles, static fn (string $path): bool => basename($path) === 'PromptRenderer.php'));
     }
 
+    public function test_manual_review_preserves_the_legacy_review_contract(): void
+    {
+        $entry = $this->app->make(PromptCatalog::class)->entry('manual_review');
+        self::assertSame([], $entry->requiredVariables);
+        $prompt = $this->app->make(PromptRenderer::class)->render('manual_review', new PromptVariables([]), $this->context());
+        foreach ([
+            'tickets/<TICKET-ID>.md',
+            ManualFindingListExtractor::MARKER_LINE,
+            ManualFindingListExtractor::NOTHING_TO_FIX,
+            '- Ändere keine Code-Dateien.',
+            '- Ändere weder Ticketstatus noch `AGENTS.md`, `CLAUDE.md` oder den normativen Plan.',
+        ] as $literal) {
+            self::assertStringContainsString($literal, $prompt);
+        }
+    }
+
+    public function test_readme_maps_each_legacy_prompt_and_keeps_migration_open(): void
+    {
+        $readme = (string) file_get_contents(base_path('README.md'));
+        foreach ([
+            '| Review-Prompt aus `ticket-prompt/index.html` | Inhalt übernommen | `manual_review` |',
+            '| Statischer Fix-Prompt aus `ticket-prompt/index.html` | Anwendungsfall abgelöst ohne Inhaltsübernahme | `manual_own_review_fix` |',
+            '| Fix-Listen-Ablauf des Review-Prompts | Anwendungsfall abgelöst ohne Inhaltsübernahme | `manual_finding_list_fix` |',
+            '| `ai/prompts/implementierung_master_prompt.md` | Anwendungsfall abgelöst ohne Inhaltsübernahme | `implementation` |',
+            '| `ai/prompts/implementierung_kleines_ticket_prompt.md` | Anwendungsfall abgelöst ohne Inhaltsübernahme | `implementation` |',
+            '| `ai/prompts/implementierung_planungs_prompt.md` | Anwendungsfall abgelöst ohne Inhaltsübernahme | `implementation` |',
+            'Katalogversion `3`',
+            '`QueueReevaluation`',
+            'AC-01 bis AC-07 und MG-01 bleiben offen',
+        ] as $text) {
+            self::assertStringContainsString($text, $readme);
+        }
+    }
+
+    public function test_legacy_migration_gate_template_exists_without_results_or_signature(): void
+    {
+        $path = base_path('docs/AI6-037_MG-01_ABNAHMEPROTOKOLL.md');
+        self::assertFileExists($path);
+        $protocol = file_get_contents($path);
+        self::assertNotFalse($protocol);
+
+        self::assertMatchesRegularExpression(
+            '/^## Befunde und Entscheidung\R+'
+            .'- Offene Abweichungen und erforderliche Nacharbeiten:\h*\R'
+            .'- Entscheidung zur semantischen Gleichwertigkeit:\h*\R'
+            .'- Geprüfter Implementierungscommit und Legacy-Projektstand nochmals bestätigt:\h*\R'
+            .'- Name, Datum und Unterschrift:\h*\R{2}'
+            .'Eine spätere Änderung/mu',
+            $protocol,
+        );
+    }
+
     /** @return array<string, mixed> */
     private function fixture(): array
     {
-        $content = file_get_contents(dirname(__DIR__, 2).'/Fixtures/Prompts/catalog-v2.json');
+        $content = file_get_contents(dirname(__DIR__, 2).'/Fixtures/Prompts/catalog-v3.json');
         self::assertNotFalse($content);
 
         return json_decode($content, true, 512, JSON_THROW_ON_ERROR);

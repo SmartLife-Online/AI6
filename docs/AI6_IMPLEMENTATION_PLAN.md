@@ -1,6 +1,8 @@
-# AI6 – Implementierungsplan V1.7.12 – Ticket-Ready, Lean & Secure
+# AI6 – Implementierungsplan V1.7.13 – Ticket-Ready, Lean & Secure
 
-**Stand:** 26. September 2026
+**Stand:** 28. September 2026
+
+**Revision V1.7.13:** Auf ausdrückliche menschliche Entscheidung vom 28. September 2026 wird AI6 selbst mit einem vorhandenen V1-Ticket das erste Pilotprojekt. Der geprüfte Bestand unter `tickets/` enthält 57 V1-Ticketdateien und keinen Legacy-Korpus; M169 bezeichnet deshalb nicht den ersten AI6-Pilotfall. `AI6-037` behält seinen Migrationsvertrag, seine IDs und sein offenes MG-01 für einen später benannten echten Altbestand; die Promptzuordnung (AC-08/TC-08) ist unabhängig davon umsetzbar. `AI6-038` führt zunächst den V1-Pilot durch und verliert die vollständige Ticketabhängigkeit von `AI6-037`; sein späterer Cutoff bleibt an die gelieferte Migration, deren signiertes MG-01 und die Pilotabnahme MG-03 gebunden. Der V1-Pilot allein erfüllt weder Migrationsnachweis noch Cutoff und schließt keines der beiden Tickets vollständig ab. Die begrenzte Etappierung ist für diese beiden veröffentlichten Verträge ausdrücklich zugelassen (§13.2); es entsteht kein neuer Blueprint. Titel, Requirements, §5.4, Teststrategie, Blueprints und Rollout werden konsistent nachgeführt; veröffentlichte Evidenz-IDs, Ticketstatus und Gate-Ergebnisse bleiben unverändert. Diese Revision beauftragt die Plan- und Ticketanpassung und erteilt keine Freigabe eines realen Laufs oder Pushs.
 
 **Revision V1.7.12:** Auf ausdrückliche menschliche Entscheidung vom 26. September 2026 nach dem Umsetzungsreview von `AI6-052` wird der Gastzugang zu den manuellen Prompt-Tools schaltbar und ist standardmäßig abgeschaltet. Die enge Ausnahme aus `SEC-002` und `UI-007` gilt nur noch, wenn der vertrauenswürdige Instanzschalter `AI6_PROMPT_HELP_GUEST_ACCESS` ausdrücklich aktiviert ist; fehlt er, ist er leer oder abgeschaltet, verlangt die Prompt-Hilfe wie vor V1.7.11 eine vollständige Anmeldung, und ein ungültiger Wert wird als benannte Konfigurationsverletzung abgewiesen. Der Schalter ist für lokale Einzelplatzinstanzen bestimmt, ist weder eine abschaltbare Maßnahme nach §10.2 noch ein Disable-Flag einer Invariante, und die ausgelieferte Container-Konfiguration reicht ihn nicht durch. Anlass ist die im Review bestätigte, vorbestehende Lücke der zentralen Redaction, über die übergroße oder unvollständig zitierte Eingaben eine generische Serverfehlerantwort statt einer sichtbaren Ablehnung auslösen; ihre Behebung bleibt einem gesonderten Fixauftrag vorbehalten und wird durch diese Revision weder erteilt noch als Risiko akzeptiert. `AI6-052` behält ID, Abhängigkeit und Requirement-Refs und heißt präzisiert „Schaltbarer Gastzugang zu manuellen Prompt-Tools“; §6.1, `UI-007`, `SEC-002`, §14.1, §15 und §21 werden nachgeführt, und sein veröffentlichtes Detailticket wird ohne Umnummerierung revidiert. Die Blueprintanzahl bleibt 58. Diese Entscheidung beauftragt Plan- und Ticketrevision, nicht die Implementierung oder eine Gate-Abnahme.
 
@@ -221,7 +223,7 @@ Die IDs sind stabil. Detaillierte Tickets referenzieren diese IDs unter `spec_re
 ### 3.2 Tickets
 - **TKT-001** – Ticketinhalt und dauerhafter Ticketstatus sind Git-native Dateien; die Datenbank ist keine zweite Ticketquelle.
 - **TKT-002** – Jedes Ticket enthält mindestens `schema: ai6.ticket.v1`, id, title, status, depends_on und einen nicht leeren Abschnitt Goal.
-- **TKT-003** – Das V1-Format verwendet YAML-Frontmatter und Markdown; das Legacy-Format darf ausschließlich read-only bis zum erfolgreich protokollierten M169-Migrationspilot gelesen werden und ist danach ohne stillen Fallback abzuschalten.
+- **TKT-003** – Das V1-Format verwendet YAML-Frontmatter und Markdown; das Legacy-Format darf ausschließlich read-only bis zur erfolgreichen V1-Pilotabnahme und zum gesondert protokollierten Migrationspilot an einem echten Legacy-Korpus gelesen werden und ist nach beiden Nachweisen ohne stillen Fallback abzuschalten.
 - **TKT-004** – Ticket-IDs, Statuswerte, Abhängigkeiten, Pfade sowie AC-/TC-IDs werden deterministisch validiert.
 - **TKT-005** – Nur die Ticketdatei ist autoritativ für den Status; zentrale Markdown-Indizes sind reine Ansichten.
 - **TKT-006** – Ticketänderungen aus dem Panel verwenden Git-Blob-Konfliktschutz und erzeugen nachvollziehbare Git-Commits. Eine inhaltlich redigierte Projektion ist niemals Editorquelle; bei Redaction eines vertragsrelevanten Bytes fallen Bearbeitung und Approval geschlossen aus, bis ein neuer unredigierter Blob sicher gelesen und an seine exakte Basis gebunden wurde. Ein unredigiertes schemaungültiges Dokument darf der Editor reparieren, aber niemals approved werden; der neue Schreibstand muss vor Commit vollständig gültig sein.
@@ -322,7 +324,7 @@ Die IDs sind stabil. Detaillierte Tickets referenzieren diese IDs unter `spec_re
 - **OPS-002** – SQLite, Database Queue und Scheduler genügen für eine zentrale Instanz mit einem aktiven Run je Projekt.
 - **OPS-003** – ai6:doctor prüft Konfiguration, Mail, Git, Provider, Sandbox, Checker, SecurityPolicy und Betriebsprofile.
 - **OPS-004** – Architektur bleibt modularer Monolith ohne Redis, Kubernetes, Microservices, CQRS oder Event Sourcing im MVP.
-- **OPS-005** – Legacy-Tickets und das bisherige Prompt-Tool werden kontrolliert migriert; Statusindizes bleiben danach nicht autoritativ. Nach dem erfolgreichen M169-Pilot wird der Legacy-Leser im selben Release abgeschaltet beziehungsweise entfernt und der migrierte V1-Bestand neu validiert.
+- **OPS-005** – Legacy-Tickets und das bisherige Prompt-Tool werden kontrolliert migriert; Statusindizes bleiben danach nicht autoritativ. Der erste Pilot nutzt ein vorhandenes V1-Ticket des AI6-Projekts und benötigt keine Legacy-Migration. Der Legacy-Leser wird erst nach erfolgreicher V1-Pilotabnahme und gesondert protokollierter Migration eines echten Altbestands in der Release-Lineage dieses Migrationsnachweises abgeschaltet beziehungsweise entfernt; der migrierte V1-Bestand wird erneut validiert. Die Promptzuordnung darf unabhängig vom Altbestand geliefert werden.
 - **OPS-006** – Ein repositorylokaler deterministischer Generator exportiert Blueprint-Metadaten und Requirement-Zuordnungen aus diesem Plan nach `docs/AI6_TICKET_MANIFEST.yaml`; ein Driftcheck schlägt bei fehlendem oder abweichendem Export fehl.
 - **OPS-007** – Das Bootstrap verwendet ausschließlich `laravel/laravel` Tag `v13.8.0` am verifizierten Commit `e196bfdfc96903f2e10219749fcbca7c0aefe99f` als immutable Scaffoldquelle. Es wird außerhalb des Repositorys ohne Composer-Skriptausführung bezogen; nur eine explizite Backend-Allowlist darf importiert werden. Bestehende Repositorydateien bleiben erhalten, Default-Fachartefakte und implizite SQLite-/Migrate-/Queue-Skripte werden nicht übernommen. Die zugesagte Mindestlaufzeit PHP 8.5 wird durch `config.platform.php: 8.5.0` bei der Lockauflösung sowie einen sauberen Locked Install und `composer check-platform-reqs` unter einer realen PHP-8.5-Laufzeit nachgewiesen.
 - **OPS-008** – Die freigegebenen Laufzeitlinien sind PHP 8.5, Laravel 13 und SQLite 3.53. Composer-Lockfile, Containerimage und Betriebspakete binden ihre konkrete Auflösung reproduzierbar; Produktion und Prüfungen beziehen niemals eine schwebende `latest`-Version. Jede spätere Änderung einer gebundenen Major-, Minor- oder Patchversion von PHP, Laravel oder SQLite erfolgt ausschließlich in einem eigenen Upgrade-Ticket. Dieses Ticket weist mindestens Kompatibilität, saubere Installation aus den gebundenen Artefakten, erforderliche Migrationen oder deren Abwesenheit, aktualisierte Versionsprüfungen und einen ausführbaren Rollback nach; eine andere Fachimplementierung darf den Versionswechsel nicht beiläufig mitführen.
@@ -503,7 +505,7 @@ Git ist autoritativ für Ticket, Code, Spezifikationen und finalen Branch. SQLit
 
 ### 5.4 Legacy
 
-Das bisherige Format mit genau einem YAML-Codeblock wird ausschließlich bis zum erfolgreich protokollierten M169-Migrationspilot read-only unterstützt. AI6-038 schaltet den Legacy-Leser danach in derselben Release-Lineage ab beziehungsweise entfernt ihn, baut die Read Models neu auf und validiert alle migrierten Tickets erneut als V1. Ein nach diesem Cutoff verbliebener Legacykandidat erzeugt einen expliziten Migrationsfehler; es gibt keinen stillen Fallback und keine dauerhafte Dual-Reader-Policy. Neue oder migrierte Tickets verwenden ausschließlich Frontmatter.
+Das bisherige Format mit genau einem YAML-Codeblock wird ausschließlich bis zum erfolgreich protokollierten Migrationspilot an einem echten Legacy-Korpus read-only unterstützt. Der erste Pilot in AI6-038 nutzt ein vorhandenes V1-Ticket des AI6-Projekts; er enthält keine Migration und löst keinen Cutoff aus. Erst nach der signierten Pilotabnahme AI6-038/MG-03 sowie der Lieferung der Migration aus AI6-037 und deren signiertem MG-01 schaltet Phase B von AI6-038 den Legacy-Leser in der Release-Lineage des Migrationsnachweises ab beziehungsweise entfernt ihn, baut die Read Models neu auf und validiert alle migrierten Tickets erneut als V1. Ein nach diesem Cutoff verbliebener Legacykandidat erzeugt einen expliziten Migrationsfehler; es gibt keinen stillen Fallback und keine dauerhafte Dual-Reader-Policy. Neue oder migrierte Tickets verwenden ausschließlich Frontmatter.
 
 ---
 
@@ -1068,7 +1070,7 @@ Vertrauenswürdige Instanzconfig definiert getrennte maximale Aufbewahrungszeite
 4. Process-/Mailbox-/Sandbox-Negativtests.
 5. FakeAgent-End-to-End für alle Workflowzweige.
 6. optionale echte Adapter-Smokes hinter explizitem Flag.
-7. realer M169-Pilot als separates manuelles Gate.
+7. realer AI6-Pilot mit einem vorhandenen V1-Ticket als separates manuelles Gate; späterer Legacy-Migrationspilot mit eigenem Nachweis.
 8. konfigurierte statische Analyse; für AI6 verbindlich `vendor/bin/phpstan analyse`.
 
 ### 12.2 Definition of Done jedes Implementierungstickets
@@ -1140,6 +1142,8 @@ Der Punkt „unabhängig auslieferbar, zurückrollbar und getestet" zielt auf tr
 
 Der letzte Punkt greift nicht, wenn die fehlende Voraussetzung ausschließlich aus bereits in Abschnitt 15 definierten `depends_on`-Blueprints besteht und die Vorabableitung nach §13.6 ausdrücklich angeordnet wurde. Eine angenommene Architektur, eine erfundene API oder eine Voraussetzung ohne eigenen Blueprint bleiben dagegen ein Abbruchgrund.
 
+**Begrenzte Etappierung für AI6-037 und AI6-038 (V1.7.13):** Die bereits veröffentlichten Verträge bleiben unter ihren IDs erhalten. AI6-037 darf die Promptzuordnung unabhängig vom noch fehlenden Legacy-Korpus liefern; AC-01 bis AC-07 und MG-01 bleiben offen. AI6-038 darf den ersten V1-Pilot nach seinen übrigen Voraussetzungen durchführen, bevor AI6-037 vollständig geliefert ist. Cutoff und Revalidierung bleiben eine spätere Phase desselben Tickets mit eigenem Startprädikat: gelieferte Migration aus AI6-037, signiertes AI6-037/MG-01 und signiertes AI6-038/MG-03. Die Teilresultate sind ausdrücklich keine vollständige Ticketabnahme nach §12.2; sie ändern weder den produktiven Dependency-Mechanismus noch Statuswerte oder Gate-Ergebnisse. Diese Ausnahme erlaubt keine weitere Aufteilung ohne Planentscheidung.
+
 ### 13.3 Progressive Elaboration
 
 - IDs, Ziele, Meilensteine und Abhängigkeiten stammen unverändert aus Abschnitt 15.
@@ -1174,7 +1178,7 @@ Der letzte Punkt greift nicht, wenn die fehlende Voraussetzung ausschließlich a
 - Jeder Fehlerpfad, der den Run blockiert oder fortsetzt, benötigt mindestens einen Testfall.
 - Jedes AC verweist auf mindestens einen TC, ein manuelles Gate oder eine externe Evidenz; verwaiste ACs sind ein Generatorfehler.
 - Ein Detailticket muss in einem Reviewpaket ohne Kenntnis des Erstellungs- oder Implementierungs-Chats bewertbar sein.
-- M169 ist bewusst ein anspruchsvoller Integrationspilot und kein Größenmaßstab für normale AI6-Tickets.
+- Der reale AI6-Pilot ist bewusst ein anspruchsvoller Integrationspilot und kein Größenmaßstab für normale AI6-Tickets.
 
 ### 13.6 Vorab abgeleitete Tickets (`ahead-derived`)
 
@@ -1295,7 +1299,7 @@ Erscheint eine neuere Major-, Minor- oder Patchversion einer dieser drei Laufzei
 53. AI6-036 — Installation, Doctor und Security-Release-Gate
 54. AI6-049 — Backup, Restore, Rotation und Disaster Recovery
 55. AI6-037 — Migration des bisherigen Ticket-Prompt-Tools
-56. AI6-038 — Realer M169-Pilot und MVP-Abnahme
+56. AI6-038 — Realer AI6-Pilot und MVP-Abnahme
 57. AI6-051 — Git-Repositories im SHA-1- und SHA-256-Objektformat unterstützen
 58. AI6-052 — Schaltbarer Gastzugang zu manuellen Prompt-Tools
 ```
@@ -4002,6 +4006,10 @@ Eine ruhende AI6-Instanz auf demselben Software- und Schemastand sichern und wie
 
 Bestehende Ticketdateien und Promptinhalte verlustfrei in die neue Git-native Struktur überführen, ohne Legacy-Statusdrift zu konservieren.
 
+**Lieferetappen (V1.7.13)**
+
+Die Promptzuordnung wird unabhängig vom Migrationskommando geliefert. Der Migrationsteil wartet auf einen benannten realen Legacy-Korpus (Projekt, Verzeichnis, Anzahl, freigegebene Beispieldatei); der V1-Bestand von AI6 und das synthetische M169-Negativfixture ersetzen diesen Nachweis nicht. Die frühere Bindung an den Namen M169 wird durch die tatsächlich bestätigte Ticket-ID des Altbestands ersetzt. MG-01 bleibt offen; eine gelieferte Promptzuordnung schließt das Ticket nicht ab.
+
 **Deliverables**
 
 - Dry-run-Migrationskommando für YAML-Codeblock zu Frontmatter.
@@ -4013,15 +4021,15 @@ Bestehende Ticketdateien und Promptinhalte verlustfrei in die neue Git-native St
 
 **Akzeptanzvertrag**
 
-- M169 wird semantisch gleichwertig migriert.
+- Das menschlich benannte reale Legacy-Ticket wird semantisch gleichwertig migriert; der Nachweis ist unabhängig vom ersten V1-Pilot.
 - Originaldatei bleibt im Dry-run unverändert.
 - Migration erzeugt validierbare V1-Datei.
 - Keine automatische Massenlöschung oder stiller Statuswechsel.
-- Legacy-Lesen bleibt ausschließlich bis zum erfolgreich protokollierten Pilotabschluss möglich; der Abschaltpunkt und alle noch nicht migrierten Kandidaten werden sichtbar ausgewiesen.
+- Legacy-Lesen bleibt ausschließlich bis zum gemeinsam erfüllten Cutoff-Startprädikat aus §5.4 möglich; der erste V1-Pilot allein löst keinen Cutoff aus. Der Abschaltpunkt und alle noch nicht migrierten Kandidaten werden sichtbar ausgewiesen.
 
 **Mindestens zu erzeugende Testfälle**
 
-- M169-Golden-Diff.
+- Golden-Diff der freigegebenen realen Legacy-Beispieldatei.
 - Statusmapping.
 - Roundtrip Parser.
 - Profiltests für `generic_v1`, `ai6_detail_v1` und unzulässige stillschweigende Hochstufung.
@@ -4032,12 +4040,12 @@ Bestehende Ticketdateien und Promptinhalte verlustfrei in die neue Git-native St
 - Dauerhafte Pflege zweier Formate.
 - Automatische Änderung fachlicher Anforderungen.
 
-### AI6-038 — Realer M169-Pilot und MVP-Abnahme
+### AI6-038 — Realer AI6-Pilot und MVP-Abnahme
 
 - **Initialstatus des späteren Detailtickets:** `todo`
 - **Risiko:** `high`
 - **Kind:** `spike`
-- **Depends on:** `AI6-032`, `AI6-035`, `AI6-036`, `AI6-037`, `AI6-049`, `AI6-050`
+- **Depends on:** `AI6-032`, `AI6-035`, `AI6-036`, `AI6-049`, `AI6-050`
 - **Requirement-Refs:** `PROD-001`, `AGT-001`, `RUN-010`, `REV-001`, `HUM-002`, `RUN-009`, `OPS-005`
 - **Erwartete Module:** `Auth`, `Projects`, `Tickets`, `Runs`, `Agents`, `Reviews`, `HumanLoop`, `Git`, `Checks`, `Prompts`, `Shared`
 
@@ -4045,16 +4053,20 @@ Bestehende Ticketdateien und Promptinhalte verlustfrei in die neue Git-native St
 
 AI6 mit einem realen, anspruchsvollen Git-Ticket und echten CLI-Sitzungen der ersten Providerstufe unter kontrollierten Bedingungen abnehmen.
 
+**Pilotbindung und Etappen (V1.7.13)**
+
+Erstes Pilotprojekt ist AI6 in einer dedizierten Pilotkopie beziehungsweise ausdrücklich freigegebenen Pilot-Remote. Ein Mensch bindet vor dem Start ein vorhandenes V1-Ticket mit realem Änderungsbedarf, Commit, Control-Branch und Reviewgegenstand; diese Revision wählt keine Ticket-ID und autorisiert keine Remote-Wirkung. Die Auswahl erfindet weder einen Legacy-Korpus noch einen Migrationsnachweis. Die übrigen Betriebs-, Provider-, Sicherheits- und Rebase-Voraussetzungen bleiben bestehen. AI6-037 ist keine vollständige Startabhängigkeit des V1-Piloten; seine unabhängig lieferbare Promptzuordnung bleibt ein eigener Arbeitsumfang. Für Phase B (Cutoff/Revalidierung) sind zusätzlich die gelieferte Migration aus AI6-037 und deren signiertes MG-01 erforderlich. Ohne echten Altbestand bleiben diese Phase und MG-04 offen; MG-03 bestätigt ausschließlich den V1-Pilot und gibt allein keinen Cutoff frei. Die vollständige Ticketabnahme bleibt an beide Phasen gebunden.
+
 **Deliverables**
 
-- Migriertes M169 als Pilot.
+- Vorhandenes V1-Ticket des AI6-Projekts als erster Pilot; keine vorgeschaltete Migration.
 - Codex-Profil für Implementierung und Fixturns.
 - Mindestens zwei unabhängige Qualitätsreviewer über die Grok-Build-CLI und die GitHub-Copilot-CLI; optional zusätzlich ein Claude-Modellprofil über Copilot, sofern AI6-034 umgesetzt ist; ein weiteres Modell desselben Providerprofils ersetzt keinen unabhängigen Providerreviewer.
 - Zuerst ein realer Review-only-Pilotlauf auf einem gebundenen Stand mit manuell bestätigtem report-only Abschluss und Messung von Findingqualität, Laufzeit und Providerfehlern; erst danach der vollständige Implementierungsablauf.
 - Realer Review-/Verifikations-/Fix-/Security-/Pushablauf auf Testbranch.
-- Vor Candidate an letzten gültigen Checkpoint, prospektive Tree-OID und Diff-Hash gebundene autorisierte Evidenz für jedes M169-spezifische `MG-`-/`EXT-`-Gate.
+- Vor Candidate an letzten gültigen Checkpoint, prospektive Tree-OID und Diff-Hash gebundene autorisierte Evidenz für jedes pilotticketspezifische `MG-`-/`EXT-`-Gate.
 - Nach Candidate getrennte Prüfung des Security-Ergebnisses über `security_gate`; sie ist keine vorgezogene `MG-`-/`EXT-`-Evidenz und ein erforderlicher Human Override bleibt Candidate-gebunden.
-- Nach erfolgreichem Pilotabschluss Abschaltung beziehungsweise Entfernung des Legacy-Lesers, erneuter Read-Model-Aufbau und vollständige V1-Profilvalidierung aller migrierten Pilotickets.
+- Nach erfolgreichem V1-Pilotabschluss und gesondert signierter Legacy-Migration Abschaltung beziehungsweise Entfernung des Legacy-Lesers, erneuter Read-Model-Aufbau und vollständige V1-Profilvalidierung aller migrierten Pilotickets.
 - Pilotprotokoll mit beobachteten Grenzen und Folge-Tickets.
 
 **Akzeptanzvertrag**
@@ -4065,7 +4077,7 @@ AI6 mit einem realen, anspruchsvollen Git-Ticket und echten CLI-Sitzungen der er
 - Manuelle/externe Gates bleiben bis zur gebundenen Evidenz ehrlich offen; ein offenes oder stale Gate verhindert Candidate, Commit und Push.
 - Das LLM-Securityergebnis entsteht erst auf dem Candidate. Ein nicht freigegebenes Ergebnis blockiert Commit und Push über `security_gate`, ohne rückwirkend Voraussetzung der Candidate-Erzeugung zu sein.
 - Branch wird ohne Änderung fremder Refs veröffentlicht.
-- Nach dem Pilot akzeptiert die reguläre Leseroute kein Legacyformat mehr; noch vorhandene Legacydateien erzeugen einen expliziten Migrationsfehler statt stillen Fallbacks.
+- Nach Phase B akzeptiert die reguläre Leseroute kein Legacyformat mehr; noch vorhandene Legacydateien erzeugen einen expliziten Migrationsfehler statt stillen Fallbacks.
 - Ein anderer Entwickler kann Ablauf anhand Doku nachvollziehen.
 
 **Mindestens zu erzeugende Testfälle**
@@ -4084,7 +4096,7 @@ AI6 mit einem realen, anspruchsvollen Git-Ticket und echten CLI-Sitzungen der er
 **Manuelle/externe Gates**
 
 - Vor Candidate: menschliche Prüfung des realen Diffs auf dem letzten gültigen Checkpoint und seiner prospektiven Tree-/Diff-Bindung.
-- Vor Candidate: manuelle Bestätigung der M169-spezifischen externen/UX-Gates.
+- Vor Candidate: manuelle Bestätigung der pilotticketspezifischen externen/UX-Gates.
 
 Die menschliche Sichtung eines nachgelagerten Security-Ergebnisses gehört zum Candidate-gebundenen `security_gate` beziehungsweise zur Pilotabnahme, nicht zu diesen vor Candidate zu schließenden `MG-`-/`EXT-`-Gates.
 
@@ -4286,7 +4298,7 @@ Die bisherigen statischen Browserprompt-Templates werden nicht als zweite Quelle
 8. Reale Providernutzung beginnt mit Review-only-Läufen und manuell bestätigtem report-only Abschluss; Findingqualität, False Positives, Laufzeit, Kosten und Providerfehler werden dabei gemessen.
 9. Erst danach werden quellenabhängige Verifikation und autorisierte Codex-Fixturns mit vollständigen Re-Reviews aktiviert.
 10. `automatic_after_gates` wird erst nach belastbarer Pilotmessung und nur dort zugelassen, wo die serverseitige Risikopolicy nicht auf `manual` verengt; ein optionaler finaler Review wird erst danach gezielt zugeschaltet.
-11. M169 bleibt der erste reale Pilot und erzeugt bei Problemen neue Folge-Tickets statt einen unkontrolliert wachsenden Pilot-Scope; nach erfolgreichem Pilot wird der Legacy-Leser im selben Release abgeschaltet und V1 erneut validiert.
+11. AI6 selbst ist mit einem vorhandenen V1-Ticket das erste reale Pilotprojekt und erzeugt bei Problemen neue Folge-Tickets statt einen unkontrolliert wachsenden Pilot-Scope. Legacy-Migration und Promptzuordnung aus AI6-037 sind keine Startabhängigkeit dieses Piloten. Erst nach dessen Abnahme und dem gesonderten Migrationsnachweis eines echten Altbestands folgt der Legacy-Cutoff mit Revalidierung in der Release-Lineage des Migrationsnachweises; bis dahin bleiben die betreffenden Lieferungen und Gates offen.
 
 ---
 
@@ -4349,10 +4361,10 @@ Der MVP ist erreicht, wenn:
 - kein effektiv blockierendes Finding und kein offenes oder stale `MG-`-/`EXT-`-Gate Candidate, Commit oder Push passieren kann;
 - abschaltbare Securitymaßnahmen standardmäßig aktiv und ausschließlich über vertrauenswürdige Env/Config sichtbar reduzierbar sind, während nicht abschaltbare Invarianten ohne Disable-Flag erzwungen bleiben;
 - abgelaufene Rohlogs, Provideroutputs und Artefakte tatsächlich gelöscht, nur redigierte Tombstones erhalten und gelöschte Daten nicht mehr ausgegeben, heruntergeladen oder durch Restore reaktiviert werden;
-- M169 auf einem Testbranch ohne manuelle Datenbankmanipulation durch den vollständigen Workflow läuft;
+- ein vorab gebundenes vorhandenes V1-Ticket des AI6-Projekts auf einem Testbranch ohne manuelle Datenbankmanipulation durch den vollständigen Workflow läuft;
 - nach erfolgreichem Push der Git-Status auf dem Control-Branch `review` ist und kein bereits veröffentlichter Run erneut gestartet werden kann;
 - offene manuelle/externe Gates niemals als bestanden simuliert werden.
-- nach erfolgreichem Pilot der Legacy-Leser abgeschaltet und der migrierte Bestand erneut unter den gewählten V1-Profilen validiert ist.
+- nach erfolgreichem V1-Pilot und gesondert signiertem Migrationsnachweis eines echten Altbestands der Legacy-Leser abgeschaltet und der migrierte Bestand erneut unter den gewählten V1-Profilen validiert ist; ein bestandener V1-Pilot allein bestätigt diesen noch offenen Teil der Gesamtabnahme nicht.
 
 ---
 
@@ -4367,3 +4379,5 @@ Der MVP ist erreicht, wenn:
 `AI6-051` erweitert einen bestehenden Git-Objektformatvertrag atomar über seine Verbraucher. Die in V1.7.10 ausdrücklich begrenzte Modul-Ausnahme erlaubt keine zusätzlichen Fachabläufe; ein allein freigeschalteter SHA-1-Clone ohne funktionsfähige nachgelagerte Bindungen wäre keine auslieferbare Fähigkeit.
 
 `AI6-052` erweitert den bestehenden manuellen Benutzerfluss aus `AI6-044` um genau eine neue, standardmäßig abgeschaltete Zugriffsfähigkeit: Nutzung ohne Login bei ausdrücklich aktiviertem Instanzschalter und weiterhin geschützten fachlichen Daten und Aktionen. Schalter und Gastzugang bilden eine untrennbare Grenze und bleiben deshalb ein Blueprint. Technische Websessions, zentrale Promptverarbeitung und Sicherheitskontrollen bleiben erhalten; ein neuer Session- oder Transportvertrag gehört nicht dazu.
+
+Die in V1.7.13 ausdrücklich freigegebene Etappierung von `AI6-037` und `AI6-038` erhält deren veröffentlichte Lieferverträge und Evidenz-IDs. Promptzuordnung und erster V1-Pilot dürfen vor dem späteren Legacy-Migrationsnachweis geliefert werden; die verbleibenden Kriterien und Gates werden weder gestrichen noch als bestanden behandelt. Die Blueprintanzahl bleibt 58.

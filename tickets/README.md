@@ -110,7 +110,7 @@ AI6-052 wurde am 25. September 2026 nach ausdrücklicher Freigabe des Entscheidu
 
 ## 3. Backlog
 
-Stand der abgeleiteten Ansicht: 26. September 2026, abgeleitet aus dem Planarbeitsstand V1.7.12 und dem vorhandenen Dateibestand. Revision V1.7.4 trennt den rollenrichtigen Checkvollzug als neuen Blueprint `AI6-045` von `AI6-021` ab; sein Detailticket ist inzwischen vorhanden. Revision V1.7.5 stellt den Adaptern die Blueprints `AI6-046` und `AI6-047` voran; ihre Detailtickets sind vorhanden. Revision V1.7.9 splittet `AI6-036` in `AI6-036` und `AI6-049` und ergänzt `AI6-050` für den realen Securityreview. Mit AI6-052 aus V1.7.11 sind 57 der 58 Blueprints als Detailticket vorhanden; nur AI6-050 ist noch Blueprint, und AI6-038 ist ahead-derived mit offenem Rebase-Gate. AI6-051 ist gegen `399076a` abgeleitet und nach zwei Reviews überarbeitet; seine Implementierung ist nicht beauftragt. AI6-048 liefert die fehlende Copilot-Implementierung aus AI6-042 nach und ist in `e3f09d7` integriert. AI6-034 ist am selben Stand rebased und gegen die gelieferte Copilot-Naht neu abgeleitet; sein Rebase-Gate ist geschlossen, während MG-01 weiterhin offen bleibt.
+Stand der abgeleiteten Ansicht: 28. September 2026, abgeleitet aus dem Planarbeitsstand V1.7.13 und dem vorhandenen Dateibestand. Revision V1.7.4 trennt den rollenrichtigen Checkvollzug als neuen Blueprint `AI6-045` von `AI6-021` ab; sein Detailticket ist inzwischen vorhanden. Revision V1.7.5 stellt den Adaptern die Blueprints `AI6-046` und `AI6-047` voran; ihre Detailtickets sind vorhanden. Revision V1.7.9 splittet `AI6-036` in `AI6-036` und `AI6-049` und ergänzt `AI6-050` für den realen Securityreview. Mit AI6-052 aus V1.7.11 sind 57 der 58 Blueprints als Detailticket vorhanden; nur AI6-050 ist noch Blueprint, und AI6-038 ist ahead-derived mit offenem Rebase-Gate. AI6-051 ist gegen `399076a` abgeleitet und nach zwei Reviews überarbeitet; seine Implementierung ist nicht beauftragt. AI6-048 liefert die fehlende Copilot-Implementierung aus AI6-042 nach und ist in `e3f09d7` integriert. AI6-034 ist am selben Stand rebased und gegen die gelieferte Copilot-Naht neu abgeleitet; sein Rebase-Gate ist geschlossen, während MG-01 weiterhin offen bleibt.
 
 ### M0 — Fundament und sichere Laufzeit
 
@@ -207,7 +207,7 @@ Stand der abgeleiteten Ansicht: 26. September 2026, abgeleitet aus dem Planarbei
 | [AI6-036](./AI6-036.md) | Installation, Doctor und Security-Release-Gate | high | Detailticket; Rebase-Gate geschlossen | AI6-002, AI6-003, AI6-005B, AI6-015, AI6-032, AI6-035 |
 | [AI6-049](./AI6-049.md) | Backup, Restore, Rotation und Disaster Recovery | high | Detailticket | AI6-002, AI6-005A, AI6-029, AI6-031 |
 | [AI6-037](./AI6-037.md) | Migration des bisherigen Ticket-Prompt-Tools | medium | Detailticket; Rebase-Gate geschlossen | AI6-007, AI6-008, AI6-009, AI6-016, AI6-032 |
-| [AI6-038](./AI6-038.md) | Realer M169-Pilot und MVP-Abnahme | high | Detailticket; ahead-derived, Rebase-Gate offen | AI6-032, AI6-035, AI6-036, AI6-037, AI6-049, AI6-050 |
+| [AI6-038](./AI6-038.md) | Realer AI6-Pilot und MVP-Abnahme | high | Detailticket; ahead-derived, Rebase-Gate offen | AI6-032, AI6-035, AI6-036, AI6-049, AI6-050 |
 | [AI6-051](./AI6-051.md) | Git-Repositories im SHA-1- und SHA-256-Objektformat unterstützen | high | Detailticket; Implementierung nicht beauftragt | AI6-006D, AI6-006E, AI6-006F, AI6-029, AI6-032, AI6-040 |
 
 ## 4. Getrennter Index-Refresh

@@ -23,6 +23,8 @@ final class PromptHelp extends Component
 
     public const FOREIGN_ENTRY_ID = 'manual_foreign_fix_review';
 
+    public const REVIEW_ENTRY_ID = 'manual_review';
+
     public const DYNAMIC_ENTRY_ID = 'manual_finding_list_fix';
 
     public string $reviewAnswer = '';
@@ -90,15 +92,18 @@ final class PromptHelp extends Component
         $context = $this->context();
         $ownEntry = $this->namedEntry($catalog, self::OWN_ENTRY_ID);
         $foreignEntry = $this->namedEntry($catalog, self::FOREIGN_ENTRY_ID);
+        $reviewEntry = $this->namedEntry($catalog, self::REVIEW_ENTRY_ID);
         $dynamicEntry = $this->namedEntry($catalog, self::DYNAMIC_ENTRY_ID);
 
         return view('prompts.help', [
             'catalogVersion' => $catalog->version,
             'ownEntry' => $ownEntry,
             'foreignEntry' => $foreignEntry,
+            'reviewEntry' => $reviewEntry,
             'dynamicEntry' => $dynamicEntry,
             'ownPrompt' => $renderer->render(self::OWN_ENTRY_ID, new PromptVariables([]), $context),
             'foreignPrompt' => $renderer->render(self::FOREIGN_ENTRY_ID, new PromptVariables([]), $context),
+            'reviewPrompt' => $renderer->render(self::REVIEW_ENTRY_ID, new PromptVariables([]), $context),
         ]);
     }
 
