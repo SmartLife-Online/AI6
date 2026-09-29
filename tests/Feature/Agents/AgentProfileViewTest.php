@@ -37,7 +37,7 @@ final class AgentProfileViewTest extends AuthFeatureTestCase
         $response = $this->actingAs($user)->get('/agents/profiles');
         $response->assertOk()
             ->assertSee('Agentenprofile')
-            ->assertSee('Promptkatalog: Version 2')
+            ->assertSee('Promptkatalog: Version 3')
             ->assertSee('codex-gpt-5.6-terra')
             ->assertSee('grok-cli-review')
             ->assertSee('copilot-cli-review')
