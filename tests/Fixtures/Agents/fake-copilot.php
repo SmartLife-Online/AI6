@@ -106,6 +106,27 @@ $document = ['schema_version' => $constant('schema_version'), 'status' => 'nothi
     'provider_runtime_profile_hash' => $constant('provider_runtime_profile_hash'), 'human_request' => null,
     'findings' => [], 'criterion_coverage' => array_map(static fn (string $id): array => ['criterion_id' => $id, 'status' => 'satisfied', 'evidence' => 'Fixture.'], $context['criterion_refs']),
     'instruction_recommendations' => []];
+if (str_starts_with($scenario, 'security_')) {
+    $document['status'] = substr($scenario, strlen('security_'));
+    // The native mailbox must expose the exact candidate, without writable input or worker credentials.
+    if (! is_file('app/Example.php') || file_get_contents('app/Example.php') !== "<?php\n\n// Bound candidate.\n"
+        || file_exists('.git') || @file_put_contents('app/Example.php', 'mutated') !== false
+        || @file_put_contents('forbidden.txt', 'mutated') !== false
+        || getenv('MAIL_PASSWORD') !== false || getenv('AI6_GIT_SSH_KEY') !== false) {
+        exit(11);
+    }
+    if ($document['status'] === 'security_findings') {
+        $document['findings'] = [['local_id' => 'security-1', 'severity' => 'critical', 'disposition' => 'must_fix',
+            'category' => 'security', 'file' => 'app/Example.php', 'line' => 1, 'title' => 'Deterministischer Securitybefund',
+            'evidence' => 'Synthetischer Testbefund.', 'expected_result' => 'Menschliche Prüfung.', 'criterion_refs' => []]];
+    }
+    if ($document['status'] === 'needs_human') {
+        $document['human_request'] = ['kind' => 'clarification', 'title' => 'Securityprüfung', 'message' => 'Entscheidung benötigt.',
+            'why_needed' => 'Synthetische Unsicherheit.', 'response_mode' => 'select',
+            'options' => [['key' => 'a', 'label' => 'Prüfen'], ['key' => 'b', 'label' => 'Abbrechen']],
+            'recommended_option' => 'a', 'affected_paths' => ['app/Example.php'], 'criterion_refs' => []];
+    }
+}
 $answer = json_encode($document, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
 echo match ($scenario) {
     'empty' => '', 'invalid_json' => '{', 'multiple' => $answer."\n".$answer,

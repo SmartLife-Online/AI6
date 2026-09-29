@@ -41,6 +41,28 @@ final class AgentExecutionMailboxTest extends TicketUiTestCase
 {
     use BuildsImplementationTurnFixture;
 
+    public function test_runner_home_paths_match_the_shipped_apparmor_projection_contract(): void
+    {
+        [, , $request, $home] = $this->stage();
+        $relative = $request->string('home');
+        self::assertMatchesRegularExpression('/\Aexecution-[0-9a-f]{32}\/[A-Za-z0-9._-]+-[A-Za-z0-9._-]+-[A-Za-z0-9._-]+\z/D', $relative);
+        self::assertSame('execution-'.substr($request->string('execution_id'), 0, 32), dirname($relative));
+        self::assertSame(AgentExecutionProcessor::inputRoot().'/'.$relative, $home->root);
+        self::assertSame(AgentExecutionProcessor::outputRoot().'/'.$relative, $home->outputRoot);
+        self::assertDirectoryExists($home->root);
+        self::assertDirectoryExists($home->outputRoot);
+
+        $profile = (string) file_get_contents(base_path('docker/apparmor/ai6-execution'));
+        foreach (['agent-executions', 'agent-outputs'] as $mailbox) {
+            self::assertSame(1, preg_match('~mount options=\(rw,rbind\) /oldroot(/var/lib/ai6/'.preg_quote($mailbox, '~').'/execution-\*/\*-\*-\*/) -> /newroot\\1,~', $profile, $match));
+            // AppArmor's single star cannot cross a directory separator.
+            $pattern = '~\A'.str_replace('\\*', '[^/]*', preg_quote($match[1], '~')).'\z~D';
+            self::assertMatchesRegularExpression($pattern, '/var/lib/ai6/'.$mailbox.'/'.$relative.'/');
+            self::assertDoesNotMatchRegularExpression($pattern, '/var/lib/ai6/'.$mailbox.'/');
+            self::assertDoesNotMatchRegularExpression($pattern, '/var/lib/ai6/'.$mailbox.'/'.dirname($relative).'/');
+        }
+    }
+
     public function test_polls_preserve_attempt_and_identity_and_the_database_free_consumer_runs_once(): void
     {
         [$run, $job, $request, $home, $context] = $this->stage();

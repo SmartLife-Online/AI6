@@ -5,6 +5,7 @@ namespace Tests\Unit\Agents;
 use App\AI6\Agents\AgentExecutionException;
 use App\AI6\Agents\AgentInputLimits;
 use App\AI6\Agents\AgentProfileRegistry;
+use App\AI6\Agents\AgentResultContext;
 use App\AI6\Agents\AgentRole;
 use App\AI6\Agents\GitHubCopilotCliAdapter;
 use App\AI6\Agents\GitHubCopilotCliConfiguration;
@@ -60,6 +61,62 @@ final class GitHubCopilotCliConfigurationTest extends TestCase
         GitHubCopilotCliAdapter::assertRuntimeProfile(new ProviderRuntimeProfile($runtime->id, $runtime->version, ['allow_all' => true], $runtime->permissions, $runtime->extensions, $runtime->hash));
     }
 
+    #[DataProvider('securityRefusals')]
+    public function test_security_selection_refusal_starts_no_probe_or_turn(string $case, string $reason): void
+    {
+        if ($case === 'no_role') {
+            config(['ai6.agent_profiles.copilot-cli-review.roles' => ['quality_review']]);
+            $this->app->forgetInstance(AgentProfileRegistry::class);
+        }
+        $adapter = $this->copilotAdapter(evidence: $case !== 'no_evidence');
+        $context = $this->copilotContext(role: AgentRole::SECURITY_REVIEW);
+        $home = $this->copilotHome($context);
+        try {
+            $adapter->turn($context, $home, static function (): void {});
+            self::fail('Security review requires its own server role and evidence.');
+        } catch (AgentExecutionException $exception) {
+            self::assertSame($reason, $exception->reason);
+        }
+        self::assertSame([], $adapter->lastCommand);
+        self::assertSame('', $adapter->lastPrompt);
+        self::assertDirectoryDoesNotExist($home->resultDirectory.'/copilot');
+    }
+
+    /** @return list<array{string, string}> */
+    public static function securityRefusals(): array
+    {
+        return [['no_role', 'agent_copilot_selection_unbound'], ['no_evidence', 'agent_copilot_capability_unproven'],
+            ['quality_evidence', 'agent_copilot_capability_unproven']];
+    }
+
+    #[DataProvider('unsafeSecurityPermissions')]
+    public function test_security_runtime_refusal_starts_no_probe_or_turn(string $permission, bool|string $value): void
+    {
+        $adapter = $this->copilotAdapter(role: AgentRole::SECURITY_REVIEW);
+        $approved = $this->copilotContext(role: AgentRole::SECURITY_REVIEW);
+        $home = $this->copilotHome($approved);
+        $runtime = $approved->runtimeProfile;
+        $permissions = array_replace($runtime->permissions, [$permission => $value]);
+        $context = new AgentResultContext($approved->role, $approved->promptSnapshot, $approved->instructionSnapshot,
+            new ProviderRuntimeProfile($runtime->id, $runtime->version, $runtime->adapterFlags, $permissions, $runtime->extensions, $runtime->hash),
+            $approved->criterionRefs, $approved->actualDiff, slotId: $approved->slotId, model: $approved->model, effort: $approved->effort);
+        try {
+            $adapter->turn($context, $home, static function (): void {});
+            self::fail('Security review must reject unsafe runtime permissions.');
+        } catch (AgentExecutionException $exception) {
+            self::assertSame('agent_copilot_runtime_unsupported', $exception->reason);
+        }
+        self::assertSame([], $adapter->lastCommand);
+        self::assertSame('', $adapter->lastPrompt);
+        self::assertDirectoryDoesNotExist($home->resultDirectory.'/copilot');
+    }
+
+    /** @return list<array{string, bool|string}> */
+    public static function unsafeSecurityPermissions(): array
+    {
+        return [['network', true], ['workspace', 'read_write']];
+    }
+
     public function test_finding_verification_requires_both_explicit_server_role_and_separate_evidence(): void
     {
         $context = $this->copilotContext();
@@ -69,6 +126,28 @@ final class GitHubCopilotCliConfigurationTest extends TestCase
         $adapter->assertSelection($context->runtimeProfile, AgentRole::FINDING_VERIFICATION, $context->model, $context->effort, false);
         $this->expectExceptionMessage('agent_copilot_capability_unproven');
         $adapter->assertSelection($context->runtimeProfile, AgentRole::FINDING_VERIFICATION, $context->model, $context->effort);
+    }
+
+    public function test_shipped_security_role_requires_its_own_evidence_and_explicit_server_selection(): void
+    {
+        self::assertSame(['quality_review', 'security_review'], config('ai6.agent_profiles.copilot-cli-review.roles'));
+        $context = $this->copilotContext(role: AgentRole::SECURITY_REVIEW);
+        $binary = FakeCopilotBinary::create($this->wrappers);
+        $configuration = new GitHubCopilotCliConfiguration($binary, '1.0.83');
+        foreach (['unbound', 'missing', 'quality', 'security'] as $case) {
+            config(['ai6.agent_profiles.copilot-cli-review.roles' => $case === 'unbound' ? ['quality_review'] : ['quality_review', 'security_review']]);
+            $this->app->forgetInstance(AgentProfileRegistry::class);
+            $evidence = in_array($case, ['quality', 'security'], true)
+                ? [$configuration->evidenceKey($context->runtimeProfile, $case === 'quality' ? AgentRole::QUALITY_REVIEW : AgentRole::SECURITY_REVIEW, $context->model, $context->effort)] : [];
+            $adapter = new GitHubCopilotCliAdapter(new GitHubCopilotCliConfiguration($binary, '1.0.83', $evidence), app(AgentInputLimits::class), app(Redactor::class), app(RestrictedJsonDecoder::class), app(AgentProfileRegistry::class), app(CanonicalJson::class));
+            try {
+                $adapter->assertSelection($context->runtimeProfile, AgentRole::SECURITY_REVIEW, $context->model, $context->effort);
+                self::assertSame('security', $case);
+            } catch (AgentExecutionException $exception) {
+                self::assertNotSame('security', $case);
+                self::assertSame($case === 'unbound' ? 'agent_copilot_selection_unbound' : 'agent_copilot_capability_unproven', $exception->reason);
+            }
+        }
     }
 
     public function test_model_identifiers_come_only_from_the_registry_and_exact_evidence(): void

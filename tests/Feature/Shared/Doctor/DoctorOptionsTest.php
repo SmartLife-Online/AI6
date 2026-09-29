@@ -3,6 +3,9 @@
 namespace Tests\Feature\Shared\Doctor;
 
 use App\AI6\Agents\AgentProfileRegistry;
+use App\AI6\Agents\AgentRole;
+use App\AI6\Agents\GitHubCopilotCliConfiguration;
+use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Shared\Doctor\DoctorCommand;
 use App\AI6\Shared\Doctor\ProcessRolesDoctorCheck;
 use App\AI6\Shared\Process\ControlProcessRunner;
@@ -66,14 +69,12 @@ final class DoctorOptionsTest extends TestCase
             'network_isolated' => true, 'apparmor_confined' => true, 'namespace_tooling' => true, 'profiles_executable' => true,
             'profile_programs' => ['php-targeted' => true],
         ], JSON_THROW_ON_ERROR));
-        // A synthetic future security-review selection tests the consumer; it
-        // does not release a production profile or manufacture runtime evidence.
+        // Seed capability reports for the shipped roles; this is no real runtime evidence.
         $profiles = config('ai6.agent_profiles');
         foreach ($profiles as &$profile) {
             $profile['capability_status'] = 'available';
         }
         unset($profile);
-        $profiles['copilot-cli-review']['roles'][] = 'security_review';
         config(['ai6.agent_profiles' => $profiles, 'ai6.agent_security_review_profile' => 'copilot-cli-review']);
         $this->app->forgetInstance(AgentProfileRegistry::class);
         $this->seedProviderReports();
@@ -123,6 +124,8 @@ final class DoctorOptionsTest extends TestCase
             self::assertSame(1, substr_count($output, $label.': OK'), $label);
         }
         self::assertStringNotContainsString('Prozessrollen:', $output);
+        self::assertStringContainsString('Adapter: github_copilot_cli', $output);
+        self::assertStringNotContainsString('security_review_adapter_fake', $output);
     }
 
     #[DataProvider('failures')]
@@ -136,12 +139,19 @@ final class DoctorOptionsTest extends TestCase
             'unknown' => config(['ai6.agent_security_review_profile' => 'unknown']),
             'invalid' => config(['ai6.agent_security_review_profile' => 'private invalid value']),
             'not-ready' => config(['ai6.copilot.capability_evidence' => []]),
+            'quality-only' => config(['ai6.copilot.capability_evidence' => [GitHubCopilotCliConfiguration::fromConfiguredValues()->evidenceKey(
+                app(ProviderRuntimeProfileRegistry::class)->get('github-copilot-cli-v1'), AgentRole::QUALITY_REVIEW, 'gpt-5.4', 'provider_default',
+            )]]),
+            'no-role' => config(['ai6.agent_security_review_profile' => 'copilot-claude-sonnet-review']),
             default => throw new \InvalidArgumentException('Unknown doctor failure fixture.'),
         };
         self::assertSame(1, Artisan::call('ai6:doctor', ['--security' => true]));
         $output = Artisan::output();
         self::assertMatchesRegularExpression('/Sicherheitsmaßnahme '.preg_quote($measure, '/').': FEHLER \([^\r\n]*'.preg_quote($reason, '/').'/', $output);
         self::assertStringNotContainsString('private invalid value', $output);
+        if (in_array($failure, ['not-ready', 'quality-only', 'no-role'], true)) {
+            self::assertStringContainsString($failure === 'no-role' ? 'combination_not_allowed' : 'capability_not_available', $output);
+        }
     }
 
     public function test_security_does_not_accept_a_check_outside_its_responsible_role(): void
@@ -165,6 +175,8 @@ final class DoctorOptionsTest extends TestCase
             ['unknown', SecurityMeasure::REQUIRE_LLM_PRECOMMIT_REVIEW->value, 'security_review_profile_unresolved'],
             ['invalid', SecurityMeasure::REQUIRE_LLM_PRECOMMIT_REVIEW->value, 'security_review_profile_unresolved'],
             ['not-ready', SecurityMeasure::REQUIRE_LLM_PRECOMMIT_REVIEW->value, 'security_review_profile_unresolved'],
+            ['quality-only', SecurityMeasure::REQUIRE_LLM_PRECOMMIT_REVIEW->value, 'security_review_profile_unresolved'],
+            ['no-role', SecurityMeasure::REQUIRE_LLM_PRECOMMIT_REVIEW->value, 'security_review_profile_unresolved'],
         ];
     }
 

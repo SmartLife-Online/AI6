@@ -4,6 +4,7 @@ namespace Tests\Unit\Agents;
 
 use App\AI6\Agents\AgentExecutionException;
 use App\AI6\Agents\AgentInputLimits;
+use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentResultValidator;
 use App\AI6\Agents\AgentRole;
 use App\AI6\Agents\GitHubCopilotCliAdapter;
@@ -132,7 +133,26 @@ class GitHubCopilotCliAdapterTest extends TestCase
     /** @return list<array{AgentRole}> */
     public static function forbiddenRoles(): array
     {
-        return [[AgentRole::IMPLEMENTATION], [AgentRole::SECURITY_REVIEW], [AgentRole::FINDING_VERIFICATION]];
+        return [[AgentRole::IMPLEMENTATION], [AgentRole::FINDING_VERIFICATION]];
+    }
+
+    public function test_implementation_is_forbidden_even_when_a_server_profile_registers_it(): void
+    {
+        $profile = config('ai6.agent_profiles.copilot-cli-review');
+        $profile['roles'] = ['implementation'];
+        config(['ai6.agent_profiles.copilot-implementation-fixture' => $profile]);
+        $this->app->forgetInstance(AgentProfileRegistry::class);
+        $adapter = $this->copilotAdapter(role: AgentRole::IMPLEMENTATION);
+        $context = $this->copilotContext(role: AgentRole::IMPLEMENTATION);
+        $home = $this->copilotHome($context);
+        try {
+            $adapter->turn($context, $home, static function (): void {});
+            self::fail('Implementation must remain forbidden by the transport.');
+        } catch (AgentExecutionException $exception) {
+            self::assertSame('agent_copilot_role_unsupported', $exception->reason);
+        }
+        self::assertSame([], $adapter->lastCommand);
+        self::assertDirectoryDoesNotExist($home->resultDirectory.'/copilot');
     }
 
     public function test_missing_capability_evidence_prevents_even_probe_or_partial_input(): void

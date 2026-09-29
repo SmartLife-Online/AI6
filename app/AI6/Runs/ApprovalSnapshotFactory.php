@@ -49,6 +49,11 @@ final readonly class ApprovalSnapshotFactory
             new PromptRenderRequest('fix', new PromptVariables(['context' => $promptContext])),
         ];
         $securitySelection = $this->securityReviewer->resolve();
+        if ($selection->runType === RunType::IMPLEMENTATION
+            && $selection->implementation->profile->providerProfileAlias !== 'fake'
+            && $securitySelection->profile->providerProfileAlias === $selection->implementation->profile->providerProfileAlias) {
+            throw new \InvalidArgumentException('Der Securityreviewer darf im Implementierungslauf nicht das Providerprofil des Implementierungsslots verwenden.');
+        }
         $firstReviewer = $selection->reviewers[0];
         $promptRequests[] = new PromptRenderRequest('quality_review', new PromptVariables(['context' => $promptContext]), $firstReviewer->promptProfileId);
         $promptRequests[] = new PromptRenderRequest('finding_verification', new PromptVariables(['context' => $promptContext]));

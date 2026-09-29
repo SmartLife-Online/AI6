@@ -53,6 +53,11 @@ profile ai6-agent-v1 flags=(attach_disconnected,mediate_deleted) {
   mount options=(ro,nosuid,nodev,noexec,remount,bind,silent,relatime) -> /newroot/var/lib/ai6/agent-executions/*-*-*/,
   mount options=(rw,rbind) /oldroot/var/lib/ai6/agent-outputs/*-*-*/ -> /newroot/var/lib/ai6/agent-outputs/*-*-*/,
   mount options=(rw,nosuid,nodev,noexec,remount,bind,silent,relatime) -> /newroot/var/lib/ai6/agent-outputs/*-*-*/,
+  # AgentExecutionRunner stages a turn home below its execution-id directory.
+  mount options=(rw,rbind) /oldroot/var/lib/ai6/agent-executions/execution-*/*-*-*/ -> /newroot/var/lib/ai6/agent-executions/execution-*/*-*-*/,
+  mount options=(ro,nosuid,nodev,noexec,remount,bind,silent,relatime) -> /newroot/var/lib/ai6/agent-executions/execution-*/*-*-*/,
+  mount options=(rw,rbind) /oldroot/var/lib/ai6/agent-outputs/execution-*/*-*-*/ -> /newroot/var/lib/ai6/agent-outputs/execution-*/*-*-*/,
+  mount options=(rw,nosuid,nodev,noexec,remount,bind,silent,relatime) -> /newroot/var/lib/ai6/agent-outputs/execution-*/*-*-*/,
   # Existing provider scope producers: individual private children only.
   # Never permit private_root itself, sibling trees or arbitrary file sources.
   mount options=(rw,rbind) /oldroot/run/ai6/provider-private/projection-*/ -> /newroot/run/ai6/provider-private/projection-*/,

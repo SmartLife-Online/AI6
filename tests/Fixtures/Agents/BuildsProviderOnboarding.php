@@ -63,7 +63,8 @@ trait BuildsProviderOnboarding
             'ai6.provider_onboarding.store_root' => $this->onboardingRoot.'/store',
             'ai6.provider_onboarding.report_root' => $this->onboardingRoot.'/reports',
             'ai6.provider_onboarding.presence_root' => $this->onboardingRoot.'/presence',
-            'ai6.provider_onboarding.private_root' => $this->onboardingRoot.'/private',
+            'ai6.provider_onboarding.private_root' => NativeProviderMailbox::containerRunner() === null
+                ? $this->onboardingRoot.'/private' : NativeProviderMailbox::CONTAINER_PRIVATE,
             'ai6.process.policies.control.working_roots' => [...config('ai6.process.policies.control.working_roots'), $this->onboardingRoot],
         ]);
         $boot = bin2hex(random_bytes(16));
@@ -76,6 +77,11 @@ trait BuildsProviderOnboarding
     #[After]
     protected function destroyOnboardingFixture(): void
     {
+        if (isset($this->onboardingRoot) && NativeProviderMailbox::containerRunner() !== null) {
+            // Only the dedicated, ephemeral test volumes; never product paths
+            // unless the external read-only test launcher was selected.
+            NativeProviderMailbox::resetContainerVolumes();
+        }
         if (isset($this->nativeMailboxRoot)) {
             (new Filesystem)->deleteDirectory($this->nativeMailboxRoot);
             unset($this->nativeMailboxRoot);
@@ -99,15 +105,19 @@ trait BuildsProviderOnboarding
             }
             // /dev/shm is an actual noexec/nosuid/nodev tmpfs in the Linux test
             // container. Keep executable Git/CLI fixtures on the separate /work mount.
-            if (! isset($this->nativeMailboxRoot)) {
+            if (NativeProviderMailbox::containerRunner() === null && ! isset($this->nativeMailboxRoot)) {
                 $this->nativeMailboxRoot = '/dev/shm/ai6-native-mailbox-'.bin2hex(random_bytes(8));
                 foreach (['inputs', 'outputs'] as $name) {
                     self::assertTrue(mkdir($this->nativeMailboxRoot.'/'.$name, 0700, true));
                 }
             }
-            config(['ai6.execution_mailboxes.agent_root' => $this->nativeMailboxRoot.'/inputs',
-                'ai6.execution_mailboxes.agent_output_root' => $this->nativeMailboxRoot.'/outputs',
-                'ai6.process.policies.agent.working_roots' => [$this->nativeMailboxRoot.'/inputs', $this->nativeMailboxRoot.'/outputs']]);
+            $input = isset($this->nativeMailboxRoot) ? $this->nativeMailboxRoot.'/inputs' : NativeProviderMailbox::CONTAINER_INPUT;
+            $output = isset($this->nativeMailboxRoot) ? $this->nativeMailboxRoot.'/outputs' : NativeProviderMailbox::CONTAINER_OUTPUT;
+            self::assertDirectoryExists($input);
+            self::assertDirectoryExists($output);
+            config(['ai6.execution_mailboxes.agent_root' => $input,
+                'ai6.execution_mailboxes.agent_output_root' => $output,
+                'ai6.process.policies.agent.working_roots' => [$input, $output]]);
             $this->app->forgetInstance(ProcessPolicyRegistry::class);
             $this->app->forgetInstance(ControlProcessRunner::class);
         }

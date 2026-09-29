@@ -14,7 +14,7 @@ use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
 use Closure;
 
-/** One programmatic stdin/text transport. AI6-047 owns sessions, results, errors and cleanup. */
+/** One programmatic stdin/text transport, including security review (AI6-050). AI6-047 owns sessions, results, errors and cleanup. */
 final class GitHubCopilotCliAdapter implements AgentAdapter
 {
     public const PROVIDER_ALIAS = 'github_copilot_cli';
@@ -96,7 +96,7 @@ final class GitHubCopilotCliAdapter implements AgentAdapter
     /** Static profile check shared by the doctor and turn; never starts a process. */
     public function assertSelection(ProviderRuntimeProfile $runtime, AgentRole $role, string $model, string $effort, bool $requireEvidence = true): void
     {
-        if (! in_array($role, [AgentRole::QUALITY_REVIEW, AgentRole::FINDING_VERIFICATION], true)) {
+        if (! in_array($role, [AgentRole::QUALITY_REVIEW, AgentRole::FINDING_VERIFICATION, AgentRole::SECURITY_REVIEW], true)) {
             throw new AgentExecutionException('agent_copilot_role_unsupported');
         }
         self::assertRuntimeProfile($runtime);

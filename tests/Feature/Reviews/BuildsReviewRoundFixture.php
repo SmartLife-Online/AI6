@@ -107,9 +107,8 @@ trait BuildsReviewRoundFixture
             $agentProfiles[$independent]['capability_status'] = $enableIndependentFallback ? 'available' : 'unchecked';
         }
         // This orchestration fixture explicitly supplies its second verifier.
-        // AI6-048 ships Copilot with quality_review only; the native transport
-        // still requires separate evidence before any verification turn.
-        $agentProfiles['copilot-cli-review']['roles'] = ['quality_review', 'finding_verification'];
+        // Preserve shipped review roles; verification still requires its own evidence.
+        $agentProfiles['copilot-cli-review']['roles'] = array_values(array_unique([...$agentProfiles['copilot-cli-review']['roles'], 'finding_verification']));
         config([
             'ai6.agent_profiles' => $agentProfiles,
             'ai6.credential_revisions.codex_cli' => 'test-v1',

@@ -180,6 +180,7 @@
         "AI6_EXECUTION_DIRECTORY": "/var/lib/ai6/executions",
         "AI6_AGENT_EXECUTION_ROOT": "/var/lib/ai6/agent-executions",
         "AI6_AGENT_OUTPUT_ROOT": "/var/lib/ai6/agent-outputs",
+        "AI6_AGENT_SECURITY_REVIEW_PROFILE": "${AI6_AGENT_SECURITY_REVIEW_PROFILE:-fake}",
         "AI6_CHECKER_EXECUTION_ROOT": "/var/lib/ai6/checker-executions",
         "AI6_CHECKER_OUTPUT_ROOT": "/var/lib/ai6/checker-outputs",
         "AI6_CODEX_BINARY": "${AI6_CODEX_BINARY:-/usr/local/bin/codex}",

@@ -22,6 +22,16 @@ final class FakeCopilotBinary
             $path .= '.cmd';
             $script = "@echo off\r\n\"".PHP_BINARY.'" "'.$fixture.'" "'.$scenario."\" %*\r\n";
         }
+        if (NativeProviderMailbox::containerRunner() !== null) {
+            // The fixture image carries these exact bytes in /usr, matching
+            // the production executable projection without an extra mount.
+            $path = NativeProviderMailbox::CONTAINER_BINARIES.'/copilot-'.hash('sha256', $script);
+            Assert::assertFileExists($path);
+            Assert::assertSame(hash('sha256', $script), hash_file('sha256', $path));
+            Assert::assertFalse(is_writable($path));
+
+            return $path;
+        }
         Assert::assertNotFalse(file_put_contents($path, $script));
         Assert::assertTrue(chmod($path, 0755));
 

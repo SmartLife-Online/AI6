@@ -76,7 +76,9 @@ final class RuntimeDocumentationTest extends TestCase
             '`github_copilot_cli` löst den `GitHubCopilotCliAdapter` auf',
             '`GitHubCopilotCliDoctorCheck`',
             '`AI6_COPILOT_BINARY`, `AI6_COPILOT_PINNED_VERSION` und die öffentliche Laufzeitevidenz erreichen über Compose `app`, `worker` und `agent`',
-            'ausschließlich `quality_review`',
+            '`quality_review` und `security_review`',
+            'test_real_linux_copilot_security_review_with_a_fully_read_only_candidate',
+            'Jede Änderung an den Adapterbytes entwertet sämtliche Copilot-Evidenzschlüssel',
             '`COPILOT_HOME` zeigt auf das vollständig read-only Home einschließlich `home/session-state`',
             '`ai6.copilot.capability_evidence` bleibt standardmäßig leer',
             '`AI6_COPILOT_CAPABILITY_EVIDENCE`',
@@ -101,6 +103,11 @@ final class RuntimeDocumentationTest extends TestCase
         foreach (['worker', 'agent'] as $service) {
             self::assertStringContainsString('AI6_COPILOT_CAPABILITY_EVIDENCE', $this->serviceRow($readme, $service), $service);
         }
+        self::assertStringContainsString('AI6_AGENT_SECURITY_REVIEW_PROFILE', $this->serviceRow($readme, 'worker'));
+        foreach (['app', 'scheduler', 'agent', 'checker'] as $service) {
+            self::assertStringNotContainsString('AI6_AGENT_SECURITY_REVIEW_PROFILE', $this->serviceRow($readme, $service));
+        }
+        self::assertStringContainsString('Befund der Vorgabe `fake`', $readme);
     }
 
     public function test_readme_documents_start_roles_allowlists_versions_and_commands(): void

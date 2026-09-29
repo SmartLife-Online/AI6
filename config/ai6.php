@@ -310,7 +310,8 @@ return [
             'adapter' => 'github_copilot_cli',
             'models' => ['gpt-5.4'],
             'efforts' => ['provider_default'],
-            'roles' => ['quality_review'],
+            // AI6-050: each review role requires its own runtime evidence; implementation stays forbidden.
+            'roles' => ['quality_review', 'security_review'],
             'capability_status' => 'unchecked',
             'runtime_profile' => 'github-copilot-cli-v1',
         ],

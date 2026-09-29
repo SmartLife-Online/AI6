@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Runs;
 
+use App\AI6\Agents\AgentExecutionProcessor;
+use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentScenario;
 use App\AI6\Agents\FakeAgentAdapter;
 use App\AI6\Agents\SecurityReviewerProfileResolver;
@@ -667,6 +669,32 @@ final class RunFinalizationStepTest extends TicketUiTestCase
         self::assertFalse(ExecutionJob::query()->where('run_id', $run->id)
             ->where('step_type', ExecutionStepType::SECURITY_REVIEW->value)
             ->where('state', ExecutionJobState::SUCCEEDED->value)->exists());
+    }
+
+    public function test_security_profile_approval_mismatch_starts_no_session_home_or_turn(): void
+    {
+        $prepared = $this->prepareSecurityCandidate('AI6-050-MISMATCH');
+        $run = $prepared['run'];
+        $adapter = $this->app->make(FakeAgentAdapter::class);
+        $turns = $adapter->turnCount;
+        $inputs = $this->directoryEntries(AgentExecutionProcessor::inputRoot());
+        $outputs = $this->directoryEntries(AgentExecutionProcessor::outputRoot());
+        config(['ai6.agent_profiles.other-security' => config('ai6.agent_profiles.fake'),
+            'ai6.agent_security_review_profile' => 'other-security']);
+        foreach ([AgentProfileRegistry::class, SecurityReviewerProfileResolver::class, SecurityReviewStep::class] as $binding) {
+            $this->app->forgetInstance($binding);
+        }
+        $security = ExecutionJob::query()->where('run_id', $run->id)->where('step_type', 'security_review')->sole();
+        (new ExecuteRunStep($security->id))->handle(app(RunOrchestrator::class), securityReview: app(SecurityReviewStep::class));
+        self::assertSame(WaitReason::SECURITY_GATE, $run->refresh()->wait_reason);
+        self::assertSame(ExecutionJobState::WAITING, $security->refresh()->state);
+        self::assertSame(0, $run->agents()->where('role', 'security_review')->count());
+        self::assertSame($turns, $adapter->turnCount);
+        self::assertSame($inputs, $this->directoryEntries(AgentExecutionProcessor::inputRoot()));
+        self::assertSame($outputs, $this->directoryEntries(AgentExecutionProcessor::outputRoot()));
+        self::assertFalse(ReviewResult::query()->where('run_id', $run->id)->where('role', 'security_review')->exists());
+        $request = HumanRequest::query()->where('run_id', $run->id)->where('kind', 'security_gate')->sole();
+        self::assertStringContainsString('security_reviewer_approval_mismatch', $request->why_needed);
     }
 
     public function test_confirmed_policy_reduction_records_a_skip_without_a_passed_result(): void

@@ -104,19 +104,16 @@ final readonly class SecurityReviewStep
         $instructionHash = null;
         try {
             $selection = $this->reviewer->resolve();
-            $profileId = $selection->profile->id;
-            if ($selection->profile->adapterId !== 'fake') {
-                throw new ImplementationImportException('security_adapter_not_available', 'A real provider adapter is not part of this product state.');
-            }
             $approved = ($run->agent_profile_snapshot ?? [])['security_reviewer'] ?? null;
             if (! is_array($approved)
-                || ($approved['profile_id'] ?? null) !== $profileId
+                || ($approved['profile_id'] ?? null) !== $selection->profile->id
                 || ($approved['provider_profile'] ?? null) !== $selection->profile->providerProfileAlias
                 || ($approved['model'] ?? null) !== $selection->model
                 || ($approved['effort'] ?? null) !== $selection->effort
                 || ($approved['runtime_profile_id'] ?? null) !== $selection->profile->runtimeProfileId) {
                 throw new ImplementationImportException('security_reviewer_approval_mismatch', 'The security reviewer differs from the approved profile.');
             }
+            $profileId = $selection->profile->id;
             $instruction = $this->instruction($run, $selection->profile->providerProfileAlias);
             $instructionHash = $instruction->hash;
             $runtime = $this->runtime($run, $selection->profile->runtimeProfileId);

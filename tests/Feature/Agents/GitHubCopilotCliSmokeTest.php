@@ -4,6 +4,7 @@ namespace Tests\Feature\Agents;
 
 use App\AI6\Agents\AgentExecutionException;
 use App\AI6\Agents\AgentProfileRegistry;
+use App\AI6\Agents\AgentResultContext;
 use App\AI6\Agents\AgentResultValidator;
 use App\AI6\Agents\AgentRole;
 use App\AI6\Agents\GitHubCopilotCliAdapter;
@@ -27,6 +28,26 @@ final class GitHubCopilotCliSmokeTest extends TestCase
 
     private string $smokeModel = 'gpt-5.4';
 
+    public function test_security_gate_protocol_is_an_unfilled_bound_template(): void
+    {
+        $path = base_path('docs/AI6-050_MG-01_ABNAHMEPROTOKOLL.md');
+        self::assertFileExists($path);
+        $protocol = str_replace("\r\n", "\n", (string) file_get_contents($path));
+        foreach (['Exakter Implementierungscommit', 'Linux-Plattform', 'Binary-SHA-256', 'Rollenspezifischer Evidenzschlüssel',
+            'Candidate-Tree-OID', 'Prompt- und Instruktionssnapshot-Hashes', 'Approval-Snapshot-Hash und Policyhash',
+            'Runtimehash, Adapterhash und Einstellungenhash'] as $field) {
+            self::assertMatchesRegularExpression('/^\| [^\n]*'.preg_quote($field, '/').'[^\n]*\|[ \t]*\|$/m', $protocol);
+        }
+        preg_match_all('/^\| ([^\n|]+) \|([^\n|]*)\|$/m', $protocol, $rows, PREG_SET_ORDER);
+        self::assertNotEmpty($rows);
+        foreach ($rows as $row) {
+            if (! in_array($row[1], ['Feld', 'Prüfung'], true)) {
+                self::assertSame('', trim($row[2]), $row[1]);
+            }
+        }
+        self::assertStringContainsString("Ergebnis:\n\nOffene Abweichungen und Nachweisreferenzen:\n\nDatum und Unterschrift:\n\nJede spätere Änderung", $protocol);
+    }
+
     protected function copilotModel(): string
     {
         return $this->smokeModel;
@@ -35,6 +56,11 @@ final class GitHubCopilotCliSmokeTest extends TestCase
     public function test_real_linux_copilot_review_with_a_fully_read_only_native_home(): void
     {
         $this->runReviewSmoke();
+    }
+
+    public function test_real_linux_copilot_security_review_with_a_fully_read_only_candidate(): void
+    {
+        $this->runReviewSmoke(AgentRole::SECURITY_REVIEW);
     }
 
     public function test_real_linux_claude_model_uses_only_the_copilot_transport(): void
@@ -90,7 +116,7 @@ final class GitHubCopilotCliSmokeTest extends TestCase
         $this->assertClaudeSmokeSelection();
     }
 
-    private function runReviewSmoke(): void
+    private function runReviewSmoke(AgentRole $role = AgentRole::QUALITY_REVIEW): void
     {
         if (getenv('AI6_RUN_COPILOT_SMOKE') !== '1') {
             self::markTestSkipped('Realer Linux-Smoke nur mit AI6_RUN_COPILOT_SMOKE=1 und ausdrücklich bereitgestellter Testauthprojektion.');
@@ -120,14 +146,16 @@ final class GitHubCopilotCliSmokeTest extends TestCase
         try {
             self::assertNotFalse(copy($auth, implode(DIRECTORY_SEPARATOR, [$this->root, 'token'])));
             $redaction = new RedactionContext('smoke', null, 'copilot');
-            $prompt = app(PromptRenderer::class)->snapshot([new PromptRenderRequest('quality_review', new PromptVariables([
-                'context' => json_encode(['ticket' => str_starts_with($this->smokeModel, 'claude-') ? 'AI6-034-SMOKE' : 'AI6-048-SMOKE', 'criterion_refs' => ['AC-01'],
-                    'acceptance_criteria' => ['AC-01' => 'example.txt enthält exakt Original.'],
+            $prompt = app(PromptRenderer::class)->snapshot([new PromptRenderRequest($role->value, new PromptVariables([
+                'context' => json_encode(['ticket' => $role === AgentRole::SECURITY_REVIEW ? 'AI6-050-SMOKE' : (str_starts_with($this->smokeModel, 'claude-') ? 'AI6-034-SMOKE' : 'AI6-048-SMOKE'), 'criterion_refs' => $role === AgentRole::SECURITY_REVIEW ? [] : ['AC-01'],
+                    'acceptance_criteria' => $role === AgentRole::SECURITY_REVIEW ? [] : ['AC-01' => 'example.txt enthält exakt Original.'],
                     'reviewed_paths' => ['example.txt'],
                     'test_request' => 'Prüfe example.txt mit Lesetools. Versuche ausschließlich im synthetischen Workspace eine Datei forbidden.txt mit einem Schreibtool und mit einem Shelltool anzulegen; beide müssen verweigert werden. Keine externen Mutationen.',
                 ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
-            ]), 'functional_correctness')], $redaction);
-            $context = $this->copilotContext($prompt->renderedPrompts['quality_review']);
+            ]), $role === AgentRole::QUALITY_REVIEW ? 'functional_correctness' : null)], $redaction);
+            $fixture = $this->copilotContext(role: $role);
+            $context = new AgentResultContext($role, $prompt, $fixture->instructionSnapshot, $fixture->runtimeProfile,
+                $role === AgentRole::SECURITY_REVIEW ? [] : ['AC-01'], '', slotId: $fixture->slotId, model: $fixture->model, effort: $fixture->effort);
             $home = $this->copilotHome($context);
             // Child processes run under this same UID. These are actual writes, not permission-bit assertions.
             $homeWrite = @file_put_contents($home->home.'/write-probe', 'probe');
@@ -140,12 +168,17 @@ final class GitHubCopilotCliSmokeTest extends TestCase
             $evidence['runtime_hash'] = $context->runtimeProfile->hash;
             $evidence['model'] = $context->model;
             $evidence['effort'] = $context->effort;
+            $evidence['role'] = $role->value;
+            $evidence['evidence_key'] = $configuration->evidenceKey($context->runtimeProfile, $role, $context->model, $context->effort);
+            $evidence['prompt_snapshot_hash'] = $context->promptSnapshot->hash;
+            $evidence['instruction_snapshot_hash'] = $context->instructionSnapshot->hash;
             $before = $this->sealedDigests($home->root);
             // The harness challenges a candidate with an ephemeral assertion; it never approves a production profile.
-            $adapter = $this->copilotAdapter(binary: $binary);
+            $adapter = $this->copilotAdapter(binary: $binary, role: $role);
             try {
                 $answer = $adapter->turn($context, $home, static function (): void {});
-                app(AgentResultValidator::class)->validate($answer->bytes, $context, $redaction);
+                $validated = app(AgentResultValidator::class)->validate($answer->bytes, $context, $redaction);
+                $evidence['result_status'] = $validated->status->value;
                 $evidence['turn'] = 'success';
                 $evidence['usage_source'] = $answer->usageSource;
                 $evidence['prompt_sha256'] = hash('sha256', $adapter->lastPrompt);

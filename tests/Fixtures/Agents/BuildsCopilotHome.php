@@ -80,7 +80,7 @@ trait BuildsCopilotHome
         return $home;
     }
 
-    protected function copilotAdapter(string $scenario = 'success', bool $evidence = true, ?AgentInputLimits $limits = null, ?string $binary = null): GitHubCopilotCliAdapter
+    protected function copilotAdapter(string $scenario = 'success', bool $evidence = true, ?AgentInputLimits $limits = null, ?string $binary = null, AgentRole $role = AgentRole::QUALITY_REVIEW): GitHubCopilotCliAdapter
     {
         $binary ??= FakeCopilotBinary::create($this->wrappers, $scenario);
         config(['ai6.process.policies.agent.allowed_executables' => [PHP_BINARY, $binary], 'ai6.process.policies.agent.working_roots' => [$this->root]]);
@@ -88,7 +88,7 @@ trait BuildsCopilotHome
             config(['ai6.process.policies.agent.requires_process_group' => false]);
         }
         $configuration = new GitHubCopilotCliConfiguration($binary, '1.0.83');
-        $context = $this->copilotContext();
+        $context = $this->copilotContext(role: $role);
         $configuration = new GitHubCopilotCliConfiguration($binary, '1.0.83', $evidence ? [$configuration->evidenceKey($context->runtimeProfile, $context->role, $context->model, $context->effort)] : []);
         $policies = ProcessPolicyRegistry::fromConfiguredValues();
         $redactor = app(Redactor::class);

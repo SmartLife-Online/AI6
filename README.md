@@ -80,7 +80,7 @@ docker compose exec --user 0 worker chmod 0600 /var/lib/ai6/managed/credentials/
 
 Den von `ssh-keygen -lf` angezeigten Fingerprint vor dem Eintragen über eine unabhängige vertrauenswürdige Quelle des Git-Hosts vergleichen; `ssh-keyscan` allein authentifiziert den Host nicht. Nach Änderungen an `.env` die betroffenen Dienste mit `docker compose up -d` neu erstellen, damit die feste Rollen-Allowlist die Werte übernimmt. Die Managed-Root gehört `root:root` mit `0755`; `credentials/` gehört dem Worker mit `0700`. Nach dem Kopieren werden Eigentümer und Dateimodus ausdrücklich gesetzt. `ai6:provider login <alias>` läuft ausschließlich in `agent`.
 
-Die geschlossene Liste erwarteter Befunde einer frischen Installation lautet: `security_review_adapter_fake` → `AI6-050` (einschließlich der dort noch zu liefernden Compose-Zeile für `AI6_AGENT_SECURITY_REVIEW_PROFILE`); `degraded`/`runtime` für `codex_cli` → `AI6-033/MG-01`, für `grok_cli` → `AI6-041/MG-01` und für `github_copilot_cli` → `AI6-048/MG-01`; der bekannte Grok-Sandboxblocker → [Grok-CLI-Transport](#grok-cli-transport). Diese Befunde bleiben Fehler mit Exitcode ungleich null und werden einzeln mit ihrem zuständigen Gate protokolliert. Jeder andere Befund hält die Abnahme offen. Insbesondere ist eine noch leere Git-Allowlist vor dem ersten Projekt erklärbar, aber kein erlaubter Restbefund der Abnahme. Evidenzwerte werden erst nach bestandenem zugehörigem Gate gesetzt. Das Release-Gate läuft im Linux-Checkout desselben Commits; die AC-Lücken des FakeAgent-Gates bleiben bis zu ihrer eigenen Nachlieferung sichtbar.
+Die geschlossene Liste erwarteter Befunde einer frischen Installation lautet: `security_review_adapter_fake` als Befund der Vorgabe `fake` → `AI6-050/MG-01` (die Compose-Zeile für `AI6_AGENT_SECURITY_REVIEW_PROFILE` ist geliefert; ein reales Profil benötigt eigene Security-Evidenz); `degraded`/`runtime` für `codex_cli` → `AI6-033/MG-01`, für `grok_cli` → `AI6-041/MG-01` und für `github_copilot_cli` → `AI6-048/MG-01`; der bekannte Grok-Sandboxblocker → [Grok-CLI-Transport](#grok-cli-transport). Diese Befunde bleiben Fehler mit Exitcode ungleich null und werden einzeln mit ihrem zuständigen Gate protokolliert. Jeder andere Befund hält die Abnahme offen. Insbesondere ist eine noch leere Git-Allowlist vor dem ersten Projekt erklärbar, aber kein erlaubter Restbefund der Abnahme. Evidenzwerte werden erst nach bestandenem zugehörigem Gate gesetzt. Das Release-Gate läuft im Linux-Checkout desselben Commits; die AC-Lücken des FakeAgent-Gates bleiben bis zu ihrer eigenen Nachlieferung sichtbar.
 
 Ohne Optionen führt `ai6:doctor` alle regulären Prüfungen einmal aus: Policy, Ring, Checker, Provider sowie Mail, Git, Retention und Ticketmanifest. Mail und Git prüfen nur in `worker`, in anderen Rollen melden sie `nicht zuständig`; die Mailprüfung prüft SMTP-Konfiguration, keine Zustellung. Retention prüft die vorhandene Wurzel oder ihren nächsten vorhandenen beschreibbaren Vorfahren. `--security` ergänzt die Securityreview-Profilprüfung und ordnet bereits erhaltene Prüfergebnisse den aktiven Maßnahmen zu. `--require-strict` verweigert jedes andere Profil auch bei bestätigtem Reduced Mode und nennt die deaktivierten Maßnahmen. `--all-processes` zeigt nur Lebendigkeit aus eigenem Heartbeat und Agentpräsenz; eine frische Präsenz beweist keine Sandbox. `UNGEPRÜFT` benennt nicht beobachtbare Rollen mit ihrem eigenen Kommando, ist keine erfolgreiche Rollenprüfung und ändert allein den Exitcode nicht. Im Worker betrifft dies `scheduler` und `app`; deren Prüfungen laufen im jeweiligen Container:
 
@@ -176,7 +176,7 @@ Die Tabellenbezeichnung **SecurityPolicy-Variablen** umfasst `AI6_SECURITY_PROFI
 | `caddy` | Separater Reverse Proxy; HTTP-Healthcheck | keine | ausschließlich `deploy/Caddyfile` read-only |
 | `init` | Einmaliger Migrations- und Lock-Bereitstellungsschritt; kein Heartbeat | SecurityPolicy-Variablen, `AI6_RUNTIME_ROLE`, `AI6_MANAGED_PROJECT_ROOT`, `AI6_EFFECT_LOCK_DIRECTORY`, `AI6_EFFECT_LOCK_OBJECT_COUNT`, `AI6_EFFECT_LOCK_OWNER_UID`, `APP_ENV`, `APP_DEBUG`, `DB_CONNECTION`, `DB_DATABASE`, `DB_FOREIGN_KEYS`, `DB_BUSY_TIMEOUT`, `DB_JOURNAL_MODE`, `DB_SYNCHRONOUS` | Datenbank, `storage/` und `ai6_managed` read-write; `/tmp` als `tmpfs` |
 | `app` | Apache/PHP; kein Heartbeat, HTTP-Healthcheck | SecurityPolicy-, Redaction-Keyring-, HTTP-Härtungs-, Git-Remote- und `AI6_AUTH_*`-Variablen, `AI6_RUNTIME_ROLE`, `APP_ENV`, `APP_DEBUG`, `APP_KEY`, `APP_PREVIOUS_KEYS`, `APP_NAME`, `APP_URL`, `CACHE_STORE`, `DB_CONNECTION`, `DB_DATABASE`, `DB_FOREIGN_KEYS`, `DB_BUSY_TIMEOUT`, `DB_JOURNAL_MODE`, `DB_SYNCHRONOUS`, `LOG_CHANNEL`, `QUEUE_CONNECTION`, `SESSION_DRIVER`, `AI6_CONTROL_OPERATION_LEASE_SECONDS`, `AI6_CONTROL_OPERATION_HEARTBEAT_SECONDS`, `AI6_CONTROL_OPERATION_MANAGED_REF_ALLOWLIST`, `AI6_CONTROL_OPERATION_STALE_SECONDS`, `AI6_CODEX_BINARY`, `AI6_CODEX_PINNED_VERSION`, `AI6_CODEX_SANDBOX_PROOF` | Datenbank und `storage/` read-write, Nachweise read-only; `/tmp` als `tmpfs`  `ai6_provider_reports` und `ai6_provider_presence` read-only; kein Storemount |
-| `worker` | `queue:work`; `Looping`-Listener schreibt auch im Leerlauf, ausschließlich am Worker-Heartbeatziel | SecurityPolicy-, Redaction-Keyring- und Git-Remote-Variablen, `AI6_RUNTIME_ROLE`, `APP_ENV`, `APP_DEBUG`, `APP_KEY`, `APP_PREVIOUS_KEYS`, `CACHE_STORE`, `DB_CONNECTION`, `DB_DATABASE`, `DB_FOREIGN_KEYS`, `DB_BUSY_TIMEOUT`, `DB_JOURNAL_MODE`, `DB_SYNCHRONOUS`, `DB_QUEUE_RETRY_AFTER`, `LOG_CHANNEL`, `QUEUE_CONNECTION`, `AI6_EXECUTION_DIRECTORY`, `AI6_AGENT_EXECUTION_ROOT`, `AI6_AGENT_OUTPUT_ROOT`, `AI6_CHECKER_EXECUTION_ROOT`, `AI6_CHECKER_OUTPUT_ROOT`, `AI6_CODEX_BINARY`, `AI6_CODEX_PINNED_VERSION`, `AI6_CODEX_SANDBOX_PROOF`, `AI6_COPILOT_BINARY`, `AI6_COPILOT_PINNED_VERSION`, `AI6_COPILOT_CAPABILITY_EVIDENCE`, `AI6_GROK_BINARY`, `AI6_GROK_PINNED_VERSION`, `AI6_GROK_CAPABILITY_EVIDENCE`, `AI6_HEARTBEAT_DIRECTORY`, `AI6_HEARTBEAT_MAX_AGE`, `AI6_WORKER_TIMEOUT`, `AI6_MANAGED_PROJECT_ROOT`, `AI6_DEPLOY_KEY_ROOT`, `AI6_EFFECT_LOCK_DIRECTORY`, `AI6_EFFECT_LOCK_OBJECT_COUNT`, `AI6_EFFECT_LOCK_OWNER_UID`, `AI6_CONTROL_OPERATION_LEASE_SECONDS`, `AI6_CONTROL_OPERATION_HEARTBEAT_SECONDS`, `AI6_CONTROL_OPERATION_RECONCILER_SECONDS`, `AI6_CONTROL_OPERATION_MAX_ATTEMPTS`, `AI6_CONTROL_OPERATION_KNOWN_HOSTS_FILE`, `AI6_CONTROL_OPERATION_MANAGED_REF_ALLOWLIST`, `AI6_CONTROL_OPERATION_STALE_SECONDS`, `AI6_CONTROL_OPERATION_RECONCILIATION_BUDGET`, `AI6_SSH_KEYGEN_BINARY` | Datenbank, `storage/`, Nachweise, beide getrennten Eingabe-/Ausgabepaare und `ai6_managed` read-write; eigener Heartbeat und `/tmp` als `tmpfs`  `ai6_provider_reports` und `ai6_provider_presence` read-only; kein Storemount |
+| `worker` | `queue:work`; `Looping`-Listener schreibt auch im Leerlauf, ausschließlich am Worker-Heartbeatziel | SecurityPolicy-, Redaction-Keyring- und Git-Remote-Variablen, `AI6_RUNTIME_ROLE`, `APP_ENV`, `APP_DEBUG`, `APP_KEY`, `APP_PREVIOUS_KEYS`, `CACHE_STORE`, `DB_CONNECTION`, `DB_DATABASE`, `DB_FOREIGN_KEYS`, `DB_BUSY_TIMEOUT`, `DB_JOURNAL_MODE`, `DB_SYNCHRONOUS`, `DB_QUEUE_RETRY_AFTER`, `LOG_CHANNEL`, `QUEUE_CONNECTION`, `AI6_EXECUTION_DIRECTORY`, `AI6_AGENT_EXECUTION_ROOT`, `AI6_AGENT_SECURITY_REVIEW_PROFILE`, `AI6_AGENT_OUTPUT_ROOT`, `AI6_CHECKER_EXECUTION_ROOT`, `AI6_CHECKER_OUTPUT_ROOT`, `AI6_CODEX_BINARY`, `AI6_CODEX_PINNED_VERSION`, `AI6_CODEX_SANDBOX_PROOF`, `AI6_COPILOT_BINARY`, `AI6_COPILOT_PINNED_VERSION`, `AI6_COPILOT_CAPABILITY_EVIDENCE`, `AI6_GROK_BINARY`, `AI6_GROK_PINNED_VERSION`, `AI6_GROK_CAPABILITY_EVIDENCE`, `AI6_HEARTBEAT_DIRECTORY`, `AI6_HEARTBEAT_MAX_AGE`, `AI6_WORKER_TIMEOUT`, `AI6_MANAGED_PROJECT_ROOT`, `AI6_DEPLOY_KEY_ROOT`, `AI6_EFFECT_LOCK_DIRECTORY`, `AI6_EFFECT_LOCK_OBJECT_COUNT`, `AI6_EFFECT_LOCK_OWNER_UID`, `AI6_CONTROL_OPERATION_LEASE_SECONDS`, `AI6_CONTROL_OPERATION_HEARTBEAT_SECONDS`, `AI6_CONTROL_OPERATION_RECONCILER_SECONDS`, `AI6_CONTROL_OPERATION_MAX_ATTEMPTS`, `AI6_CONTROL_OPERATION_KNOWN_HOSTS_FILE`, `AI6_CONTROL_OPERATION_MANAGED_REF_ALLOWLIST`, `AI6_CONTROL_OPERATION_STALE_SECONDS`, `AI6_CONTROL_OPERATION_RECONCILIATION_BUDGET`, `AI6_SSH_KEYGEN_BINARY` | Datenbank, `storage/`, Nachweise, beide getrennten Eingabe-/Ausgabepaare und `ai6_managed` read-write; eigener Heartbeat und `/tmp` als `tmpfs`  `ai6_provider_reports` und `ai6_provider_presence` read-only; kein Storemount |
 | `scheduler` | `schedule:work`; der Zehn-Sekunden-Task schreibt den Heartbeat und verwendet einen stabilen Selbsttestschlüssel je Scheduler-Boot-ID | SecurityPolicy- und Redaction-Keyring-Variablen, `AI6_RUNTIME_ROLE`, `APP_ENV`, `APP_DEBUG`, `CACHE_STORE`, `DB_CONNECTION`, `DB_DATABASE`, `DB_FOREIGN_KEYS`, `DB_BUSY_TIMEOUT`, `DB_JOURNAL_MODE`, `DB_SYNCHRONOUS`, `DB_QUEUE_RETRY_AFTER`, `LOG_CHANNEL`, `QUEUE_CONNECTION`, `AI6_HEARTBEAT_DIRECTORY`, `AI6_HEARTBEAT_MAX_AGE`, `AI6_CONTROL_OPERATION_RECONCILER_SECONDS`, `AI6_CODEX_BINARY`, `AI6_CODEX_PINNED_VERSION`, `AI6_CODEX_SANDBOX_PROOF`, `AI6_COPILOT_BINARY`, `AI6_COPILOT_PINNED_VERSION`, `AI6_COPILOT_CAPABILITY_EVIDENCE`, `AI6_GROK_BINARY`, `AI6_GROK_PINNED_VERSION`, `AI6_GROK_CAPABILITY_EVIDENCE` | Datenbank und `storage/` read-write; `ai6_provider_reports` und `ai6_provider_presence` read-only; kein Storemount; eigener Heartbeat und `/tmp` als `tmpfs` |
 | `agent` | Laravel-Agent-Mailboxprozess mit rollengebundenem Heartbeat | Redaction-Keyring-Variablen, `AI6_AGENT_EXECUTION_ROOT`, `AI6_AGENT_OUTPUT_ROOT`, `AI6_CODEX_BINARY`, `AI6_CODEX_PINNED_VERSION`, `AI6_CODEX_SANDBOX_PROOF`, `AI6_COPILOT_BINARY`, `AI6_COPILOT_PINNED_VERSION`, `AI6_COPILOT_CAPABILITY_EVIDENCE`, `AI6_GROK_BINARY`, `AI6_GROK_PINNED_VERSION`, `AI6_GROK_CAPABILITY_EVIDENCE`, `AI6_HEARTBEAT_DIRECTORY`, `AI6_HEARTBEAT_INTERVAL`, `AI6_HEARTBEAT_MAX_AGE`, `AI6_RUNTIME_ROLE`, `LOG_CHANNEL=stderr` | Agent-Eingabewurzel read-only, getrennte Agent-Ausgabewurzel read-write, eigener Heartbeat und `/tmp`; UID/GID `10002:10001`  persistenter `ai6_provider_store`, `ai6_provider_reports` und `ai6_provider_presence` read-write; `ai6_provider_private` als privates tmpfs |
 | `checker` | Laravel-Checker-Mailboxprozess mit konsumierender Checkschleife, rollengebundenem Heartbeat und ohne Containernetz | Redaction-Keyring-Variablen, `AI6_CHECKER_EXECUTION_ROOT`, `AI6_CHECKER_OUTPUT_ROOT`, `AI6_CHECKER_WORKSPACE_ROOT`, fester Namespacewerkzeug-/Wrapperpfad, `AI6_HEARTBEAT_DIRECTORY`, `AI6_HEARTBEAT_INTERVAL`, `AI6_HEARTBEAT_MAX_AGE`, `AI6_RUNTIME_ROLE`, `LOG_CHANNEL=stderr` | Checker-Eingabewurzel read-only, getrennte Checker-Ausgabewurzel read-write, checkerprivates Workspace read-write, eigener Heartbeat und `/tmp`; UID/GID `10003:10001`, `network_mode: none` |
@@ -591,7 +591,7 @@ Ohne Flag wird der Smoke übersprungen; mit Flag und fehlendem Binary, Pin, Linu
 
 `AI6_COPILOT_BINARY`, `AI6_COPILOT_PINNED_VERSION` und die öffentliche Laufzeitevidenz erreichen über Compose `app`, `worker` und `agent`. Der registrierte `GitHubCopilotCliDoctorCheck` meldet deshalb in `app` ohne diese Einrichtung keine verfügbare Copilot-Capability. Der Doctor prüft Version und native Erweiterungsoberfläche ohne Modellturn und trennt diese Beobachtung von der statischen Profilprüfung sowie der menschlichen Laufzeitevidenz. Ein gesetzter Pin gibt keine CLI-Version frei. Der leere Standardpin und `capability_status: unchecked` bleiben bis zur Einrichtung bestehen.
 
-Das ausgelieferte `copilot-cli-review` erlaubt ausschließlich `quality_review`, das Modell `gpt-5.4` und `provider_default` als Effort (kein CLI-Effortoverride). `finding_verification` verlangt einen ausdrücklichen serverseitigen Rolleneintrag und eine eigene Evidenzbindung; Implementierung, Fix und Security-Review werden vor dem Providerstart abgewiesen. Nur `view`, `glob` und `grep` stehen über `--available-tools` zur Verfügung. Die getrennte `--excluded-tools`-Liste und `--deny-tool` schließen Shell, Schreiben, Delegation, Memory, URLs und MCP; `--disable-builtin-mcps` schließt insbesondere GitHub-MCP. Freie Projektoptionen und Runtime-Erweiterungen werden abgewiesen.
+Das ausgelieferte `copilot-cli-review` erlaubt `quality_review` und `security_review`, das Modell `gpt-5.4` und `provider_default` als Effort (kein CLI-Effortoverride). Jede Rolle benötigt ihren eigenen Evidenzschlüssel; ein Qualitätsreview-Nachweis gibt den Securityreview nicht frei. `finding_verification` verlangt einen ausdrücklichen serverseitigen Rolleneintrag und eine eigene Evidenzbindung; Implementierung und Fix werden vor dem Providerstart abgewiesen. Nur `view`, `glob` und `grep` stehen über `--available-tools` zur Verfügung. Die getrennte `--excluded-tools`-Liste und `--deny-tool` schließen Shell, Schreiben, Delegation, Memory, URLs und MCP; `--disable-builtin-mcps` schließt insbesondere GitHub-MCP. Freie Projektoptionen und Runtime-Erweiterungen werden abgewiesen. Jede Änderung an den Adapterbytes entwertet sämtliche Copilot-Evidenzschlüssel; der Betreiber muss die Nachweise am neuen Stand erneuern.
 
 `ExecutionHomeManager` materialisiert die deterministischen nativen `settings.json` ausschließlich vor der Versiegelung. Sie deaktivieren die drei eingebauten Skills, Hooks, Memory, IDE-Verbindung und Updates. `COPILOT_HOME` zeigt auf das vollständig read-only Home einschließlich `home/session-state`. Die einzige Authprojektion ist die turnlokale read-only Datei `token` aus dem Agentstore; ausschließlich der Agent liest sie und übergibt ihren Inhalt über das dokumentierte `COPILOT_GITHUB_TOKEN`. AI6-035 materialisiert sie ausschließlich agentseitig im privaten Projektionsverzeichnis. Die Credentialrevision bindet Rotation und Logout über die bestehende Mailboxprüfung. `COPILOT_CACHE_HOME`, `TMPDIR`, Logs und Nutzungsdatei zeigen ausschließlich in `result/copilot/`; vorhandene Ressourcenlimits gelten auch für eine native Paketextraktion. Keine Session-Schreibausnahme und keine Historyrückkopie. Jeder Turn ist eine neue Invocation ohne natives Resume; AI6-Slot und Session bleiben die Autorität. Fremde Home-/Workspace-Instruktionen einschließlich `CLAUDE.md`, `.claude` und nicht gebundener `AGENTS.md` verhindern den Start. Der Vorfahren-Scan weist `.git` als Datei, Verzeichnis oder Symlink ab, damit der Pin keine übergeordnete Gitwurzel übernimmt. Eigenständige Instruktionsdateien außerhalb von Home und Workspace werden vom Pin nicht entdeckt und blockieren den Start nicht.
 
@@ -612,6 +612,14 @@ Der vorbereitete Smoke läuft ausschließlich unter Linux als unprivilegierter B
 ```bash
 AI6_RUN_COPILOT_SMOKE=1 AI6_COPILOT_BINARY=/path/to/copilot AI6_COPILOT_PINNED_VERSION=1.0.83 AI6_COPILOT_SMOKE_AUTH_FILE=/path/to/test-token php artisan test --filter=test_real_linux_copilot_review_with_a_fully_read_only_native_home
 ```
+
+Der separate Securitysmoke verwendet denselben Aufbau mit dem zentralen `security_review`-Prompt und rollenspezifischer Evidenzausgabe:
+
+```bash
+AI6_RUN_COPILOT_SMOKE=1 AI6_COPILOT_BINARY=/path/to/copilot AI6_COPILOT_PINNED_VERSION=1.0.83 AI6_COPILOT_SMOKE_AUTH_FILE=/path/to/test-token php artisan test --filter=test_real_linux_copilot_security_review_with_a_fully_read_only_candidate
+```
+
+Er ersetzt nicht den vollständigen Candidate-Run auf der bestehenden Linux-Instanz und die signierte Abnahme [AI6-050/MG-01](docs/AI6-050_MG-01_ABNAHMEPROTOKOLL.md). Die eigenständigen Gates AI6-048/MG-01 und EXT-01 bleiben offen.
 
 Mit gesetztem Flag sind fehlende Voraussetzungen Fehler; ohne Flag wird der Smoke übersprungen. Er prüft tatsächliche Schreibverweigerung an Homewurzel und Sessionablage unter derselben UID, einen zentral gültigen Review, unveränderte Eingaben und die Abweisung eines fremden Instruktionsköders. Die ausgegebene `AI6_COPILOT_SMOKE_EVIDENCE` enthält Bindungen und wertfreie Resultate, keine Tokens. Sein temporärer Capabilityeintrag dient ausschließlich dem Kandidatentest und wird niemals in die Produktkonfiguration geschrieben. Die vollständige Agentrollen-Isolation, beobachtete tatsächliche Versuche verbotener Tools, Credentialrotation und die signierte Commitabnahme bleiben MG-01. Ein grüner Fake-, Windows- oder Smoke-Lauf allein ersetzt diese Abnahme nicht.
 
@@ -869,9 +877,17 @@ Das zentrale Candidate-Gate verlangt gemeinsam die vollständigen gültigen Erge
 
 ## Optionales LLM-Sicherheitsgate
 
+**Auslieferungsvoraussetzung:** Das Repository-Profil `ai6-agent-v1` enthält nach
+der menschlichen Freigabe die Mount-Regeln für die von `AgentExecutionRunner`
+erzeugten verschachtelten `execution-<32hex>/<home>/`-Pfade. Auf einer Instanz
+mit dem alten geladenen Profil verweigert AppArmor weiterhin reale Mailbox-Turns.
+Die folgende Konfiguration setzt daher auch die gesonderte Auslieferung und
+Aktivierung des korrigierten Profils voraus. Diese wurde mit dem Finding-Fix
+nicht durchgeführt; siehe [AppArmor-Voraussetzung und Nachweisgrenze](#apparmor-voraussetzung-und-nachweisgrenze).
+
 Unmittelbar nach der Candidate-Bindung plant AI6 den workergebundenen Schritt `security_review`. Unter dem Standardprofil `strict` ist `AI6_SECURITY_REQUIRE_LLM_PRECOMMIT_REVIEW=true` zwingend aktiv. Nur ein nicht-striktes Profil mit ausdrücklich bestätigter Reduktion darf die Maßnahme abschalten. In diesem Fall speichert AI6 das unveränderliche Runereignis `security_review_skipped` mit einer ausdrücklichen Kennzeichnung als „übersprungen“; es ist kein bestandenes Review und ersetzt kein `clear`.
 
-Das vertrauenswürdige Instanzsetting `AI6_AGENT_SECURITY_REVIEW_PROFILE` wählt den Reviewer aus dem zentralen Agentenprofilregister; der Default ist `fake`. Das Profil muss die Rolle `security_review` führen. Projektkonfiguration, Tickettext, Candidate-Inhalt und Provideroutput können Profil, Modell, Effort, Policy oder Instruktionspriorität nicht ändern. Im derzeitigen Produktstand ist nur der lokale `FakeAgentAdapter` ausführbar. Ein konfiguriertes reales Profil endet bis zur Integration der Provideradapter aus den Folgetickets benannt und fail closed unter `security_gate`.
+Das vertrauenswürdige Instanzsetting `AI6_AGENT_SECURITY_REVIEW_PROFILE` wählt den Reviewer aus dem zentralen Agentenprofilregister; der Default ist `fake`. Compose reicht `AI6_AGENT_SECURITY_REVIEW_PROFILE: ${AI6_AGENT_SECURITY_REVIEW_PROFILE:-fake}` ausschließlich an `worker` weiter. Für den realen Securityreview setzt der Betreiber `AI6_AGENT_SECURITY_REVIEW_PROFILE=copilot-cli-review` und trägt nach dem Linux-Nachweis den eigenen Schlüssel für `security_review`, Modell und Effort in `AI6_COPILOT_CAPABILITY_EVIDENCE` ein. Das Profil muss die Rolle führen und sein exaktes Tupel im aktuellen Agentbericht `ready` sein. Der Turn läuft über die vorhandene Agentmailbox und den einen `GitHubCopilotCliAdapter`; der `FakeAgentAdapter` bleibt das Testdouble. Im Implementierungslauf darf der Securityreviewer nicht den Provideralias des Implementierungsslots verwenden; nur `fake` und Review-only sind ausgenommen. Projektkonfiguration, Tickettext, Candidate-Inhalt und Provideroutput können Profil, Modell, Effort, Policy oder Instruktionspriorität nicht ändern. Fehlende Evidenz sowie Provider-, Schema- und Runtimefehler bleiben fail closed unter `security_gate`.
 
 Der Worker materialisiert exakt die gebundene Candidate-Tree-OID aus dem validierten Managed Repository, lehnt Symlinks, Gitlinks, Sondermodi und Größenüberschreitungen ab und führt keinen Projektcode aus. Danach verwendet er dieselbe gitmetadatenfreie Exportgrenze wie Reviewer: `.git`, Common-Dir, Alternates, Hooks, Refs und Index sind nicht erreichbar. Jede Ausführung erhält eine neue Session, ein neues versiegeltes Provider-Home, die minimale Credential-Projektion des gewählten Profils und ausschließlich den freigegebenen read-only Instruction-Snapshot. Der exportierte Candidate ist untrusted Prüfgegenstand, niemals native Instruktionsquelle. Schreibschutz für neue Dateien ist eine POSIX-Zusage; der Windows-Testlauf beweist nur den Schreibschutz vorhandener Dateien und ist dafür keine vollständige Evidenz.
 
@@ -1117,6 +1133,71 @@ final readonly class NormalizeValueData
     public function __construct(public string $value) {}
 }
 ```
+
+## Reproduzierbarer Linux-Mailboxtest (AI6-050)
+
+Die synthetischen Copilot-Mailboxtests verwenden auf Linux optional
+`AI6_NATIVE_PROVIDER_TEST_RUNNER`. Der vollständige Testaufbau liegt unter
+`tests/Fixtures/Agents/container/`: `run.sh`, der begrenzte Host-Supervisor,
+der PHP-Launcher, das Dockerfile sowie Binary- und Volume-Manifest-Erzeugung.
+Die Binaries werden aus `FakeCopilotBinary` erzeugt und bei jeder Verwendung
+gegen ihre exakten SHA-256-Bytes im unveränderlichen Testimage geprüft.
+
+Voraussetzungen: Linux/amd64 mit Docker, aktivem AppArmor einschließlich
+Policy-Namespaces, `apparmor_parser`, PHP-CLI und GNU-Werkzeugen;
+ein Testbenutzer mit UID/GID 1000 und `sudo -n` für Docker und den Parser.
+Der Quellstand einschließlich der mit `composer.lock` installierten
+Entwicklungsabhängigkeiten muss in einer separaten Kopie ohne `.env` vorliegen.
+Keine produktiven Zugangsdaten verwenden. Das Runtimeimage wird mit dem
+versionierten Root-Dockerfile und dessen gepinnten Downloads gebaut:
+
+```bash
+docker build -t ai6-native-runtime .
+bash tests/Fixtures/Agents/container/run.sh "$PWD" ai6-native-runtime "$(git rev-parse HEAD)"
+```
+
+Ein bereits aus diesem Dockerfile gebautes Runtimeimage kann anstelle von
+`ai6-native-runtime` angegeben werden. Das Skript bindet seine aufgelöste
+Image-ID und die daraus gebaute Testimage-ID in die Evidenz ein; ein während
+des Builds geänderter Basistag führt zum Abbruch. Ein vorhandenes Testimage
+mit bereits angelegter UID 1000 ist keine geeignete Basis.
+
+### AppArmor-Voraussetzung und Nachweisgrenze
+
+Das Repository-Profil erlaubt die von `AgentExecutionRunner` erzeugten
+verschachtelten `execution-<32hex>/<home>/`-Pfade. `run.sh` prüft per `cmp`, dass
+seine Profilkopie bytegleich zum Repository ist, und lädt sie ohne Patch in einen
+einmaligen Test-Namespace. `apparmor-turn-homes.patch` bleibt ausschließlich als
+historischer Entwurf erhalten und wird nicht angewandt. Der Test prüft außerdem,
+dass eine vollständige Root-Bindung weiterhin konkret am Mount verweigert wird.
+AppArmor, Seccomp und die nativen Mount-/Labelprüfungen bleiben aktiv; kein
+Testcontainer erhält den Docker-Socket. Ein grüner Lauf ist keine Auslieferung:
+Die Profile der Live-Instanz werden durch diesen Aufruf nicht neu geladen.
+
+Der Aufruf startet getrennte Worker-/Agent-Testcontainer, erzeugt ausschließlich
+eigene noexec/nosuid/nodev-Tmpfs-Volumes und ein schreibgeschütztes Manifest ihrer
+tatsächlichen Gerätekennungen. Aufräumen und Containerstarts sind auf diese
+einmaligen Ressourcen begrenzt. Container, Volumes und Testprofile werden beim
+Beenden entfernt; Quellkopie, Testimage und Protokolle bleiben zur Prüfung erhalten.
+
+Das ausgegebene Verzeichnis `/tmp/ai6-native.<id>` enthält `evidence.txt`
+(Basiscommit, Runtime-/Testimage-Digest, Kommando, Profilhash, Kernel-Label,
+Exitcode und Testzahlen), `source.sha256` (alle kopierten Quell- und
+Dependency-Dateien), `build.log`, `supervisor.log`, `contract.log`,
+`root-mount-negative.log` und `phpunit.log`.
+Bei uncommittierten Änderungen bezeichnet der Commit nur die Basis; maßgeblich
+für die getesteten Bytes ist zusätzlich das SHA-256-Manifest. Der Aufruf erstellt
+keinen Commit. Ein späterer Commit muss ausdrücklich freigegeben werden und
+dieselben Bytes enthalten oder erneut geprüft werden.
+
+Ausgeführt werden `CopilotSecurityReviewTest`, `GitHubCopilotCliDoctorCheckTest`,
+`GitHubCopilotCliExecutionTest`, `FindingVerificationRoundTest`,
+`GitHubCopilotCliAdapterTest`, `GitHubCopilotCliSmokeTest` und
+`RuntimeComposeContractTest`. Zusätzlich prüft der Pfadvertragstest in
+`AgentExecutionMailboxTest` die tatsächlich erzeugten Homes. Nur die drei
+ausdrücklich opt-in geschalteten echten Provider-Smokes bleiben übersprungen;
+die MG-01-Vorlagenprüfung läuft regulär. Dieser synthetische Linux-Nachweis
+schließt weder MG-01 noch externe Provider-Gates.
 
 ## Projektdokumentation
 

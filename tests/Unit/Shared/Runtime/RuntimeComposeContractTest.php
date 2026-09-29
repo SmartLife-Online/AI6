@@ -119,6 +119,7 @@ final class RuntimeComposeContractTest extends TestCase
             'AI6_DEPLOY_KEY_ROOT', 'AI6_EFFECT_LOCK_DIRECTORY', 'AI6_EFFECT_LOCK_OBJECT_COUNT',
             'AI6_EFFECT_LOCK_OWNER_UID', 'AI6_MANAGED_PROJECT_ROOT', 'AI6_SSH_KEYGEN_BINARY',
             'AI6_AGENT_EXECUTION_ROOT', 'AI6_AGENT_OUTPUT_ROOT', 'AI6_CHECKER_EXECUTION_ROOT', 'AI6_CHECKER_OUTPUT_ROOT',
+            'AI6_AGENT_SECURITY_REVIEW_PROFILE',
             'AI6_CODEX_BINARY', 'AI6_CODEX_PINNED_VERSION', 'AI6_CODEX_SANDBOX_PROOF',
             'AI6_COPILOT_BINARY', 'AI6_COPILOT_PINNED_VERSION', 'AI6_COPILOT_CAPABILITY_EVIDENCE', 'AI6_GROK_BINARY', 'AI6_GROK_PINNED_VERSION', 'AI6_GROK_CAPABILITY_EVIDENCE',
             'AI6_EXECUTION_DIRECTORY', 'AI6_GIT_ALLOWED_HOSTS', 'AI6_GIT_ALLOWED_REMOTE_PATHS', 'AI6_GIT_ALLOWED_REF_PATTERNS',
@@ -312,6 +313,20 @@ final class RuntimeComposeContractTest extends TestCase
         }
     }
 
+    public function test_nested_agent_homes_preserve_read_only_inputs_and_noexec_outputs(): void
+    {
+        $profile = (string) file_get_contents(dirname(__DIR__, 4).'/docker/apparmor/ai6-execution');
+        foreach (['agent-executions' => 'ro', 'agent-outputs' => 'rw'] as $mailbox => $access) {
+            $path = '/var/lib/ai6/'.$mailbox.'/execution-*/*-*-*/';
+            self::assertStringContainsString('mount options=(rw,rbind) /oldroot'.$path.' -> /newroot'.$path.',', $profile);
+            self::assertStringContainsString('mount options=('.$access.',nosuid,nodev,noexec,remount,bind,silent,relatime) -> /newroot'.$path.',', $profile);
+        }
+        self::assertStringNotContainsString('mount options=(rw,rbind) /oldroot/ -> /newroot/,', $profile);
+        $runner = (string) file_get_contents(dirname(__DIR__, 4).'/tests/Fixtures/Agents/container/run.sh');
+        self::assertStringNotContainsString('apparmor-turn-homes.patch', $runner);
+        self::assertStringContainsString('cmp "$source/docker/apparmor/ai6-execution" "$root/harness/ai6-execution"', $runner);
+    }
+
     private function assertApparmorReplacementPaths(string $abstraction): void
     {
         self::assertCount(12, ExecutionRoleProtectedPaths::MASKED);
@@ -486,6 +501,19 @@ final class RuntimeComposeContractTest extends TestCase
                 self::assertArrayNotHasKey($key, $environment, $role);
             }
         }
+    }
+
+    public function test_security_review_selection_reaches_only_worker(): void
+    {
+        foreach ($this->services() as $role => $service) {
+            $environment = $service['environment'] ?? [];
+            if ($role === 'worker') {
+                self::assertSame('${AI6_AGENT_SECURITY_REVIEW_PROFILE:-fake}', $environment['AI6_AGENT_SECURITY_REVIEW_PROFILE'] ?? null);
+            } else {
+                self::assertArrayNotHasKey('AI6_AGENT_SECURITY_REVIEW_PROFILE', $environment, $role);
+            }
+        }
+        self::assertStringContainsString('AI6_AGENT_SECURITY_REVIEW_PROFILE=fake', (string) file_get_contents(dirname(__DIR__, 4).'/.env.example'));
     }
 
     public function test_retention_configuration_reaches_exactly_init_app_worker_and_scheduler(): void
