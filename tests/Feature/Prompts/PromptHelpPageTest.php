@@ -302,6 +302,7 @@ final class PromptHelpPageTest extends AuthFeatureTestCase
         self::assertSame($expected, html_entity_decode($matches[1], ENT_QUOTES | ENT_HTML5));
         self::assertStringContainsString('data-prompt-copy="static-review-preview"', $html);
         self::assertStringContainsString('Ticketumsetzung prüfen und Fix-Liste erstellen', $html);
+        self::assertStringContainsString('Ersetze nach dem Kopieren beide Vorkommen von <code>&lt;TICKET-ID&gt;</code> durch die zu prüfende Ticket-ID.', $html);
         self::assertStringContainsString('tickets/&lt;TICKET-ID&gt;.md', $html);
     }
 

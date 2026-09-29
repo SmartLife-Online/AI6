@@ -25,7 +25,7 @@
         </article>
         <article class="ai6-prompt-card" aria-labelledby="review-prompt-heading">
             <h3 id="review-prompt-heading">{{ $reviewEntry->displayName }}</h3>
-            <p>Ersetze nach dem Kopieren <code>&lt;TICKET-ID&gt;</code> durch die zu prüfende Ticket-ID.</p>
+            <p>Ersetze nach dem Kopieren beide Vorkommen von <code>&lt;TICKET-ID&gt;</code> durch die zu prüfende Ticket-ID.</p>
             <label class="ai6-prompt-label" for="static-review-preview">Vorschau</label>
             <textarea id="static-review-preview" class="ai6-prompt-preview" readonly rows="12">{{ $reviewPrompt }}</textarea>
             <button type="button" data-prompt-copy="static-review-preview">In die Zwischenablage kopieren</button>

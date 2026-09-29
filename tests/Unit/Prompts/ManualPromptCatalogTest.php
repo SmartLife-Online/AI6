@@ -84,6 +84,8 @@ final class ManualPromptCatalogTest extends TestCase
             '| `ai/prompts/implementierung_planungs_prompt.md` | Anwendungsfall abgelöst ohne Inhaltsübernahme | `implementation` |',
             'Katalogversion `3`',
             '`QueueReevaluation`',
+            '`approval_snapshot_changed`',
+            '`review_prompt_binding_mismatch`',
             'AC-01 bis AC-07 und MG-01 bleiben offen',
         ] as $text) {
             self::assertStringContainsString($text, $readme);
