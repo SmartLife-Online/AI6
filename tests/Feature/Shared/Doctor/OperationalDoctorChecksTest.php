@@ -2,11 +2,13 @@
 
 namespace Tests\Feature\Shared\Doctor;
 
+use App\AI6\Git\ControlOperationConfigurationFactory;
 use App\AI6\Shared\Doctor\GitDoctorCheck;
 use App\AI6\Shared\Doctor\MailDoctorCheck;
 use App\AI6\Shared\Doctor\RetentionDoctorCheck;
 use App\AI6\Shared\Doctor\TicketManifestDoctorCheck;
 use App\AI6\Shared\Process\ControlProcessRunner;
+use App\AI6\Shared\Process\ProcessConfiguration;
 use App\AI6\Shared\Process\ProcessOutcome;
 use App\AI6\Shared\Process\ProcessPolicyRegistry;
 use App\AI6\Shared\Process\ProcessResult;
@@ -98,6 +100,28 @@ final class OperationalDoctorChecksTest extends TestCase
             [RetentionDoctorCheck::class, 'ai6.retention.artifacts.max_days', 'private-invalid-limit', 'retention_configuration_invalid'],
             [RetentionDoctorCheck::class, 'ai6.run_artifacts.root', '', 'retention_configuration_invalid'],
         ];
+    }
+
+    public function test_worker_git_check_rejects_a_runtime_writable_process_wrapper(): void
+    {
+        if (DIRECTORY_SEPARATOR !== '/') {
+            self::markTestSkipped('Runtime file immutability requires POSIX permission evidence.');
+        }
+
+        self::assertTrue((new GitDoctorCheck)->run()->passed);
+        $wrapper = $this->root.'/writable-wrapper';
+        file_put_contents($wrapper, "#!/bin/sh\nexit 0\n");
+        chmod($wrapper, 0600);
+        self::assertTrue(is_writable($wrapper));
+        config(['ai6.process.wrapper_script' => $wrapper]);
+        $this->app->forgetInstance(ProcessConfiguration::class);
+        $this->app->forgetInstance(ControlOperationConfigurationFactory::class);
+
+        $result = (new GitDoctorCheck)->run();
+
+        self::assertFalse($result->passed);
+        self::assertSame('git_configuration_invalid', $result->details['Grund']);
+        self::assertStringNotContainsString($wrapper, implode(' ', $result->details));
     }
 
     public function test_production_git_requires_allowlists_and_known_hosts(): void

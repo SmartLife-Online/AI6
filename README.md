@@ -1084,6 +1084,167 @@ Für die Schlüsselring-Rotation eine neue Key-ID mit neuer Version und neuem Ma
 
 Die menschliche Restore-Übung **AI6-049/MG-01 bleibt offen**. [Die ergebnisfreie Vorlage](docs/AI6-049_MG-01_ABNAHMEPROTOKOLL.md) verlangt eine frische Instanz ohne ursprüngliche Volumes, Sessionwiderruf, fortgesetzte Retention, Git-Zugriff und anschließende APP_KEY-Rotation, gebunden an Commit, Image-Digest und Host. Automatisierte Tests und Windows-Läufe ersetzen diesen Nachweis nicht.
 
+## Pilot AI6
+
+Für die spätere gemeinsame Durchführung mit einem LLM: [Geführte Testanleitung bis zur Ticketabnahme](docs/AI6-038_TESTANLEITUNG.md). Sie führt durch Voraussetzungen, beide Pilotläufe, menschliche Nachweise und die gesonderte Phase B.
+
+AI6-038 wird nach Plan V1.7.13 in zwei Phasen geliefert. **Phase A beginnt mit dieser Vorbereitung; der reale Pilot ist noch nicht freigegeben.** Ein Mensch bindet ein vorhandenes V1-Ticket mit realem Änderungsbedarf in einer dedizierten AI6-Pilotkopie beziehungsweise ausdrücklich freigegebenen Pilot-Remote. Die bereits vorhandene Linux-Auslieferung ist Betriebskontext; erst Commit, Image-Digest und gültige signierte Nachweise binden den Prüfstand. Sie ersetzt insbesondere keine frische Installation nach AI6-036/MG-01. Das [Pilotprotokoll](docs/AI6-038_PILOTPROTOKOLL.md) enthält den auszufüllenden Teil A (MG-03) und den getrennten Teil B (MG-04). Diese Anleitung wählt kein Ticket und autorisiert weder Lauf, Deployment noch Push.
+
+### Voraussetzungen vor der Pilotfreigabe
+
+Jede Zeile wird in Teil A des Protokolls mit verantwortlicher Person, Entscheidung beziehungsweise Folgeauftrag, erforderlicher Evidenz und exaktem Stand geschlossen. **Ein offener Eintrag sperrt den Pilot.** Die folgende Bestandsbeschreibung bezieht sich auf den Phase-A-Rebase gegen `d1ae94bb585f535d75b1fe5118122051d56d0e5a`; vor dem Lauf wird der tatsächlich freigegebene Stand erneut geprüft.
+
+| Voraussetzung | Entscheidung oder Folgeauftrag und erforderlicher Nachweis |
+|---|---|
+| Release-Gate-Lücken `AC-02` und `AC-04` | Separater Folgeauftrag schließt die deklarierten `AC_COVERAGE_GAPS`; Linux-Release-Gate am Pilotcommit mit Exitcode 0, ohne Fehler oder Skips. Die mildere Upgrade-Lesart aus AI6-036 genügt für den Pilot nicht. |
+| Grok-Transport | Offenen Sandboxblocker und Leseschutzbefund aus „Grok-CLI-Transport“ separat beheben und am gebundenen Pin nativ nachweisen; keine gesetzten Evidenzwerte als Ersatz. |
+| Realer Copilot-Securityreview | `AI6_AGENT_SECURITY_REVIEW_PROFILE=copilot-cli-review` erreicht ausschließlich `worker` (Compose-Naht ist geliefert); aktuelles `ready`-Tupel für `security_review` und signiertes AI6-050/MG-01 mit echtem Candidate-Review. |
+| Auswahlpools ohne `fake` | Separater Folgeauftrag mit menschlicher Freigabe: `fake` aus Verifierpool, Reviewer- und Implementierungsauswahl der Pilotinstanz ausschließen. Im Rebase-Stand weiterhin auswählbar; die Wahl zweier echter Reviewer allein sperrt den Fake-Verifier nicht. |
+| Codex-Laufzeit | Signiertes AI6-033/MG-01, aktueller Pin, Binaryhash, Runtimebindung und Sandboxnachweis für `codex_cli`. |
+| Grok-Laufzeit | Signiertes AI6-041/MG-01 und aktuelle gebundene Laufzeitevidenz für `grok_cli`. |
+| Copilot-Laufzeit | AI6-048/MG-01 und dessen externe Voraussetzungen einschließlich EXT-01, aktuelle rollenspezifische Evidenz für `github_copilot_cli`; Adapteränderungen entwerten alte Evidenz. |
+| Release-Abnahme | Signiertes AI6-032/MG-01 am geltenden Implementierungsstand. |
+| Provider-Onboarding | Signiertes AI6-035/MG-01 mit Testzugängen und Store-/Turntrennung. |
+| Frische strict-Installation | Signiertes AI6-036/MG-01 auf leerem Host einschließlich Tunnelzugang; ein bestehender Deploy ersetzt es nicht. Seine zulässigen Restbefunde sind keine Pilotfreigabe. |
+| Backup-/Restore-Abnahme | Signiertes AI6-049/MG-01; die spätere begrenzte Pilot-Restoreprobe ersetzt dessen Git-/Rotationsnachweis nicht. |
+| Weitere Rollen-/Providerbindungen | Eigenständige Gates AI6-045/MG-01 und AI6-047/MG-01 prüfen; bei optionalem Claude-Slot zusätzlich AI6-034/MG-01. |
+| Pilotticket und Remote | Mensch bindet Ticket-ID, Pfad, Commit, echten Änderungsbedarf, erfüllte Startvoraussetzungen, Control-Branch und zulässige Remote-Wirkungen. Das Ticket muss `todo`, `valid`, `redaction_state=clear` und unter `ai6_detail_v1` mit Contract-Hash projiziert sein. |
+| Zwei Reviewer und Projektkonfiguration | Vollständige `.ai6/config.yaml` mit allen zehn Schlüsseln, `grok-cli-review` und `copilot-cli-review`, gewähltem Profil und Limits; `config_refresh` und Step-up-Freigabe durch Approver, Config-Hash binden. |
+| Review-only-Gegenstand | Mensch entscheidet Pilotkopie oder freigegebene Pilot-Remote und bindet eine Quelle nach GIT-011. Empfehlung: menschlich erstellter Umsetzungsbranch zum ausgewählten Ticket, als verwalteter Branch gegen den Control-Stand, mit Vorher-OID. |
+| Mobiler Zugang | Mensch entscheidet SSH-Tunnel mit SSH-Client und TOTP auf dem Smartphone gemäß „Zugang“ oder gesondert abgenommenes HTTPS. VPN/HTTPS bleibt in AI6-036 eine Referenz ohne Abnahme. Origin und Port binden. |
+| Linux-Instanz | Exakten Commit, sauberen Auslieferungsstand, Image-Digest, Host, CLI-Pins, Runtime- und Policyhash binden; Linux-Checkout für Tests auf denselben Commit bringen. |
+| Restoreprobe: Zugang und Login bei gestopptem Worker | Offener Betriebs-/Vertragsentscheid: Die Vorgabe „nur `init` und `app`“ liefert keinen vollständigen strict-Login. Browserzugang und eine sicher begrenzte Zustellung ausschließlich der Loginmail benötigen eine gesondert freigegebene Lösung; keine allgemeine Queueverarbeitung auf dem restaurierten Bestand. Siehe Restoreprobe unten. |
+
+### Vorbereitung in Ausführungsreihenfolge
+
+1. Verantwortliche schließen die Voraussetzungen und binden die zulässigen Vorbereitungsänderungen. Die bestehende Linux-Laufzeit beziehungsweise eine ausdrücklich abgenommene frische Testinstallation wird auf den freigegebenen Stand gebracht. Installations- und Zugangsverfahren stehen oben; die beiden Doctor-Läufe und alle Exitcodes werden separat protokolliert. Der erste Lauf erfolgt im laufenden Workercontainer:
+
+   ```bash
+   docker compose exec worker php artisan ai6:doctor --security --all-processes --require-strict
+   ```
+
+   Das Release-Gate läuft **im Linux-Checkout desselben Commits mit Entwicklungsabhängigkeiten**, weil das Produktionsimage weder PHPUnit noch `tests/` enthält:
+
+   ```bash
+   php artisan ai6:release-gate
+   ```
+
+   Beide Befehle müssen mit Exitcode 0 enden; offene `AC_COVERAGE_GAPS`, Fehler und übersprungene Nachweise sperren. `UNGEPRÜFT` ist keine Rollenevidenz: ergänzend `docker compose exec scheduler php artisan ai6:runtime-health --role=scheduler` und `docker compose exec app /opt/ai6/docker/healthcheck.sh app` ausführen und binden. Kein Check setzt seine eigenen Freigabewerte.
+
+2. Providerzugänge und aktuelle Berichte für `codex_cli`, `grok_cli` und `github_copilot_cli` nach „Provider-Onboarding“ prüfen; nur bei ausdrücklich freigegebenem Loginbedarf die dort genannten `docker compose exec agent php artisan ai6:provider login <alias>`-Aufrufe verwenden. Native Nachweise laufen mit eigens bereitgestellten Testzugängen im Linux-Checkout, nicht gegen Produktionsdaten. Authdateien, Binary-/Pinwerte und Sandbox-/Capabilitynachweise sind gemäß den jeweiligen Adapterabschnitten vorab bereitzustellen. Ohne Flag ist der Nachweis übersprungen, mit Flag und fehlenden Voraussetzungen fehlgeschlagen:
+
+   ```bash
+   AI6_RUN_CODEX_SMOKE=1 php artisan test tests/Feature/Agents/CodexCliSmokeTest.php
+   AI6_RUN_GROK_SMOKE=1 php artisan test tests/Feature/Agents/GrokCliSmokeTest.php
+   AI6_RUN_COPILOT_SMOKE=1 php artisan test tests/Feature/Agents/GitHubCopilotCliSmokeTest.php --filter='test_real_linux_copilot_(review|security_review)'
+   AI6_RUN_PROVIDER_ONBOARDING_SMOKE=1 AI6_PROVIDER_ONBOARDING_TEST_ACCESS=1 php artisan test tests/Feature/Agents/ProviderOnboardingSmokeTest.php
+   AI6_BROWSER_SMOKE=1 php artisan test tests/Feature/Runs/RunObservationMobileBrowserSmokeTest.php
+   ```
+
+   Der Onboarding-Smoke benötigt zusätzlich einen eingerichteten Linux-Agentprozess unter `strict` und `APP_ENV=testing`. Der optionale Claude-Smoke wird nur bei gewähltem Claude-Slot nach dem Copilot-Abschnitt ausgeführt. Der Browser-Smoke belegt Darstellung und Scrollen; die reale mobile Antwortwirkung bleibt ein eigener Prüfschritt.
+
+3. Pilotremote und Control-Branch ausdrücklich binden, Pilotprojekt registrieren und Deploy-Key/Clone über die bestehenden Panelaktionen einrichten. Die folgende vollständige Konfiguration ist ein Ausgangsbeispiel für die **Pilotkopie**, keine Änderung dieses Entwicklungscheckouts. Limits und Checks vor Übernahme gegen Ticket und Serverfreigaben prüfen; insbesondere keine sensible Kategorie aus der Scopeprüfung entfernen. Die Serverdefaults allein liefern nur einen Reviewer und `generic_v1`.
+
+   ```yaml
+   version: 1
+   tickets_path: tickets
+   ticket_validation_profile: ai6_detail_v1
+   push_mode: manual
+   auto_start_next: false
+   dependency_satisfied_statuses: [done]
+   defaults:
+     implementation_profile: codex-gpt-5.6-terra
+     implementation_effort: medium
+     reviewers:
+       - profile: grok-cli-review
+         effort: provider_default
+       - profile: copilot-cli-review
+         effort: provider_default
+   limits:
+     max_fix_rounds: 3
+     max_review_rounds: 4
+     max_verification_rounds: 2
+     max_agent_invocations: 20
+     max_added_scope_paths: 12
+     max_changed_files: 40
+     max_changed_bytes: 2000000
+     max_artifacts: 20
+     max_artifact_bytes: 5000000
+     max_total_artifact_bytes: 20000000
+     max_provider_output_bytes: 2000000
+     max_run_minutes: 180
+   scope:
+     unlisted_paths: auto_allow
+     auto_allow: [app/**, resources/**, tests/**]
+     require_approval: [AGENTS.md, CLAUDE.md, .ai6/**, tickets/**, docs/AI6_IMPLEMENTATION_PLAN.md, database/migrations/**, composer.json, composer.lock, .github/**, docker/**, deploy/**, Dockerfile, docker-compose.yml, app/AI6/Auth/**]
+   checks:
+     before_review: [php-targeted]
+     final: [php-all]
+   ```
+
+   `.ai6/config.yaml` auf dem Control-Branch der Pilotkopie bereitstellen, im Panel `config_refresh` auslösen, Ende abwarten und den gültigen Entwurf durch einen Approver mit Step-up freigeben. Erst danach das vorhandene V1-Ticket ohne Migration auswählen und endgültig binden, Fetch und `ticket_refresh` für seinen Pfad ausführen und Profil, Contract-Hash, klare Redaction und Startberechtigung prüfen. `invalid` oder `content_redacted` verhindern Approval. Bei einer abweichenden Configbindung erneut refreshen und prüfen.
+
+4. Die OID **jedes Refs** nach der autorisierten Vorbereitung erfassen: Dies ist der Nullpunkt der Ref-Tabelle, einschließlich Control-Branch, Reviewquelle und noch nicht vorhandenem Runbranch (ausdrücklich als abwesend erfassen). Vorher ein Zeit-/Kostenbudget, Grenzen für Runden und Interventionen, erwartete Anzahl der `verification_independence`-Entscheidungen für Grok-Findings und den Stopppunkt binden. Nach Ausschluss von `fake` ist bei den ausgelieferten Rollen kein unabhängiger Verifier für Grok-Findings verfügbar; die menschliche Standardantwort ist `keep_finding`, keine automatische Freigabe. Unbekannte Kosten bleiben `unknown`; dafür vorab eine begrenzende Abbruchregel vereinbaren.
+
+5. Alle Runs und Control Operations müssen ruhen. Dauerhafte Rollen stoppen, das Vorbereitungsbackup erstellen und seine Kennung, Herkunft und Manifestbindung geschützt protokollieren:
+
+   ```bash
+   docker compose stop caddy app worker scheduler agent checker
+   docker compose run --rm --no-deps --entrypoint php worker artisan ai6:backup
+   docker compose start app worker scheduler agent checker caddy
+   docker compose exec worker php artisan ai6:doctor --security --all-processes --require-strict
+   ```
+
+   Bei fehlgeschlagenem Backup nicht zur nächsten Zeile beziehungsweise zum Approval übergehen. Der zweite Doctor muss nach dem Neustart mit Exitcode 0 bestehen; neue Boot-IDs, frische Providerpräsenz/-berichte und Checker-Attestation binden. Die ergänzenden rolleneigenen Healthprüfungen aus Schritt 1 ebenfalls wiederholen. Erst dann beginnt das erste Approval.
+
+### Zwei getrennt freigegebene Läufe
+
+| Reihenfolge und Control-Statusmutation | Bedienung und zu bindende Evidenz |
+|---|---|
+| 1. Approval `review_only`: `todo → ready` | Neues Approval, gebundener Reviewgegenstand, Abschlussmodus `manual`, zwei Slots `grok-cli-review` und `copilot-cli-review`; nach Abschluss der Freigabe gesondert in die Queue aufnehmen und autorisiert starten. |
+| 2. Claim `review_only`: `ready → in_progress` | Eigene Run-ID, unveränderlicher Checkpoint mit Tree-OID und Diff-Hash, beide Reviewer sowie tatsächliche Verifierquelle je Finding. |
+| 3. Report-only-Abschluss: `in_progress → ready` | `manual_report` im Panel bestätigen; gebundenen Abschlussbericht sichern. Kein Codepublish; genau drei autorisierte Statuscommits dieses Laufs auf dem Control-Branch. |
+| 4. `return_to_todo`: `ready → todo` | Nach abgeschlossenem Lauf im Panel durch Approver oder Operator ausführen und Control-Mutation abwarten. Dies ist eine Statusoperation, kein Artisan-Kommando. |
+| 5. Approval `implementation`: `todo → ready` | Frisches Approval mit aktuellen Snapshots; Implementierung/Fix `codex-gpt-5.6-terra`, Modell `gpt-5.3-codex`, Effort `medium`; dieselben zwei unabhängigen Reviewer, Pushmodus `manual`; separat einreihen/starten. |
+| 6. Claim `implementation`: `ready → in_progress` | Eigene Run-ID; Implementierung, Checks, Review, quellenabhängige Verifikation und gegebenenfalls Fixturns über die vorhandenen Nähte. |
+| 7. Publish-Synchronisation: `in_progress → review` | Erst nach Candidate, freigegebenem Securitygate und manuell autorisiertem Runbranch-Push mit erwarteter Remote-OID; Control-Mutation einschließlich `## Recorded Scope` abwarten. |
+
+Jede Laufart erhält ihr eigenes aktuelles Approval; kein Snapshot wird wiederverwendet. Der optionale Slot `copilot-claude-sonnet-review` (`claude-sonnet-4.6`, `provider_default`) ersetzt keinen unabhängigen Provider. Grok verwendet für Modell und Effort `provider_default`, Copilot `gpt-5.4` und `provider_default`. Der Profilname von Codex ist kein Modellnachweis. Teil A trennt je Slot die Approval-Auswahl, Adapterübergabe und tatsächlich gemeldeten Providerdaten; unbekannte Modelle, Efforts, Token- oder Kostenwerte werden nicht ergänzt oder als null ausgegeben. Findingqualität wird als bestätigt, verworfen oder unklar, jeweils mit begründeter menschlicher Einordnung, erfasst.
+
+Im Implementierungslauf jedes deklarierte pilotticketspezifische `MG-`-/`EXT-`-Gate **vor Candidate** im Panel an letzten gültigen Checkpoint, prospektive Tree-OID und Diff-Hash binden (AI6-038/MG-01 und MG-02 dokumentieren die Prüfung; die konkreten Gate-IDs stammen aus dem Pilotticket). Offene oder stale Evidenz verhindert Candidate, Commit und Push. Erst auf dem Candidate entsteht der reale Copilot-Securityreview; `security_gate` wird getrennt geprüft. Ein Human Override bleibt Candidate-gebunden und ersetzt keinen Securityreview-Nachweis.
+
+Jede Phase — Finding, Verifikation, Fixturn, Human Request — erhält im Protokoll „beobachtet“ oder „nicht beobachtet“, Auslöser, Run/Slot und Ergebnis. Fehlende Beobachtungen werden gegebenenfalls in einem separat autorisierten, begrenzten Ergänzungslauf nachgeholt. Keine eingebauten Fehler, künstlichen Findings oder Datenbankeingriffe; die deterministische Fehlermatrix wird nicht mit kostenpflichtigen Providern wiederholt. Tatsächlich aufgetretene Verweigerungen (offenes/stale Gate, vollständige neue Runde nach Codeänderung) gesondert erfassen. Beim Stopppunkt über den vorgesehenen Panelpfad kontrolliert abbrechen und offene Arbeit dokumentieren.
+
+Während des Piloten auf einem realen Smartphone über den gebundenen Zugang mindestens einen Human Request nach seiner E-Mail-Benachrichtigung beantworten und eine Gate-Evidenz mit frischem Step-up eintragen. Jeweils Aktion, Version und Einmaleffekt binden; Reload und Polling dürfen keine zweite Wirkung erzeugen. Kerninformationen müssen ohne horizontales Scrollen lesbar bleiben.
+
+### Nach Push: Cleanup, getrennte Restoreprobe und Teil-A-Abnahme
+
+Runbranch-Tree mit Candidate-Tree vergleichen; Control-Branch ab Vorbereitungsnullpunkt ausschließlich auf die sieben autorisierten Statusmutationen einschließlich `return_to_todo` und `## Recorded Scope` prüfen. Für sämtliche übrigen Refs Vorher-/Nachher-OIDs vergleichen; auch unerwartet neue oder verschwundene Refs erfassen. Für die konkreten Pilot-Run-IDs müssen Run-Worktrees, Review-Checkpoints, Execution-Homes und Exportkopien durch das reguläre Cleanup entfernt sein. Andere Läufe und aufbewahrte Auditdaten bleiben unberührt; manuelles Löschen ersetzt diesen Nachweis nicht.
+
+Vor der Restoreprobe redigierte Pilotbelege außerhalb des Rücksetzbereichs sichern. **Die Pilotinstanz bleibt unverändert.** Auf einem getrennten Wiederherstellungshost mit eigenen Volumes denselben Software-/Schemastand und dasselbe getrennt geschützte Schlüsselpaket verwenden. Eine eigene Compose-Projektkennung ist ausdrücklich zu setzen, weil die Compose-Datei `name: ai6` vorgibt; eine zweite Projektkennung allein isoliert auf demselben Host nicht die fest konfigurierten Subnetze. Dort ausschließlich `init` zur Provisionierung und `app` für Session-/Loginprüfung als Dienste starten; keine Worker-, Scheduler-, Agent- oder Checker-Daemons, keinen Git-Zugriff und keine Providerlogins. Das Backup enthält Projektregistrierung, Approvals, Queue und private Deploy-Keys; ein zweiter Worker könnte mit derselben Identität gegen die Pilotremote arbeiten.
+
+```bash
+docker compose -p ai6-pilot-restore run --rm --no-deps init
+# Geschützte Backupkopie in die eigenen privaten Zielvolumes übernehmen; siehe Backup/Restore.
+docker compose -p ai6-pilot-restore run --rm --no-deps --entrypoint php worker artisan ai6:restore <privater-backuppfad>
+docker compose -p ai6-pilot-restore up -d --no-deps app
+docker compose -p ai6-pilot-restore exec app php artisan schedule:test --name=ai6-run-retention
+```
+
+`<privater-backuppfad>` vor Ausführung durch den gebundenen Pfad ersetzen. Der einmalige Restoreprozess benötigt die Workeridentität; `--entrypoint php` startet ausschließlich `ai6:restore`, keinen Queueworker, und `--no-deps` verhindert weitere Rollenstarts. Vor jedem Schritt den eigenen Compose-Kontext und die Zielvolumes prüfen. Bei Restorefehler stoppen und den dokumentierten Rückweg verwenden. Unmittelbar nach Restore die leeren `sessions`/`login_confirmations` prüfen. Widerruf der alten Browsersession und anschließender vollständiger Login bleiben an den nachfolgend beschriebenen offenen Zugangsentscheid gebunden. Der Restore führt den ersten Retention-Sweep aus; `schedule:test --name=ai6-run-retention` ruft ausschließlich denselben benannten Callback ein weiteres Mal auf. Seine Exitmeldung allein beweist keine Idempotenz: Tombstones, Ablaufzeiten, verbliebene Artefakte und Logzustände vor/nach dem zweiten Sweep vergleichen; zwischenzeitlich neu fällige Daten gesondert erklären. Kein `schedule:run`, da dies weitere geplante Wirkungen auslösen würde.
+
+**Offener Folgeentscheid für die vollständige Restoreprobe:** `LoginCompletionGate` verlangt unter `strict` die E-Mail-Bestätigung; `LoginConfirmationManager` stellt dafür `SendLoginConfirmationMail` in die Datenbankqueue, und nur `worker` erhält SMTP-Konfiguration. Mit ausschließlich `app` bleibt ein neuer Login daher an der E-Mail-Barriere stehen. Außerdem veröffentlicht `app` selbst keinen Hostport; der übliche Browserzugang benötigt Caddy. Vor dem Pilot muss ein gesonderter Auftrag den gebundenen Browserzugang und eine ausschließlich auf Loginmails begrenzte, rollenrichtige Zustellung freigeben und nachweisen. Bis dahin ist dieser Teil von TC-06/MG-03 offen. Die obigen Wartungskommandos sind kein vollständiger Login-Nachweis; weder das Abschalten der E-Mail-Barriere noch ein allgemeiner Queueworker, gefälschte Ingress-Header oder Credentialweitergabe an `app` lösen den Konflikt zulässig. Auth-, Deploy- und Queuecode bleiben außerhalb dieser Pilotvorbereitung unverändert.
+
+Ein zweiter Entwickler vollzieht Anleitung und Belege nach. Erst der vollständig ausgefüllte und signierte Teil A schließt MG-03. Grenzen, Folgeaufträge, Budgetverbrauch und tatsächliche Zahl der Human Requests bleiben sichtbar. Roh-Providertranskripte, Credentials, Gerätecodes und Schlüsselwerte gehören in keinen Protokollteil. Die Protokollvorlage, Fake-/Windows-Tests und übersprungene Smokes tragen kein Gate-Ergebnis ein.
+
+### Phase B: weiterhin gesperrter Legacy-Cutoff
+
+Phase B startet erst nach **gelieferter Migration aus AI6-037, signiertem AI6-037/MG-01 an einem echten Altbestand und signiertem AI6-038/MG-03** sowie gesonderter Freigabe des dann rebasten Cutoff-Scope. Die Promptzuordnung aus AI6-037 und die V1-Tickets dieses Repositorys ersetzen keinen Legacy-Korpus. Am Phase-A-Stand fehlen Migrationsklassen, -kommando und -fixtures; deshalb wird hier kein ausführbarer Migrationsaufruf erfunden.
+
+Erst dann wird in der Release-Lineage des Migrationsnachweises der Aufruf von `LegacyTicketReader::read()` aus `TicketReadModelProjector` entfernt. Die weiterhin über `canRead()` erkannte Legacydatei erhält `invalid`, `legacy_format_unsupported`, keinen Contract-Hash und einen Hinweis auf das dann gelieferte Migrationskommando. `LegacyTicketReader::read()` bleibt unverändert für die Migration verfügbar. Bis dahin bleiben Projektionscode, der heutige Befund `legacy_format` und seine Testerwartungen unverändert; TC-07/TC-08 sind noch nicht geliefert.
+
+Nach dem Cutoff-Commit im benannten Legacy-Projekt **und** in der AI6-Pilotkopie für jeden Ticketpfad des gebundenen Control-Stands im Panel `ticket_refresh` auslösen und abschließen lassen. Vollständige Kandidatenliste je Control-Commit mit den Projektionen vergleichen: migrierte Tickets `valid` mit Contract-Hash unter ihrem freigegebenen `generic_v1`-/`ai6_detail_v1`-Profil, zuvor gültige V1-Tickets weiterhin gültig mit unverändertem Contract-Hash, verbliebene Legacydateien sichtbar `invalid` mit `legacy_format_unsupported`. `ai6:tickets:reproject-unparsed --project-config` überspringt aktuell gebundene Projektionen und ist kein Neuaufbau nach einer Codeänderung. Teil B bindet beide Bestände, Cutoff-Commit, Revalidierung und eigene Signatur für MG-04. Ohne Altbestand bleibt er offen; MG-03 allein erfüllt weder Phase B noch die vollständige Definition of Done von AI6-038.
+
 ## Ticketmanifest
 
 `docs/AI6_TICKET_MANIFEST.yaml` ist eine deterministisch erzeugte Ansicht der Blueprint-Metadaten und Requirement-Zuordnungen aus dem Implementierungsplan, keine zweite gepflegte Wahrheit.

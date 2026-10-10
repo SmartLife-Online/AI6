@@ -1049,7 +1049,7 @@
         "source": {
             "target": "ticket_approvals",
             "code": "\\Illuminate\\Support\\Facades\\DB::table('ticket_approvals')->where('id', $approval->id)->update(['config_hash' => str_repeat('f', 64), 'version' => 2])",
-            "context_sha256": "466f3edc3570a7a4d828c7bb02070151b084f918f79629bb2efc3e2f9dadfd36"
+            "context_sha256": "98396cc61c5a69080b7feacde784446da6a531f531e6fefc09617196c9f55660"
         }
     },
     "tests/Feature/Runs/TicketApprovalQueueTest.php::test_invalid_masked_and_stale_sources_are_rejected_before_any_approval_effect#1": {

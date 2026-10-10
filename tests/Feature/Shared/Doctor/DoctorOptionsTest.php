@@ -9,6 +9,7 @@ use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Shared\Doctor\DoctorCommand;
 use App\AI6\Shared\Doctor\ProcessRolesDoctorCheck;
 use App\AI6\Shared\Process\ControlProcessRunner;
+use App\AI6\Shared\Process\ProcessConfiguration;
 use App\AI6\Shared\Process\ProcessOutcome;
 use App\AI6\Shared\Process\ProcessRequest;
 use App\AI6\Shared\Process\ProcessResult;
@@ -87,6 +88,16 @@ final class DoctorOptionsTest extends TestCase
         }
         (new Filesystem)->deleteDirectory($this->root);
         parent::tearDown();
+    }
+
+    public function test_doctor_construction_does_not_resolve_process_runtime_configuration(): void
+    {
+        $this->app->forgetInstance(DoctorCommand::class);
+        $this->app->beforeResolving(ProcessConfiguration::class, static function (): never {
+            Assert::fail('Console command discovery must not resolve the process runtime.');
+        });
+
+        self::assertInstanceOf(DoctorCommand::class, $this->app->make(DoctorCommand::class));
     }
 
     public function test_shipped_wiring_runs_every_check_once_and_reuses_security_evidence(): void

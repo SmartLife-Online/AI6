@@ -580,7 +580,7 @@ final class AI6ServiceProvider extends ServiceProvider
                         $app->make(ProviderRuntimeProfileRegistry::class),
                     ),
                     $app->make(MailDoctorCheck::class),
-                    $app->make(GitDoctorCheck::class),
+                    new GitDoctorCheck,
                     $app->make(RetentionDoctorCheck::class),
                     $app->make(TicketManifestDoctorCheck::class),
                 ],

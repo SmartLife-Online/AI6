@@ -2,10 +2,35 @@
 
 namespace Tests\Feature\Shared\Runtime;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class RuntimeDocumentationTest extends TestCase
 {
+    #[DataProvider('pilotInstructions')]
+    public function test_pilot_documents_the_doctor_status_sequence_and_protocol(string $statement): void
+    {
+        $readme = (string) file_get_contents(dirname(__DIR__, 4).'/README.md');
+        self::assertSame(1, preg_match('/^## Pilot AI6\R(.*?)(?=^## |\z)/ms', $readme, $matches));
+        self::assertStringContainsString($statement, $matches[1]);
+    }
+
+    /** @return array<string, array{string}> */
+    public static function pilotInstructions(): array
+    {
+        return [
+            'strict doctor' => ['docker compose exec worker php artisan ai6:doctor --security --all-processes --require-strict'],
+            'review approval' => ['Approval `review_only`: `todo → ready`'],
+            'review claim' => ['Claim `review_only`: `ready → in_progress`'],
+            'manual report' => ['Report-only-Abschluss: `in_progress → ready`'],
+            'human reset' => ['`return_to_todo`: `ready → todo`'],
+            'implementation approval' => ['Approval `implementation`: `todo → ready`'],
+            'implementation claim' => ['Claim `implementation`: `ready → in_progress`'],
+            'publish synchronization' => ['Publish-Synchronisation: `in_progress → review`'],
+            'protocol link' => ['[Pilotprotokoll](docs/AI6-038_PILOTPROTOKOLL.md)'],
+        ];
+    }
+
     public function test_backup_restore_documents_the_offline_recovery_contract_and_open_gate(): void
     {
         $readme = (string) file_get_contents(dirname(__DIR__, 4).'/README.md');

@@ -9,8 +9,8 @@ use App\AI6\Shared\Config\ConfigurationException;
 final readonly class GitDoctorCheck implements DoctorCheck
 {
     public function __construct(
-        private GitConfigurationFactory $gitFactory,
-        private ControlOperationConfigurationFactory $controlFactory,
+        private ?GitConfigurationFactory $gitFactory = null,
+        private ?ControlOperationConfigurationFactory $controlFactory = null,
     ) {}
 
     public function label(): string
@@ -25,8 +25,10 @@ final readonly class GitDoctorCheck implements DoctorCheck
         }
 
         try {
-            $git = $this->gitFactory->fromConfiguredValues();
-            $control = $this->controlFactory->fromConfiguredValues();
+            // Console discovery needs no execution-ready process wrapper.
+            // Resolve the guarded factories only for the responsible worker check.
+            $git = ($this->gitFactory ?? app(GitConfigurationFactory::class))->fromConfiguredValues();
+            $control = ($this->controlFactory ?? app(ControlOperationConfigurationFactory::class))->fromConfiguredValues();
         } catch (ConfigurationException) {
             return new DoctorCheckResult(false, ['Rolle' => 'worker', 'Grund' => 'git_configuration_invalid']);
         }
