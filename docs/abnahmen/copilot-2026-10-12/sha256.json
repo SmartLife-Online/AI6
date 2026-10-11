@@ -1,0 +1,11 @@
+{
+  "binding.json": "673c0e093f6ec0399f1b35cf205ebb55c22a913b11e6182236b666f050f0e933",
+  "doctor.txt": "e9d3501811d0a87ab26f51f3b1c566f4bb3d07fd8332661b5a4c244cf0a759a8",
+  "http-health.json": "2c3b9aef58ed2babc24437c2c5546451bd4d2f2ada61746986f392caaa662a8e",
+  "native-evidence.txt": "d5707d26b78637d9b2336490f1708030b58cb9516f6ca11e6cdac24dd797a05c",
+  "native-source.sha256": "31d59c3b83fcf3cd82239f68f0673d989e14b9b717147bf2968e299a1ff73c52",
+  "production-uid-proof.json": "94f8a34db898391ec4b1678977cc628983c9a54d495fc02164a5a2079acf772a",
+  "real-v2-evidence.json": "903cb2ae3a3ce08add447043ce85d8aecdcf942fbe1f977f69013fbe15a910ff",
+  "rollout-proof.json": "5d1922416c826a0ab4a5a779eeadc22b92d8936dfe915fb53fa7c114fb07fd7e",
+  "verification-summary.json": "8101ecf1e75ed8fa3f7ea3fa3dfff21806806c784405a153f169cc6c11d97ed3"
+}

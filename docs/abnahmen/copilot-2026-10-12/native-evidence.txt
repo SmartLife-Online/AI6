@@ -1,0 +1,17 @@
+base_commit=6eb8f9f58c7925a30467e44f37dc638dc67c0157
+runtime_image=sha256:2da43729882e62145ab2413ba141873da496ea7b27da7a396c08330ef8b15f73
+test_image=sha256:32996b82558638af7f40e24a5ea052a98c4efdf9872d819da8e14965a2a2aef8
+command=sudo -n docker exec ai6-native-55c2d4c09c46097a-worker php vendor/bin/phpunit tests/Feature/Reviews/CopilotSecurityReviewTest.php tests/Feature/Shared/Doctor/GitHubCopilotCliDoctorCheckTest.php tests/Feature/Agents/GitHubCopilotCliExecutionTest.php tests/Feature/Reviews/FindingVerificationRoundTest.php tests/Unit/Agents/GitHubCopilotCliAdapterTest.php tests/Feature/Agents/GitHubCopilotCliSmokeTest.php tests/Unit/Shared/Runtime/RuntimeComposeContractTest.php tests/Feature/Agents/NativeSessionProjectionBoundaryTest.php --testdox 
+contract_command=sudo -n docker exec ai6-native-55c2d4c09c46097a-worker php vendor/bin/phpunit tests/Feature/Agents/AgentExecutionMailboxTest.php --filter=test_runner_home_paths_match_the_shipped_apparmor_projection_contract --testdox 
+profile_sha256=37f491c53a7d0ccdcc500609a6cda8dae1d057e2b5497cb06e22feae9fbaecde  /tmp/ai6-native.Rv7H8VU3/harness/ai6-execution
+ai6-agent-v1 (enforce)
+1dd86210851084dd7a03d9efe95809ee9ada564d5a850e07a2f06e8a70d8a23f  /tmp/ai6-native.Rv7H8VU3/source.sha256
+contract_exit=0
+root_mount_refused_exit=1
+phpunit_exit=0
+[32m ✔ [0mHeartbeat mounts are private tmpfs and persistent targets are named volumes
+[32m ✔ [0mEffect locks exist only on the shared managed volume with unprivileged workers
+[32m ✔ [0mAgent checker and proxy receive no ai6 data or application key
+
+[30;42mOK, but some tests were skipped![0m
+[30;42mTests: 135[0m[30;42m, Assertions: 11237[0m[30;42m, Skipped: 5[0m[30;42m.[0m

@@ -1,0 +1,75 @@
+{
+  "binding": {
+    "commit": "6eb8f9f58c7925a30467e44f37dc638dc67c0157",
+    "archive_sha256": "ed385abd76127a28c3edbf293e08efa0a0685246d1ba4a84ed874964df30c493",
+    "image": "ai6-upgrade:6eb8f9f-copilot-acceptance-20261012",
+    "image_id": "sha256:2da43729882e62145ab2413ba141873da496ea7b27da7a396c08330ef8b15f73",
+    "base_image_id": "sha256:7e353e582335f3a5900b7c42bbc7a1da99e9507e286550fa152a2b08692015c2",
+    "entrypoint_executable": true,
+    "healthcheck_executable": true,
+    "unknown_role_refused_exit": 64
+  },
+  "harness_directory": "/tmp/ai6-native.6NqYKmMC",
+  "events": [
+    {
+      "commit": "6eb8f9f58c7925a30467e44f37dc638dc67c0157",
+      "role": "quality_review",
+      "model": "auto",
+      "runtime_version": 2,
+      "evidence_key": "053e7cf4ae51444e4022f97b81dd081590312731b0af3750e84f24a38036197b",
+      "run_id": "f9e28bf0-cdb5-4394-8a09-d5f6447b746f",
+      "result_ids": [
+        "20c54f69-83a0-4c72-ab46-08d6da3f357f",
+        "5856f45e-a293-44b5-a3a8-92658e4a8a84"
+      ],
+      "session_ids": [
+        "9224de06-6364-42eb-8ae5-57a950c084c5",
+        "eca820e9-9452-4411-971f-63ccf4761817"
+      ],
+      "statuses": [
+        "nothing_to_fix",
+        "nothing_to_fix"
+      ],
+      "artifact_ids": [
+        "edd57201-4d8a-4023-b2b1-e6e92c149f93",
+        "3b1b33fb-18b6-4b7b-83a8-ecdc6e3b1d63"
+      ],
+      "mailbox_clean": true,
+      "formal_gate": "open",
+      "upstream_steps": "synthetic_fixtures"
+    },
+    {
+      "commit": "6eb8f9f58c7925a30467e44f37dc638dc67c0157",
+      "role": "security_review",
+      "model": "auto",
+      "runtime_version": 2,
+      "evidence_key": "2c945da949e8ff55506f2e39cd557f28a0ec96336c33b4726e435f2a04a6c2aa",
+      "run_id": "b1c7f2e4-8686-4fff-8db5-68255514c64c",
+      "session_id": "ebbc8024-6406-4cce-ade3-a3f8c9197d0c",
+      "result_id": "56a01252-0079-4ca4-b86b-bb0addf2edd6",
+      "artifact_id": "c2c53a34-00c9-4930-b97d-ce5602dbdd7c",
+      "status": "clear",
+      "usage": {
+        "premium_requests": 1,
+        "api_duration_ms": 18494
+      },
+      "candidate_tree_oid": "234dd8fd3d53de3a424ef7f499779290eb6563ed4540c41bc0367fc9b3cba636",
+      "candidate_diff_hash": "86a8c85fd55499050202f905c8fe879d6af6b087ac044406ff4be0475174b6b8",
+      "candidate_base_oid": "754da51a289abdf8671626ff55e7df3b215ad82a4608278fde3a6409ba10e207",
+      "mailbox_clean": true,
+      "ticket_contract_hash": "b1686df9a91c1fb6feccbe767e9ca65a200d240ef3fef2a22d99f504d935d2f1",
+      "scope_hash": "de3d5381dc6ae3220ad60000db0f25102a8ec8b9f49d20f6cb9f4f2266a38435",
+      "prompt_snapshot_hash": "4038811ed947035a942ccc5fc252fd97ce3d99a17550ffe6700af15dcefafe22",
+      "instruction_snapshot_hash": "2607aa293259402f0f45ddb0de601915fb633c686ca0a6a1e618df85977936c2",
+      "runtime_hash": "813996fbd7ddb27b36000265a5d05a44dc4ebcfa8d635a589713abdb384c744e",
+      "policy_hash": "f6da67712bc4b52c98469acb5fd6f555ed09ed8f461c23f957cb52223d8a4674",
+      "slot_id": "be934f00-03e6-402b-a284-8b6c27d96a1b",
+      "formal_gate": "open",
+      "upstream_steps": "synthetic_fixtures"
+    }
+  ],
+  "exit": 0,
+  "formal_gate": "open",
+  "observed_prior_security_failure": true,
+  "prior_failure_diagnosis": "not_retained_before_diagnostic_extension"
+}

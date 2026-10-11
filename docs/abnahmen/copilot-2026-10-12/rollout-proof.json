@@ -1,0 +1,35 @@
+{
+  "commit": "6eb8f9f58c7925a30467e44f37dc638dc67c0157",
+  "archive_sha256": "ed385abd76127a28c3edbf293e08efa0a0685246d1ba4a84ed874964df30c493",
+  "image": "ai6-upgrade:6eb8f9f-copilot-acceptance-20261012",
+  "image_id": "sha256:2da43729882e62145ab2413ba141873da496ea7b27da7a396c08330ef8b15f73",
+  "base_image_id": "sha256:7e353e582335f3a5900b7c42bbc7a1da99e9507e286550fa152a2b08692015c2",
+  "entrypoint_executable": true,
+  "healthcheck_executable": true,
+  "unknown_role_refused_exit": 64,
+  "previous_images": {
+    "app": "ai6-upgrade:0600c8e-copilot-session-20261011",
+    "worker": "ai6-upgrade:0600c8e-copilot-session-20261011",
+    "scheduler": "ai6-upgrade:0600c8e-copilot-session-20261011",
+    "agent": "ai6-upgrade:0600c8e-copilot-session-20261011",
+    "checker": "ai6-upgrade:0600c8e-copilot-session-20261011"
+  },
+  "roles": {
+    "app": "healthy",
+    "worker": "healthy",
+    "scheduler": "healthy",
+    "agent": "healthy",
+    "checker": "healthy",
+    "caddy": "healthy"
+  },
+  "runtime_source_sha256": {
+    "app/AI6/Agents/GitHubCopilotCliAdapter.php": "ca643451228d79a90862defec2f0f48d9eeddaca97f2c783edbccfd8a36c07f0",
+    "app/AI6/Agents/ExecutionHomeManager.php": "161c1bee8164acf5d5e76755539cccb82d9ce8c52cb3d5be309338d6304ecd37",
+    "app/AI6/Agents/ProviderCredentialStore.php": "25acf3a2f4b503861fa812d1ded8c725b2b486027f673bce11b65c31fee39593",
+    "config/ai6.php": "d4ab54ff5682bff1c6e794f7a5d9b5e836131f985e53abafe7a2600e8d7e4d61"
+  },
+  "apparmor_sha256": "37f491c53a7d0ccdcc500609a6cda8dae1d057e2b5497cb06e22feae9fbaecde",
+  "backup": "/var/lib/ai6-offline-backups/20261011T221759Z",
+  "production_capability_evidence": "empty",
+  "formal_gate": "open"
+}

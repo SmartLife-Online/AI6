@@ -1,0 +1,39 @@
+{
+  "regular_total": 2336,
+  "regular_skipped": 412,
+  "initial_error": "FixLoopTest notification transport fixture",
+  "corrected_fix_loop": {
+    "tests": 11,
+    "assertions": 2059,
+    "exit": 0
+  },
+  "notification_regression": {
+    "tests": 6,
+    "assertions": 99,
+    "exit": 0
+  },
+  "linux": {
+    "tests": 135,
+    "assertions": 11237,
+    "skipped": 5,
+    "exit": 0
+  },
+  "real_v2": {
+    "tests": 2,
+    "assertions": 486,
+    "exit": 0
+  },
+  "locked_install": {
+    "tests": 2,
+    "assertions": 1309,
+    "exit": 0
+  },
+  "phpstan": "passed",
+  "pint": "passed",
+  "composer_strict": "passed",
+  "composer_platform": "passed",
+  "manifest": "current",
+  "diff_check": "passed",
+  "formal_gate": "open",
+  "prior_security_smoke_failure": "not reproduced; original cause not retained"
+}

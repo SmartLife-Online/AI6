@@ -1,0 +1,10 @@
+{
+  "commit": "6eb8f9f58c7925a30467e44f37dc638dc67c0157",
+  "archive_sha256": "ed385abd76127a28c3edbf293e08efa0a0685246d1ba4a84ed874964df30c493",
+  "image": "ai6-upgrade:6eb8f9f-copilot-acceptance-20261012",
+  "image_id": "sha256:2da43729882e62145ab2413ba141873da496ea7b27da7a396c08330ef8b15f73",
+  "base_image_id": "sha256:7e353e582335f3a5900b7c42bbc7a1da99e9507e286550fa152a2b08692015c2",
+  "entrypoint_executable": true,
+  "healthcheck_executable": true,
+  "unknown_role_refused_exit": 64
+}
