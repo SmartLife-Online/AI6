@@ -130,7 +130,17 @@ final class CopilotSecurityReviewTest extends TicketUiTestCase
         $run->refresh();
         $results = ReviewResult::query()->where('run_id', $run->id)->where('role', 'security_review')->get();
         if ($scenario === 'real') {
-            self::assertCount(1, $results, (string) $job->refresh()->failure_code);
+            $failure = [
+                'failure_code' => $job->refresh()->failure_code,
+                'gate_reason' => HumanRequest::query()->where('run_id', $run->id)->where('kind', 'security_gate')->value('why_needed'),
+                'provider_states' => RunArtifact::query()->where('run_id', $run->id)->where('kind', 'provider_raw')->get()
+                    ->map(fn (RunArtifact $artifact): array => array_intersect_key($artifact->redacted_metadata,
+                        array_flip(['state', 'validation_state', 'reason', 'exit_code', 'process_outcome'])))->all(),
+            ];
+            if ($results->count() !== 1) {
+                fwrite(STDERR, "\nAI6_COPILOT_V2_FAILURE=".json_encode($failure, JSON_THROW_ON_ERROR)."\n");
+            }
+            self::assertCount(1, $results, json_encode($failure, JSON_THROW_ON_ERROR));
             $status = $results->sole()->result_status;
             self::assertContains($status, ['clear', 'security_findings', 'needs_human', 'inconclusive']);
             $reason = $status === 'clear' ? null : 'security_result_'.$status;
