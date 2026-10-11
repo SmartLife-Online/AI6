@@ -145,7 +145,9 @@ class GitHubCopilotCliAdapterTest extends TestCase
         self::assertContains('--available-tools='.GitHubCopilotCliAdapter::READ_TOOLS, $observation['argv']);
         self::assertContains('--excluded-tools='.GitHubCopilotCliAdapter::EXCLUDED_TOOLS, $observation['argv']);
         self::assertContains('--deny-tool=shell,write,url,github-mcp-server', $observation['argv']);
-        self::assertNotContains('--allow-tool=read', $observation['argv']);
+        self::assertContains('--allow-tool=read', $observation['argv']);
+        self::assertNotContains('--allow-tool='.GitHubCopilotCliAdapter::READ_TOOLS, $observation['argv']);
+        self::assertNotContains('--allow-all-tools', $observation['argv']);
         self::assertSame('bash,powershell,write,edit,create,task,skill,web_fetch,web_search,store_memory,read_memories,vote_memory,delegate,read_bash,write_bash,stop_bash,sql,fetch_copilot_cli_documentation,github-mcp-server', GitHubCopilotCliAdapter::EXCLUDED_TOOLS);
         self::assertSame('present', $observation['env']['COPILOT_GITHUB_TOKEN']);
         foreach (['APP_KEY', 'DB_DATABASE', 'MAIL_PASSWORD', 'GITHUB_TOKEN', 'GH_TOKEN', 'AI6_GIT_SSH_KEY', 'CODEX_HOME', 'XDG_CONFIG_HOME'] as $name) {

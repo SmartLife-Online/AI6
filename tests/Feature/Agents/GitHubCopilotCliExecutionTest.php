@@ -32,7 +32,9 @@ use Tests\Fixtures\Agents\FakeCopilotBinary;
 
 class GitHubCopilotCliExecutionTest extends TicketUiTestCase
 {
-    use BuildsReviewRoundFixture;
+    use BuildsReviewRoundFixture {
+        implementationTicketMarkdown as private genericImplementationTicketMarkdown;
+    }
 
     private string $wrappers;
 
@@ -49,6 +51,20 @@ class GitHubCopilotCliExecutionTest extends TicketUiTestCase
     {
         $this->prepareRealCopilotSmoke();
         $this->test_production_binding_reaches_mailbox_consumer_and_artifact('real', 'ok');
+    }
+
+    /** @param list<string> $files */
+    protected function implementationTicketMarkdown(string $id, array $files): string
+    {
+        $markdown = $this->genericImplementationTicketMarkdown($id, $files);
+        if (config('ai6.fixture.real_copilot_smoke') !== true) {
+            return $markdown;
+        }
+
+        return str_replace(['Ziel des Tickets.', 'Die Änderung ist nachvollziehbar.'], [
+            'Synthetische Transportabnahme: app/Example.php ausschließlich mit Lesetools prüfen. Es ist keine Änderung, Shellausführung oder externe Testausführung erforderlich.',
+            'app/Example.php enthält die PHP-Öffnung und den Kommentar // original. Der unveränderte Ausgangszustand erfüllt dieses Kriterium.',
+        ], $markdown);
     }
 
     protected function setUp(): void

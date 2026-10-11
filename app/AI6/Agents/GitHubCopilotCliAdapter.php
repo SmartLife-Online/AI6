@@ -152,7 +152,7 @@ final class GitHubCopilotCliAdapter implements AgentAdapter
     {
         // experimental=false is sealed in settings.json; the CLI flag rewrites that file.
         return ['--no-auto-update', '--no-remote-export', '--no-ask-user', '--no-color',
-            '--disable-builtin-mcps', '--disallow-temp-dir', '--available-tools='.self::READ_TOOLS, '--allow-tool='.self::READ_TOOLS,
+            '--disable-builtin-mcps', '--disallow-temp-dir', '--available-tools='.self::READ_TOOLS, '--allow-tool=read',
             '--excluded-tools='.self::EXCLUDED_TOOLS, '--deny-tool=shell,write,url,github-mcp-server'];
     }
 
