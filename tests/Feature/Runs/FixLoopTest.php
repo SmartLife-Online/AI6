@@ -42,6 +42,15 @@ final class FixLoopTest extends TicketUiTestCase
         ."img-src 'self'; font-src 'self'; connect-src 'self'; form-action 'self'; "
         ."base-uri 'none'; object-src 'none'; frame-ancestors 'none';";
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        // Orchestration may notify a human as a side effect. Match the declared
+        // deliverable transport with a fake; delivery failures have their own tests.
+        config(['mail.default' => 'smtp']);
+        Mail::fake();
+    }
+
     /** TC-01: one blocking finding drives exactly one fix turn and one complete new review round. */
     public function test_a_single_blocking_finding_runs_one_fix_turn_and_a_complete_new_review_round(): void
     {
