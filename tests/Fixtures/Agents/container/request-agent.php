@@ -7,10 +7,11 @@ if (! isset($argv) || count($argv) !== 2 || $argv[1] !== '/var/lib/ai6/agent-exe
 $settings = json_decode(file_get_contents($argv[1]), true, 64, JSON_THROW_ON_ERROR);
 $id = bin2hex(random_bytes(16));
 $base = '/test-control/'.$id;
-$request = ['schema' => 'ai6.test-supervisor.v1', 'expires_at' => time() + 110, 'settings' => $settings];
+$timeout = ($settings['ai6.fixture.real_copilot_smoke'] ?? false) === true ? 590 : 110;
+$request = ['schema' => 'ai6.test-supervisor.v1', 'expires_at' => time() + $timeout, 'settings' => $settings];
 file_put_contents($base.'.pending', json_encode($request, JSON_THROW_ON_ERROR));
 rename($base.'.pending', $base.'.request');
-$deadline = microtime(true) + 110;
+$deadline = microtime(true) + $timeout;
 while (! is_file($base.'.response')) {
     if (microtime(true) >= $deadline) {
         throw new RuntimeException('The external test supervisor did not respond.');

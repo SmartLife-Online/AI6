@@ -10,7 +10,16 @@ $nativeHome = (string) getenv('COPILOT_HOME');
 $temporary = (string) getenv('TMPDIR');
 $scratch = dirname($temporary);
 if ($arguments === ['--headless', '--stdio', '--no-auto-update', '--no-auto-login', '--log-level', 'none']) {
-    $wire = (string) stream_get_contents(STDIN);
+    $header = fgets(STDIN);
+    if (! is_string($header) || preg_match('/\AContent-Length: ([1-9][0-9]{0,6})\r\n\z/', $header, $match) !== 1
+        || fgets(STDIN) !== "\r\n") {
+        exit(9);
+    }
+    $body = '';
+    while (strlen($body) < (int) $match[1] && ! feof(STDIN)) {
+        $body .= (string) fread(STDIN, (int) $match[1] - strlen($body));
+    }
+    $wire = $header."\r\n".$body;
     $parts = explode("\r\n\r\n", $wire, 2);
     $request = isset($parts[1]) ? json_decode($parts[1], true, 16, JSON_THROW_ON_ERROR) : [];
     if (($request['method'] ?? null) !== 'models.list' || ($request['params']['gitHubToken'] ?? null) !== 'synthetic-copilot-token'
@@ -18,7 +27,7 @@ if ($arguments === ['--headless', '--stdio', '--no-auto-update', '--no-auto-logi
         exit(9);
     }
     $response = ['jsonrpc' => '2.0', 'id' => 1, 'result' => ['models' => [
-        ['id' => 'gpt-5.4', 'policy' => ['state' => $scenario === 'model_disabled' ? 'disabled' : 'enabled']],
+        ['id' => 'auto', 'policy' => ['state' => $scenario === 'model_disabled' ? 'disabled' : 'enabled']],
         ['id' => 'claude-sonnet-4.6', 'policy' => ['state' => 'disabled']],
     ]]];
     if ($scenario === 'models_offline') {
@@ -30,15 +39,24 @@ if ($arguments === ['--headless', '--stdio', '--no-auto-update', '--no-auto-logi
     }
     $body = json_encode($response, JSON_THROW_ON_ERROR);
     $wire = 'Content-Length: '.strlen($body)."\r\n\r\n".$body;
+    if ($scenario === 'models_slow') {
+        usleep(1500000);
+    }
     echo $scenario === 'models_truncated' ? substr($wire, 0, -1) : $wire;
     if ($scenario === 'models_multiple') {
         echo $wire;
+    }
+    if ($scenario === 'models_exit_failure') {
+        exit(9);
+    }
+    if (! in_array($scenario, ['models_truncated', 'models_wrong_id', 'models_duplicate', 'models_offline'], true)) {
+        stream_get_contents(STDIN);
     }
     exit(0);
 }
 if ($arguments === ['login', '--with-token']) {
     $input = trim((string) stream_get_contents(STDIN));
-    if ($scenario === 'login_fail' || $input !== 'synthetic-copilot-token') {
+    if (in_array($scenario, ['login_fail', 'login_consent_required'], true) || $input !== 'synthetic-copilot-token') {
         exit(9);
     }
     file_put_contents($nativeHome.'/login-history', 'private-login-bait');
@@ -47,6 +65,9 @@ if ($arguments === ['login', '--with-token']) {
 }
 if ($arguments === ['--version']) {
     echo $scenario === 'version_drift' ? "GitHub Copilot CLI 1.0.84.\n" : "GitHub Copilot CLI 1.0.83.\n";
+    if ($scenario === 'version_hint') {
+        echo "Run 'copilot update' to check for updates.\n";
+    }
     exit(0);
 }
 if (in_array('plugins', $arguments, true)) {
@@ -128,9 +149,19 @@ if (str_starts_with($scenario, 'security_')) {
     }
 }
 $answer = json_encode($document, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
-echo match ($scenario) {
+$payload = match ($scenario) {
     'empty' => '', 'invalid_json' => '{', 'multiple' => $answer."\n".$answer,
     'prefix' => "Explanation\n".$answer, 'invalid_utf8' => "\xff",
     'foreign_schema' => '{"schema_version":"foreign"}', 'fenced' => "```json\n".$answer."\n```",
     default => $answer,
 };
+$format = array_search('--output-format', $arguments, true);
+if ($format !== false && ($arguments[$format + 1] ?? null) === 'json' && $scenario !== 'invalid_utf8') {
+    foreach ([['type' => 'assistant.message', 'data' => ['content' => $payload, 'toolRequests' => [], 'turnId' => 'fixture-turn']],
+        ['type' => 'assistant.turn_end', 'data' => ['turnId' => 'fixture-turn']],
+        ['type' => 'result', 'exitCode' => 0]] as $event) {
+        echo json_encode($event, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE)."\n";
+    }
+} else {
+    echo $payload;
+}

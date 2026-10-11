@@ -40,7 +40,10 @@ final readonly class ProviderLogin
                 'codex_cli' => in_array($configuration->pinnedVersion, CodexCliAdapter::VERIFIED_TRANSPORT_VERSIONS, true) ? $configuration->pinnedVersion : null,
                 'grok_cli' => GrokCliConfiguration::TRANSPORT_VERSION, default => GitHubCopilotCliConfiguration::TRANSPORT_VERSION
             };
-            if (! $version->succeeded() || trim($version->output) !== $expected || $configuration->pinnedVersion !== $pin) {
+            $versionMatches = $configuration instanceof GitHubCopilotCliConfiguration
+                ? $configuration->acceptsVersionOutput($version->output)
+                : trim($version->output) === $expected;
+            if (! $version->succeeded() || ! $versionMatches || $configuration->pinnedVersion !== $pin) {
                 throw new CredentialProjectionException('The provider login transport is not pinned.');
             }
             if ($alias === 'grok_cli') {
@@ -51,17 +54,23 @@ final readonly class ProviderLogin
 
                 return $secret;
             }
-            $arguments = $alias === 'codex_cli' ? ['login', '--device-auth', '-c', 'cli_auth_credentials_store="file"'] : ['login', '--with-token'];
-            if ($alias === 'github_copilot_cli' && ($secret === null || preg_match('/\A[!-~]+\z/D', $secret) !== 1 || strlen($secret) > 65536)) {
-                throw new CredentialProjectionException('The provider login input is invalid.');
+            if ($alias === 'github_copilot_cli') {
+                if ($secret === null || preg_match('/\A[!-~]+\z/D', $secret) !== 1 || strlen($secret) > 65536
+                    || $this->authenticatedCopilotCatalog($root, $secret, $cancelled) === []) {
+                    throw new CredentialProjectionException('The native Copilot credential verification failed.');
+                }
+
+                // AI6 owns persistence. Native login would require a separate
+                // interactive consent to a redundant plaintext CLI auth file.
+                return $secret;
             }
-            $result = $this->execute([$configuration->binary, ...$arguments], $root, $environment,
-                $alias === 'github_copilot_cli' ? $secret."\n" : null, $alias === 'codex_cli' ? $hint : null, 300, $cancelled);
+            $result = $this->execute([$configuration->binary, 'login', '--device-auth', '-c', 'cli_auth_credentials_store="file"'],
+                $root, $environment, null, $hint, 300, $cancelled);
             if (! $result->succeeded()) {
                 throw new CredentialProjectionException('The provider login failed or was cancelled.');
             }
 
-            return $alias === 'codex_cli' ? AgentExecutionProcessor::readBytes($root.'/auth.json', 65536) : (string) $secret;
+            return AgentExecutionProcessor::readBytes($root.'/auth.json', 65536);
         });
         if ($cancelled()) {
             throw new CredentialProjectionException('The provider login was cancelled.');
@@ -130,16 +139,7 @@ final readonly class ProviderLogin
                 return $models;
             }
             if ($alias === 'github_copilot_cli') {
-                // The pinned CLI's bundled SDK declares models.list as an
-                // authenticated catalog. Never use models.getBuiltInCatalog.
-                // Only a request is sent; no session or model turn is created.
-                $request = json_encode(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'models.list',
-                    'params' => ['gitHubToken' => $bytes]], JSON_THROW_ON_ERROR);
-                $catalog = $this->execute([$configuration->binary, '--headless', '--stdio', '--no-auto-update',
-                    '--no-auto-login', '--log-level', 'none'], $root, $environment,
-                    'Content-Length: '.strlen($request)."\r\n\r\n".$request, outputLimit: 1048576);
-
-                return $catalog->succeeded() ? $this->copilotCatalog($catalog->output) : [];
+                return $this->authenticatedCopilotCatalog($root, $bytes);
             }
             if ($alias === 'grok_cli') {
                 return $this->grokCatalog($root, $bytes);
@@ -147,6 +147,22 @@ final readonly class ProviderLogin
 
             return [];
         }, $alias === 'codex_cli' ? $bytes : null);
+    }
+
+    /** @return array<string, list<string>> */
+    private function authenticatedCopilotCatalog(string $root, #[\SensitiveParameter] string $bytes, ?Closure $cancelled = null): array
+    {
+        // models.list authenticates remotely; the bundled catalog is not evidence.
+        // No session or model turn is created, and the token stays off argv/env.
+        $request = json_encode(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'models.list',
+            'params' => ['gitHubToken' => $bytes]], JSON_THROW_ON_ERROR);
+        $catalog = $this->execute([ProviderOnboarding::configuration('github_copilot_cli')->binary,
+            '--headless', '--stdio', '--no-auto-update', '--no-auto-login', '--log-level', 'none'],
+            $root, $this->environment($root, 'github_copilot_cli'),
+            'Content-Length: '.strlen($request)."\r\n\r\n".$request,
+            cancelled: $cancelled, outputLimit: 1048576, closeInputAfterFramedResponse: true);
+
+        return $catalog->succeeded() ? $this->copilotCatalog($catalog->output) : [];
     }
 
     private function grokModelAvailable(string $root, #[\SensitiveParameter] string $bytes, string $model, string $effort, ?Closure $cancelled = null): bool
@@ -289,11 +305,12 @@ final readonly class ProviderLogin
      * @param  null|Closure(string): void  $hint
      * @param  null|Closure(): bool  $cancelled
      */
-    private function execute(array $arguments, string $root, array $environment, #[\SensitiveParameter] ?string $input = null, ?Closure $hint = null, int $timeout = 30, ?Closure $cancelled = null, int $outputLimit = 65536): ProcessResult
+    private function execute(array $arguments, string $root, array $environment, #[\SensitiveParameter] ?string $input = null, ?Closure $hint = null, int $timeout = 30, ?Closure $cancelled = null, int $outputLimit = 65536, bool $closeInputAfterFramedResponse = false): ProcessResult
     {
         $boot = $this->reports->boot();
         $running = $this->processes->start(new ProcessRequest($arguments, $root, array_keys($environment), $environment,
-            new RedactionContext('provider', null, 'login'), timeoutSeconds: $timeout, outputLimitBytes: $outputLimit, standardInput: $input));
+            new RedactionContext('provider', null, 'login'), timeoutSeconds: $timeout, outputLimitBytes: $outputLimit,
+            standardInput: $input, closeInputAfterFramedResponse: $closeInputAfterFramedResponse));
         try {
             return $running->wait(function () use ($boot, $cancelled): void {
                 if ($cancelled !== null && $cancelled()) {

@@ -131,7 +131,7 @@ final class AgentExecutionProcessor
                             $pulse();
 
                             return $adapter->turn($context, $projected, $pulse, $context->unreachablePaths);
-                        });
+                        }, $context);
                 }
             } finally {
                 self::$executing = false;

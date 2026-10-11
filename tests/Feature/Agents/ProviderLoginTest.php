@@ -60,6 +60,61 @@ final class ProviderLoginTest extends TestCase
         self::assertSame(['.', '..'], scandir($this->onboardingRoot.'/private'));
     }
 
+    public function test_copilot_login_accepts_the_observed_native_version_update_hint(): void
+    {
+        config(['ai6.copilot.binary' => FakeCopilotBinary::create($this->onboardingRoot.'/cli-fixtures', 'version_hint')]);
+        $command = $this->command('login', 'github_copilot_cli', ['synthetic-copilot-token']);
+        self::assertSame(0, $command->getStatusCode(), $command->getDisplay());
+        self::assertSame('synthetic-copilot-token', file_get_contents($this->onboardingRoot.'/store/github_copilot_cli/token'));
+        self::assertFalse(app(AgentProfileRegistry::class)->get('copilot-cli-review')->capabilityStatus->selectable());
+    }
+
+    public function test_copilot_login_uses_authenticated_catalog_without_native_plaintext_consent(): void
+    {
+        config(['ai6.copilot.binary' => FakeCopilotBinary::create($this->onboardingRoot.'/cli-fixtures', 'login_consent_required')]);
+        $command = $this->command('login', 'github_copilot_cli', ['synthetic-copilot-token']);
+        self::assertSame(0, $command->getStatusCode());
+        self::assertStringNotContainsString('synthetic-copilot-token', $command->getDisplay());
+        self::assertSame('synthetic-copilot-token', file_get_contents($this->onboardingRoot.'/store/github_copilot_cli/token'));
+        self::assertSame(['.', '..'], scandir($this->onboardingRoot.'/private'));
+        self::assertFalse(app(AgentProfileRegistry::class)->get('copilot-cli-review')->capabilityStatus->selectable());
+    }
+
+    public function test_copilot_login_rejects_unproven_catalogs_and_preserves_existing_credentials(): void
+    {
+        $store = app(ProviderCredentialStore::class);
+        $store->replace('github_copilot_cli', 'old-synthetic-token');
+        $generation = $store->generation('github_copilot_cli');
+        foreach (['models_offline', 'model_disabled', 'models_wrong_id', 'models_duplicate', 'models_truncated',
+            'models_multiple', 'models_exit_failure', 'version_drift'] as $scenario) {
+            config(['ai6.copilot.binary' => FakeCopilotBinary::create($this->onboardingRoot.'/cli-fixtures', $scenario)]);
+            $command = $this->command('login', 'github_copilot_cli', ['synthetic-copilot-token']);
+            self::assertSame(1, $command->getStatusCode(), $scenario);
+            self::assertStringNotContainsString('synthetic-copilot-token', $command->getDisplay());
+            self::assertSame($generation, $store->generation('github_copilot_cli'));
+            self::assertSame('old-synthetic-token', file_get_contents($this->onboardingRoot.'/store/github_copilot_cli/token'));
+            self::assertSame(['.', '..'], scandir($this->onboardingRoot.'/private'));
+        }
+    }
+
+    public function test_copilot_login_rejects_invalid_input_and_cancellation_without_rotating_credentials(): void
+    {
+        config(['ai6.copilot.binary' => FakeCopilotBinary::create($this->onboardingRoot.'/cli-fixtures', 'models_slow')]);
+        $store = app(ProviderCredentialStore::class);
+        $store->replace('github_copilot_cli', 'old-synthetic-token');
+        $generation = $store->generation('github_copilot_cli');
+        foreach ([null, '', ' ', "invalid\ninput", str_repeat('a', 65537), 'synthetic-copilot-token'] as $input) {
+            try {
+                app(ProviderLogin::class)->login('github_copilot_cli', $input, static function (): void {}, static fn (): bool => true);
+                self::fail('An invalid or cancelled Copilot login was accepted.');
+            } catch (CredentialProjectionException) {
+                self::assertSame($generation, $store->generation('github_copilot_cli'));
+                self::assertSame('old-synthetic-token', file_get_contents($this->onboardingRoot.'/store/github_copilot_cli/token'));
+                self::assertSame(['.', '..'], scandir($this->onboardingRoot.'/private'));
+            }
+        }
+    }
+
     public function test_failed_or_cancelled_login_preserves_the_old_store_and_generation(): void
     {
         $store = app(ProviderCredentialStore::class);
@@ -169,9 +224,9 @@ final class ProviderLoginTest extends TestCase
         foreach (['success' => true, 'model_disabled' => false, 'models_offline' => false,
             'models_wrong_id' => false, 'models_duplicate' => false, 'models_truncated' => false, 'models_multiple' => false] as $scenario => $expected) {
             config(['ai6.copilot.binary' => FakeCopilotBinary::create($this->onboardingRoot.'/cli-fixtures', $scenario)]);
-            self::assertSame($expected, app(ProviderLogin::class)->verifyStored('github_copilot_cli', $generation, 'gpt-5.4', 'provider_default'), $scenario);
+            self::assertSame($expected, app(ProviderLogin::class)->verifyStored('github_copilot_cli', $generation, 'auto', 'provider_default'), $scenario);
             self::assertFalse(app(ProviderLogin::class)->verifyStored('github_copilot_cli', $generation, 'claude-sonnet-4.6', 'provider_default'));
-            self::assertFalse(app(ProviderLogin::class)->verifyStored('github_copilot_cli', $generation, 'gpt-5.4', 'high'));
+            self::assertFalse(app(ProviderLogin::class)->verifyStored('github_copilot_cli', $generation, 'auto', 'high'));
             self::assertSame(['.', '..'], scandir($this->onboardingRoot.'/private'));
         }
     }

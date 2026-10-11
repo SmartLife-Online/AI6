@@ -21,7 +21,7 @@ Ergebnisfreie Vorlage. Kein bestandener Test, keine Signatur und keine Ticketsta
 
 | Prüfung | Tatsächliche Beobachtung und Nachweisreferenz |
 |---|---|
-| Homewurzel, Auth, Einstellungen, Workspace und `home/session-state` unter der Turnidentität read-only; echte verweigerte Schreibversuche | |
+| Runtimeversion 2: Homewurzel, Auth, Einstellungen, Runtime, Instruktionen und Workspace read-only; ausschließlich frische Sessionprojektion beschreibbar, echte positive und negative Schreibproben | |
 | Echter programmatischer Reviewturn über die Agentmailbox bis zum zentral validierten Ergebnis | |
 | Versionsdrift, fehlender Pin und fehlende Capability sperren nur das betroffene Profil | |
 | Nur gebundene Instruktionen; Host-, Parent-, Home- und Workspace-Köder einschließlich `CLAUDE.md`, `.claude`, Skills, Hooks und MCP | |
@@ -32,7 +32,7 @@ Ergebnisfreie Vorlage. Kein bestandener Test, keine Signatur und keine Ticketsta
 | Timeout, Cancel, Startfehler und Providerfehler beenden alle Prozesse; keine verbliebenen Homes und keine späten Ergebnisse | |
 | Promptmaximum einschließlich Wrapper und Instruktionslimits | |
 | Eindeutige gültige Antwort, Fehlerzuordnung und gemeldete Nutzungswerte einschließlich null/0/unknown | |
-| Smoke-Ausgabe `AI6_COPILOT_SMOKE_EVIDENCE` und verbleibende Abnahmeprüfungen | |
+| V2-Mailbox-Smoke-Ausgabe `AI6_COPILOT_V2_SMOKE_EVIDENCE` und verbleibende Abnahmeprüfungen | |
 
 ## Einordnung des Linux-Home-Ergebnisses
 
@@ -42,7 +42,7 @@ Ausgang und Begründung:
 
 Nachweisreferenzen:
 
-Ein inkompatibler oder ungeprüfter Pin bleibt gesperrt. Eine Schreibausnahme erfordert einen separaten begründeten Entscheidungsauftrag; dieses Protokoll erlaubt keine Laufzeitänderung. Die automatische Smoke-Prüfung ersetzt weder beobachtete tatsächliche Toolversuche noch die vollständige Agentrollen-Isolation.
+Ein inkompatibler oder ungeprüfter Pin bleibt gesperrt. Die begrenzte Sessionprojektion ist durch den menschlichen Entscheidungsauftrag und Plan V1.7.14 freigegeben. Dieses Protokoll erlaubt keine weitere Laufzeitänderung. Native Sessiondaten müssen vor Antwortpublikation entfernt sein; ungeklärtes Prozessende verweigert die Bereinigung. Die automatische Smoke-Prüfung ersetzt weder beobachtete tatsächliche Toolversuche noch die vollständige Agentrollen-Isolation.
 
 ## Menschliche Entscheidung
 

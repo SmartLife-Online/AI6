@@ -2,6 +2,16 @@
 
 Stand: 10. September 2026. Kein Abnahmeprotokoll, kein bestandenes Gate und keine Änderung des Ticketstatus.
 
+## Ausdrückliche begrenzte Freigabe am 11. Oktober 2026
+
+Der Auftraggeber hat die Frage zur Umsetzung der pro Review frischen Sessionprojektion sowie zur ausdrücklichen Nachführung von Plan und AI6-048 mit „Begrenzte Sessionprojektion freigeben“ beantwortet. Die zuvor bedingte Untersuchung ist damit ausschließlich für die in Plan V1.7.14 beschriebene Variante freigegeben. Die folgenden älteren Befunde bleiben historische Evidenz und werden nicht in bestandene Gates umgedeutet.
+
+Der echte Linux-Befund unter UID 10002 mit erzwungenem AppArmor belegt zunächst den Versuch der nativen Startmetadatenpersistenz. Die unveränderliche Vorbereitung der festen `firstLaunchAt`-Metadatei beseitigt diese frühe Fehlerursache. Danach meldet der echte Reviewturn den konkreten Schreibschutzfehler beim Persistieren seiner Sessionereignisse. Das belegt den nativen Session-Schreibbedarf und unterscheidet ihn vom vorherigen GitHub-/Copilot-Zugangstest. Die private Sessionquelle liegt ausschließlich im jeweiligen Ergebnisausgang. Die wirkliche Mount-/Inodeidentität und geschützte Eingaben werden im Kindprozess vor dem CLI-Start geprüft; frische Session-, Log- und temporäre Nutzungsdateien werden agentseitig vor der Antwortpublikation entfernt. Die Worker-Ausgänge erhalten keine zusätzlichen Leserechte.
+
+Der native Textmodus hat in den Diagnoseproben ungültige JSON-Steuerzeichen geliefert; die Runtimevariante 2 verwendet deshalb ausschließlich die offiziellen JSONL-Ereignisse des gleichen Pins. Nur eine eindeutig abgeschlossene finale Nachricht darf die bestehende Antwortvalidierung erreichen. Copilot erhält das bereits vorhandene, nun zentral wiederverwendete Antwortschema. Diese Korrektur erfindet weder ein zweites Schema noch einen weiteren Providertransport.
+
+Die synthetischen Kandidatenproben enthalten keine Produktionsprojektdateien. Capabilityeinträge bleiben dabei flüchtig und werden nicht in die Produktkonfiguration geschrieben. Implementierungsstand, Binärbindung, Runtime-/Kontexthashes, Prozessidentität und wertfreie Ergebnisse werden getrennt dokumentiert. Ein Diagnoselauf ersetzt weiterhin weder einen sauberen committed Smoke-Kandidaten noch eine menschliche Signatur; MG-01 und andere Gateergebnisse bleiben unverändert offen.
+
 ## Ergänzung durch AI6-048 am 11. September 2026
 
 Der nachstehende Ausgangsbefund dokumentiert den historischen Stand von AI6-042. AI6-048 ergänzt jetzt Adapter, Containerbindung, Doctor, Fake und vorbereiteten Smoke. Die Entwicklung erfolgt auf ausdrückliche Anweisung ohne vorherigen EXT-01-Lauf; den realen Linux-/Copilot-Test übernimmt der Auftraggeber nach der Entwicklung. Das ist keine behauptete Laufzeitevidenz und keine Änderung eines Gateergebnisses.

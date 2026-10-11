@@ -308,7 +308,7 @@ return [
         'copilot-cli-review' => [
             'provider_profile' => 'github_copilot_cli',
             'adapter' => 'github_copilot_cli',
-            'models' => ['gpt-5.4'],
+            'models' => ['auto'],
             'efforts' => ['provider_default'],
             // AI6-050: each review role requires its own runtime evidence; implementation stays forbidden.
             'roles' => ['quality_review', 'security_review'],
@@ -382,9 +382,9 @@ return [
             ],
         ],
         'github-copilot-cli-v1' => [
-            'version' => 1,
+            'version' => 2,
             'adapter_flags' => [],
-            'permissions' => ['network' => false, 'workspace' => 'read_only'],
+            'permissions' => ['native_session_state' => 'ephemeral_review', 'network' => false, 'workspace' => 'read_only'],
             'extensions' => [
                 'mcp_servers' => [],
                 'plugins' => [],

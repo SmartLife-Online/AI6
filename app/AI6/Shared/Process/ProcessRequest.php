@@ -32,7 +32,12 @@ final readonly class ProcessRequest
          * are data — they never become part of the argument list.
          */
         public ?string $standardInput = null,
+        /** Keep input open until the first complete Content-Length response frame. */
+        public bool $closeInputAfterFramedResponse = false,
     ) {
+        if ($this->closeInputAfterFramedResponse && $this->standardInput === null) {
+            throw new InvalidArgumentException('A framed response requires standard input.');
+        }
         if ($this->command === []) {
             throw new InvalidArgumentException('A control process requires a non-empty argument list.');
         }

@@ -37,6 +37,11 @@ trait BuildsCopilotHome
 
     private function createCopilotFixture(): void
     {
+        // Direct adapter fixtures exercise the legacy read-only transport. The
+        // context-bound session variant requires the real agent namespace/store.
+        config(['ai6.provider_runtime_profiles.github-copilot-cli-v1.version' => 1,
+            'ai6.provider_runtime_profiles.github-copilot-cli-v1.permissions' => ['network' => false, 'workspace' => 'read_only']]);
+        app()->forgetInstance(ProviderRuntimeProfileRegistry::class);
         $this->root = str_replace('\\', '/', (string) realpath(sys_get_temp_dir())).'/ai6-copilot-'.bin2hex(random_bytes(6));
         $this->wrappers = str_replace('\\', '/', storage_path('framework/testing/copilot-'.bin2hex(random_bytes(6))));
         foreach (['export', 'inputs', 'outputs'] as $directory) {
@@ -48,7 +53,7 @@ trait BuildsCopilotHome
 
     protected function copilotModel(): string
     {
-        return 'gpt-5.4';
+        return 'auto';
     }
 
     private function copilotContext(string $prompt = 'Prüfe das Beispiel.', AgentRole $role = AgentRole::QUALITY_REVIEW): AgentResultContext

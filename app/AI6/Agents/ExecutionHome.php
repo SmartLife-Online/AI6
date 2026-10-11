@@ -17,5 +17,6 @@ final readonly class ExecutionHome
         public string $artifactDirectory,
         public string $patchDirectory,
         public array $workspaceProjection = [],
+        public ?NativeSessionProjection $nativeSessionProjection = null,
     ) {}
 }

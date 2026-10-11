@@ -35,18 +35,29 @@ final class GitHubCopilotCliConfigurationTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_version_output_accepts_only_the_pinned_native_shapes(): void
+    {
+        $configuration = new GitHubCopilotCliConfiguration('', '1.0.83');
+        self::assertTrue($configuration->acceptsVersionOutput("GitHub Copilot CLI 1.0.83.\n"));
+        self::assertTrue($configuration->acceptsVersionOutput("GitHub Copilot CLI 1.0.83.\nRun 'copilot update' to check for updates.\n"));
+        foreach (["GitHub Copilot CLI 1.0.84.\n", "GitHub Copilot CLI 1.0.83.\nforeign", "GitHub Copilot CLI 1.0.83.\nRun 'foreign' to check for updates."] as $output) {
+            self::assertFalse($configuration->acceptsVersionOutput($output));
+        }
+        self::assertFalse((new GitHubCopilotCliConfiguration('', '1.0.84'))->acceptsVersionOutput("GitHub Copilot CLI 1.0.83.\n"));
+    }
+
     public function test_binary_pin_model_effort_and_runtime_are_checked_before_a_process(): void
     {
         $binary = FakeCopilotBinary::create($this->wrappers);
         $context = $this->copilotContext();
-        foreach ([['', '1.0.83', 'gpt-5.4', 'provider_default', 'agent_copilot_binary_missing'],
+        foreach ([['', '1.0.83', 'auto', 'provider_default', 'agent_copilot_binary_missing'],
             ['', '1.0.83', 'claude-sonnet-4.6', 'provider_default', 'agent_copilot_binary_missing'],
             [$binary, '', 'claude-sonnet-4.6', 'provider_default', 'agent_copilot_pin_missing'],
             [$binary, '1.0.84', 'claude-sonnet-4.6', 'provider_default', 'agent_copilot_transport_unsupported'],
-            [$binary, '', 'gpt-5.4', 'provider_default', 'agent_copilot_pin_missing'],
-            [$binary, '1.0.84', 'gpt-5.4', 'provider_default', 'agent_copilot_transport_unsupported'],
+            [$binary, '', 'auto', 'provider_default', 'agent_copilot_pin_missing'],
+            [$binary, '1.0.84', 'auto', 'provider_default', 'agent_copilot_transport_unsupported'],
             [$binary, '1.0.83', 'provider_default', 'provider_default', 'agent_copilot_selection_unbound'],
-            [$binary, '1.0.83', 'gpt-5.4', '--allow-all', 'agent_copilot_selection_unsupported']] as [$path, $pin, $model, $effort, $reason]) {
+            [$binary, '1.0.83', 'auto', '--allow-all', 'agent_copilot_selection_unsupported']] as [$path, $pin, $model, $effort, $reason]) {
             $adapter = new GitHubCopilotCliAdapter(new GitHubCopilotCliConfiguration($path, $pin), app(AgentInputLimits::class), app(Redactor::class), app(RestrictedJsonDecoder::class), app(AgentProfileRegistry::class), app(CanonicalJson::class));
             try {
                 $adapter->assertSelection($context->runtimeProfile, $context->role, $model, $effort, false);

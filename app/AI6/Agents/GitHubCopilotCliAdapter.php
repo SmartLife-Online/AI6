@@ -75,7 +75,7 @@ final class GitHubCopilotCliAdapter implements AgentAdapter
         // The native CLI supports this token input; no ambient login or persistent home is read.
         $environment['COPILOT_GITHUB_TOKEN'] = $token;
         $command = [$this->configuration->binary, ...self::guardArguments(),
-            '--model', $context->model, '--silent', '--stream', 'off', '--output-format', 'text',
+            '--model', $context->model, '--silent', '--stream', 'off', '--output-format', $context->runtimeProfile->version === 2 ? 'json' : 'text',
             '--log-level', 'none', '--log-dir', $scratch, '--usage-output-file', $scratch.'/usage.json'];
         $this->lastCommand = $command;
         $this->lastPrompt = $prompt;
@@ -90,7 +90,7 @@ final class GitHubCopilotCliAdapter implements AgentAdapter
         }
         $usage = $this->usage($scratch.'/usage.json');
 
-        return $this->answer($result->output, $usage);
+        return $this->answer($result->output, $usage, $context->runtimeProfile->version === 2);
     }
 
     /** Static profile check shared by the doctor and turn; never starts a process. */
@@ -134,7 +134,10 @@ final class GitHubCopilotCliAdapter implements AgentAdapter
     {
         $permissions = $profile->permissions;
         ksort($permissions);
-        if ($profile->adapterFlags !== [] || $permissions !== ['network' => false, 'workspace' => 'read_only']) {
+        $expected = $profile->version === 2
+            ? ['native_session_state' => 'ephemeral_review', 'network' => false, 'workspace' => 'read_only']
+            : ['network' => false, 'workspace' => 'read_only'];
+        if (! in_array($profile->version, [1, 2], true) || $profile->adapterFlags !== [] || $permissions !== $expected) {
             throw new AgentExecutionException('agent_copilot_runtime_unsupported');
         }
         foreach (RuntimeExtensionType::cases() as $type) {
@@ -149,7 +152,7 @@ final class GitHubCopilotCliAdapter implements AgentAdapter
     {
         // experimental=false is sealed in settings.json; the CLI flag rewrites that file.
         return ['--no-auto-update', '--no-remote-export', '--no-ask-user', '--no-color',
-            '--disable-builtin-mcps', '--disallow-temp-dir', '--available-tools='.self::READ_TOOLS,
+            '--disable-builtin-mcps', '--disallow-temp-dir', '--available-tools='.self::READ_TOOLS, '--allow-tool='.self::READ_TOOLS,
             '--excluded-tools='.self::EXCLUDED_TOOLS, '--deny-tool=shell,write,url,github-mcp-server'];
     }
 
@@ -161,7 +164,7 @@ final class GitHubCopilotCliAdapter implements AgentAdapter
     public function probe(ExecutionHome $home, InstructionSnapshot $snapshot, array $environment, Closure $heartbeat, ProcessPolicyName $policy = ProcessPolicyName::AGENT): void
     {
         $version = $this->execute([$this->configuration->binary, '--version'], $home, $environment, $heartbeat, policy: $policy);
-        if (! $version->succeeded() || trim($version->output) !== 'GitHub Copilot CLI '.$this->configuration->pinnedVersion.'.') {
+        if (! $version->succeeded() || ! $this->configuration->acceptsVersionOutput($version->output)) {
             throw new AgentExecutionException('agent_copilot_version_drift');
         }
         $surface = $this->execute([$this->configuration->binary, ...self::guardArguments(), 'plugins', 'list', '--json'], $home, $environment, $heartbeat, policy: $policy);
@@ -203,15 +206,27 @@ final class GitHubCopilotCliAdapter implements AgentAdapter
             throw new AgentExecutionException('agent_copilot_prompt_missing');
         }
 
-        return $rendered."\n\nAntwortvertrag: Genau ein JSON-Dokument, ohne Begleittext. Neue Invocation ohne native History.\n"
+        $schema = in_array($context->role, [AgentRole::QUALITY_REVIEW, AgentRole::SECURITY_REVIEW], true)
+            ? "\nJSON-Schema der Antwort:\n".$this->canonicalJson->normalizeAndEncode(app(AgentResultSchema::class)->outputSchema($context))."\n"
+            : '';
+
+        return $rendered."\n\nAntwortvertrag: Genau ein JSON-Dokument, ohne Begleittext. Neue Invocation ohne native History. Alle Zeichenketten JSON-konform escapen; keine unescaped Steuerzeichen.\n"
             .'schema_version: '.($context->role === AgentRole::FINDING_VERIFICATION ? 'ai6.finding-verification.v1' : 'ai6.quality-review.v1')."\n"
             .'prompt_snapshot_hash: '.$context->promptSnapshot->hash."\n"
             .'instruction_snapshot_hash: '.$context->instructionSnapshot->hash."\n"
-            .'provider_runtime_profile_hash: '.$context->runtimeProfile->hash."\n";
+            .'provider_runtime_profile_hash: '.$context->runtimeProfile->hash."\n".$schema;
     }
 
     private function assertHome(ExecutionHome $home, AgentResultContext $context): void
     {
+        if (NativeSessionProjection::appliesTo($context)) {
+            $session = $home->nativeSessionProjection;
+            if ($session === null || $session->contextHash !== hash('sha256', $context->toJson())
+                || $session->runtimeHash !== $context->runtimeProfile->hash || $session->role !== $context->role->value) {
+                throw new AgentExecutionException('agent_copilot_session_projection_unbound');
+            }
+            $session->assertBinding();
+        }
         foreach ([$home->root, $home->home, $home->workspace, $home->authDirectory, $home->resultDirectory, $home->artifactDirectory] as $path) {
             if (! is_dir($path) || is_link($path)) {
                 throw new AgentExecutionException('agent_copilot_home_missing');
@@ -225,12 +240,16 @@ final class GitHubCopilotCliAdapter implements AgentAdapter
         if (! is_file($settings) || is_link($settings) || file_get_contents($settings) !== GitHubCopilotCliConfiguration::settingsBytes($context->runtimeProfile, $this->canonicalJson)) {
             throw new AgentExecutionException('agent_copilot_settings_unbound');
         }
+        $globalState = $home->home.'/config.json';
+        if (! is_file($globalState) || is_link($globalState) || file_get_contents($globalState) !== GitHubCopilotCliConfiguration::globalStateBytes($this->canonicalJson)) {
+            throw new AgentExecutionException('agent_copilot_global_state_unbound');
+        }
         $projection = implode(DIRECTORY_SEPARATOR, [$home->authDirectory, 'token']);
         if (! is_file($projection) || is_link($projection)) {
             throw new AgentExecutionException('agent_copilot_credential_projection_missing');
         }
         foreach (scandir($home->home) ?: [] as $name) {
-            if (! in_array($name, ['.', '..', 'auth', 'settings.json', 'session-state'], true)) {
+            if (! in_array($name, ['.', '..', 'auth', 'settings.json', 'config.json', 'session-state'], true)) {
                 throw new AgentExecutionException('agent_copilot_home_config_unapproved');
             }
         }
@@ -314,12 +333,15 @@ final class GitHubCopilotCliAdapter implements AgentAdapter
         return new AgentTurnResult('', $values, $values === [] ? 'unknown' : self::USAGE_SOURCE);
     }
 
-    private function answer(string $output, AgentTurnResult $usage): AgentTurnResult
+    private function answer(string $output, AgentTurnResult $usage, bool $nativeEvents = false): AgentTurnResult
     {
         try {
             $this->redactor->assertValidInput($output);
         } catch (InvalidRedactionInputException) {
             throw new InvalidAgentResponse('agent_response_invalid_utf8', $usage);
+        }
+        if ($nativeEvents) {
+            $output = $this->nativeAnswer($output, $usage);
         }
         $answer = trim($output);
         if (preg_match('/\A```json\r?\n(.*)\r?\n```\z/sD', $answer, $match) === 1) {
@@ -333,5 +355,53 @@ final class GitHubCopilotCliAdapter implements AgentAdapter
         }
 
         return new AgentTurnResult($answer, $usage->usage, $usage->usageSource);
+    }
+
+    /** Extract only one completed native message, never repair or concatenate model JSON. */
+    private function nativeAnswer(string $output, AgentTurnResult $usage): string
+    {
+        $answer = null;
+        $turnId = null;
+        $ended = false;
+        $result = false;
+        try {
+            foreach (explode("\n", trim($output)) as $line) {
+                $event = $this->json->decode($line, new RedactionContext('agent', null, 'copilot-event'));
+                $type = $event['type'] ?? null;
+                if ($result || ! is_string($type)) {
+                    throw new InvalidAgentResponse('agent_response_invalid', $usage);
+                }
+                if ($type === 'assistant.message') {
+                    $data = $event['data'] ?? null;
+                    if (! is_array($data) || (isset($data['toolRequests']) && ! is_array($data['toolRequests'])) || ! is_string($data['content'] ?? null)) {
+                        throw new InvalidAgentResponse('agent_response_invalid', $usage);
+                    }
+                    if (($data['toolRequests'] ?? []) === [] && trim($data['content']) !== '') {
+                        if ($answer !== null || ! is_string($data['turnId'] ?? null) || ($event['agentId'] ?? null) !== null) {
+                            throw new InvalidAgentResponse('agent_response_invalid', $usage);
+                        }
+                        $answer = $data['content'];
+                        $turnId = $data['turnId'];
+                    }
+                } elseif ($type === 'assistant.turn_end' && $answer !== null) {
+                    if (($event['data']['turnId'] ?? null) !== $turnId || $ended) {
+                        throw new InvalidAgentResponse('agent_response_invalid', $usage);
+                    }
+                    $ended = true;
+                } elseif ($type === 'result') {
+                    if ($answer === null || ! $ended || ($event['exitCode'] ?? null) !== 0) {
+                        throw new InvalidAgentResponse('agent_response_invalid', $usage);
+                    }
+                    $result = true;
+                }
+            }
+        } catch (JsonDecodingException|InvalidRedactionInputException) {
+            throw new InvalidAgentResponse('agent_response_invalid', $usage);
+        }
+        if (! $result) {
+            throw new InvalidAgentResponse('agent_response_invalid', $usage);
+        }
+
+        return $answer;
     }
 }

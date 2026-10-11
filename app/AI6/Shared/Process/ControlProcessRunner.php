@@ -14,6 +14,11 @@ final class ControlProcessRunner
 {
     private ?AgentProcessScope $agentScope = null;
 
+    /** @var list<RunningControlProcess> */
+    private array $scopedProcesses = [];
+
+    private bool $scopedStartUnconfirmed = false;
+
     /**
      * Apply one supervisor-created view to every native probe and turn it starts.
      *
@@ -28,10 +33,40 @@ final class ControlProcessRunner
             throw new ProcessStartRejectedException('The provider supervisor scope is invalid.');
         }
         $this->agentScope = $scope;
+        $this->scopedProcesses = [];
+        $this->scopedStartUnconfirmed = false;
         try {
             return $operation();
         } finally {
-            $this->agentScope = null;
+            try {
+                $this->releaseAgentScope($scope);
+            } finally {
+                $this->agentScope = null;
+                $this->scopedProcesses = [];
+                $this->scopedStartUnconfirmed = false;
+            }
+        }
+    }
+
+    private function releaseAgentScope(AgentProcessScope $scope): void
+    {
+        if ($scope->onRelease === null) {
+            return;
+        }
+        $quiescent = ! $this->scopedStartUnconfirmed;
+        foreach ($this->scopedProcesses as $running) {
+            try {
+                if (! $running->quiescent()) {
+                    $running->cancel();
+                }
+                $quiescent = $running->quiescent() && $quiescent;
+            } catch (Throwable) {
+                $quiescent = false;
+            }
+        }
+        ($scope->onRelease)($quiescent);
+        if (! $quiescent) {
+            throw new ProcessStartRejectedException('The provider process end could not be confirmed.');
         }
     }
 
@@ -104,14 +139,27 @@ final class ControlProcessRunner
         $command = DIRECTORY_SEPARATOR === '/'
             ? $this->wrapperCommand(['direct', '--', ...$payload])
             : $request->command;
-        $process = new Process($command, $request->workingDirectory, $this->environment($request), $request->standardInput, null);
+        $framedInput = null;
+        if ($request->closeInputAfterFramedResponse) {
+            $framedInput = new InputStream;
+            $framedInput->write($request->standardInput);
+        }
+        $process = new Process($command, $request->workingDirectory, $this->environment($request), $framedInput ?? $request->standardInput, null);
         $process->start();
+        if ($this->agentScope?->onRelease !== null) {
+            $this->scopedStartUnconfirmed = true;
+        }
+        $running = $this->trackStartedProcess($process, $request, $policy, $framedInput);
+        if ($this->agentScope?->onRelease !== null) {
+            $this->scopedProcesses[] = $running;
+            $this->scopedStartUnconfirmed = false;
+        }
 
-        return $this->trackStartedProcess($process, $request, $policy);
+        return $running;
     }
 
     /** @param array{int, int, int, ?ProcessLimits} $policy */
-    private function trackStartedProcess(Process $process, ProcessRequest $request, array $policy): RunningControlProcess
+    private function trackStartedProcess(Process $process, ProcessRequest $request, array $policy, ?InputStream $framedInput = null): RunningControlProcess
     {
         [$timeout, $outputLimit, $cancelGrace, $limits] = $policy;
         $startedAt = $process->getStartTime();
@@ -151,6 +199,7 @@ final class ControlProcessRunner
             resultDirectory: $request->resultDirectory,
             artifactDirectory: $request->artifactDirectory,
             supervisorHeartbeat: $this->agentScope?->heartbeat,
+            framedInput: $framedInput,
         );
     }
 

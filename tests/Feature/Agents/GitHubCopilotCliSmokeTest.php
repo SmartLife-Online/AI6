@@ -26,7 +26,7 @@ final class GitHubCopilotCliSmokeTest extends TestCase
     use BuildsCopilotHome;
     use BuildsProviderOnboarding;
 
-    private string $smokeModel = 'gpt-5.4';
+    private string $smokeModel = 'auto';
 
     public function test_security_gate_protocol_is_an_unfilled_bound_template(): void
     {

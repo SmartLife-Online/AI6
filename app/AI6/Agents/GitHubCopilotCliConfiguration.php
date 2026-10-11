@@ -12,6 +12,9 @@ final readonly class GitHubCopilotCliConfiguration
 
     public const DISABLED_SKILLS = ['customize-cloud-agent', 'discover-resources', 'github-pr-media'];
 
+    /** The pinned runtime's expFirstLaunchBackfill() value for an existing settings file. */
+    private const FIRST_LAUNCH_BACKFILL = '2026-03-11T00:00:00.000Z';
+
     /** @param list<string> $capabilityEvidence */
     public function __construct(public string $binary, public string $pinnedVersion, public array $capabilityEvidence = [], private CanonicalJson $canonicalJson = new CanonicalJson) {}
 
@@ -40,6 +43,15 @@ final readonly class GitHubCopilotCliConfiguration
             && (DIRECTORY_SEPARATOR !== '/' || is_executable($this->binary));
     }
 
+    /** Exact output shapes observed for the pinned native transport. */
+    public function acceptsVersionOutput(string $output): bool
+    {
+        $version = 'GitHub Copilot CLI '.self::TRANSPORT_VERSION.'.';
+
+        return $this->pinnedVersion === self::TRANSPORT_VERSION
+            && in_array(trim($output), [$version, $version."\nRun 'copilot update' to check for updates."], true);
+    }
+
     /** A binding identifier is not proof by itself; only a human supplies approved entries. */
     public function evidenceKey(ProviderRuntimeProfile $runtime, AgentRole $role, string $model, string $effort): string
     {
@@ -49,6 +61,16 @@ final readonly class GitHubCopilotCliConfiguration
             'role' => $role->value, 'model' => $model, 'effort' => $effort,
             'transport_sha256' => hash_file('sha256', __DIR__.'/GitHubCopilotCliAdapter.php'),
             'settings_sha256' => hash('sha256', self::settingsBytes($runtime, $this->canonicalJson)),
+            'global_state_sha256' => hash('sha256', self::globalStateBytes($this->canonicalJson)),
+            'session_projection_sha256' => hash_file('sha256', __DIR__.'/NativeSessionProjection.php'),
+            'namespace_scope_sha256' => hash_file('sha256', __DIR__.'/../Shared/Process/AgentProcessScope.php'),
+            'session_verifier_sha256' => hash_file('sha256', __DIR__.'/../Shared/Process/native-session-verify.php'),
+            'session_wrapper_sha256' => hash_file('sha256', __DIR__.'/../Shared/Process/native-session-wrapper.sh'),
+            'credential_projection_sha256' => hash_file('sha256', __DIR__.'/ProviderCredentialStore.php'),
+            'home_materialization_sha256' => hash_file('sha256', __DIR__.'/ExecutionHomeManager.php'),
+            'answer_schema_sha256' => hash_file('sha256', __DIR__.'/AgentResultSchema.php'),
+            'process_lifecycle_sha256' => hash_file('sha256', __DIR__.'/../Shared/Process/ControlProcessRunner.php'),
+            'process_monitor_sha256' => hash_file('sha256', __DIR__.'/../Shared/Process/RunningControlProcess.php'),
         ]));
     }
 
@@ -63,5 +85,11 @@ final readonly class GitHubCopilotCliConfiguration
             'customAgents' => ['defaultLocalOnly' => true], 'ide' => ['autoConnect' => false],
             'renderMarkdown' => false, 'updateTerminalTitle' => false, 'terminalProgress' => false,
         ])."\n";
+    }
+
+    /** Native startup metadata only; never credentials, permissions or discovery settings. */
+    public static function globalStateBytes(CanonicalJson $canonicalJson): string
+    {
+        return $canonicalJson->normalizeAndEncode(['firstLaunchAt' => self::FIRST_LAUNCH_BACKFILL])."\n";
     }
 }

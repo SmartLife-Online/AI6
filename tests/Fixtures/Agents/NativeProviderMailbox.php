@@ -4,6 +4,7 @@ namespace Tests\Fixtures\Agents;
 
 use App\AI6\Agents\AgentExecutionProcessor;
 use App\AI6\Agents\CodexCliAdapter;
+use App\AI6\Agents\ExecutionHome;
 use App\AI6\Agents\GitHubCopilotCliAdapter;
 use App\AI6\Agents\GrokCliAdapter;
 use App\AI6\Agents\ProviderOnboarding;
@@ -62,6 +63,23 @@ final class NativeProviderMailbox
 
     public static function processNext(bool $missingAnswer = false): bool
     {
+        return self::invoke(['ai6.fixture.missing_answer' => $missingAnswer])['processed'];
+    }
+
+    /** @return array<string, mixed> */
+    public static function probeSessionScope(ExecutionHome $home, bool $unconfirmed): array
+    {
+        $result = self::invoke(['ai6.fixture.native_session_scope_probe' => ['home' => get_object_vars($home), 'unconfirmed' => $unconfirmed]]);
+        Assert::assertIsArray($result['native_scope']);
+
+        return $result['native_scope'];
+    }
+
+    /** @param array<string, mixed> $fixtureSettings
+     * @return array<string, mixed>
+     */
+    private static function invoke(array $fixtureSettings): array
+    {
         if (PHP_OS_FAMILY !== 'Linux') {
             Assert::markTestSkipped('Native provider mailbox requires Linux namespaces.');
         }
@@ -76,8 +94,9 @@ final class NativeProviderMailbox
         $settings = [...$settings, 'ai6.runtime_role' => 'agent', 'app.env' => 'testing', 'app.debug' => false,
             'app.key' => 'base64:'.base64_encode(str_repeat('x', 32)), 'logging.default' => 'stderr',
             'database.connections.sqlite.database' => '/nonexistent/agent-has-no-database',
-            'ai6.fixture.missing_answer' => $missingAnswer,
-            'ai6.fixture.expire_provider_report' => config('ai6.fixture.expire_provider_report', false)];
+            'ai6.fixture.expire_provider_report' => config('ai6.fixture.expire_provider_report', false),
+            'ai6.fixture.real_copilot_smoke' => config('ai6.fixture.real_copilot_smoke', false)];
+        $settings = [...$settings, ...$fixtureSettings];
         file_put_contents($configuration, json_encode($settings, JSON_THROW_ON_ERROR));
         $arguments = ['/usr/bin/bwrap', '--die-with-parent', '--unshare-user', '--unshare-pid', '--unshare-ipc', '--unshare-uts',
             '--cap-drop', 'ALL', '--new-session', '--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev',
@@ -93,7 +112,7 @@ final class NativeProviderMailbox
             $arguments = [PHP_BINARY, $runner, $configuration];
         }
         $process = new Process($arguments, base_path(), ['APP_ENV' => 'testing']);
-        $process->setTimeout(120);
+        $process->setTimeout(config('ai6.fixture.real_copilot_smoke') === true ? 600 : 120);
         try {
             Assert::assertSame(0, $process->run(), $process->getErrorOutput());
             $result = json_decode($process->getOutput(), true, 32, JSON_THROW_ON_ERROR);
@@ -109,7 +128,7 @@ final class NativeProviderMailbox
                 app($adapter)->lastCommand = $command;
             }
 
-            return $result['processed'];
+            return $result;
         } finally {
             $process->stop(1);
             unlink($configuration);

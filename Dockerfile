@@ -132,6 +132,8 @@ COPY . .
 COPY --from=vendor /opt/ai6/vendor ./vendor
 COPY --chmod=0444 docker/apache-ports.conf /etc/apache2/ports.conf
 COPY --chmod=0444 docker/apache-vhost.conf /etc/apache2/sites-available/000-default.conf
+COPY --chmod=0555 app/AI6/Shared/Process/native-session-wrapper.sh /usr/local/lib/ai6/native-session-wrapper.sh
+COPY --chmod=0444 app/AI6/Shared/Process/native-session-verify.php /usr/local/lib/ai6/native-session-verify.php
 
 RUN set -eux; \
     groupadd --gid 10001 ai6; \

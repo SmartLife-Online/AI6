@@ -59,6 +59,11 @@ profile ai6-agent-v1 flags=(attach_disconnected,mediate_deleted) {
   mount options=(rw,rbind) /oldroot/var/lib/ai6/agent-outputs/execution-*/*-*-*/ -> /newroot/var/lib/ai6/agent-outputs/execution-*/*-*-*/,
   mount options=(rw,nosuid,nodev,noexec,remount,bind,silent,relatime) -> /newroot/var/lib/ai6/agent-outputs/execution-*/*-*-*/,
   # Existing provider scope producers: individual private children only.
+  # AI6-048: agent-owned invocation outputs and its one native session inode.
+  mount options=(rw,rbind) /oldroot/var/lib/ai6/agent-outputs/execution-*/*-*-*/result/copilot-invocation/{result,artifacts}/ -> /newroot/var/lib/ai6/agent-outputs/execution-*/*-*-*/result/copilot-invocation/{result,artifacts}/,
+  mount options=(rw,nosuid,nodev,noexec,remount,bind,silent,relatime) -> /newroot/var/lib/ai6/agent-outputs/execution-*/*-*-*/result/copilot-invocation/{result,artifacts}/,
+  mount options=(rw,rbind) /oldroot/var/lib/ai6/agent-outputs/execution-*/*-*-*/result/copilot-invocation/result/copilot-session-state/ -> /newroot/var/lib/ai6/agent-executions/execution-*/*-*-*/home/session-state/,
+  mount options=(rw,nosuid,nodev,noexec,remount,bind,silent,relatime) -> /newroot/var/lib/ai6/agent-executions/execution-*/*-*-*/home/session-state/,
   # Never permit private_root itself, sibling trees or arbitrary file sources.
   mount options=(rw,rbind) /oldroot/run/ai6/provider-private/projection-*/ -> /newroot/run/ai6/provider-private/projection-*/,
   mount options=(ro,nosuid,nodev,noexec,remount,bind,silent,relatime) -> /newroot/run/ai6/provider-private/projection-*/,

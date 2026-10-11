@@ -2,6 +2,7 @@
 
 namespace App\AI6\Shared\Process;
 
+use App\AI6\Agents\NativeSessionProjection;
 use App\AI6\Agents\ProviderOnboarding;
 
 /** A supervisor-owned filesystem view for one provider invocation (AGT-007). */
@@ -14,12 +15,15 @@ final readonly class AgentProcessScope
      * @param  list<string>  $writableDirectories
      * @param  list<string>  $readOnlyFiles
      * @param  null|\Closure(): void  $heartbeat
+     * @param  null|\Closure(bool): void  $onRelease
      */
     public function __construct(
         public array $readOnlyDirectories,
         public array $writableDirectories,
         public ?\Closure $heartbeat = null,
         public array $readOnlyFiles = [],
+        public ?NativeSessionProjection $nativeSessionProjection = null,
+        public ?\Closure $onRelease = null,
     ) {}
 
     /** @return non-empty-list<string> */
@@ -88,7 +92,20 @@ final readonly class AgentProcessScope
             }
             array_push($command, '--ro-bind', $path, $path);
         }
-        array_push($command, '--chdir', $request->workingDirectory, '--remount-ro', '/', '--', ...$request->command);
+        $payload = $request->command;
+        if ($this->nativeSessionProjection !== null) {
+            $session = $this->nativeSessionProjection;
+            $identity = $session->assertBinding();
+            if (! in_array(dirname($session->source), $this->writableDirectories, true)
+                || ! in_array(dirname(dirname($session->target)), $this->readOnlyDirectories, true)
+                || ! is_executable(NativeSessionProjection::WRAPPER) || is_link(NativeSessionProjection::WRAPPER)) {
+                throw new ProcessStartRejectedException('The native session scope is invalid.');
+            }
+            array_push($command, '--bind', $session->source, $session->target);
+            $payload = [NativeSessionProjection::WRAPPER, $session->source, $session->target, $identity,
+                $session->contextHash, $session->runtimeHash, $session->role, ...$request->command];
+        }
+        array_push($command, '--chdir', $request->workingDirectory, '--remount-ro', '/', '--', ...$payload);
 
         return $command;
     }

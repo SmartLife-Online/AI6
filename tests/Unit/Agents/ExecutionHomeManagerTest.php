@@ -2,6 +2,8 @@
 
 namespace Tests\Unit\Agents;
 
+use App\AI6\Agents\AgentResultContext;
+use App\AI6\Agents\AgentRole;
 use App\AI6\Agents\CredentialProjection as AuthProjection;
 use App\AI6\Agents\CredentialProjectionException as AuthProjectionException;
 use App\AI6\Agents\CredentialRevisionRegistry as AuthRevisionRegistry;
@@ -19,6 +21,8 @@ use App\AI6\Agents\InstructionSnapshotEntry;
 use App\AI6\Agents\ProviderRuntimeProfile;
 use App\AI6\Agents\ProviderRuntimeProfileRegistry;
 use App\AI6\Git\CanonicalJson;
+use App\AI6\Prompts\PromptSnapshot;
+use App\AI6\Shared\Config\ConfigurationException;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\RedactionFingerprintGenerator;
 use App\AI6\Shared\Redaction\RedactionKeyring;
@@ -30,6 +34,26 @@ use Tests\TestCase;
 final class ExecutionHomeManagerTest extends TestCase
 {
     private string $root;
+
+    public function test_failed_native_description_binding_removes_the_sealed_home_and_output(): void
+    {
+        $snapshot = new InstructionSnapshot('github_copilot_cli', [], str_repeat('a', 64));
+        $runtime = new ProviderRuntimeProfile('unregistered-copilot', 2, [],
+            ['native_session_state' => 'ephemeral_review', 'network' => false, 'workspace' => 'read_only'], [], str_repeat('b', 64));
+        $context = new AgentResultContext(AgentRole::QUALITY_REVIEW,
+            new PromptSnapshot('1', [], ['quality_review' => 'Fixture.'], str_repeat('c', 64)),
+            $snapshot, $runtime, [], '', slotId: 'slot', model: 'auto', effort: 'provider_default');
+        $manager = new ExecutionHomeManager(app(CanonicalJson::class), new AuthRevisionRegistry(['github_copilot_cli' => 'revision-1']));
+        try {
+            $manager->create($this->root.'/inputs', $this->root.'/outputs', 'slot', 'review', $this->root.'/export',
+                app(InstructionProfileRegistry::class)->get('github_copilot_cli'), $snapshot, $runtime,
+                new AuthProjection('github_copilot_cli', 'revision-1', []), turnContext: $context);
+            self::fail('An unregistered native runtime cannot create a session projection.');
+        } catch (ConfigurationException) {
+            self::assertSame(['.', '..'], scandir($this->root.'/inputs'));
+            self::assertSame(['.', '..'], scandir($this->root.'/outputs'));
+        }
+    }
 
     protected function setUp(): void
     {

@@ -7,6 +7,7 @@ use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Redaction\Redactor;
 use Closure;
 use Symfony\Component\Process\Exception\ProcessSignaledException;
+use Symfony\Component\Process\InputStream;
 use Symfony\Component\Process\Process;
 use Throwable;
 
@@ -35,12 +36,18 @@ final class RunningControlProcess
         private readonly ?string $artifactDirectory = null,
         /** @var null|Closure(): void */
         private readonly ?Closure $supervisorHeartbeat = null,
+        private readonly ?InputStream $framedInput = null,
     ) {}
 
     public function running(): bool
     {
         return ! $this->finished && ($this->process->isRunning()
             || ($this->terminateProcessGroup !== null && $this->processGroupInventory()[1] > 0));
+    }
+
+    public function quiescent(): bool
+    {
+        return ! $this->terminationFailed && ! $this->running();
     }
 
     public function waitForOutputPrefix(string $prefix, int $timeoutSeconds): bool
@@ -81,8 +88,10 @@ final class RunningControlProcess
         }
 
         $observedBytes = 0;
+        $inputClosed = false;
         $outcome = null;
         $limitResult = null;
+        $inventoryUnavailable = false;
         $nextHeartbeat = microtime(true) + $heartbeatSeconds;
         $nextResourceCheck = microtime(true);
 
@@ -95,6 +104,15 @@ final class RunningControlProcess
                 $outcome = ProcessOutcome::OUTPUT_LIMIT_EXCEEDED;
                 $this->terminate();
                 break;
+            }
+
+            if ($this->framedInput !== null && ! $inputClosed) {
+                $output = substr($this->process->getOutput(), $this->discardOutputPrefixBytes);
+                if (preg_match('/\AContent-Length: ([1-9][0-9]{0,6})\r\n\r\n/', $output, $header) === 1
+                    && strlen($output) >= strlen($header[0]) + (int) $header[1]) {
+                    $this->framedInput->close();
+                    $inputClosed = true;
+                }
             }
 
             if ($observe !== null) {
@@ -111,7 +129,14 @@ final class RunningControlProcess
             }
 
             if ($this->limits !== null && microtime(true) >= $nextResourceCheck) {
-                $resourceLimit = $this->resourceLimitResult();
+                try {
+                    $resourceLimit = $this->resourceLimitResult();
+                } catch (ProcessInventoryUnavailableException) {
+                    $inventoryUnavailable = true;
+                    $outcome = ProcessOutcome::FAILED;
+                    $this->terminate();
+                    break;
+                }
                 if ($resourceLimit !== null) {
                     $outcome = ProcessOutcome::RESOURCE_LIMIT_EXCEEDED;
                     $limitResult = $resourceLimit;
@@ -153,7 +178,14 @@ final class RunningControlProcess
             }
         }
         $duration = max(0.0, microtime(true) - $this->startedAt);
-        $limitResult ??= $this->resourceLimitResult();
+        if (! $inventoryUnavailable) {
+            try {
+                $limitResult ??= $this->resourceLimitResult();
+            } catch (ProcessInventoryUnavailableException) {
+                $inventoryUnavailable = true;
+                $this->terminate();
+            }
+        }
         if ($limitResult !== null) {
             if ($outcome !== ProcessOutcome::RESOURCE_LIMIT_EXCEEDED) {
                 $this->terminate();
@@ -165,6 +197,10 @@ final class RunningControlProcess
 
         if ($this->terminationFailed) {
             return $this->limitedResult(ProcessOutcome::TERMINATION_FAILED, $duration, 'The control process group could not be terminated safely.');
+        }
+
+        if ($inventoryUnavailable) {
+            return $this->limitedResult(ProcessOutcome::FAILED, $duration, 'The process output inventory is unavailable for the execution role.');
         }
 
         $finalVisibleBytes = max(
@@ -281,15 +317,19 @@ final class RunningControlProcess
 
         $files = 0;
         $bytes = 0;
-        $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS));
-        foreach ($iterator as $entry) {
-            if ($entry->isLink()) {
-                return [PHP_INT_MAX, PHP_INT_MAX];
+        try {
+            $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS));
+            foreach ($iterator as $entry) {
+                if ($entry->isLink()) {
+                    return [PHP_INT_MAX, PHP_INT_MAX];
+                }
+                if ($entry->isFile()) {
+                    $files++;
+                    $bytes += $entry->getSize();
+                }
             }
-            if ($entry->isFile()) {
-                $files++;
-                $bytes += $entry->getSize();
-            }
+        } catch (\UnexpectedValueException) {
+            throw new ProcessInventoryUnavailableException('The process output inventory is unavailable for the execution role.');
         }
 
         return [$files, $bytes];

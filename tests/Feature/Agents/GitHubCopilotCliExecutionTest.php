@@ -43,7 +43,13 @@ class GitHubCopilotCliExecutionTest extends TicketUiTestCase
 
     protected string $copilotProfile = 'copilot-cli-review';
 
-    protected string $copilotModel = 'gpt-5.4';
+    protected string $copilotModel = 'auto';
+
+    public function test_real_linux_copilot_quality_reviews_use_v2_mailbox(): void
+    {
+        $this->prepareRealCopilotSmoke();
+        $this->test_production_binding_reaches_mailbox_consumer_and_artifact('real', 'ok');
+    }
 
     protected function setUp(): void
     {
@@ -79,7 +85,7 @@ class GitHubCopilotCliExecutionTest extends TicketUiTestCase
         Mail::fake();
         // Keep the exact shipped resolver while the existing setup fixture temporarily selects its fake.
         $production = $this->app->getBindings()[AgentAdapter::class]['concrete'];
-        $binary = FakeCopilotBinary::create($this->wrappers, $scenario);
+        $binary = $scenario === 'real' ? '/usr/local/bin/copilot' : FakeCopilotBinary::create($this->wrappers, $scenario);
         $configuration = new GitHubCopilotCliConfiguration($binary, '1.0.83');
         config(['ai6.copilot.binary' => $binary, 'ai6.copilot.pinned_version' => '1.0.83',
             'ai6.copilot.capability_evidence' => [$configuration->evidenceKey(app(ProviderRuntimeProfileRegistry::class)->get('github-copilot-cli-v1'), AgentRole::QUALITY_REVIEW, $this->copilotModel, 'provider_default')],
@@ -133,6 +139,17 @@ class GitHubCopilotCliExecutionTest extends TicketUiTestCase
         }
         self::assertSame([], $this->directoryEntries(AgentExecutionProcessor::inputRoot()));
         self::assertSame([], $this->directoryEntries(AgentExecutionProcessor::outputRoot()));
+        if ($scenario === 'real') {
+            fwrite(STDERR, "\nAI6_COPILOT_V2_SMOKE_EVIDENCE=".json_encode([
+                'commit' => getenv('AI6_ACCEPTANCE_COMMIT'), 'role' => 'quality_review', 'model' => $this->copilotModel,
+                'runtime_version' => app(ProviderRuntimeProfileRegistry::class)->get('github-copilot-cli-v1')->version,
+                'evidence_key' => $configuration->evidenceKey(app(ProviderRuntimeProfileRegistry::class)->get('github-copilot-cli-v1'), AgentRole::QUALITY_REVIEW, $this->copilotModel, 'provider_default'),
+                'run_id' => $prepared['run']->id, 'result_ids' => $results->pluck('id')->all(),
+                'session_ids' => $results->pluck('session_id')->all(), 'statuses' => $results->pluck('result_status')->all(),
+                'artifact_ids' => $copilotArtifacts->pluck('id')->all(), 'mailbox_clean' => true,
+                'formal_gate' => 'open', 'upstream_steps' => 'synthetic_fixtures',
+            ], JSON_THROW_ON_ERROR)."\n");
+        }
     }
 
     /** @return list<array{string, string}> */

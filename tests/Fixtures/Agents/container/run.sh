@@ -37,6 +37,7 @@ sudo -n apparmor_parser -Q -K -I "$root/include" "$root/harness/ai6-execution"
 supervisor=''
 profile_loaded=false
 cleanup() {
+  if [ -f "$root/work/copilot-test-token" ]; then rm -- "$root/work/copilot-test-token"; fi
   touch "$root/bridge/stop"
   sudo -n docker rm -f "$identity-agent" "$identity-worker" >/dev/null 2>&1 || true
   if [ -n "$supervisor" ]; then wait "$supervisor" || true; fi
@@ -52,7 +53,14 @@ sudo -n docker run --rm --network none --read-only --user 1000:1000 \
 sudo -n docker build --network none --build-arg "AI6_RUNTIME_IMAGE=$2" -t "$identity" "$root/build" > "$root/build.log" 2>&1
 test "$runtime" = "$(sudo -n docker image inspect "$2" --format '{{.Id}}')"
 image=$(sudo -n docker image inspect "$identity" --format '{{.Id}}')
-printf '{"image":"%s","identity":"%s"}\n' "$image" "$identity" > "$root/harness/launcher.json"
+real_copilot=false
+if [ "${AI6_RUN_COPILOT_V2_SMOKE:-0}" = 1 ]; then
+  real_copilot=true
+  test -f "${AI6_COPILOT_SMOKE_AUTH_FILE:?Explicit test credential file required}"
+  test ! -L "$AI6_COPILOT_SMOKE_AUTH_FILE"
+  install -m 0600 "$AI6_COPILOT_SMOKE_AUTH_FILE" "$root/work/copilot-test-token"
+fi
+printf '{"image":"%s","identity":"%s","real_copilot_smoke":%s}\n' "$image" "$identity" "$real_copilot" > "$root/harness/launcher.json"
 for part in inputs outputs private; do
   sudo -n docker volume create --driver local --opt type=tmpfs --opt device=tmpfs \
     --opt 'o=size=128m,uid=1000,gid=1000,mode=0700,nosuid,nodev,noexec' "$identity-$part" >/dev/null
@@ -72,8 +80,14 @@ supervisor=$!
 tests=(tests/Feature/Reviews/CopilotSecurityReviewTest.php tests/Feature/Shared/Doctor/GitHubCopilotCliDoctorCheckTest.php
   tests/Feature/Agents/GitHubCopilotCliExecutionTest.php tests/Feature/Reviews/FindingVerificationRoundTest.php
   tests/Unit/Agents/GitHubCopilotCliAdapterTest.php tests/Feature/Agents/GitHubCopilotCliSmokeTest.php
-  tests/Unit/Shared/Runtime/RuntimeComposeContractTest.php)
+  tests/Unit/Shared/Runtime/RuntimeComposeContractTest.php tests/Feature/Agents/NativeSessionProjectionBoundaryTest.php)
 command=(sudo -n docker exec "$identity-worker" php vendor/bin/phpunit "${tests[@]}" --testdox)
+if $real_copilot; then
+  command=(sudo -n docker exec -e AI6_RUN_COPILOT_V2_SMOKE=1
+    -e AI6_COPILOT_SMOKE_AUTH_FILE=/work/copilot-test-token -e "AI6_ACCEPTANCE_COMMIT=$commit"
+    "$identity-worker" php vendor/bin/phpunit tests/Feature/Agents/GitHubCopilotCliExecutionTest.php
+    tests/Feature/Reviews/CopilotSecurityReviewTest.php --filter=test_real_linux_copilot --testdox)
+fi
 contract_command=(sudo -n docker exec "$identity-worker" php vendor/bin/phpunit tests/Feature/Agents/AgentExecutionMailboxTest.php
   --filter=test_runner_home_paths_match_the_shipped_apparmor_projection_contract --testdox)
 {
@@ -105,4 +119,7 @@ result=$?
 set -e
 printf 'phpunit_exit=%s\n' "$result" >> "$root/evidence.txt"
 tail -n 6 "$root/phpunit.log" | tee -a "$root/evidence.txt"
+if $real_copilot; then
+  rm -- "$root/work/copilot-test-token"
+fi
 exit "$result"

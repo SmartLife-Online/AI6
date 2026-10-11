@@ -62,7 +62,7 @@ final class ClaudeCopilotCliAdapterTest extends GitHubCopilotCliAdapterTest
         $runtime = app(ProviderRuntimeProfileRegistry::class)->get('github-copilot-cli-v1');
         foreach ([['claude-unconfigured', 'provider_default', 'agent_copilot_selection_unbound'],
             ['claude-sonnet-4.6', 'high', 'agent_copilot_selection_unsupported'],
-            ['gpt-5.4', 'provider_default', 'agent_copilot_capability_unproven']] as [$model, $effort, $reason]) {
+            ['auto', 'provider_default', 'agent_copilot_capability_unproven']] as [$model, $effort, $reason]) {
             try {
                 $adapter->assertSelection($runtime, AgentRole::QUALITY_REVIEW, $model, $effort);
                 self::fail('Unbound selection accepted.');

@@ -24,6 +24,102 @@ use Tests\TestCase;
 
 final class ControlProcessRunnerTest extends TestCase
 {
+    #[DataProvider('unreadableOutputDirectories')]
+    public function test_unreadable_output_stops_the_process_without_inventing_limit_measurements(string $channel, bool $completed): void
+    {
+        if (PHP_OS_FAMILY !== 'Linux' || ! function_exists('posix_geteuid') || posix_geteuid() === 0) {
+            self::markTestSkipped('Output permission evidence requires an unprivileged Linux identity.');
+        }
+        $root = sys_get_temp_dir().'/ai6-inventory-'.bin2hex(random_bytes(8));
+        mkdir($root, 0700);
+        mkdir($root.'/result', 0700);
+        mkdir($root.'/artifacts', 0700);
+        chmod($root.'/'.$channel, 0000);
+        $process = null;
+        try {
+            $runner = $this->runner(timeout: 5, outputLimit: 4096);
+            $command = [PHP_BINARY, '-r', $completed ? 'exit(0);' : 'usleep(2000000); file_put_contents($argv[1], "late");', $root.'/late'];
+            $process = new Process(['/usr/bin/setsid', '--', '/usr/bin/dash',
+                base_path('app/AI6/Shared/Process/control-process-wrapper.sh'), 'direct', '--', ...$command]);
+            $completed ? $process->run() : $process->start();
+            $request = new ProcessRequest($command, base_path(), [], [], new RedactionContext('project', 'run', 'inventory'),
+                resultDirectory: $root.'/result', artifactDirectory: $root.'/artifacts');
+            $running = (new ReflectionMethod($runner, 'trackStartedProcess'))->invoke($runner, $process, $request,
+                [5, 4096, 100, new ProcessLimits(5, 4096, 10, 10, 10000, 10)]);
+            $result = $running->wait();
+            self::assertSame(ProcessOutcome::FAILED, $result->outcome);
+            self::assertSame('The process output inventory is unavailable for the execution role.', $result->errorOutput);
+            self::assertNull($result->limitResult);
+            self::assertSame('', $result->output);
+            self::assertFalse($process->isRunning());
+            self::assertFileDoesNotExist($root.'/late');
+        } finally {
+            if ($process !== null && $process->isRunning()) {
+                $process->stop(0, 9);
+            }
+            chmod($root.'/'.$channel, 0700);
+            rmdir($root.'/result');
+            rmdir($root.'/artifacts');
+            if (is_file($root.'/late')) {
+                unlink($root.'/late');
+            }
+            rmdir($root);
+        }
+    }
+
+    /** @return iterable<string, array{string, bool}> */
+    public static function unreadableOutputDirectories(): iterable
+    {
+        foreach (['result', 'artifacts'] as $channel) {
+            yield $channel.' during execution' => [$channel, false];
+            yield $channel.' after completion' => [$channel, true];
+        }
+    }
+
+    public function test_framed_input_stays_open_until_the_complete_fragmented_response(): void
+    {
+        $code = <<<'PHP'
+$input = fgets(STDIN);
+echo "Content-Length: 4\r\n\r\n";
+fflush(STDOUT);
+usleep(150000);
+// Windows PHP cannot make a child stdin pipe nonblocking. Linux additionally
+// proves that the header alone has not caused the supervisor to send EOF.
+if (PHP_OS_FAMILY !== 'Windows') {
+    stream_set_blocking(STDIN, false);
+    if (fread(STDIN, 1) !== '' || feof(STDIN)) { exit(9); }
+}
+echo "{}\n\n";
+fflush(STDOUT);
+stream_set_blocking(STDIN, true);
+if (stream_get_contents(STDIN) !== '') { exit(8); }
+exit($input === "request\n" ? 0 : 7);
+PHP;
+        $result = $this->runner(timeout: 5, outputLimit: 4096)->run(new ProcessRequest(
+            [PHP_BINARY, '-r', $code], base_path(), [], [], new RedactionContext('project', 'run', 'framed-test'),
+            standardInput: "request\n", closeInputAfterFramedResponse: true));
+        self::assertSame(ProcessOutcome::SUCCEEDED, $result->outcome);
+        self::assertSame("Content-Length: 4\r\n\r\n{}\n\n", $result->output);
+    }
+
+    public function test_framed_input_retains_timeout_and_output_limits(): void
+    {
+        foreach ([['fgets(STDIN); sleep(10);', ProcessOutcome::TIMED_OUT],
+            ['fgets(STDIN); echo str_repeat("x", 10000); fflush(STDOUT); stream_get_contents(STDIN);', ProcessOutcome::OUTPUT_LIMIT_EXCEEDED]] as [$code, $outcome]) {
+            $result = $this->runner(timeout: 1, outputLimit: 128)->run(new ProcessRequest(
+                [PHP_BINARY, '-r', $code], base_path(), [], [], new RedactionContext('project', 'run', 'framed-test'),
+                standardInput: "request\n", closeInputAfterFramedResponse: true));
+            self::assertSame($outcome, $result->outcome);
+        }
+    }
+
+    public function test_framed_response_requires_input_bytes(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new ProcessRequest([PHP_BINARY, '-r', 'exit(0);'], base_path(), [], [],
+            new RedactionContext('project', 'run', 'framed-test'), closeInputAfterFramedResponse: true);
+    }
+
     public function test_it_uses_argument_lists_and_a_positive_environment_allowlist(): void
     {
         putenv('AI6_PROCESS_BLOCKED=must-not-pass');
@@ -158,6 +254,7 @@ PHP;
 
         self::assertSame(ProcessOutcome::TERMINATION_FAILED, $result->outcome);
         self::assertFalse($running->running());
+        self::assertFalse($running->quiescent());
         self::assertLessThan(2.0, microtime(true) - $started);
     }
 

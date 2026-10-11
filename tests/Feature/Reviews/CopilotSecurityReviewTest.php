@@ -69,13 +69,20 @@ final class CopilotSecurityReviewTest extends TicketUiTestCase
         return $this->nativeMailbox;
     }
 
+    public function test_real_linux_copilot_security_candidate_uses_v2_mailbox(): void
+    {
+        $this->nativeMailbox = true;
+        $this->prepareRealCopilotSmoke();
+        $this->test_security_turn_reaches_the_production_mailbox_and_bound_consumer('real', null, null);
+    }
+
     #[DataProvider('securityScenarios')]
     public function test_security_turn_reaches_the_production_mailbox_and_bound_consumer(string $scenario, ?string $status, ?string $reason): void
     {
         $this->nativeMailbox = true;
         $production = $this->app->getBindings()[AgentAdapter::class]['concrete'];
         $this->copilotWrappers = str_replace('\\', '/', storage_path('framework/testing/copilot-security-'.bin2hex(random_bytes(6))));
-        $binary = FakeCopilotBinary::create($this->copilotWrappers, $scenario);
+        $binary = $scenario === 'real' ? '/usr/local/bin/copilot' : FakeCopilotBinary::create($this->copilotWrappers, $scenario);
         config(['ai6.copilot.binary' => $binary, 'ai6.copilot.pinned_version' => '1.0.83',
             'ai6.agent_security_review_profile' => 'copilot-cli-review',
             'ai6.process.policies.agent.allowed_executables' => [PHP_BINARY, $binary],
@@ -118,6 +125,12 @@ final class CopilotSecurityReviewTest extends TicketUiTestCase
         });
         $run->refresh();
         $results = ReviewResult::query()->where('run_id', $run->id)->where('role', 'security_review')->get();
+        if ($scenario === 'real') {
+            self::assertCount(1, $results, (string) $job->refresh()->failure_code);
+            $status = $results->sole()->result_status;
+            self::assertContains($status, ['clear', 'security_findings', 'needs_human', 'inconclusive']);
+            $reason = $status === 'clear' ? null : 'security_result_'.$status;
+        }
         if ($status !== null) {
             self::assertCount(1, $results, (string) HumanRequest::query()->where('run_id', $run->id)->where('kind', 'security_gate')->value('why_needed'));
             $result = $results->sole();
@@ -129,8 +142,10 @@ final class CopilotSecurityReviewTest extends TicketUiTestCase
             $artifact = RunArtifact::query()->findOrFail($result->raw_artifact_id);
             self::assertSame('provider_raw', $artifact->kind->value);
             self::assertSame(GitHubCopilotCliAdapter::USAGE_SOURCE, $artifact->redacted_metadata['usage_source']);
-            self::assertSame(0, $artifact->redacted_metadata['usage']['premium_requests']);
-            self::assertSame(12, $artifact->redacted_metadata['usage']['api_duration_ms']);
+            if ($scenario !== 'real') {
+                self::assertSame(0, $artifact->redacted_metadata['usage']['premium_requests']);
+                self::assertSame(12, $artifact->redacted_metadata['usage']['api_duration_ms']);
+            }
             self::assertGreaterThan(0, $claims);
         } else {
             self::assertCount(0, $results);
@@ -161,6 +176,28 @@ final class CopilotSecurityReviewTest extends TicketUiTestCase
         }
         self::assertSame([], $this->directoryEntries(AgentExecutionProcessor::inputRoot()));
         self::assertSame([], $this->directoryEntries(AgentExecutionProcessor::outputRoot()));
+        if ($scenario === 'real') {
+            $result = $results->sole();
+            $artifact = RunArtifact::query()->findOrFail($result->raw_artifact_id);
+            $configuration = GitHubCopilotCliConfiguration::fromConfiguredValues();
+            fwrite(STDERR, "\nAI6_COPILOT_V2_SMOKE_EVIDENCE=".json_encode([
+                'commit' => getenv('AI6_ACCEPTANCE_COMMIT'), 'role' => 'security_review', 'model' => 'auto',
+                'runtime_version' => app(ProviderRuntimeProfileRegistry::class)->get('github-copilot-cli-v1')->version,
+                'evidence_key' => $configuration->evidenceKey(app(ProviderRuntimeProfileRegistry::class)->get('github-copilot-cli-v1'), AgentRole::SECURITY_REVIEW, 'auto', 'provider_default'),
+                'run_id' => $run->id, 'session_id' => $result->session_id, 'result_id' => $result->id,
+                'artifact_id' => $artifact->id, 'status' => $status, 'usage' => $artifact->redacted_metadata['usage'],
+                'candidate_tree_oid' => $run->candidate_tree_sha, 'candidate_diff_hash' => $run->candidate_diff_hash,
+                'candidate_base_oid' => $run->candidate_base_sha, 'mailbox_clean' => true,
+                'ticket_contract_hash' => $result->candidate_ticket_contract_sha256,
+                'scope_hash' => $result->candidate_scope_hash,
+                'prompt_snapshot_hash' => $result->candidate_prompt_snapshot_hash,
+                'instruction_snapshot_hash' => $result->candidate_instruction_snapshot_hash,
+                'runtime_hash' => $result->candidate_runtime_profile_hash,
+                'policy_hash' => $result->candidate_security_policy_hash,
+                'slot_id' => $result->slot_id,
+                'formal_gate' => 'open', 'upstream_steps' => 'synthetic_fixtures',
+            ], JSON_THROW_ON_ERROR)."\n");
+        }
     }
 
     /** @return list<array{string, ?string, ?string}> */
@@ -201,7 +238,7 @@ final class CopilotSecurityReviewTest extends TicketUiTestCase
         $project = $this->provisionedProject($actor);
         $read = $this->publishReadModel($actor, $project, 'tickets/A50.md', $this->validTicketMarkdown('A50'));
         $selection = new ApprovalSelection(app(AgentProfileRegistry::class)->resolve($implementation, AgentRole::IMPLEMENTATION,
-            $implementation === 'fake' ? 'fake-model' : 'gpt-5.4', $implementation === 'fake' ? 'medium' : 'provider_default'),
+            $implementation === 'fake' ? 'fake-model' : 'auto', $implementation === 'fake' ? 'medium' : 'provider_default'),
             app(ReviewerSlotFactory::class)->fromArray([['id' => (string) Str::uuid(), 'profile' => 'fake', 'model' => 'fake-model', 'effort' => 'high', 'prompt_profile' => 'security']]),
             ApprovalLimits::fromConfiguredValues(config('ai6.project_config.server_defaults.limits'), app(AgentInputLimits::class)),
             $actor->getKey(), 'manual', $type, $type === RunType::REVIEW_ONLY ? 'bound-source' : null,

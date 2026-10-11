@@ -13,6 +13,7 @@ use App\AI6\Shared\Doctor\CodexCliDoctorCheck;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Foundation\Bootstrap\LoadConfiguration;
 use Tests\Fixtures\Agents\MissingAnswerAdapter;
+use Tests\Fixtures\Agents\NativeSessionScopeProbe;
 
 // Test-only role driver: a fresh application inside real read-only input mounts.
 require dirname(__DIR__, 3).'/vendor/autoload.php';
@@ -26,6 +27,11 @@ $app->afterBootstrapping(LoadConfiguration::class, static function () use ($sett
     config($settings);
 });
 $app->make(Kernel::class)->bootstrap();
+if (is_array(config('ai6.fixture.native_session_scope_probe'))) {
+    echo json_encode(['processed' => true, 'commands' => [], 'capability_probes' => 0,
+        'native_scope' => NativeSessionScopeProbe::run()], JSON_THROW_ON_ERROR);
+    exit(0);
+}
 if (config('ai6.fixture.missing_answer') === true) {
     $app->bind(AgentAdapter::class, static fn () => new MissingAnswerAdapter);
 }

@@ -104,7 +104,10 @@ final class RuntimeDocumentationTest extends TestCase
             '`quality_review` und `security_review`',
             'test_real_linux_copilot_security_review_with_a_fully_read_only_candidate',
             'Jede Änderung an den Adapterbytes entwertet sämtliche Copilot-Evidenzschlüssel',
-            '`COPILOT_HOME` zeigt auf das vollständig read-only Home einschließlich `home/session-state`',
+            'Runtimeversion 2 bindet `native_session_state=ephemeral_review` an den vollständigen Turnkontext',
+            'Homewurzel, Auth, Einstellungen, Runtime, Instruktionen und Reviewworkspace bleiben read-only',
+            'genau eine finale Nachricht ohne Toolauftrag',
+            'NativeSessionProjectionBoundaryTest',
             '`ai6.copilot.capability_evidence` bleibt standardmäßig leer',
             '`AI6_COPILOT_CAPABILITY_EVIDENCE`',
             'kommagetrennte Liste kleingeschriebener SHA-256-Werte',
@@ -119,7 +122,7 @@ final class RuntimeDocumentationTest extends TestCase
             'AI6_RUN_COPILOT_SMOKE=1',
             'Ein gesetzter Pin gibt keine CLI-Version frei',
             'ergebnisfreie Vorlage',
-            'Der Home-Vertragsentwurf bleibt bis zu diesem Laufzeitnachweis für eine Planübernahme gesperrt',
+            'Die ausdrückliche Freigabe vom 11. Oktober 2026 (Plan V1.7.14)',
         ] as $statement) {
             self::assertStringContainsString($statement, $matches[1]);
         }

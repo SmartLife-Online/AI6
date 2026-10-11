@@ -151,7 +151,7 @@ final class DoctorOptionsTest extends TestCase
             'invalid' => config(['ai6.agent_security_review_profile' => 'private invalid value']),
             'not-ready' => config(['ai6.copilot.capability_evidence' => []]),
             'quality-only' => config(['ai6.copilot.capability_evidence' => [GitHubCopilotCliConfiguration::fromConfiguredValues()->evidenceKey(
-                app(ProviderRuntimeProfileRegistry::class)->get('github-copilot-cli-v1'), AgentRole::QUALITY_REVIEW, 'gpt-5.4', 'provider_default',
+                app(ProviderRuntimeProfileRegistry::class)->get('github-copilot-cli-v1'), AgentRole::QUALITY_REVIEW, 'auto', 'provider_default',
             )]]),
             'no-role' => config(['ai6.agent_security_review_profile' => 'copilot-claude-sonnet-review']),
             default => throw new \InvalidArgumentException('Unknown doctor failure fixture.'),

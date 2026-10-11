@@ -106,8 +106,8 @@ final class ProviderOnboardingEvidenceTest extends TestCase
         self::assertTrue($registry->get('copilot-claude-sonnet-review')->capabilityStatus->selectable());
         $configuration = GitHubCopilotCliConfiguration::fromConfiguredValues();
         $runtime = app(ProviderRuntimeProfileRegistry::class)->get($registry->get('copilot-cli-review')->runtimeProfileId);
-        config(['ai6.copilot.capability_evidence' => [$configuration->evidenceKey($runtime, AgentRole::QUALITY_REVIEW, 'gpt-5.4', 'provider_default')]]);
-        self::assertTrue($registry->supportsProviderSelection('github_copilot_cli', AgentRole::QUALITY_REVIEW, 'gpt-5.4', 'provider_default'));
+        config(['ai6.copilot.capability_evidence' => [$configuration->evidenceKey($runtime, AgentRole::QUALITY_REVIEW, 'auto', 'provider_default')]]);
+        self::assertTrue($registry->supportsProviderSelection('github_copilot_cli', AgentRole::QUALITY_REVIEW, 'auto', 'provider_default'));
         self::assertFalse($registry->supportsProviderSelection('github_copilot_cli', AgentRole::QUALITY_REVIEW, 'claude-sonnet-4.6', 'provider_default'));
         $doctor = app(ProviderCapabilityReport::class)->doctor('github_copilot_cli');
         self::assertTrue($doctor->passed);
@@ -132,7 +132,7 @@ final class ProviderOnboardingEvidenceTest extends TestCase
         $doctor = $reports->doctor('github_copilot_cli');
         self::assertTrue($doctor->passed);
         self::assertStringContainsString('unavailable', $doctor->details['optional-reviewer']);
-        $profiles['optional-reviewer']['models'][] = 'gpt-5.4';
+        $profiles['optional-reviewer']['models'][] = 'auto';
         config(['ai6.agent_profiles' => $profiles]);
         $this->app->forgetInstance(AgentProfileRegistry::class);
         self::assertFalse($reports->doctor('github_copilot_cli')->passed, 'Mixed profiles still require evidence for their mandatory models.');
@@ -173,7 +173,7 @@ final class ProviderOnboardingEvidenceTest extends TestCase
         match ($change) {
             'pin' => config(['ai6.copilot.pinned_version' => 'unverified-test-version']),
             'binary' => file_put_contents($this->onboardingRoot.'/fixture-copilot', "#!/bin/sh\n# changed binary\nexit 92\n"),
-            'runtime' => config(['ai6.provider_runtime_profiles.'.$registry->get('copilot-cli-review')->runtimeProfileId.'.version' => 2]),
+            'runtime' => config(['ai6.provider_runtime_profiles.'.$registry->get('copilot-cli-review')->runtimeProfileId.'.version' => app(ProviderRuntimeProfileRegistry::class)->get($registry->get('copilot-cli-review')->runtimeProfileId)->version + 1]),
             'human' => config(['ai6.copilot.capability_evidence' => []]),
             default => throw new \LogicException('Unknown drift fixture.'),
         };
@@ -186,7 +186,7 @@ final class ProviderOnboardingEvidenceTest extends TestCase
         $store = app(ProviderCredentialStore::class);
         $store->locked(fn () => $store->publish('github_copilot_cli', $document['generation'], $document['rows'], time(), $document['boot_id']));
         self::assertFalse($registry->get('copilot-cli-review')->capabilityStatus->selectable());
-        self::assertFalse($registry->supportsProviderSelection('github_copilot_cli', AgentRole::QUALITY_REVIEW, 'gpt-5.4', 'provider_default'));
+        self::assertFalse($registry->supportsProviderSelection('github_copilot_cli', AgentRole::QUALITY_REVIEW, 'auto', 'provider_default'));
     }
 
     public function test_interrupted_mutation_cannot_be_released_by_a_late_probe(): void

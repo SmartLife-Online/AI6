@@ -115,7 +115,7 @@ final readonly class ProviderCredentialStore
      * @param  Closure(ExecutionHome): T  $operation
      * @return T
      */
-    public function withProjection(ExecutionHome $home, string $alias, string $generation, Closure $operation): mixed
+    public function withProjection(ExecutionHome $home, string $alias, string $generation, Closure $operation, ?AgentResultContext $context = null): mixed
     {
         $projection = $this->locked(function () use ($alias, $generation): string {
             if ($this->generation($alias) !== $generation || $this->reports->generation($alias, false) !== $generation) {
@@ -150,21 +150,67 @@ final readonly class ProviderCredentialStore
 
             return $directory;
         });
+        $session = null;
+        $quiescent = true;
         try {
+            $result = $home->resultDirectory;
+            $artifacts = $home->artifactDirectory;
+            $writable = [$home->outputRoot];
+            if ($alias === 'github_copilot_cli' && $context !== null && NativeSessionProjection::appliesTo($context)) {
+                GitHubCopilotCliAdapter::assertRuntimeProfile($context->runtimeProfile);
+                if ($context->instructionSnapshot->providerProfileAlias !== $alias
+                    || ! in_array($context->role, [AgentRole::QUALITY_REVIEW, AgentRole::SECURITY_REVIEW], true)
+                    || AgentExecutionProcessor::readBytes(dirname($home->runtimeConfiguration).'/turn.json', strlen($context->toJson())) !== $context->toJson()
+                    || ! hash_equals(app(ProviderRuntimeProfileRegistry::class)->get($context->runtimeProfile->id)->hash, $context->runtimeProfile->hash)) {
+                    throw new AgentExecutionException('agent_copilot_session_projection_unbound');
+                }
+                $invocation = $home->resultDirectory.'/copilot-invocation';
+                $description = $home->nativeSessionProjection;
+                if ($description === null || $description->source !== $invocation.'/result/copilot-session-state'
+                    || $description->target !== $home->home.'/session-state' || $description->contextHash !== hash('sha256', $context->toJson())
+                    || $description->runtimeHash !== $context->runtimeProfile->hash || $description->role !== $context->role->value) {
+                    throw new AgentExecutionException('agent_copilot_session_projection_unbound');
+                }
+                // mkdir is exclusive: a revoked or previously used invocation cannot be resumed.
+                if (file_exists($invocation) || is_link($invocation) || ! @mkdir($invocation, 0700)) {
+                    throw new AgentExecutionException('agent_copilot_invocation_not_fresh');
+                }
+                // Cleanup authority starts only after our exclusive mkdir succeeds.
+                $session = $description;
+                $result = $invocation.'/result';
+                $artifacts = $invocation.'/artifacts';
+                foreach ([$result, $artifacts, $session->source] as $directory) {
+                    if (! mkdir($directory, 0700)) {
+                        throw new CredentialProjectionException('The native session projection is unavailable.');
+                    }
+                }
+                $session->assertBinding();
+                $writable = [$result, $artifacts];
+            }
             $projected = new ExecutionHome($home->root, $home->outputRoot, $home->workspace, $home->home,
-                $home->instructionOverlay, $home->runtimeConfiguration, $projection, $home->resultDirectory,
-                $home->artifactDirectory, $home->patchDirectory, $home->workspaceProjection);
+                $home->instructionOverlay, $home->runtimeConfiguration, $projection, $result,
+                $artifacts, $home->patchDirectory, $home->workspaceProjection, $session);
 
             return app(ControlProcessRunner::class)->withinAgentScope(
-                new AgentProcessScope([$home->root, $projection], [$home->outputRoot], function () use ($alias, $generation): void {
+                new AgentProcessScope([$home->root, $projection], $writable, function () use ($alias, $generation): void {
                     if ($this->reports->generation($alias, false) !== $generation) {
                         throw new CredentialProjectionException('The provider projection generation was revoked.');
                     }
+                }, nativeSessionProjection: $session, onRelease: $session === null ? null : function (bool $confirmed) use (&$quiescent): void {
+                    $quiescent = $confirmed;
                 }),
                 fn () => $operation($projected),
             );
         } finally {
-            $this->cleanup($projection);
+            try {
+                if ($session !== null && $quiescent) {
+                    $session->cleanup();
+                }
+            } finally {
+                if ($quiescent) {
+                    $this->cleanup($projection);
+                }
+            }
         }
     }
 

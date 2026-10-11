@@ -28,13 +28,13 @@ Ergebnisfreie Vorlage. Kein bestandener Nachweis, keine Signatur und keine Ticke
 | `AI6_AGENT_SECURITY_REVIEW_PROFILE=copilot-cli-review` erreicht ausschließlich `worker`; eigenes Security-Tupel ist `ready` | |
 | `docker compose exec worker php artisan ai6:doctor --security --require-strict`: Securityreview-Profil bestanden, Profil und Adapter genannt, kein `security_review_adapter_fake` | |
 | Echter Run erreicht `security_review`; Agentmailbox übergibt exakt den gebundenen Candidate und unveränderte Snapshots | |
-| Candidate-Workspace, Home und Instruktionen read-only; keine erreichbaren Gitmetadaten oder Worker-Credentials | |
+| Candidate-Workspace, Homewurzel, Auth, Einstellungen und Instruktionen read-only; nur frische Sessionprojektion beschreibbar und vor Publikation bereinigt; keine erreichbaren Gitmetadaten oder Worker-Credentials | |
 | Zentral validiertes `clear`, `security_findings`, `needs_human` oder `inconclusive` als gebundenes `ReviewResult` gespeichert; Rohartefakt mit gemeldeter Nutzung oder `unknown` | |
 | Nur gebundenes `clear` setzt zum Publish fort; andere Ergebnisse parken unter `security_gate`; kritisches Finding bietet den bestehenden Override an | |
 | Rollenspezifischen Evidenzschlüssel absichtlich entfernen: Doctor verweigert das Profil und der Securityturn startet keinen Provider; Qualitätsreview-Evidenz allein genügt nicht | |
 | Evidenz kontrolliert wiederherstellen und aktuellen Agentbericht prüfen; keine stillschweigende Freigabe | |
 | Provider-, Schema- und Runtimefehler erlauben kein `clear`; Wartegrund und Request enthalten keine Providertexte oder Credentialbytes | |
-| Securitysmoke mit `AI6_RUN_COPILOT_SMOKE=1`: gebundene Ausgabe `AI6_COPILOT_SMOKE_EVIDENCE` | |
+| Securitysmoke mit `AI6_RUN_COPILOT_V2_SMOKE=1`: gebundene Ausgabe `AI6_COPILOT_V2_SMOKE_EVIDENCE` | |
 
 Der Smoke allein ersetzt weder die vollständige Agentrollen-Isolation noch den gebundenen Candidate-Run und die menschliche Prüfung. Ein Windows- oder Fake-Lauf ist keine reale Copilot-Abnahme. Ein unklarer Ausgang bleibt offen; er rechtfertigt keine Schreib-, Tool- oder Netzfreigabe.
 

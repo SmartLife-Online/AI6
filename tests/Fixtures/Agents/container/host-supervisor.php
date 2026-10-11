@@ -8,6 +8,7 @@ if (! preg_match('~\A/tmp/ai6-native\.[a-zA-Z0-9]+\z~D', $root) || realpath($roo
 $configuration = json_decode((string) file_get_contents($root.'/harness/launcher.json'), true, 8, JSON_THROW_ON_ERROR);
 $image = $configuration['image'];
 $identity = $configuration['identity'];
+$realCopilot = ($configuration['real_copilot_smoke'] ?? false) === true;
 if (! is_string($image) || ! preg_match('/\Asha256:[a-f0-9]{64}\z/D', $image)
     || ! is_string($identity) || ! preg_match('/\Aai6-native-[a-f0-9]{16}\z/D', $identity)) {
     throw new RuntimeException('Invalid immutable test image or resource identity.');
@@ -26,12 +27,12 @@ while (! is_file($bridge.'/stop')) {
         try {
             $request = json_decode(file_get_contents($file), true, 64, JSON_THROW_ON_ERROR);
             if (($request['schema'] ?? null) !== 'ai6.test-supervisor.v1' || ! is_int($request['expires_at'] ?? null)
-                || $request['expires_at'] < time() || $request['expires_at'] > time() + 120) {
+                || $request['expires_at'] < time() || $request['expires_at'] > time() + ($realCopilot ? 600 : 120)) {
                 throw new RuntimeException('Invalid or expired isolated test request.');
             }
             $settings = $request['settings'];
             $command = ['sudo', '-n', 'docker', 'run', '--rm', '--name', $identity.'-agent', '--user', '1000:1000', '--cpus', '2', '--memory', '1g',
-                '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
+                '--network', $realCopilot ? 'bridge' : 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
                 '--security-opt', 'apparmor=:'.$identity.'://ai6-agent-v1', '--security-opt', 'systempaths=unconfined',
                 '--security-opt', 'seccomp='.$source.'/docker/agent-seccomp-moby-29.6.1.json',
                 '--tmpfs', '/tmp:rw,nosuid,mode=1777', '-e', 'APP_ENV=testing', '-e', 'HOME=/tmp', '-e', 'APP_KEY=base64:'.base64_encode(str_repeat('x', 32)),

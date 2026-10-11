@@ -24,6 +24,30 @@ use PHPUnit\Framework\Attributes\After;
 
 trait BuildsProviderOnboarding
 {
+    /** Explicit real test credentials stay solely inside the dedicated Linux fixture. */
+    protected function prepareRealCopilotSmoke(): void
+    {
+        if (getenv('AI6_RUN_COPILOT_V2_SMOKE') !== '1') {
+            self::markTestSkipped('Real V2 Copilot acceptance requires AI6_RUN_COPILOT_V2_SMOKE=1.');
+        }
+        self::assertSame('Linux', PHP_OS_FAMILY);
+        self::assertNotNull(NativeProviderMailbox::containerRunner());
+        self::assertNotSame(0, posix_geteuid());
+        $auth = (string) getenv('AI6_COPILOT_SMOKE_AUTH_FILE');
+        self::assertTrue(is_file($auth) && ! is_link($auth));
+        self::assertMatchesRegularExpression('/\A[0-9a-f]{40}\z/D', (string) getenv('AI6_ACCEPTANCE_COMMIT'));
+        config(['ai6.fixture.real_copilot_smoke' => true, 'ai6.copilot.binary' => '/usr/local/bin/copilot',
+            'ai6.copilot.pinned_version' => '1.0.83']);
+        $this->seedProviderReports();
+        $role = config('ai6.runtime_role');
+        config(['ai6.runtime_role' => 'agent']);
+        try {
+            app(ProviderCredentialStore::class)->replace('github_copilot_cli', (string) file_get_contents($auth));
+        } finally {
+            config(['ai6.runtime_role' => $role]);
+        }
+    }
+
     private string $onboardingRoot;
 
     private string $nativeMailboxRoot;
@@ -128,7 +152,8 @@ trait BuildsProviderOnboarding
             foreach (['codex_cli' => 'codex', 'grok_cli' => 'grok', 'github_copilot_cli' => 'copilot'] as $alias => $key) {
                 $binary = config('ai6.'.$key.'.binary');
                 if (! is_string($binary) || ! is_file($binary)
-                    || in_array($binary, ['/usr/local/bin/codex', '/usr/local/bin/grok', '/usr/local/bin/copilot'], true)) {
+                    || (in_array($binary, ['/usr/local/bin/codex', '/usr/local/bin/grok', '/usr/local/bin/copilot'], true)
+                        && ! ($alias === 'github_copilot_cli' && config('ai6.fixture.real_copilot_smoke') === true))) {
                     $binary = $this->onboardingRoot.'/fixture-'.$key;
                     file_put_contents($binary, "#!/bin/sh\nexit 91\n");
                     chmod($binary, 0755);

@@ -7,6 +7,7 @@ use App\AI6\Agents\AgentInputLimits;
 use App\AI6\Agents\AgentProfileRegistry;
 use App\AI6\Agents\AgentResultValidator;
 use App\AI6\Agents\AgentRole;
+use App\AI6\Agents\AgentTurnResult;
 use App\AI6\Agents\GitHubCopilotCliAdapter;
 use App\AI6\Agents\GitHubCopilotCliConfiguration;
 use App\AI6\Agents\InvalidAgentResponse;
@@ -31,6 +32,90 @@ class GitHubCopilotCliAdapterTest extends TestCase
     {
         $this->destroyCopilotFixture();
         parent::tearDown();
+    }
+
+    public function test_native_update_hint_preserves_the_validated_review_turn(): void
+    {
+        $adapter = $this->copilotAdapter('version_hint');
+        $context = $this->copilotContext();
+        $home = $this->copilotHome($context);
+        $result = $adapter->turn($context, $home, static function (): void {});
+        app(AgentResultValidator::class)->validate($result->bytes, $context, new RedactionContext('test', null, 'copilot-version'));
+        self::assertNotSame('', $result->bytes);
+    }
+
+    public function test_native_events_select_only_the_completed_final_answer_and_preserve_json_escapes(): void
+    {
+        $adapter = $this->copilotAdapter();
+        $content = '{"summary":"first\\nsecond","schema_version":"ai6.quality-review.v1"}';
+        $events = [
+            ['type' => 'user.message', 'data' => ['content' => 'Untrusted input is not the answer.']],
+            ['type' => 'assistant.message', 'data' => ['content' => 'Reading.', 'toolRequests' => [['name' => 'view']], 'turnId' => 'turn']],
+            ['type' => 'assistant.message', 'data' => ['content' => $content, 'toolRequests' => [], 'turnId' => 'turn']],
+            ['type' => 'assistant.turn_end', 'data' => ['turnId' => 'turn']],
+            ['type' => 'result', 'exitCode' => 0],
+        ];
+        $stream = implode("\n", array_map(static fn (array $event): string => json_encode($event, JSON_THROW_ON_ERROR), $events));
+        $usage = new AgentTurnResult('', ['requests' => 0], 'native-test');
+        $result = (new \ReflectionMethod($adapter, 'answer'))->invoke($adapter, $stream, $usage, true);
+        self::assertSame($content, $result->bytes);
+        self::assertSame($usage->usage, $result->usage);
+        self::assertSame($usage->usageSource, $result->usageSource);
+    }
+
+    #[DataProvider('invalidNativeStreams')]
+    public function test_incomplete_or_ambiguous_native_stream_is_never_repaired(string $mutation): void
+    {
+        $adapter = $this->copilotAdapter();
+        $message = ['type' => 'assistant.message', 'data' => ['content' => '{}', 'toolRequests' => [], 'turnId' => 'turn']];
+        $events = [$message, ['type' => 'assistant.turn_end', 'data' => ['turnId' => 'turn']], ['type' => 'result', 'exitCode' => 0]];
+        if ($mutation === 'missing_result') {
+            array_pop($events);
+        } elseif ($mutation === 'missing_end') {
+            unset($events[1]);
+        } elseif ($mutation === 'wrong_turn') {
+            $events[1]['data']['turnId'] = 'foreign';
+        } elseif ($mutation === 'multiple_answers') {
+            array_unshift($events, $message);
+        } elseif ($mutation === 'failed_result') {
+            $events[2]['exitCode'] = 1;
+        } elseif ($mutation === 'late_event') {
+            $events[] = ['type' => 'assistant.message', 'data' => $message['data']];
+        }
+        $stream = implode("\n", array_map(static fn (array $event): string => json_encode($event, JSON_THROW_ON_ERROR), $events));
+        $this->expectException(InvalidAgentResponse::class);
+        (new \ReflectionMethod($adapter, 'answer'))->invoke($adapter, $stream, new AgentTurnResult(''), true);
+    }
+
+    /** @return list<array{string}> */
+    public static function invalidNativeStreams(): array
+    {
+        return [['missing_result'], ['missing_end'], ['wrong_turn'], ['multiple_answers'], ['failed_result'], ['late_event']];
+    }
+
+    public function test_native_bootstrap_metadata_remains_read_only_and_cannot_carry_permissions(): void
+    {
+        $context = $this->copilotContext();
+        $home = $this->copilotHome($context);
+        $path = $home->home.'/config.json';
+        $state = json_decode((string) file_get_contents($path), true, 32, JSON_THROW_ON_ERROR);
+        self::assertSame(['firstLaunchAt'], array_keys($state));
+        if (PHP_OS_FAMILY === 'Linux' && posix_geteuid() !== 0) {
+            self::assertFalse(@file_put_contents($path, '{}'));
+            self::assertFalse(@file_put_contents($home->home.'/new-state', '{}'));
+        }
+        chmod($path, 0600);
+        $state['trusted_folders'] = ['*'];
+        file_put_contents($path, json_encode($state, JSON_THROW_ON_ERROR));
+        $adapter = $this->copilotAdapter();
+        try {
+            $adapter->turn($context, $home, static function (): void {});
+            self::fail('Native bootstrap metadata must not widen permissions.');
+        } catch (AgentExecutionException $exception) {
+            self::assertSame('agent_copilot_global_state_unbound', $exception->reason);
+        }
+        self::assertSame([], $adapter->lastCommand);
+        self::assertDirectoryDoesNotExist($home->resultDirectory.'/copilot');
     }
 
     /** @param array<string, int|float|null> $usage */
@@ -67,6 +152,7 @@ class GitHubCopilotCliAdapterTest extends TestCase
             self::assertSame('missing', $observation['env'][$name], $name);
         }
         self::assertSame(GitHubCopilotCliConfiguration::settingsBytes($context->runtimeProfile, app(CanonicalJson::class)), file_get_contents($home->home.'/settings.json'));
+        self::assertSame(GitHubCopilotCliConfiguration::globalStateBytes(app(CanonicalJson::class)), file_get_contents($home->home.'/config.json'));
         self::assertSame(['.', '..'], scandir($home->home.'/session-state'));
         self::assertSame('Original', file_get_contents($home->workspace.'/example.txt'));
     }
@@ -317,7 +403,7 @@ class GitHubCopilotCliAdapterTest extends TestCase
     /** @return list<array{string, string}> */
     public static function nativeBaits(): array
     {
-        return [['AGENTS.md', 'agent_copilot_home_config_unapproved'], ['config.json', 'agent_copilot_home_config_unapproved'],
+        return [['AGENTS.md', 'agent_copilot_home_config_unapproved'], ['config.json', 'agent_copilot_global_state_unbound'],
             ['session-store.db', 'agent_copilot_home_config_unapproved'], ['session-store.db-wal', 'agent_copilot_home_config_unapproved'],
             ['session-store.db-shm', 'agent_copilot_home_config_unapproved'], ['session-state/foreign.json', 'agent_copilot_native_state_unapproved'],
             ['auth/foreign-token', 'agent_copilot_native_state_unapproved'], ['settings.json', 'agent_copilot_settings_unbound']];

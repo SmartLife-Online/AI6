@@ -23,9 +23,32 @@ final readonly class ExecutionHomeManager
      * @param  \Closure(ExecutionHome): T  $operation
      * @return T
      */
-    public function withAgentCredentials(ExecutionHome $home, string $alias, string $generation, \Closure $operation): mixed
+    public function withAgentCredentials(ExecutionHome $home, string $alias, string $generation, \Closure $operation, ?AgentResultContext $context = null): mixed
     {
-        return app(ProviderCredentialStore::class)->withProjection($home, $alias, $generation, $operation);
+        if ($context !== null) {
+            $home = $this->withNativeSessionProjection($home, $context);
+        }
+
+        return app(ProviderCredentialStore::class)->withProjection($home, $alias, $generation, $operation, $context);
+    }
+
+    /** The same server-bound description is created when staging and reconstructing a turn. */
+    public function withNativeSessionProjection(ExecutionHome $home, AgentResultContext $context): ExecutionHome
+    {
+        if (! NativeSessionProjection::appliesTo($context)) {
+            return $home;
+        }
+        GitHubCopilotCliAdapter::assertRuntimeProfile($context->runtimeProfile);
+        if (! in_array($context->role, [AgentRole::QUALITY_REVIEW, AgentRole::SECURITY_REVIEW], true)
+            || ! hash_equals(($this->runtimeProfiles ?? app(ProviderRuntimeProfileRegistry::class))->get($context->runtimeProfile->id)->hash, $context->runtimeProfile->hash)) {
+            throw new AgentExecutionException('agent_copilot_session_projection_unbound');
+        }
+        $session = new NativeSessionProjection($home->resultDirectory.'/copilot-invocation/result/copilot-session-state',
+            $home->home.'/session-state', hash('sha256', $context->toJson()), $context->runtimeProfile->hash, $context->role->value);
+
+        return new ExecutionHome($home->root, $home->outputRoot, $home->workspace, $home->home,
+            $home->instructionOverlay, $home->runtimeConfiguration, $home->authDirectory, $home->resultDirectory,
+            $home->artifactDirectory, $home->patchDirectory, $home->workspaceProjection, $session);
     }
 
     /** Central, credential-free native probe preparation in agent-private storage.
@@ -158,6 +181,7 @@ final readonly class ExecutionHomeManager
             $this->writeImmutable($home->runtimeConfiguration, $this->canonicalJson->normalizeAndEncode($runtimeProfile->jsonSerialize())."\n");
             if ($instructionProfile->providerProfileAlias === GitHubCopilotCliAdapter::PROVIDER_ALIAS) {
                 $this->writeImmutable($home->home.'/settings.json', GitHubCopilotCliConfiguration::settingsBytes($runtimeProfile, $this->canonicalJson));
+                $this->writeImmutable($home->home.'/config.json', GitHubCopilotCliConfiguration::globalStateBytes($this->canonicalJson));
                 if (! mkdir($home->home.'/session-state', 0700)) {
                     throw new ExecutionHomeException('The native session directory could not be created.');
                 }
@@ -213,7 +237,7 @@ final readonly class ExecutionHomeManager
             $this->cleanupFailedCreation($home, $exception);
         }
 
-        return new ExecutionHome(
+        $completed = new ExecutionHome(
             $home->root,
             $home->outputRoot,
             $home->workspace,
@@ -226,6 +250,12 @@ final readonly class ExecutionHomeManager
             $home->patchDirectory,
             $writableWorkspace ? $projection : [],
         );
+
+        try {
+            return $turnContext === null ? $completed : $this->withNativeSessionProjection($completed, $turnContext);
+        } catch (\Throwable $exception) {
+            $this->cleanupFailedCreation($completed, $exception);
+        }
     }
 
     public function assertWorkspaceProjection(ExecutionHome $home): void
