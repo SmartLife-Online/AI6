@@ -49,6 +49,22 @@ while (! is_file($bridge.'/stop')) {
                 if (! is_dir($hostPath) || realpath($hostPath) !== $hostPath) {
                     throw new RuntimeException('The isolated provider-state path is not canonical.');
                 }
+                if ($realCopilot && $key === 'store_root') {
+                    $isolatedStore = $root.'/agent-store-'.$id;
+                    if (! mkdir($isolatedStore, 0700)) {
+                        throw new RuntimeException('The private agent test store could not be created.');
+                    }
+                    $copy = proc_open(['cp', '-a', $hostPath.'/.', $isolatedStore], [0 => ['file', '/dev/null', 'r'],
+                        1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $copyPipes);
+                    if (! is_resource($copy) || proc_close($copy) !== 0) {
+                        throw new RuntimeException('The private agent test store could not be prepared.');
+                    }
+                    $tokenPath = $isolatedStore.'/github_copilot_cli/token';
+                    if (is_link($tokenPath) || ! is_file($tokenPath) || ! copy($root.'/copilot-test-token', $tokenPath) || ! chmod($tokenPath, 0600)) {
+                        throw new RuntimeException('The agent-only test credential could not be projected.');
+                    }
+                    $hostPath = $isolatedStore;
+                }
                 array_push($command, '-v', $hostPath.':'.$path);
             }
             array_push($command, '--workdir', $source, '--entrypoint', 'php', $image,
@@ -63,6 +79,14 @@ while (! is_file($bridge.'/stop')) {
             file_put_contents($base.'.stdout', '');
             file_put_contents($base.'.stderr', $error->getMessage());
             $exit = 125;
+        }
+        if ($realCopilot && isset($isolatedStore) && $isolatedStore === $root.'/agent-store-'.$id) {
+            $cleanup = proc_open(['rm', '-rf', '--', $isolatedStore], [0 => ['file', '/dev/null', 'r'],
+                1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $cleanupPipes);
+            if (! is_resource($cleanup) || proc_close($cleanup) !== 0) {
+                throw new RuntimeException('The isolated agent credential cleanup failed.');
+            }
+            unset($isolatedStore);
         }
         file_put_contents($base.'.pending-response', json_encode(['exit_code' => $exit], JSON_THROW_ON_ERROR));
         rename($base.'.pending-response', $base.'.response');

@@ -115,12 +115,16 @@ final class CopilotSecurityReviewTest extends TicketUiTestCase
         }
         $dispatch();
         $claims = 0;
-        AgentMailboxFixture::drain($job, $dispatch, function () use (&$claims): void {
+        AgentMailboxFixture::drain($job, $dispatch, function () use (&$claims, $scenario): void {
             $claims++;
             $homes = glob(AgentExecutionProcessor::inputRoot().'/execution-*/*/home/auth', GLOB_ONLYDIR) ?: [];
             self::assertNotEmpty($homes);
             foreach ($homes as $directory) {
                 self::assertSame(['.', '..'], scandir($directory), 'Worker staging must contain no provider credential bytes.');
+            }
+            if ($scenario === 'real') {
+                self::assertSame('test-projection', file_get_contents($this->onboardingRoot.'/store/github_copilot_cli/token'),
+                    'The worker must never receive the real test token.');
             }
         });
         $run->refresh();

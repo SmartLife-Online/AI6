@@ -37,7 +37,7 @@ sudo -n apparmor_parser -Q -K -I "$root/include" "$root/harness/ai6-execution"
 supervisor=''
 profile_loaded=false
 cleanup() {
-  if [ -f "$root/work/copilot-test-token" ]; then rm -- "$root/work/copilot-test-token"; fi
+  if [ -f "$root/copilot-test-token" ]; then rm -- "$root/copilot-test-token"; fi
   touch "$root/bridge/stop"
   sudo -n docker rm -f "$identity-agent" "$identity-worker" >/dev/null 2>&1 || true
   if [ -n "$supervisor" ]; then wait "$supervisor" || true; fi
@@ -58,7 +58,7 @@ if [ "${AI6_RUN_COPILOT_V2_SMOKE:-0}" = 1 ]; then
   real_copilot=true
   test -f "${AI6_COPILOT_SMOKE_AUTH_FILE:?Explicit test credential file required}"
   test ! -L "$AI6_COPILOT_SMOKE_AUTH_FILE"
-  install -m 0600 "$AI6_COPILOT_SMOKE_AUTH_FILE" "$root/work/copilot-test-token"
+  install -m 0600 "$AI6_COPILOT_SMOKE_AUTH_FILE" "$root/copilot-test-token"
 fi
 printf '{"image":"%s","identity":"%s","real_copilot_smoke":%s}\n' "$image" "$identity" "$real_copilot" > "$root/harness/launcher.json"
 for part in inputs outputs private; do
@@ -84,7 +84,7 @@ tests=(tests/Feature/Reviews/CopilotSecurityReviewTest.php tests/Feature/Shared/
 command=(sudo -n docker exec "$identity-worker" php vendor/bin/phpunit "${tests[@]}" --testdox)
 if $real_copilot; then
   command=(sudo -n docker exec -e AI6_RUN_COPILOT_V2_SMOKE=1
-    -e AI6_COPILOT_SMOKE_AUTH_FILE=/work/copilot-test-token -e "AI6_ACCEPTANCE_COMMIT=$commit"
+    -e "AI6_ACCEPTANCE_COMMIT=$commit"
     "$identity-worker" php vendor/bin/phpunit tests/Feature/Agents/GitHubCopilotCliExecutionTest.php
     tests/Feature/Reviews/CopilotSecurityReviewTest.php --filter=test_real_linux_copilot --testdox)
 fi
@@ -120,6 +120,6 @@ set -e
 printf 'phpunit_exit=%s\n' "$result" >> "$root/evidence.txt"
 tail -n 6 "$root/phpunit.log" | tee -a "$root/evidence.txt"
 if $real_copilot; then
-  rm -- "$root/work/copilot-test-token"
+  rm -- "$root/copilot-test-token"
 fi
 exit "$result"

@@ -33,19 +33,12 @@ trait BuildsProviderOnboarding
         self::assertSame('Linux', PHP_OS_FAMILY);
         self::assertNotNull(NativeProviderMailbox::containerRunner());
         self::assertNotSame(0, posix_geteuid());
-        $auth = (string) getenv('AI6_COPILOT_SMOKE_AUTH_FILE');
-        self::assertTrue(is_file($auth) && ! is_link($auth));
         self::assertMatchesRegularExpression('/\A[0-9a-f]{40}\z/D', (string) getenv('AI6_ACCEPTANCE_COMMIT'));
         config(['ai6.fixture.real_copilot_smoke' => true, 'ai6.copilot.binary' => '/usr/local/bin/copilot',
             'ai6.copilot.pinned_version' => '1.0.83']);
         $this->seedProviderReports();
-        $role = config('ai6.runtime_role');
-        config(['ai6.runtime_role' => 'agent']);
-        try {
-            app(ProviderCredentialStore::class)->replace('github_copilot_cli', (string) file_get_contents($auth));
-        } finally {
-            config(['ai6.runtime_role' => $role]);
-        }
+        // The worker holds only synthetic credentials. The fixed host launcher
+        // projects the operator's real test token exclusively into the agent.
     }
 
     private string $onboardingRoot;

@@ -109,6 +109,9 @@ class GitHubCopilotCliExecutionTest extends TicketUiTestCase
                 self::assertSame(['.', '..'], scandir($directory), 'The worker received no credentials.');
             }
             $auth = $this->onboardingRoot.'/store/github_copilot_cli/token';
+            if ($scenario === 'real') {
+                self::assertSame('test-projection', file_get_contents($auth), 'The worker must never receive the real test token.');
+            }
             if ($scenario === 'missing_auth' && is_file($auth)) {
                 unlink($auth);
             }
@@ -116,7 +119,11 @@ class GitHubCopilotCliExecutionTest extends TicketUiTestCase
         $results = ReviewResult::query()->where('run_id', $prepared['run']->id)->get();
         self::assertNotEmpty($results, (string) $job->refresh()->failure_code);
         if ($state === 'ok') {
-            self::assertSame(ExecutionJobState::SUCCEEDED, $job->refresh()->state);
+            self::assertSame(ExecutionJobState::SUCCEEDED, $job->refresh()->state, json_encode([
+                'failure_code' => $job->failure_code, 'results' => $results->map(fn (ReviewResult $result): array => [
+                    'outcome' => $result->invocation_outcome->value, 'failure_code' => $result->failure_code,
+                ])->all(),
+            ], JSON_THROW_ON_ERROR));
             self::assertCount(2, $results);
             self::assertSame([ReviewInvocationOutcome::VALID_RESULT], $results->pluck('invocation_outcome')->unique()->values()->all());
             self::assertCount(2, $results->pluck('session_id')->unique());
