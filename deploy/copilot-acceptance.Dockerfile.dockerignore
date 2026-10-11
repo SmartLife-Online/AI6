@@ -1,0 +1,17 @@
+**
+!app/
+!app/**
+!config/
+!config/**
+!docs/
+!docs/**
+!tickets/
+!tickets/**
+!docker/
+!docker/**
+!README.md
+!deploy/
+!deploy/copilot-acceptance.Dockerfile
+!deploy/copilot-acceptance.Dockerfile.dockerignore
+**/.env
+**/.env.*
