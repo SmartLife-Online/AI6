@@ -1,0 +1,26 @@
+{
+  "commit": "5a6b32b0d7540a7d7add4cf5503a71ad85b29d59",
+  "image": "ai6-upgrade:5a6b32b-copilot-negative-fix-20261012",
+  "image_id": "sha256:8301a2d10700bd4adff9fd144063077099e5c51a9b0f6fa6548bdb139f62644d",
+  "archive_sha256": "39334e2d29451df3ae26c82b92af9b988ed8bf56c3f7f042c1b2bf0d610b458f",
+  "base_image_id": "sha256:7e353e582335f3a5900b7c42bbc7a1da99e9507e286550fa152a2b08692015c2",
+  "previous_images": {
+    "app": "ai6-upgrade:6eb8f9f-copilot-acceptance-20261012",
+    "worker": "ai6-upgrade:6eb8f9f-copilot-acceptance-20261012",
+    "scheduler": "ai6-upgrade:6eb8f9f-copilot-acceptance-20261012",
+    "agent": "ai6-upgrade:6eb8f9f-copilot-acceptance-20261012",
+    "checker": "ai6-upgrade:6eb8f9f-copilot-acceptance-20261012"
+  },
+  "roles": {
+    "app": "healthy",
+    "worker": "healthy",
+    "scheduler": "healthy",
+    "agent": "healthy",
+    "checker": "healthy",
+    "caddy": "healthy"
+  },
+  "apparmor_sha256": "37f491c53a7d0ccdcc500609a6cda8dae1d057e2b5497cb06e22feae9fbaecde",
+  "backup": "/var/lib/ai6-offline-backups/20261011T221759Z",
+  "formal_gate": "open",
+  "recorded_at": "2026-10-12T09:51:04.756414+00:00"
+}

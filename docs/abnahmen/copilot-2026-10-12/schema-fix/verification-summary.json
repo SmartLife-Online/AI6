@@ -1,0 +1,34 @@
+{
+  "implementation_commit": "5a6b32b0d7540a7d7add4cf5503a71ad85b29d59",
+  "test_commit": "f5554e20478021105ff044ed3d810b0a6db570a4",
+  "negative_cases": 22,
+  "native_full_run": {
+    "exit": 1,
+    "tests": 25,
+    "assertions": 2144,
+    "failure": "test assumed every security_findings result was critical"
+  },
+  "corrected_security_run": {
+    "exit": 0,
+    "tests": 2,
+    "assertions": 592
+  },
+  "regression": {
+    "exit": 0,
+    "tests": 138,
+    "assertions": 11534,
+    "skipped": 6
+  },
+  "formal_gate": "open",
+  "signature": null,
+  "phpstan": "passed",
+  "pint": "passed",
+  "composer_strict_platform": "passed",
+  "manifest": "current",
+  "windows_feature_tests": {
+    "passed": 25,
+    "skipped": 17,
+    "assertions": 2805
+  },
+  "external_locked_install": "previous evidence: PHP 8.5.5; 2 tests, 1309 assertions; dependencies unchanged"
+}

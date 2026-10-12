@@ -1,0 +1,39 @@
+{
+  "implementation_commit": "6bb017f535c9994327532fef46f3fcba6437814b",
+  "source": "/tmp/ai6-native.s2jomn1O/phpunit.log",
+  "failures": [
+    {
+      "failure_code": null,
+      "persistence_reasons": [
+        "finding_disposition_unknown"
+      ],
+      "gate_reason": "Ohne gebundenes gültiges clear darf der Publish-Kandidat nicht fortgesetzt werden. Technischer Grundcode: security_result_persistence_failed.",
+      "provider_states": [
+        {
+          "state": "ok"
+        },
+        {
+          "state": "ok"
+        },
+        {
+          "state": "ok"
+        },
+        {
+          "state": "ok"
+        },
+        {
+          "state": "ok"
+        },
+        {
+          "state": "ok"
+        },
+        {
+          "state": "ok"
+        },
+        {
+          "state": "ok"
+        }
+      ]
+    }
+  ]
+}
