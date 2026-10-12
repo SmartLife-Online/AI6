@@ -2,6 +2,11 @@
 
 namespace App\AI6\Agents;
 
+use App\AI6\Reviews\FindingCategory;
+use App\AI6\Reviews\FindingOriginalDisposition;
+use App\AI6\Reviews\FindingReviewStatus;
+use App\AI6\Reviews\FindingSeverity;
+
 /** The existing provider output schema, shared without duplicating its contract. */
 final readonly class AgentResultSchema
 {
@@ -42,7 +47,7 @@ final readonly class AgentResultSchema
         ];
         $findingStatuses = ['type' => 'array', 'items' => $object([
             'finding_id' => ['type' => 'string', 'enum' => $context->expectedFindingIds],
-            'status' => $string,
+            'status' => ['type' => 'string', 'enum' => array_column(FindingReviewStatus::cases(), 'value')],
             'evidence' => $string,
         ])];
         if ($context->role === AgentRole::IMPLEMENTATION) {
@@ -74,8 +79,11 @@ final readonly class AgentResultSchema
             }
         } else {
             $properties['findings'] = ['type' => 'array', 'items' => $object([
-                'local_id' => $string, 'severity' => $string, 'disposition' => $string, 'category' => $string,
-                'file' => $string, 'line' => ['type' => 'integer'], 'title' => $string, 'evidence' => $string,
+                'local_id' => $string,
+                'severity' => ['type' => 'string', 'enum' => array_column(FindingSeverity::cases(), 'value')],
+                'disposition' => ['type' => 'string', 'enum' => array_column(FindingOriginalDisposition::cases(), 'value')],
+                'category' => ['type' => 'string', 'enum' => array_column(FindingCategory::cases(), 'value')],
+                'file' => $string, 'line' => ['type' => 'integer', 'minimum' => 1], 'title' => $string, 'evidence' => $string,
                 'expected_result' => $string,
                 'criterion_refs' => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => $context->criterionRefs]],
             ])];

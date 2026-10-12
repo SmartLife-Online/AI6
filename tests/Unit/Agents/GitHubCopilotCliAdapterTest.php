@@ -5,6 +5,7 @@ namespace Tests\Unit\Agents;
 use App\AI6\Agents\AgentExecutionException;
 use App\AI6\Agents\AgentInputLimits;
 use App\AI6\Agents\AgentProfileRegistry;
+use App\AI6\Agents\AgentResultSchema;
 use App\AI6\Agents\AgentResultValidator;
 use App\AI6\Agents\AgentRole;
 use App\AI6\Agents\AgentTurnResult;
@@ -12,6 +13,8 @@ use App\AI6\Agents\GitHubCopilotCliAdapter;
 use App\AI6\Agents\GitHubCopilotCliConfiguration;
 use App\AI6\Agents\InvalidAgentResponse;
 use App\AI6\Git\CanonicalJson;
+use App\AI6\Reviews\FindingCategory;
+use App\AI6\Reviews\FindingSeverity;
 use App\AI6\Shared\Process\ProcessOutcome;
 use App\AI6\Shared\Redaction\RedactionContext;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -32,6 +35,19 @@ class GitHubCopilotCliAdapterTest extends TestCase
     {
         $this->destroyCopilotFixture();
         parent::tearDown();
+    }
+
+    public function test_prompt_carries_the_persistence_enums_instead_of_unrestricted_finding_strings(): void
+    {
+        $context = $this->copilotContext();
+        $schema = app(AgentResultSchema::class)->outputSchema($context);
+        $finding = $schema['properties']['findings']['items']['properties'];
+        self::assertSame(['open', 'must_fix', 'human_required', 'suggestion', 'follow_up'], $finding['disposition']['enum']);
+        self::assertNotContains('resolved', $finding['disposition']['enum']);
+        self::assertSame(array_column(FindingSeverity::cases(), 'value'), $finding['severity']['enum']);
+        self::assertSame(array_column(FindingCategory::cases(), 'value'), $finding['category']['enum']);
+        self::assertSame(1, $finding['line']['minimum']);
+        self::assertStringContainsString(app(CanonicalJson::class)->normalizeAndEncode($schema), $this->copilotAdapter()->prompt($context));
     }
 
     public function test_native_update_hint_preserves_the_validated_review_turn(): void
