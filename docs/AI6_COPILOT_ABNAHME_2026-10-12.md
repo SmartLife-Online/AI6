@@ -24,20 +24,20 @@ Nicht signierter Ergebnisentwurf. Automatisierte Ausführung: Codex. Menschliche
 | Prüfung | Ergebnis |
 |---|---|
 | Native Negativmatrix | 22 Fälle bestanden: Tools, Parent, Home/Workspace-Discovery, Timeout, Cancel, Providerfehler, fehlende Projektion/Credentials, stale, Rotation, Logout, fremder Kontext, fehlende/falsche Evidenz und Wiederherstellung. Bereinigung in allen Fällen bestätigt. |
-| QA / Securitysmokes | 22 native Negativfälle bestanden; zwei gültige QA-Ergebnisse (findings_to_fix / nothing_to_fix). Korrigierter Securitylauf: 2 Tests, 592 Assertions, Exit 0; clear und security_findings. |
-| Roter Lauf und gezielter Rerun | Voller nativer Lauf: 25 Tests, 2.144 Assertions, Exit 1 wegen falscher kritischer Testannahme. Test-only Fix f5554e2; Security-Rerun 2 Tests / 592 Assertions / Exit 0. Kein einzelner komplett grüner 25-Testlauf behauptet. |
+| Abschließender Gesamtlauf | Gemeinsamer abschließender Lauf: 25 Tests, 2,153 Assertions, Exit 0, keine Skips. Darin 22 native Negativfälle; QA nothing_to_fix / nothing_to_fix; Security clear und security_findings. Testtokenprojektionen bereinigt. |
+| Historischer Fehler und Abschluss | Voller nativer Lauf: 25 Tests, 2.144 Assertions, Exit 1 wegen falscher kritischer Testannahme. Test-only Fix f5554e2; Security-Rerun 2 Tests / 592 Assertions / Exit 0. Jetzt zusätzlich gemeinsamer Gesamtlauf aller 25 nativen Tests bestanden; Details und aktuelle Ergebnisbindungen im final-full-run.json. |
 | Linux-Regression | 138 Tests, 11.534 Assertions, 6 opt-in skips; Exit 0. |
 | UID 10002 / Auslieferung | Gültiges inconclusive; Schreibschutz und Cleanup bestanden, Credentialgeneration unverändert. Alle sechs Dienste healthy, AI6 und Smartlife HTTP 200. |
 | PHPStan / Pint / Verträge | Vollständige Analyse und Formatprüfung bestanden; geänderte Testdatei zusätzlich gezielt geprüft. Manifest, Composer strict/platform und Diffprüfung bestanden. |
 | Windows / vorherige Belege | Feature-Regression: 25 passed, 17 POSIX/opt-in skips, 2.805 Assertions. Frühere Gesamtsuite und explizite Locked-Installation bleiben historische Belege; kein neuer Gesamtlauf behauptet. |
-| Securityreview-Fehler | Am Stand 6bb017f wurde derselbe echte Security-Persistenzfehler mit finding_disposition_unknown reproduziert: Das ausgegebene Schema erlaubte freie Dispositionen, die die zentrale Persistenz zurückwies. Fix 5a6b32b bindet Severity, Disposition, Kategorie und Status an die vorhandenen Enums sowie positive Zeilennummern. Keine JSON-Reparatur oder Lockerung. Der ursprüngliche Einzelaufruf an 7ab5616 hat keine rückwirkend beweisbare Detailursache. Ein zusätzlicher Test erwartete jeden Befund als kritisch; f5554e2 korrigiert ausschließlich diese Testannahme anhand tatsächlicher Severity. Echter Security-Rerun bestanden. |
+| Securityreview-Fehler | Am Stand 6bb017f wurde derselbe echte Security-Persistenzfehler mit finding_disposition_unknown reproduziert: Das ausgegebene Schema erlaubte freie Dispositionen, die die zentrale Persistenz zurückwies. Fix 5a6b32b bindet Severity, Disposition, Kategorie und Status an die vorhandenen Enums sowie positive Zeilennummern. Keine JSON-Reparatur oder Lockerung. Der ursprüngliche Einzelaufruf an 7ab5616 hat keine rückwirkend beweisbare Detailursache. Ein zusätzlicher Test erwartete jeden Befund als kritisch; f5554e2 korrigiert ausschließlich diese Testannahme anhand tatsächlicher Severity. Echter Security-Rerun und jetzt abschließender gemeinsamer 25-Testlauf bestanden. |
 
 ## AI6-048/MG-01 - tatsächliche Beobachtungen
 
 | Prüfung | Stand | Beobachtung |
 |---|---|---|
 | Geschützte Eingaben / Session | Belegt | UID 10002: Home-, Workspace- und ungebundene Session-Writes verweigert. Frische RW-Session pro Turn; danach leer. |
-| Programmatischer Review | Belegt | Zwei gültige QA-Ergebnisse über reale Agentmailbox: findings_to_fix und nothing_to_fix; getrennte Slots und Sessions. |
+| Programmatischer Review | Belegt | Zwei gültige QA-Ergebnisse über reale Agentmailbox: nothing_to_fix / nothing_to_fix; getrennte Slots und Sessions. Frühere QA-findings_to_fix-Beobachtung bleibt im historischen Nachweis. |
 | Pin / Version / Capability | Belegt | Drift in Regression gesperrt. Native fehlende, falsche Rolle und kontrollierte Testwiederherstellung geprüft; Produktionsschlüssel leer. |
 | Discovery / Instruktionsköder | Belegt | Native Parent-/Home-/Workspace-Matrix für AGENTS, CLAUDE, Skills, Hooks und MCP geprüft. Fremde ungebundene Discovery gesperrt; Hostköder nicht erreichbar. |
 | Verbotene native Tools | Begrenzt | Shell, Write, Delegation, Memory, URL und MCP angefordert, aber nicht verfügbar und nicht ausgeführt. Beobachtet: view/glob/rg (grep-Alias). Keine Behauptung einer separaten nativen RPC-Ablehnung für jede Toolart. |
@@ -76,21 +76,21 @@ Nicht signierter Ergebnisentwurf. Automatisierte Ausführung: Codex. Menschliche
 | AppArmor SHA-256 | `37f491c53a7d0ccdcc500609a6cda8dae1d057e2b5497cb06e22feae9fbaecde` |
 | Native Release-Archiv SHA-256 | `ffbe1c429664b8a05efed67ecdb467123e40fcaa3c6c14ef9a98ba74da4687b7` |
 | Basisimage-Digest | `sha256:7e353e582335f3a5900b7c42bbc7a1da99e9507e286550fa152a2b08692015c2` |
-| QA Run / Ergebnisse | `af6f7145-07b0-49bf-beea-0a7ef46b48dc / c94c9853-085a-4f28-9cb7-0f020ead99f5, 0a7a63c3-26fc-484a-b587-7249c1893f9e` |
-| Security Run / Session | `4a3aef43-cddd-43e1-88ee-920ee1d24b17 / 7ec569fb-3378-4673-9fdb-8cecb5e29484` |
-| Security Slot / Ergebnis / Artefakt | `b9448f06-71c4-4cee-b64c-7debe3987cb0 / b09e2437-8297-499c-8c66-7aaa438770e6 / 38ae8026-72e2-4dc2-bb5b-a4b08cf3d1fb` |
+| QA Run / Ergebnisse | `d3e39421-9cb6-45b2-baf3-dc019366bf31 / b27146e5-9cbb-4511-baf7-47b343805733, 798f43a3-d5e2-47e3-8d9a-ab1f94c61737` |
+| Security Run / Session | `ff471035-4dd0-4f4c-9a36-2a958acbf7a8 / a7711b21-bf01-4a90-98c0-2832a77130ba` |
+| Security Slot / Ergebnis / Artefakt | `74a99020-1f30-4260-8e93-7f17586d0219 / e7982fc2-c2e3-4d1a-af6f-c2e63f09f911 / 5a5622e2-b779-4a5b-ae5b-ce31e7ba9b15` |
 | Candidate Tree-OID (SHA-256 Git) | `234dd8fd3d53de3a424ef7f499779290eb6563ed4540c41bc0367fc9b3cba636` |
-| Candidate Diff / Basis-OID | `86a8c85fd55499050202f905c8fe879d6af6b087ac044406ff4be0475174b6b8 / 86dd096d5640f2dc8f818d241c23e745826069a61679e1966ea12473b59c6051` |
+| Candidate Diff / Basis-OID | `86a8c85fd55499050202f905c8fe879d6af6b087ac044406ff4be0475174b6b8 / 03519f2cb1ea0694cfb9bd476cfb8b3e0d2a03f47fe7d00493a1a85dd883b735` |
 | Ticketvertrag / Scope | `b1686df9a91c1fb6feccbe767e9ca65a200d240ef3fef2a22d99f504d935d2f1 / de3d5381dc6ae3220ad60000db0f25102a8ec8b9f49d20f6cb9f4f2266a38435` |
-| Prompt / Instruktionen | `c682765df3de69e2f7d12fa63e41767f46f6fbdffaf628293f87344feaa9782d / 2607aa293259402f0f45ddb0de601915fb633c686ca0a6a1e618df85977936c2` |
+| Prompt / Instruktionen | `1807ba2b6e956862e46b07b2e4c97d84e12621fef9e52b6c57cfe009b99a7c67 / 2607aa293259402f0f45ddb0de601915fb633c686ca0a6a1e618df85977936c2` |
 | Security Policyhash | `f6da67712bc4b52c98469acb5fd6f555ed09ed8f461c23f957cb52223d8a4674` |
-| Gemeldete Securitynutzung | `{"premium_requests": 1, "api_duration_ms": 10499}` |
-| Findings Run / Ergebnis | `206d33a1-9772-4775-b04c-ac92971b3079 / 99c97392-61d5-41a5-a38d-144714b996d9` |
+| Gemeldete Securitynutzung | `{"premium_requests": 1, "api_duration_ms": 9396}` |
+| Findings Run / Ergebnis | `715067cd-d84f-4167-8493-1bcd77be812c / e860fbd8-3052-42b7-a5c9-04a88f3a499b` |
 | Findings Tree / Diff | `97a43a0630fdfbf21c902829e9cb2336c58f043580925a91986330a613f38799 / a7e83c79be6b4862f4bccef289beb502a10b727e962e9f96f86ed4dacd0f9a23` |
 
 ## Geklärter Securityreview-Fehler
 
-Am Stand 6bb017f wurde derselbe echte Security-Persistenzfehler mit finding_disposition_unknown reproduziert: Das ausgegebene Schema erlaubte freie Dispositionen, die die zentrale Persistenz zurückwies. Fix 5a6b32b bindet Severity, Disposition, Kategorie und Status an die vorhandenen Enums sowie positive Zeilennummern. Keine JSON-Reparatur oder Lockerung. Der ursprüngliche Einzelaufruf an 7ab5616 hat keine rückwirkend beweisbare Detailursache. Ein zusätzlicher Test erwartete jeden Befund als kritisch; f5554e2 korrigiert ausschließlich diese Testannahme anhand tatsächlicher Severity. Echter Security-Rerun bestanden.
+Am Stand 6bb017f wurde derselbe echte Security-Persistenzfehler mit finding_disposition_unknown reproduziert: Das ausgegebene Schema erlaubte freie Dispositionen, die die zentrale Persistenz zurückwies. Fix 5a6b32b bindet Severity, Disposition, Kategorie und Status an die vorhandenen Enums sowie positive Zeilennummern. Keine JSON-Reparatur oder Lockerung. Der ursprüngliche Einzelaufruf an 7ab5616 hat keine rückwirkend beweisbare Detailursache. Ein zusätzlicher Test erwartete jeden Befund als kritisch; f5554e2 korrigiert ausschließlich diese Testannahme anhand tatsächlicher Severity. Echter Security-Rerun und jetzt abschließender gemeinsamer 25-Testlauf bestanden.
 
 ## Menschliche Entscheidungen
 

@@ -1,13 +1,15 @@
 {
   "docs/abnahmen/copilot-2026-10-12/schema-fix/binding.json": "348680038b4ed83d3be2ccf41c131373b42ddda89d82a1b7855ebcd2a895759f",
   "docs/abnahmen/copilot-2026-10-12/schema-fix/doctor.txt": "1ab1195f9424b8a21fbff554e4b2f0a6851145a209b4de1d8ee95ea715262a71",
+  "docs/abnahmen/copilot-2026-10-12/schema-fix/final-full-run.json": "a658bb7159b8a6a0114fc394c71d84d5c5a76ab916e4f6448098eef0945682f0",
+  "docs/abnahmen/copilot-2026-10-12/schema-fix/final-source.sha256": "75b9f401968c336bc1dd475feddaeb56cafe6dff2a9e20f3189bc16ac77a062f",
   "docs/abnahmen/copilot-2026-10-12/schema-fix/http-health.json": "729bf52405c27adddc8cefe965ba8d33b67bc32a702538bf9ef4836d70b29b37",
   "docs/abnahmen/copilot-2026-10-12/schema-fix/native-evidence.json": "1a646e354ed6c67a23e9d9b152d857233ed98b64b3c19693bf933d2a5cd2f0e5",
   "docs/abnahmen/copilot-2026-10-12/schema-fix/production-cleanup.json": "af673dacb6b6a12527819949809a188fe8501df5ccc6136edcce975e83e33570",
   "docs/abnahmen/copilot-2026-10-12/schema-fix/production-uid-proof.json": "b44914041a867134ed8cde1f466bd5083332f830f83d827875f96c43c4dc40df",
   "docs/abnahmen/copilot-2026-10-12/schema-fix/rollout-proof.json": "cf96ba32ae566d98ecc41878c4dd5d94befb2991d2650c10c1c8382320ea092b",
   "docs/abnahmen/copilot-2026-10-12/schema-fix/schema-failure-diagnostic.json": "a7116e8d8c38cca5f77ef418234b6017d2cbfbf0e7e889616322effec068fd2d",
-  "docs/abnahmen/copilot-2026-10-12/schema-fix/verification-summary.json": "183161e7fd050ad273fb95e0659f69b4fd64f46ada38ebf8d28e10da00693986",
-  "docs/AI6_COPILOT_ABNAHME_2026-10-12.md": "0ca439f7e3b89fe3eb4f9cb1da07240a9b3f34566028cc29e2bc8bbd6bfd587c",
-  "output/pdf/AI6-Copilot-Abnahme-2026-10-12.pdf": "97a948573e5dcd40185eadb492ede1039bf501fc85bb601c4fa90cf642356d49"
+  "docs/abnahmen/copilot-2026-10-12/schema-fix/verification-summary.json": "1e6b72578280634f6cd60c0261b8ad7f93d9b295b1be2cdc48cc19173a1bcdb3",
+  "docs/AI6_COPILOT_ABNAHME_2026-10-12.md": "2931c7f0fee913bc0effd39f8abcb4125ca012dbc1d9e3b70b1ff33eb2ce3344",
+  "output/pdf/AI6-Copilot-Abnahme-2026-10-12.pdf": "41eba6c26a2a2c14c13fde9d464601e5ca8b8f23e3f6134cb438a6051f32908d"
 }

@@ -30,5 +30,18 @@
     "skipped": 17,
     "assertions": 2805
   },
-  "external_locked_install": "previous evidence: PHP 8.5.5; 2 tests, 1309 assertions; dependencies unchanged"
+  "external_locked_install": "previous evidence: PHP 8.5.5; 2 tests, 1309 assertions; dependencies unchanged",
+  "final_native_full_run": {
+    "implementation_commit": "5a6b32b0d7540a7d7add4cf5503a71ad85b29d59",
+    "test_commit": "f5554e20478021105ff044ed3d810b0a6db570a4",
+    "recorded_at": "2026-10-12T10:46:17.091133+00:00",
+    "harness": "/tmp/ai6-native.x2VhQm4A",
+    "operator_log": "/home/ops/ai6-deployments/20261010-0600c8e/copilot-negative-fix-20261012/fixed-real-104132.log",
+    "exit": 0,
+    "tests": 25,
+    "assertions": 2153,
+    "test_tokens_removed": true,
+    "formal_gate": "open",
+    "signature": null
+  }
 }
