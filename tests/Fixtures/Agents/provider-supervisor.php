@@ -12,6 +12,7 @@ use App\AI6\Agents\ProviderOnboarding;
 use App\AI6\Shared\Doctor\CodexCliDoctorCheck;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Foundation\Bootstrap\LoadConfiguration;
+use Tests\Fixtures\Agents\CopilotNativeNegativeProbe;
 use Tests\Fixtures\Agents\MissingAnswerAdapter;
 use Tests\Fixtures\Agents\NativeSessionScopeProbe;
 
@@ -27,6 +28,11 @@ $app->afterBootstrapping(LoadConfiguration::class, static function () use ($sett
     config($settings);
 });
 $app->make(Kernel::class)->bootstrap();
+if (config('ai6.fixture.real_copilot_smoke') === true && is_array(config('ai6.fixture.copilot_negative'))) {
+    echo json_encode(['processed' => true, 'commands' => [], 'capability_probes' => 0,
+        'copilot_negative' => CopilotNativeNegativeProbe::run()], JSON_THROW_ON_ERROR);
+    exit(0);
+}
 if (is_array(config('ai6.fixture.native_session_scope_probe'))) {
     echo json_encode(['processed' => true, 'commands' => [], 'capability_probes' => 0,
         'native_scope' => NativeSessionScopeProbe::run()], JSON_THROW_ON_ERROR);

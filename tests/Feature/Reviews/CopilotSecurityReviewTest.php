@@ -76,18 +76,32 @@ final class CopilotSecurityReviewTest extends TicketUiTestCase
         $this->test_security_turn_reaches_the_production_mailbox_and_bound_consumer('real', null, null);
     }
 
+    public function test_real_linux_copilot_security_finding_reaches_the_human_gate(): void
+    {
+        $this->nativeMailbox = true;
+        $this->prepareRealCopilotSmoke();
+        $this->test_security_turn_reaches_the_production_mailbox_and_bound_consumer('real_finding', null, null);
+        $review = ReviewResult::query()->where('role', 'security_review')->sole();
+        self::assertSame('security_findings', $review->result_status);
+        self::assertGreaterThan(0, $review->findings()->count());
+    }
+
     #[DataProvider('securityScenarios')]
     public function test_security_turn_reaches_the_production_mailbox_and_bound_consumer(string $scenario, ?string $status, ?string $reason): void
     {
         $this->nativeMailbox = true;
+        $real = in_array($scenario, ['real', 'real_finding'], true);
         $production = $this->app->getBindings()[AgentAdapter::class]['concrete'];
         $this->copilotWrappers = str_replace('\\', '/', storage_path('framework/testing/copilot-security-'.bin2hex(random_bytes(6))));
-        $binary = $scenario === 'real' ? '/usr/local/bin/copilot' : FakeCopilotBinary::create($this->copilotWrappers, $scenario);
+        $binary = $real ? '/usr/local/bin/copilot' : FakeCopilotBinary::create($this->copilotWrappers, $scenario);
         config(['ai6.copilot.binary' => $binary, 'ai6.copilot.pinned_version' => '1.0.83',
             'ai6.agent_security_review_profile' => 'copilot-cli-review',
             'ai6.process.policies.agent.allowed_executables' => [PHP_BINARY, $binary],
             'ai6.process.policies.agent.timeout_seconds' => $scenario === 'timeout' ? 2 : 300]);
-        $prepared = $this->preparedSecurityReview('A50-'.strtoupper(str_replace('_', '-', $scenario)), ['app/Example.php' => "<?php\n\n// Bound candidate.\n"]);
+        $candidate = $scenario === 'real_finding'
+            ? "<?php\n\nfunction getUser(\\PDO \$db): mixed\n{\n    return \$db->query('SELECT * FROM users WHERE id = '.\$_GET['id']);\n}\n"
+            : "<?php\n\n// Bound candidate.\n";
+        $prepared = $this->preparedSecurityReview('A50-'.strtoupper(str_replace('_', '-', $scenario)), ['app/Example.php' => $candidate]);
         $run = $prepared['run'];
         $this->app->bind(AgentAdapter::class, $production);
         foreach ([GitHubCopilotCliConfiguration::class, GitHubCopilotCliAdapter::class, SecurityReviewStep::class] as $binding) {
@@ -115,23 +129,30 @@ final class CopilotSecurityReviewTest extends TicketUiTestCase
         }
         $dispatch();
         $claims = 0;
-        AgentMailboxFixture::drain($job, $dispatch, function () use (&$claims, $scenario): void {
+        AgentMailboxFixture::drain($job, $dispatch, function () use (&$claims, $real): void {
             $claims++;
             $homes = glob(AgentExecutionProcessor::inputRoot().'/execution-*/*/home/auth', GLOB_ONLYDIR) ?: [];
             self::assertNotEmpty($homes);
             foreach ($homes as $directory) {
                 self::assertSame(['.', '..'], scandir($directory), 'Worker staging must contain no provider credential bytes.');
             }
-            if ($scenario === 'real') {
+            if ($real) {
                 self::assertSame('test-projection', file_get_contents($this->onboardingRoot.'/store/github_copilot_cli/token'),
                     'The worker must never receive the real test token.');
             }
         });
         $run->refresh();
+        if ($scenario === 'security_unknown_disposition') {
+            self::assertContains(['Bound security result persistence failed.', [
+                'reason' => 'finding_disposition_unknown', 'exception_class' => \App\AI6\Reviews\ReviewResultParseException::class,
+            ]], $logs);
+        }
         $results = ReviewResult::query()->where('run_id', $run->id)->where('role', 'security_review')->get();
-        if ($scenario === 'real') {
+        if ($real) {
             $failure = [
                 'failure_code' => $job->refresh()->failure_code,
+                'persistence_reasons' => array_values(array_map(static fn (array $entry): mixed => $entry[1]['reason'] ?? null,
+                    array_filter($logs, static fn (array $entry): bool => $entry[0] === 'Bound security result persistence failed.'))),
                 'gate_reason' => HumanRequest::query()->where('run_id', $run->id)->where('kind', 'security_gate')->value('why_needed'),
                 'provider_states' => RunArtifact::query()->where('run_id', $run->id)->where('kind', 'provider_raw')->get()
                     ->map(fn (RunArtifact $artifact): array => array_intersect_key($artifact->redacted_metadata,
@@ -156,7 +177,7 @@ final class CopilotSecurityReviewTest extends TicketUiTestCase
             $artifact = RunArtifact::query()->findOrFail($result->raw_artifact_id);
             self::assertSame('provider_raw', $artifact->kind->value);
             self::assertSame(GitHubCopilotCliAdapter::USAGE_SOURCE, $artifact->redacted_metadata['usage_source']);
-            if ($scenario !== 'real') {
+            if (! $real) {
                 self::assertSame(0, $artifact->redacted_metadata['usage']['premium_requests']);
                 self::assertSame(12, $artifact->redacted_metadata['usage']['api_duration_ms']);
             }
@@ -190,7 +211,7 @@ final class CopilotSecurityReviewTest extends TicketUiTestCase
         }
         self::assertSame([], $this->directoryEntries(AgentExecutionProcessor::inputRoot()));
         self::assertSame([], $this->directoryEntries(AgentExecutionProcessor::outputRoot()));
-        if ($scenario === 'real') {
+        if ($real) {
             $result = $results->sole();
             $artifact = RunArtifact::query()->findOrFail($result->raw_artifact_id);
             $configuration = GitHubCopilotCliConfiguration::fromConfiguredValues();
@@ -218,6 +239,7 @@ final class CopilotSecurityReviewTest extends TicketUiTestCase
     public static function securityScenarios(): array
     {
         return [
+            ['security_unknown_disposition', null, 'security_result_persistence_failed'],
             ['security_clear', 'clear', null],
             ['security_security_findings', 'security_findings', 'security_result_security_findings'],
             ['security_needs_human', 'needs_human', 'security_result_needs_human'],

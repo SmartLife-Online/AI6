@@ -86,7 +86,15 @@ if $real_copilot; then
   command=(sudo -n docker exec -e AI6_RUN_COPILOT_V2_SMOKE=1
     -e "AI6_ACCEPTANCE_COMMIT=$commit"
     "$identity-worker" php vendor/bin/phpunit tests/Feature/Agents/GitHubCopilotCliExecutionTest.php
-    tests/Feature/Reviews/CopilotSecurityReviewTest.php --filter=test_real_linux_copilot --testdox)
+    tests/Feature/Reviews/CopilotSecurityReviewTest.php tests/Feature/Agents/CopilotNativeNegativeTest.php --filter=test_real_linux_copilot --testdox)
+  if [ "${AI6_RUN_COPILOT_NEGATIVE_ONLY:-0}" = 1 ]; then
+    command=(sudo -n docker exec -e AI6_RUN_COPILOT_V2_SMOKE=1 -e "AI6_ACCEPTANCE_COMMIT=$commit"
+      "$identity-worker" php vendor/bin/phpunit tests/Feature/Agents/CopilotNativeNegativeTest.php --testdox)
+  fi
+  if [ "${AI6_RUN_COPILOT_SECURITY_ONLY:-0}" = 1 ]; then
+    command=(sudo -n docker exec -e AI6_RUN_COPILOT_V2_SMOKE=1 -e "AI6_ACCEPTANCE_COMMIT=$commit"
+      "$identity-worker" php vendor/bin/phpunit tests/Feature/Reviews/CopilotSecurityReviewTest.php --filter=test_real_linux_copilot --testdox)
+  fi
 fi
 contract_command=(sudo -n docker exec "$identity-worker" php vendor/bin/phpunit tests/Feature/Agents/AgentExecutionMailboxTest.php
   --filter=test_runner_home_paths_match_the_shipped_apparmor_projection_contract --testdox)

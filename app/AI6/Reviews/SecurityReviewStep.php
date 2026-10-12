@@ -43,6 +43,7 @@ use App\AI6\Shared\Redaction\InvalidRedactionInputException;
 use App\AI6\Shared\Redaction\RedactionContext;
 use App\AI6\Shared\Security\SecurityMeasure;
 use App\AI6\Shared\Security\SecurityPolicy;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -146,7 +147,11 @@ final readonly class SecurityReviewStep
             ), $context);
             try {
                 $review = $this->results->appendValid($run, $slot, 1, 1, $bindings, $result, $artifact->id, $context);
-            } catch (Throwable) {
+            } catch (Throwable $exception) {
+                Log::warning('Bound security result persistence failed.', [
+                    'reason' => $exception instanceof ReviewResultParseException ? $exception->reason : 'persistence_failed',
+                    'exception_class' => $exception::class,
+                ]);
                 throw new ImplementationImportException('security_result_persistence_failed', 'The bound security result could not be stored.');
             }
             if ($result->status === AgentResultStatus::CLEAR && $this->evidence->validClear($run->fresh() ?? $run)?->id === $review->id) {

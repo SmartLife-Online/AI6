@@ -133,6 +133,12 @@ class GitHubCopilotCliExecutionTest extends TicketUiTestCase
             }
         });
         $results = ReviewResult::query()->where('run_id', $prepared['run']->id)->get();
+        if ($scenario === 'real') {
+            fwrite(STDERR, "\nAI6_COPILOT_QA_INVOCATIONS=".json_encode($results->map(fn (ReviewResult $result): array => [
+                'outcome' => $result->invocation_outcome->value, 'failure_code' => $result->failure_code,
+                'session_id' => $result->session_id, 'status' => $result->result_status,
+            ])->all(), JSON_THROW_ON_ERROR)."\n");
+        }
         self::assertNotEmpty($results, (string) $job->refresh()->failure_code);
         if ($state === 'ok') {
             self::assertSame(ExecutionJobState::SUCCEEDED, $job->refresh()->state, json_encode([

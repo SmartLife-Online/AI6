@@ -9,6 +9,9 @@ $configuration = json_decode((string) file_get_contents($root.'/harness/launcher
 $image = $configuration['image'];
 $identity = $configuration['identity'];
 $realCopilot = ($configuration['real_copilot_smoke'] ?? false) === true;
+if ($realCopilot) {
+    file_put_contents($root.'/host-bait', 'Synthetic unapproved host instruction; never mounted into the agent.');
+}
 if (! is_string($image) || ! preg_match('/\Asha256:[a-f0-9]{64}\z/D', $image)
     || ! is_string($identity) || ! preg_match('/\Aai6-native-[a-f0-9]{16}\z/D', $identity)) {
     throw new RuntimeException('Invalid immutable test image or resource identity.');
@@ -31,6 +34,10 @@ while (! is_file($bridge.'/stop')) {
                 throw new RuntimeException('Invalid or expired isolated test request.');
             }
             $settings = $request['settings'];
+            if ($realCopilot) {
+                $settings['ai6.fixture.host_bait'] = $root.'/host-bait';
+                file_put_contents($base.'.agent-settings', json_encode($settings, JSON_THROW_ON_ERROR));
+            }
             $command = ['sudo', '-n', 'docker', 'run', '--rm', '--name', $identity.'-agent', '--user', '1000:1000', '--cpus', '2', '--memory', '1g',
                 '--network', $realCopilot ? 'bridge' : 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
                 '--security-opt', 'apparmor=:'.$identity.'://ai6-agent-v1', '--security-opt', 'systempaths=unconfined',
@@ -70,6 +77,11 @@ while (! is_file($bridge.'/stop')) {
             array_push($command, '--workdir', $source, '--entrypoint', 'php', $image,
                 '-d', 'zend.exception_ignore_args=1', $source.'/tests/Fixtures/Agents/provider-supervisor.php',
                 '/var/lib/ai6/agent-executions/native-supervisor-test.json');
+            if ($realCopilot) {
+                // Fixed operator-created observation path, read-only; never a request-selected mount.
+                array_splice($command, array_search('--workdir', $command, true), 0,
+                    ['-v', $base.'.agent-settings:/var/lib/ai6/agent-executions/native-supervisor-test.json:ro']);
+            }
             $process = proc_open($command, [0 => ['file', '/dev/null', 'r'], 1 => ['file', $base.'.stdout', 'w'], 2 => ['file', $base.'.stderr', 'w']], $pipes);
             if (! is_resource($process)) {
                 throw new RuntimeException('The isolated test supervisor could not start.');

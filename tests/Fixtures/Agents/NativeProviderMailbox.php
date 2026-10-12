@@ -75,6 +75,14 @@ final class NativeProviderMailbox
         return $result['native_scope'];
     }
 
+    /** @return array<string, mixed> */
+    public static function probeCopilotNegative(ExecutionHome $home, string $context, string $scenario): array
+    {
+        $result = self::invoke(['ai6.fixture.copilot_negative' => ['home' => get_object_vars($home), 'context' => $context, 'scenario' => $scenario]]);
+
+        return $result['copilot_negative'];
+    }
+
     /** @param array<string, mixed> $fixtureSettings
      * @return array<string, mixed>
      */
