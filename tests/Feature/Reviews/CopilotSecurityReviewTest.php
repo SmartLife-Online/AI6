@@ -15,6 +15,7 @@ use App\AI6\HumanLoop\Models\HumanRequest;
 use App\AI6\Projects\Models\Project;
 use App\AI6\Reviews\Models\ReviewResult;
 use App\AI6\Reviews\ReviewerSlotFactory;
+use App\AI6\Reviews\ReviewResultParseException;
 use App\AI6\Reviews\SecurityReviewEvidence;
 use App\AI6\Reviews\SecurityReviewStep;
 use App\AI6\Runs\ApprovalLimits;
@@ -144,7 +145,7 @@ final class CopilotSecurityReviewTest extends TicketUiTestCase
         $run->refresh();
         if ($scenario === 'security_unknown_disposition') {
             self::assertContains(['Bound security result persistence failed.', [
-                'reason' => 'finding_disposition_unknown', 'exception_class' => \App\AI6\Reviews\ReviewResultParseException::class,
+                'reason' => 'finding_disposition_unknown', 'exception_class' => ReviewResultParseException::class,
             ]], $logs);
         }
         $results = ReviewResult::query()->where('run_id', $run->id)->where('role', 'security_review')->get();
