@@ -197,7 +197,11 @@ final class CopilotSecurityReviewTest extends TicketUiTestCase
             self::assertStringContainsString((string) $reason, $request->why_needed);
             self::assertNull(app(SecurityReviewEvidence::class)->validClear($run));
             if ($status === 'security_findings') {
-                self::assertContains('security_override', $request->allowed_effects);
+                if ($results->sole()->findings()->where('severity', 'critical')->exists()) {
+                    self::assertContains('security_override', $request->allowed_effects);
+                } else {
+                    self::assertNotContains('security_override', $request->allowed_effects);
+                }
             }
             $logs[] = $request->toArray();
         }
