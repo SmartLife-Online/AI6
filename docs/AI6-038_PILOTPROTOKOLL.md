@@ -32,7 +32,9 @@ Nur redigierte, zugriffsgeschützte Belegreferenzen eintragen: keine Roh-Provide
 | Smartphone, SSH-Client bei Tunnelzugang, TOTP/Passkey und Step-up-Verfahren | |
 | Geschützter Ablageort der redigierten Belege außerhalb der Restore-Ziele | |
 
-### A2. Voraussetzungstabelle — jeder offene Eintrag sperrt den Pilot
+### A2. Voraussetzungstabelle — offene Pflichtvoraussetzungen sperren den Pilot
+
+Die ausdrücklich als offene Vertragsentscheidung bezeichnete Restorezeile ist keine zusätzliche Pflichtvoraussetzung. Sie dokumentiert die Anfrage an den Menschen und wird nicht als Pilotsperre ausgewertet.
 
 Die Bestandsbeschreibung im Ticket ist keine Freigabe. Je Zeile den zuständigen menschlichen Entscheider oder konkreten Folgeauftrag, den gebundenen Implementierungsstand und die signierte Evidenz nennen. Ein `done`-Status, eine vorhandene Linux-Auslieferung, eine Versionsprobe oder ein gesetzter Evidenzwert ersetzt keine Signatur und keinen Laufzeitnachweis. Bei geänderten Implementierungsbytes ist die Gültigkeit neu zu prüfen.
 
@@ -57,7 +59,7 @@ Die Bestandsbeschreibung im Ticket ist keine Freigabe. Je Zeile den zuständigen
 | Review-only-Gegenstand und Pilotremote | | Menschliche Entscheidung; GIT-011-Quelle, Basis und Vorher-OID; ausdrücklich erlaubte Ref-Wirkungen | |
 | Mobiler Zugangsweg | | SSH-Client und TOTP über gebundene Origin oder gesondert abgenommenes HTTPS; Step-up möglich | |
 | Exakte Linux-Auslieferung | | Commit, sauberer Stand, Image-Digest, Host und identischer Testcheckout | |
-| Zugang und strict-Login auf der Wiederherstellungsinstanz | | Gesondert freigegebener/nachgewiesener Browserzugang und auf Loginmails begrenzte rollenrichtige Zustellung ohne allgemeine Queueverarbeitung; offener Konflikt laut README | |
+| Offene Vertragsentscheidung zur Restoreprobe (keine zusätzliche Pilotsperre) | | Task 6 gegenüber AC-13/TC-06: Workeridentität für Restore und Umfang des Loginnachweises; menschliche Entscheidung gemäß Anfrage im README, keine neue Pflichtvoraussetzung | |
 
 ### A3. Vorbereitung und Nachweise vor Approval
 
@@ -130,7 +132,7 @@ Jeden Ref der Remote einzeln erfassen, einschließlich Tags und Reviewquelle. Fe
 | Approval `review_only`: `todo → ready`, Abschlussmodus `manual` | | | |
 | Claim `review_only`: `ready → in_progress` | | | |
 | `manual_report` bestätigt: `in_progress → ready`, kein Codepublish | | | |
-| Approver/Operator: `return_to_todo`, `ready → todo` | | | |
+| Admin/Operator mit frischem Step-up: `return_to_todo`, `ready → todo` | | | |
 | Neues Approval `implementation`: `todo → ready`, Pushmodus `manual` | | | |
 | Claim `implementation`: `ready → in_progress` | | | |
 | Nach Runbranch-Push: `in_progress → review`, `## Recorded Scope` | | | |
@@ -240,9 +242,9 @@ Tatsächliche Zahl der Human Requests je Lauf, einschließlich `verification_ind
 | Exportkopien | Entfernt | |
 | Andere Läufe und aufbewahrte Auditdaten | Unverändert / vorhanden | |
 
-Die Restoreprobe verwendet das Backup aus A3 auf einer **getrennten Wiederherstellungsinstanz mit eigenen Volumes**; das README-Rezept setzt dafür einen getrennten Host voraus. Nur `init` und `app` als Dienste; keine Worker-/Scheduler-/Agent-/Checker-Daemons, kein Git-Zugriff, keine Providerlogins. Ausschließlich das begrenzte `ai6:restore` läuft einmalig mit Workeridentität und `--entrypoint php --no-deps`, weil sein Vertrag diese Rolle verlangt. Projektregistrierung, Approvals, Queue und private Deploy-Keys aus dem Backup dürfen keine zweite Instanz an der Pilotremote aktivieren. Die Pilotinstanz und ihre Belege bleiben unverändert.
+Die Restoreprobe verwendet das Backup aus A3 auf einer **getrennten Wiederherstellungsinstanz mit eigenen Volumes**; das README-Rezept setzt dafür einen getrennten Host voraus. **Offene Vertragsentscheidung:** Task 6 und AC-13/TC-06 nennen nur `init`/`app`, der Restore verlangt Workeridentität, und nur Task 6 nennt Login. Die Anfrage im README muss Rollen und Prüfumfang menschlich binden. Bis dahin sind dessen Transfer-/Restorekommandos und die folgenden Loginzeilen Vorschläge, keine zusätzliche Pilotvoraussetzung und kein Nachweis. Keine Worker-/Scheduler-/Agent-/Checker-Daemons, kein Git-Zugriff, keine Providerlogins. Projektregistrierung, Approvals, Queue und private Deploy-Keys aus dem Backup dürfen keine zweite Instanz an der Pilotremote aktivieren. Die Pilotinstanz und ihre Belege bleiben unverändert.
 
-Der vollständige Browser-/Loginnachweis ist am Vorbereitungsstand offen: `app` veröffentlicht keinen Hostport, und ein strict-Login benötigt die durch den Worker zugestellte Bestätigungsmail. Der Folgeentscheid aus A2 muss den Zugang und eine sicher begrenzte Mailzustellung liefern; das Starten eines allgemeinen Queueworkers oder Abschalten der Barriere ist keine Lösung. Dieser Befund wird durch die Vorlage nicht als behoben erklärt.
+Falls der Mensch einen vollständigen Browser-/Loginnachweis zum Vertragsumfang erklärt, benötigt dieser einen gebundenen Zugang und eine sicher begrenzte Mailzustellung: `app` veröffentlicht keinen Hostport, und ein strict-Login benötigt die durch den Worker zugestellte Bestätigungsmail. Ein allgemeiner Queueworker oder Abschalten der Barriere ist keine Lösung. Die offene Vertragsentscheidung aus A2 darf bis dahin weder als gelöst noch als zusätzliche Pilotsperre behandelt werden.
 
 | Bindung / Prüfung | Tatsächlicher Wert / Beobachtung / Beleg |
 |---|---|
@@ -269,7 +271,7 @@ Die Exitmeldung des zweiten Sweep allein belegt keine Idempotenz. Zwischenzeitli
 | Entscheidung | Vom Prüfer auszufüllen |
 |---|---|
 | Zweiter Entwickler: Name, nachvollzogene Anleitung/Belege, Datum und offene Punkte | |
-| Voraussetzungstabelle vollständig geschlossen; Ausnahmen nur ausdrücklich nicht anwendbare optionale Slots | |
+| Pflichtvoraussetzungen vollständig geschlossen; optionale Slots begründet nicht anwendbar; Restore-Vertragsentscheidung separat dokumentiert | |
 | Budgetverbrauch, Zahl der Human Requests und tatsächlicher Stopppunkt | |
 | Gesamtergebnis Teil A (bestanden / nicht bestanden) | |
 | Begründung, Grenzen und Belegreferenzen | |

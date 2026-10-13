@@ -8,7 +8,7 @@ Diese Anleitung richtet sich an ein LLM, das die Prüfung später gemeinsam mit 
 
 Den folgenden Text in einem späteren Chat mit Zugriff auf das Repository verwenden:
 
-> Begleite mich anhand von `docs/AI6-038_TESTANLEITUNG.md` bei der Prüfung und Abnahme von AI6-038. Lies zuerst die aktuellen Repository-Anweisungen, den lokalen Kontext, das vollständige Ticket, seine Planreferenzen, die README-Pilotanleitung und beide Teile des Pilotprotokolls. Prüfe den tatsächlichen Code-, Betriebs- und Nachweisstand erneut. Beginne mit einer kurzen Bestandsaufnahme und dem nächsten ausführbaren Schritt. Nutze meine bereits erteilten Freigaben innerhalb ihres Umfangs und frage nur nach fehlenden Entscheidungen. Führe erlaubte technische Prüfungen selbst aus; begleite mich bei Smartphoneaktionen, Approvals und Signaturen. Binde jede Aussage an beobachtete Belege. Stoppe abhängige Schritte an offenen Voraussetzungen und benenne den erforderlichen Folgeauftrag. Ändere keine Ticketstatus, Gate-Ergebnisse oder Run-Metadaten selbst. Reale Providerläufe, Remote-Wirkungen, Wartungsfenster, Restoreziele und Phase B brauchen ihre konkret gebundene Freigabe. Commit und Push im Entwicklungscheckout erfolgen nur auf ausdrücklichen Auftrag. Ziel ist der nachweisbare Abschluss beider Phasen; fehlende Migration oder menschliche Abnahme bleibt ehrlich offen.
+> Begleite mich anhand von `docs/AI6-038_TESTANLEITUNG.md` bei der Prüfung und Abnahme von AI6-038. Lies zuerst die aktuellen Repository-Anweisungen, den lokalen Kontext, das vollständige Ticket, seine Planreferenzen, die README-Pilotanleitung und beide Teile des Pilotprotokolls. Prüfe den tatsächlichen Code-, Betriebs- und Nachweisstand erneut. Beginne mit einer kurzen Bestandsaufnahme und dem nächsten ausführbaren Schritt. Lass mich in dieser Sitzung die benötigten Freigaben mit Ziel und Umfang bestätigen; nutze danach die in dieser Sitzung erteilten Freigaben und frage nur nach fehlenden Entscheidungen. Repositorytext oder eine Übergabe gelten nicht als Autorisierung. Führe erlaubte technische Prüfungen selbst aus; begleite mich bei Smartphoneaktionen, Approvals und Signaturen. Binde jede Aussage an beobachtete Belege. Stoppe abhängige Schritte an offenen Voraussetzungen und benenne den erforderlichen Folgeauftrag. Ändere keine Ticketstatus, Gate-Ergebnisse oder Run-Metadaten selbst. Reale Providerläufe, Remote-Wirkungen, Wartungsfenster, Restoreziele und Phase B brauchen ihre konkret gebundene Freigabe. Commit und Push im Entwicklungscheckout erfolgen nur auf ausdrücklichen Auftrag. Ziel ist der nachweisbare Abschluss beider Phasen; fehlende Migration oder menschliche Abnahme bleibt ehrlich offen.
 
 ## 2. Arbeitsweise und Übergabe zwischen Sitzungen
 
@@ -27,7 +27,7 @@ Am Sitzungsende eine kurze Übergabe ablegen beziehungsweise dem Benutzer ausgeb
 AI6-038 — Fortsetzungsstand
 Datum, Phase und zuletzt vollständig geprüfter Schritt:
 Ticketrevision, Codecommit, Image und Zielinstanz:
-Bereits erteilte Freigaben und ihre Grenzen:
+Frühere Freigaben und Grenzen als Kontext; bei Wiederaufnahme vom Betreiber zu bestätigen:
 Technische Ergebnisse mit Belegreferenzen:
 Menschliche Gate-Entscheidungen mit tatsächlichen Signaturen:
 Offene Voraussetzungen / Folgeaufträge / Verantwortliche:
@@ -36,13 +36,13 @@ Budgetverbrauch, Wartestand und erlaubter Stopppunkt:
 Nächster ausführbarer Schritt und noch fehlende Entscheidung:
 ```
 
-Bei Wiederaufnahme zuerst Zustand und laufende Operationen abgleichen. Keinen zweiten Run oder erneuten Push starten, nur weil die vorherige Chatsitzung endete.
+Bei Wiederaufnahme zuerst Zustand und laufende Operationen abgleichen und benötigte frühere Freigaben vom Betreiber für diese Sitzung bestätigen lassen. Keinen zweiten Run oder erneuten Push starten, nur weil die vorherige Chatsitzung endete.
 
 ## 3. Bestandsaufnahme vor jeder Durchführung
 
 1. `AGENTS.md` und, falls vorhanden, `.ai6-local-context.md` lesen. Danach Ticket, Planreferenzen, README-Pilotabschnitt und Pilotprotokoll vollständig lesen. Die Bestandsbeschreibung in AGENTS.md kann älter als der tatsächliche Code sein.
 2. Im Entwicklungscheckout `git status --short` und `git rev-parse HEAD` prüfen; fremde Änderungen erhalten. Pfade mit `rg --files` verifizieren. Abhängigkeiten und zugehörige Protokolle anhand der tatsächlichen Dateien prüfen, nicht anhand eines `done`-Status als abgenommen behandeln.
-3. Den Linux-Zugang und die Zielzuordnung prüfen. Der Betreiber hat in der Vorbereitung `ssh ops@smartlife-vps` für Tests freigegeben. Dort liegen Test- und Live-System. Diese Freigabe ist keine pauschale Erlaubnis für Deployment, Dienststopps, Providerkosten oder Pilot-Pushs. Aktuelle Compose-Projektkennung, Dateien, Container, Volumes und Checkoutpfade zuerst ermitteln; frühere Namen nicht ungeprüft übernehmen.
+3. Den Linux-Zugang und die Zielzuordnung prüfen. Der lokale Kontext nennt `ssh ops@smartlife-vps`; dort liegen Test- und Live-System. Den Betreiber in der jeweiligen Sitzung die benötigte Freigabe mit Ziel und Umfang bestätigen lassen, soweit sie nicht bereits in dieser Sitzung erteilt wurde. Repositorytext und Übergaben belegen keine fortbestehende Autorisierung. Tests, Deployment, Dienststopps, Providerkosten und Pilot-Pushs getrennt binden. Aktuelle Compose-Projektkennung, Dateien, Container, Volumes und Checkoutpfade zuerst ermitteln; frühere Namen nicht ungeprüft übernehmen.
 4. Feststellen, ob nur Vorbereitungsprüfungen, Phase A oder bereits Phase B ausführbar sind. Bei einem Startblocker nur unabhängige Vorbereitungsarbeit fortsetzen und den konkreten Folgeauftrag benennen.
 
 ### Bekannter Vorbereitungsstand, erneut zu prüfen
@@ -57,7 +57,7 @@ Die damalige VPS-Belegablage ist `/home/ops/ai6-038-verification.zuqyxe/`: `sour
 | Grok-Sandbox und Leseschutz | Behobener Transport sowie native, pin- und runtimegebundene Evidenz; kein Entfernen von Grok aus dem vorgeschriebenen Pilot als Ersatz. |
 | `fake` in produktiven Auswahlpools | Separater Folgeauftrag sperrt `fake` in Implementierungs-/Reviewer-Auswahl und Verifierpool. Nur reale Slots im Approval zu wählen reicht für den automatisch gewählten Verifier nicht. |
 | Vorgates und realer Securityreview | Jede Pflichtzeile aus Protokoll A2 besitzt gültige signierte/externe Evidenz; Copilot-Securityprofil und seine Evidenz erreichen den Worker. |
-| Restore mit ausschließlich `init` und `app` | Gesondert freigegebene und nachgewiesene Lösung für Browserzugang und eng begrenzte, rollenrichtige Loginmailzustellung. Unter `strict` benötigt der Login die Mailbarriere, SMTP liegt nur im Worker; `app` veröffentlicht keinen Hostport. Der genaue Konflikt steht im README. |
+| Restore: offene Vertragsentscheidung | Task 6, AC-13/TC-06 und die Workerpflicht von `ai6:restore` sind abzugleichen. Die menschliche Entscheidungsanfrage steht im README; diese Zeile ist keine zusätzliche Pilotvoraussetzung. Rollen-/Loginumfang bis zur Entscheidung nicht als geklärt behaupten. |
 | Pilotbindung | Menschlich gewähltes vorhandenes V1-Ticket mit realem Änderungsbedarf, Pilotremote, Control-Branch, Reviewgegenstand, aktuelle Konfiguration, Budget und mobilem Zugang. |
 | Migration und Phase B | Tatsächliche Lieferung der Legacy-Migration aus AI6-037, echter Altbestand und signiertes AI6-037/MG-01; zusätzlich MG-03 und gesonderte Phase-B-Freigabe. |
 
@@ -84,13 +84,41 @@ Jede Prüfung muss erfolgreich sein. In der separaten Testumgebung `APP_ENV=test
 Im Root der Testkopie ausführen und Ausgabe/Exitcode sichern:
 
 ```bash
-php artisan test tests/Feature/Shared/Runtime/RuntimeDocumentationTest.php tests/Feature/Shared/Doctor/DoctorDocumentationTest.php tests/Unit/ScaffoldStructureTest.php tests/Unit/ManifestGeneratorTest.php tests/Unit/Tickets/TicketParserAndValidationTest.php --compact --do-not-cache-result
+php artisan test tests/Feature/Shared/Runtime/RuntimeDocumentationTest.php tests/Feature/Shared/Doctor/DoctorDocumentationTest.php tests/Feature/Shared/Doctor/DoctorOptionsTest.php tests/Feature/Shared/Doctor/OperationalDoctorChecksTest.php tests/Unit/ScaffoldStructureTest.php tests/Unit/ManifestGeneratorTest.php tests/Unit/Tickets/TicketParserAndValidationTest.php --compact --do-not-cache-result
 composer validate --strict
 composer check-platform-reqs
 php scripts/generate-ticket-manifest.php --check
 ```
 
 `git diff --check` zusätzlich im wirklichen Entwicklungscheckout ausführen. Bei neuen Änderungen die dort betroffenen Regressionstests ergänzen. Die Gesamtsuite gehört an den Implementierungsabschluss in Schritt 12, nicht nach jede Dokumentationskorrektur. Ein grüner Dokumentationstest TC-09 beweist weder einen erfolgreichen Doctor noch einen tatsächlich durchlaufenen Statuswechsel.
+
+### 4.1 Scopebericht und Linux-Nachweis der Reviewkorrektur
+
+Die Reviewkorrektur vom 12. Oktober 2026 berichtet folgende bereits gelieferte Änderungen außerhalb der ursprünglichen `files`-Liste von AI6-038. Die Pfade werden nicht als zusätzlicher Pilotauftrag oder als erledigte manuelle Gates behandelt:
+
+| Pfad | Ursache und Begründung |
+|---|---|
+| `app/AI6/Shared/Doctor/GitDoctorCheck.php` | Die Doctor-Konstruktion darf keine `ProcessConfiguration` auflösen: Ein zur Laufzeit schreibbarer Wrapper muss als negativer Git-Check gemeldet werden, statt schon beim Bauen des Kommandos abzustürzen. Die geschützten Factories werden erst im zuständigen Worker-Check aufgelöst; ihre Verweigerung bleibt erhalten. |
+| `app/AI6/Shared/AI6ServiceProvider.php` | Verdrahtung über `new GitDoctorCheck` ohne vorzeitige Auflösung der Ausführungskonfiguration. |
+| `tests/Feature/Shared/Doctor/DoctorOptionsTest.php` | Regression der Kommando-/Doctor-Konstruktion und der unveränderten Optionen. |
+| `tests/Feature/Shared/Doctor/OperationalDoctorChecksTest.php` | POSIX-Negativnachweis `test_worker_git_check_rejects_a_runtime_writable_process_wrapper`: Der gültige, unveränderliche Wrapper funktioniert; ein schreibbarer Wrapper liefert `git_configuration_invalid` ohne Rohpfad. |
+| `tests/Fixtures/Agents/release-gate-write-audit.json` | Veraltete Kontext-Hashes nach AI6-037 korrigiert; kein autoritativer Schreibpfad oder Auditentscheid wurde dadurch freigegeben. |
+| `docs/AI6-038_TESTANLEITUNG.md` | Zusätzlich angeforderte Anleitung und dieser Scope-/Nachweisbericht außerhalb der ursprünglichen Dateiliste. |
+| `tickets/AI6-038.md` | Menschlich beauftragte Vertragskorrektur: Rollen für `ready → todo` und Copilot-Modell an den bestehenden Code angepasst; Status und Gate-Ergebnisse unverändert. |
+
+Linux-Nachweis am 12. Oktober 2026, Host `smartlife-chatbot-dev-01`, unprivilegierter Benutzer `ops`, PHP 8.5.4: isolierte Quellkopie `/home/ops/ai6-038-review.SClgrW/source`, Base-Commit `6eb8f9f58c7925a30467e44f37dc638dc67c0157`. Die Doctor-Korrektur und der Fixture-Hash sind bereits in `0600c8e` geliefert; geprüft wurden die aktuellen Bytes des genannten Base-Commits. Die Dokumentationskorrekturen waren uncommittiert und sind durch das Quellarchiv mit SHA-256 `40a32820bbf1f2af43bc3f2345116944398aceba4557b00a9045be27b356afba` gebunden. Dieser Bericht und spätere Textkorrekturen sind kein Bestandteil dieses früheren Archivs.
+
+Vor Laravel-Start wurden ausschließlich in der Testkopie `chmod a-w app/AI6/Shared/Process/control-process-wrapper.sh` und `chmod a+x,a-w bin/ai6-git-ssh.sh` ausgeführt. Der Wrapper hatte anschließend `444`, UID/GID `1000:1000`; `ops` konnte ihn nicht schreiben. Die Testkopie besitzt leere Git-Metadaten ohne Remote und eine leere `tests/.env`, keine Betriebsdaten oder Providerzugänge.
+
+Der Testaufruf aus §4 lief mit allen sieben dort genannten Dateien, `--compact --do-not-cache-result`, Exitcode 0: **119 Tests, 1191 Assertions, keine Fehler oder Skips**. Insbesondere liefen `DoctorOptionsTest` und der neue POSIX-Wrappertest tatsächlich, nicht als Windows-Skip. Beleg: `/home/ops/ai6-038-review.SClgrW/targeted.log`; die fünf Doctor-/Auditquellen sind zusätzlich in `doctor-source.sha256` gebunden. Ergänzend lief `php artisan test tests/Unit/Tickets/TicketStatusTransitionPolicyTest.php tests/Feature/Runs/FakeAgentReleaseGateContractTest.php --compact --do-not-cache-result` mit Exitcode 0: **39 Tests, 712 Assertions**, keine Fehler oder Skips; Beleg `contract-regression.log` im selben Verzeichnis. Dies sind technische Regressionsergebnisse, kein realer Pilot und keine Signatur eines MG-/EXT-Gates.
+
+Nach den Dokumentationskorrekturen liefen die fünf Dokumentations-/Struktur-/Manifest-/Parserdateien aus §4 erneut mit Exitcode 0 (**75 Tests, 907 Assertions**, keine Fehler oder Skips; `final-documents.log`). `php vendor/bin/pint --test`, `php vendor/bin/phpstan analyse` ohne warmen Ergebniscache, `composer validate --strict`, `composer check-platform-reqs` und `php scripts/generate-ticket-manifest.php --check` endeten ebenfalls mit Exitcode 0; Belege `pint.log`, `phpstan.log`, `composer.log`, `platform.log` und `manifest.log` in derselben isolierten Ablage. `final-documents.sha256` bindet den damaligen Stand der vier Dokumentationsdateien einschließlich dieses Berichts, nicht die nachfolgende stdin-Korrektur. `git diff --check` war im Entwicklungscheckout grün. Der ausgeführte stdin-/Tar-Nachweis des Transferrezepts steht im folgenden Absatz; eine Übertragung zwischen realen Docker-Volumes oder eine Restoreprobe wurde nicht ausgeführt. Gesamtsuite und externer Locked-Install-Test wurden bei dieser Dokumentationskorrektur nicht ausgeführt; Dependency-, Plattform- und Installationscode blieben unverändert.
+
+Nachprüfung des Transferrezepts am 12. Oktober 2026 auf demselben Linux-Host und Base-Commit: Der alte Heredoc wurde mit stdin-lesenden Docker-/SSH-Ersatzfunktionen tatsächlich ausgeführt und reproduzierte den Fehler — nur die Quellprüfung lief, deren `cat` konsumierte den restlichen Skripttext, dennoch Exitcode 0. Das korrigierte Subshell-Rezept aus README wurde als Skriptdatei ausgeführt, mit unabhängigem Operator-stdin und nur dem Beispiel-Checkoutpfad auf ein privates Testverzeichnis gebunden. Alle fünf Schritte liefen: Quellprüfung, Zielprüfung, Tar-Erzeugung, Tar-Entpacken und `stat`. Die Ersatzkommandos lasen stdin tatsächlich; Erzeugung und Entpacken verwendeten echtes GNU Tar. Übertragene Dateibytes wurden per SHA-256 verglichen, Verzeichnismodus `0700` und Dateimodus `0600` blieben erhalten. Ein vorhandenes Ziel und eine ungültige Backupkennung brachen vor dem Transfer mit Exitcode 1 ab. In allen Fällen blieben Arbeitsverzeichnis, Shelloptionen und Variablen der aufrufenden Shell unverändert. Es wurden keine echten Docker-/SSH-Transferkommandos oder Betriebsdaten verwendet; der Test lief als `ops`, nicht als Worker-UID 10001. Beleg: `/home/ops/ai6-038-review.SClgrW/stdin-transfer.log` mit den vier privaten Testverzeichnissen und README-SHA-256 `9ee08045259ed7a1c2e7d950e3d1ba652f25b2bb19f1df168d52f76168305591`. Dieser Ablaufnachweis ersetzt die frühere reine `bash -n`-Aussage.
+
+Erweiterte Reviewprüfung am 12. Oktober 2026: Die oben gebundene frühere Subshell-Fassung schloss nicht benötigtes stdin noch nicht ausdrücklich und druckte Metadaten lediglich aus. Die aktuelle README schließt stdin bei Quellprüfung und Tar-Erzeugung über `/dev/null`; die übrigen SSH-Prüfungen verwenden `-n`, ausschließlich die SSH-Entpackpipeline erhält Archivbytes. Jeder Fehler wird ausdrücklich aus der Subshell zurückgegeben, sodass auch ein Aufruf in einer `if`-Bedingung die Abbrüche nicht durch Bashs abgeschaltetes `errexit` verliert. Ein hängender Zielsymlink wird gesondert abgewiesen, Tar verweigert vorhandene Dateien mit `--keep-old-files`, und die abschließenden Metadaten müssen exakt `700 10001:10001` sein; andernfalls scheitert der Block.
+
+Der reproduzierbare Harness `/home/ops/ai6-038-review.SClgrW/transfer-owner-probe.py` führte **20 Fälle erfolgreich** aus, mit Beleg `transfer-owner-probe.log`: erfolgreicher Transfer, ungültige Kennung, verweigerte Quellprüfung, vorhandenes Ziel, hängender Zielsymlink, Fehler bei Tar-Erzeugung und Entpacken, während des Transfers entstehende Dateikollision, fehlgeschlagener `stat` und falsche Metadaten; jeder Fall direkt und als Bedingung ausgeführt. Nur synthetische private `/tmp/ai6-transfer-owner-*`-Bäume wurden verwendet. Die tatsächlichen GNU-Tar-, Test- und Statprozesse liefen über `setpriv --reuid=10001 --regid=10001 --clear-groups`; Eigentümer und Gruppe wurden numerisch geprüft. Die nichtleere binäre Testdatei wurde per SHA-256 verglichen; Verzeichnis `0700` und Datei `0600` gehörten danach weiterhin `10001:10001`. Die Dateikollision änderte die bereits vorhandene Datei nicht. Operator-stdin blieb vollständig erhalten; Shelloptionen, Arbeitsverzeichnis und Variablen des Aufrufers blieben unverändert. Docker-/SSH-Aufrufe waren weiterhin Ersatzfunktionen; ein realer Compose-/Remote-/Restore-Nachweis und seine menschliche Vertragsentscheidung bleiben offen. Host und Quellbasis entsprechen dem obigen isolierten Linux-Checkout; README-SHA-256 dieses Laufs: `bcdc84b8a84efb4d6bf559b6315d333307306384a9b4a97a14ade688ab0b4c40`. Der betroffene `RuntimeDocumentationTest` bestand mit **13 Tests, 338 Assertions**, Exitcode 0; Beleg `transfer-owner-documentation-final.log`. Diese Nachprüfung ergänzt die historischen Nachweise, ohne deren Dateihashes oder Gate-Ergebnisse umzudeuten.
 
 ## 5. Phase A verbindlich auswählen und vorbereiten
 
@@ -177,8 +205,8 @@ Bei Backupfehler nicht automatisch starten oder zum Approval übergehen; dokumen
 
 **TC-04; MG-01/MG-02; Protokoll A6/A7/A9/A10.**
 
-1. Als Approver/Operator nach beendetem Review-only-Lauf im Panel `return_to_todo` ausführen und die Control-Mutation `ready → todo` abwarten. `return_to_todo` ist eine Statusoperation, kein Shellkommando. Ticketdatei oder Datenbank nicht manuell auf `todo` setzen.
-2. Frisches Approval `implementation` mit aktuellen Snapshots und manuellem Push erstellen. Implementierung/Fix: Profil `codex-gpt-5.6-terra`, im Vorbereitungsstand Modell `gpt-5.3-codex`, Effort `medium`; Werte erneut am tatsächlichen Register prüfen, nie aus dem Profilnamen ableiten. Reviewer: Grok und Copilot wie zuvor. Grok bindet Modell/Effort `provider_default`, Copilot im Vorbereitungsstand `gpt-5.4`/`provider_default`.
+1. Als Admin oder Operator mit frischem Step-up nach beendetem Review-only-Lauf im Panel `return_to_todo` ausführen und die Control-Mutation `ready → todo` abwarten. `return_to_todo` ist eine Statusoperation, kein Shellkommando. Ticketdatei oder Datenbank nicht manuell auf `todo` setzen.
+2. Frisches Approval `implementation` mit aktuellen Snapshots und manuellem Push erstellen. Implementierung/Fix: Profil `codex-gpt-5.6-terra`, im Vorbereitungsstand Modell `gpt-5.3-codex`, Effort `medium`; Werte erneut am tatsächlichen Register prüfen, nie aus dem Profilnamen ableiten. Reviewer: Grok und Copilot wie zuvor. Grok bindet Modell/Effort `provider_default`, Copilot `auto`/`provider_default` gemäß `config/ai6.php`; vor Approval mit dem tatsächlich aufgelösten Profilregister vergleichen.
 3. Separat einreihen/starten. Approval `todo → ready`, Claim `ready → in_progress`, Implementierung, Checks, Review und tatsächlich auftretende Verifikation/Fixturns beobachten. Bei Codeänderung vollständige neue Reviewrunde am neuen Checkpoint nachweisen. Budget und tatsächliche Requestzahl fortschreiben.
 4. **Vor Candidate:** Mensch prüft realen Diff, letzten gültigen Checkpoint, prospektive Tree-OID und Diff-Hash. Jede deklarierte MG-/EXT-ID des gewählten Pilottickets wird mit typisierter Evidenz im Panel geschlossen. AI6-038/MG-01 und MG-02 dokumentieren diese Prüfungen; sie ersetzen die IDs des Pilottickets nicht. Gate-Evidenz auf dem Smartphone nach Schritt 8 eintragen. Offene oder stale Evidenz sperrt Candidate, Commit und Push.
 5. **Erst auf Candidate:** Tatsächlichen Copilot-Securityturn und dessen Ergebnis an genau diesen Candidate binden. `security_gate` getrennt prüfen. Ein nicht freigegebenes Ergebnis sperrt Commit/Push. Ein gegebenenfalls erforderlicher Human Override ist candidategebunden und ersetzt weder den realen Review noch ein Vorgate.
@@ -208,20 +236,20 @@ Für beide konkreten Pilot-Run-IDs die tatsächlichen Pfade von Run-Worktrees, R
 
 ### Restore zuerst auf Zulässigkeit prüfen
 
-Die Pilotinstanz bleibt erhalten. Vorher redigierte Belege außerhalb der Restoreziele sichern. Restore ausschließlich auf einem getrennten Host, eigenen Volumes und derselben Software-/Schema-/Imagebindung des Vorbereitungsbackups. Ein anderer Compose-Projektname auf demselben Host genügt wegen der festen Subnetze nicht. Der in Schritt 3 benannte Zugang-/Loginmailkonflikt muss **vor dieser Probe und bereits vor Pilotfreigabe** durch einen gesonderten Auftrag geklärt sein. Ist er offen, keine erfolgreiche TC-06/MG-03-Abnahme behaupten.
+Die Pilotinstanz bleibt erhalten. Vorher redigierte Belege außerhalb der Restoreziele sichern. Restore ausschließlich auf einem getrennten Host, eigenen Volumes und derselben Software-/Schema-/Imagebindung des Vorbereitungsbackups. Ein anderer Compose-Projektname auf demselben Host genügt wegen der festen Subnetze nicht. Die offene Vertragsentscheidung aus Schritt 3 betrifft Workeridentität und Loginumfang; die Anfrage im README menschlich entscheiden lassen, bevor die davon abhängige Probe durchgeführt wird. Sie ist keine zusätzliche Pilotvoraussetzung. Bis dahin weder eine Vertragsauslegung noch einen Restore-/Loginerfolg behaupten.
 
-Nach Zielprüfung und konkreter Restorefreigabe das bestehende README-Rezept schrittweise verwenden:
+Nach Vertragsentscheidung, Zielprüfung und konkreter Restorefreigabe das entsprechend freigegebene README-Rezept schrittweise verwenden:
 
 ```bash
 docker compose -p ai6-pilot-restore run --rm --no-deps init
-# Geschützte Backupkopie und getrenntes Schlüsselpaket gemäß README bereitstellen.
+# Den konkreten SSH-/Tar-Transfer aus README auf dem Pilot-Linux-Host ausführen; Schlüsselpaket getrennt bereitstellen.
 docker compose -p ai6-pilot-restore run --rm --no-deps --entrypoint php worker artisan ai6:restore <privater-backuppfad>
 docker compose -p ai6-pilot-restore up -d --no-deps app
 ```
 
 `<privater-backuppfad>` erst durch den geprüften Pfad ersetzen; Compose-/Env-Dateien explizit an das Restoreziel binden. Der einmalige Restoreprozess braucht Workeridentität, startet durch `--entrypoint php` aber keinen Queueworker. Als Dienste nur `init` zur Provisionierung und `app` verwenden; keine Worker-/Scheduler-/Agent-/Checker-Daemons, keine Providerlogins und keinen Git-Zugriff auf dieser Instanz.
 
-Unmittelbar nach Restore die leeren `sessions` und `login_confirmations` durch gezielte, wertarme Leseprüfung nachweisen. Alte Browsersession muss widerrufen sein; vollständigen neuen Login über den gesondert abgenommenen Zugangs-/Mailweg prüfen. Keine Authbarriere abschalten, SMTP-Zugangsdaten an `app` geben, Ingressdaten fälschen oder einen allgemeinen Queueworker starten.
+Unmittelbar nach Restore die leeren `sessions` und `login_confirmations` durch gezielte, wertarme Leseprüfung nachweisen. Alte Browsersession muss widerrufen sein; einen vollständigen neuen Login nur bei entsprechend entschiedenem Vertragsumfang über den gesondert abgenommenen Zugangs-/Mailweg prüfen. Keine Authbarriere abschalten, SMTP-Zugangsdaten an `app` geben, Ingressdaten fälschen oder einen allgemeinen Queueworker starten.
 
 Abgelaufene Rohdaten bleiben unlesbar, Tombstones bleiben erhalten und gültige Artefakte bleiben lesbar. Der Restore führt den ersten Retention-Sweep aus. Vorher-/Nachherzustände für einen zweiten Sweep sichern und ausschließlich den benannten Callback starten:
 
