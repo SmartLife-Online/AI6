@@ -1,4 +1,6 @@
-# AI6 – Implementierungsplan V1.7.14 – Ticket-Ready, Lean & Secure
+# AI6 – Implementierungsplan V1.7.15 – Ticket-Ready, Lean & Secure
+
+**Revision V1.7.15:** Auf ausdrückliche menschliche Freigabe vom 19. Oktober 2026 («Setzte das neue Ticket Format um.») wird die empfohlene Option 1 aus `docs/AI6-053_TICKET_PROMPT_SMART_TICKETS_ENTSCHEIDUNGSANTRAG.md` aufgenommen. Der neue Blueprint `AI6-053` ersetzt das bisherige Ticket-Prompt-Tool unter `ticket-prompt/` durch einen Hinweis auf die eigenständige lokale Anwendung Smart Tickets, die AI6 über ihr Profil `ai6` bedient. Das Verzeichnis bleibt mit `ticket-prompt/README.md` bestehen, sodass `.dockerignore`, `pint.json` und die daran gebundenen Tests unverändert gelten. `ai/prompts/` und `tools/` bleiben erhalten, solange Smart Tickets den Master-Prompt und den Ticketvalidator verwendet; ihre spätere Entfernung ist mit einer Änderung dieses Profils abzustimmen. Produktcode, Promptkatalog, `/prompts/help`, der Legacy-Leser und bestehende Tickets ändern sich nicht. Die Ausschlüsse in `AI6-037`, `AI6-038` und `AI6-052` bleiben als Historie unverändert. Der Backlog wächst von 58 auf 59 Blueprints; §14.1, §15.8, §16 und §21 werden nachgeführt.
 
 **Revision V1.7.14:** Ausdrückliche menschliche Freigabe vom 11. Oktober 2026 («Begrenzte Sessionprojektion freigeben»): Der echte Linux-Test des gepinnten Copilot-Transports 1.0.83 belegt dessen erforderliche native Sessionpersistenz. AI6-048 erhält deshalb ausschließlich für quality_review und den durch AI6-050 separat freigegebenen security_review eine pro Turn frische Sessionquelle im privaten Ergebnisausgang und deren exakten Bindmount auf home/session-state. Auth, Homewurzel, Konfiguration, Instruktionen und Reviewworkspace bleiben read-only. Die Variante ist durch Runtimeversion 2, die geschlossene Berechtigung native_session_state=ephemeral_review und den vollständigen Turnkontext gebunden; alte Aufträge werden nicht allein durch ihren Alias aufgewertet. Der bestehende AgentProcessScope richtet den Mount ein; ein unveränderlicher Prüfschritt im Kindprozess beobachtet die tatsächliche Mount-/Inodeidentität vor dem Providerstart. Agent-eigene private Ausgänge erhalten keine zusätzlichen Leserechte am geschützten Workerkanal, bleiben zentral überwacht und werden einschließlich nativer Rohdaten vor Antwortpublikation entfernt. Kein Resume, Sessionstore, zweiter Runner oder zweiter Mailboxvertrag entsteht. Plan und AI6-048 werden auf diese Entscheidung angepasst; veröffentlichte IDs, Statusentscheidungen und unsignierte Gates bleiben unverändert. Die Freigabe der begrenzten Umsetzung ersetzt weder Capability-Evidenz noch menschliche Abnahme.
 
@@ -1304,6 +1306,7 @@ Erscheint eine neuere Major-, Minor- oder Patchversion einer dieser drei Laufzei
 56. AI6-038 — Realer AI6-Pilot und MVP-Abnahme
 57. AI6-051 — Git-Repositories im SHA-1- und SHA-256-Objektformat unterstützen
 58. AI6-052 — Schaltbarer Gastzugang zu manuellen Prompt-Tools
+59. AI6-053 — Altes Ticket-Prompt-Tool durch Hinweis auf Smart Tickets ersetzen
 ```
 
 Die Reihenfolge ist eine gültige Topologie, aber nicht jede unabhängige Arbeit muss künstlich seriell erfolgen. Innerhalb eines Meilensteins dürfen nur Tickets parallel entwickelt werden, deren `depends_on` vollständig erfüllt ist und die nicht denselben noch instabilen Vertrag definieren.
@@ -4145,6 +4148,44 @@ Verwaltete Git-Repositories im SHA-1- und SHA-256-Objektformat durchgängig vera
 - Repositorykonvertierung, Umschreiben bestehender Git-Historie, Hashalgorithmuswechsel für AI6-Prüfsummen, Provideradapter oder neue UI-Abläufe.
 - Umsetzung während der Ticketerzeugung, produktiver Push oder Schließen fremder manueller Gates.
 
+### AI6-053 — Altes Ticket-Prompt-Tool durch Hinweis auf Smart Tickets ersetzen
+
+- **Initialstatus des späteren Detailtickets:** `todo`
+- **Risiko:** `low`
+- **Kind:** `chore`
+- **Depends on:** keine
+- **Requirement-Refs:** `OPS-005`
+- **Erwartete Module:** keine; ausschließlich Repository-Werkzeuge außerhalb des Produktcodes und `README.md`
+
+**Ziel**
+
+Das bisherige Ticket-Prompt-Tool unter `ticket-prompt/` durch einen Hinweis auf die lokale Anwendung Smart Tickets ersetzen, ohne Produktcode, Promptkatalog, Master-Prompt oder Ticketvalidator zu ändern.
+
+**Deliverables**
+
+- `ticket-prompt/api.php`, `ticket-prompt/index.html` und `ticket-prompt/tests/` sind entfernt; `ticket-prompt/README.md` nennt Pfad, Startbefehl, Adresse und Projekt-ID `ai6` von Smart Tickets sowie den Commit mit dem letzten Stand des alten Tools.
+- `README.md` beschreibt im Zuordnungsabschnitt des bisherigen Ticket-Prompt-Tools den Ersatz durch Smart Tickets und nennt `ai/prompts/implementierung_master_prompt.md` und `tools/validate_tickets.php` als weiterhin verwendet; die Herkunftszeilen der Zuordnungstabelle bleiben unverändert.
+- `.dockerignore`, `pint.json`, `ai/prompts/`, `tools/`, Produktcode und bestehende Tickets bleiben unverändert.
+
+**Akzeptanzvertrag**
+
+- Unter `ticket-prompt/` ist ausschließlich `ticket-prompt/README.md` versioniert.
+- Die an `ticket-prompt` gebundenen Laufzeit-, Format- und Dokumentationsverträge bleiben gültig.
+- Der Ticketvalidator meldet nach der Änderung keine zusätzlichen Fehler gegenüber dem Stand davor.
+- Smart Tickets zeigt für `ai6` die Ticketliste und erzeugt den Implementierungs-Prompt aus dem Projekt-Master-Prompt; dabei wird kein echter Ticketstatus geändert.
+
+**Mindestens zu erzeugende Testfälle**
+
+- Dateibestand unter `ticket-prompt/` nach der Änderung.
+- `ManualPromptCatalogTest`, `RuntimeScriptsTest`, Pint und die reguläre PHPUnit-Suite als Regression.
+- Validatorlauf vor und nach der Änderung.
+- Menschlicher Smoke von Smart Tickets für `ai6` ohne Statuswechsel.
+
+**Nicht Teil dieses Tickets**
+
+- Entfernung von `ai/prompts/` oder `tools/`, Abschaltung des Legacy-Lesers aus Phase B von `AI6-038`, Änderungen am Promptkatalog, an `/prompts/help` oder an Smart Tickets.
+- Korrektur bestehender Validatorfehler in `tickets/`.
+
 ---
 
 ## 16. Requirement-Traceability
@@ -4240,7 +4281,7 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `OPS-002` | `AI6-002` |
 | `OPS-003` | `AI6-003`, `AI6-035`, `AI6-036`, `AI6-045` |
 | `OPS-004` | `AI6-001`, `AI6-002`, `AI6-015` |
-| `OPS-005` | `AI6-037`, `AI6-038` |
+| `OPS-005` | `AI6-037`, `AI6-038`, `AI6-053` |
 | `OPS-006` | `AI6-001`, `AI6-036` |
 | `OPS-007` | `AI6-001` |
 | `OPS-008` | `AI6-001`, `AI6-002` |
@@ -4372,7 +4413,7 @@ Der MVP ist erreicht, wenn:
 
 ## 21. Kurzbegründung der Ticketanzahl
 
-58 Tickets sind für den Funktionsumfang bewusst kleiner als die bisherigen zehn Pakete, aber keine künstlichen Mikrotickets. Jeder Blueprint bildet eine reviewbare Grenze: Datenvertrag, vertikaler Benutzerfluss oder sicherheitsrelevante technische Naht. Die fünf mit V1.7.0 ergänzten Blueprints folgen demselben Schnitt: zwei für den Review-only-Modus (Statusvertrag getrennt von Quellbindung und Bedienung), zwei für die neuen Provideradapter (je CLI ein eigenständig testbarer Adapter) und einer für die providerunabhängige Verifier-Orchestrierung. `AI6-044` ergänzt als eigener manueller Benutzerfluss ausschließlich die Clipboard-Bedienung des zentralen Promptkatalogs und bleibt von Provider- und Runwirkung getrennt. `AI6-045` folgt demselben Schnitt als sicherheitsrelevante technische Naht: Die Definition eines Checks und sein rollenrichtiger Vollzug sind getrennt reviewbar, weil der Vollzug eigene Container-, Mount- und Wartezustandsverträge berührt, die die Profildefinition nicht kennt. Ein Ticket darf während der Detailerzeugung weiter gesplittet werden, aber nur über eine explizite Planrevision; ein stilles Zusammenlegen mehrerer Blueprints ist nicht zulässig.
+59 Tickets sind für den Funktionsumfang bewusst kleiner als die bisherigen zehn Pakete, aber keine künstlichen Mikrotickets. Jeder Blueprint bildet eine reviewbare Grenze: Datenvertrag, vertikaler Benutzerfluss oder sicherheitsrelevante technische Naht. Die fünf mit V1.7.0 ergänzten Blueprints folgen demselben Schnitt: zwei für den Review-only-Modus (Statusvertrag getrennt von Quellbindung und Bedienung), zwei für die neuen Provideradapter (je CLI ein eigenständig testbarer Adapter) und einer für die providerunabhängige Verifier-Orchestrierung. `AI6-044` ergänzt als eigener manueller Benutzerfluss ausschließlich die Clipboard-Bedienung des zentralen Promptkatalogs und bleibt von Provider- und Runwirkung getrennt. `AI6-045` folgt demselben Schnitt als sicherheitsrelevante technische Naht: Die Definition eines Checks und sein rollenrichtiger Vollzug sind getrennt reviewbar, weil der Vollzug eigene Container-, Mount- und Wartezustandsverträge berührt, die die Profildefinition nicht kennt. Ein Ticket darf während der Detailerzeugung weiter gesplittet werden, aber nur über eine explizite Planrevision; ein stilles Zusammenlegen mehrerer Blueprints ist nicht zulässig.
 
 `AI6-048` ist eine ausdrücklich beauftragte Nachlieferung zur fehlenden Umsetzung von `AI6-042`. Adapter, Doctor, Testdouble und Smoke beweisen gemeinsam genau eine Providergrenze und werden nicht in parallele Implementierungen aufgeteilt. Die frühere Konfigurationslieferung bleibt erhalten; die in V1.7.14 ausdrücklich freigegebene Sessionprojektion erweitert nur diese vorhandene Providergrenze und konsumiert den bestehenden AgentProcessScope. Eine weitere Mount-/Namespacearchitektur gehört nicht dazu. Claude-Modellprofile aus `AI6-034` konsumieren erst danach diese eine Copilot-Naht.
 
@@ -4383,3 +4424,5 @@ Der MVP ist erreicht, wenn:
 `AI6-052` erweitert den bestehenden manuellen Benutzerfluss aus `AI6-044` um genau eine neue, standardmäßig abgeschaltete Zugriffsfähigkeit: Nutzung ohne Login bei ausdrücklich aktiviertem Instanzschalter und weiterhin geschützten fachlichen Daten und Aktionen. Schalter und Gastzugang bilden eine untrennbare Grenze und bleiben deshalb ein Blueprint. Technische Websessions, zentrale Promptverarbeitung und Sicherheitskontrollen bleiben erhalten; ein neuer Session- oder Transportvertrag gehört nicht dazu.
 
 Die in V1.7.13 ausdrücklich freigegebene Etappierung von `AI6-037` und `AI6-038` erhält deren veröffentlichte Lieferverträge und Evidenz-IDs. Promptzuordnung und erster V1-Pilot dürfen vor dem späteren Legacy-Migrationsnachweis geliefert werden; die verbleibenden Kriterien und Gates werden weder gestrichen noch als bestanden behandelt. Die Blueprintanzahl bleibt 58.
+
+`AI6-053` ist nach V1.7.15 eine eigene, produktcodefreie Repository-Bereinigung: Sie ersetzt ausschließlich das statusschreibende Alttool durch einen Hinweis auf Smart Tickets, damit nur noch eine gepflegte Fassung dieses Werkzeugs existiert. Sie gehört weder zur Promptzuordnung oder Migration aus `AI6-037` noch zum Legacy-Cutoff aus `AI6-038`, deren Ausschlüsse unverändert bleiben. Die Blueprintanzahl steigt damit auf 59.
