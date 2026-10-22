@@ -1,7 +1,7 @@
 schema: ai6.ticket-manifest.v1
 source: docs/AI6_IMPLEMENTATION_PLAN.md
-plan_revision: "V1.7.15"
-blueprint_count: 59
+plan_revision: "V1.7.16"
+blueprint_count: 60
 blueprints:
   - id: "AI6-001"
     title: "Laravel-Grundgerüst und Qualitätsbaseline"
@@ -475,3 +475,11 @@ blueprints:
     kind: "chore"
     depends_on: []
     requirement_refs: ["OPS-005"]
+  - id: "AI6-054"
+    title: "AGENTS.md für moderne Coding-Agenten straffen"
+    milestone: "M7"
+    initial_status: "todo"
+    risk: "medium"
+    kind: "chore"
+    depends_on: []
+    requirement_refs: ["REV-009"]

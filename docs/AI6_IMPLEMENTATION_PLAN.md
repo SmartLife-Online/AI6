@@ -1,4 +1,6 @@
-# AI6 – Implementierungsplan V1.7.15 – Ticket-Ready, Lean & Secure
+# AI6 – Implementierungsplan V1.7.16 – Ticket-Ready, Lean & Secure
+
+**Revision V1.7.16:** Auf ausdrücklichen menschlichen Auftrag vom 22. Oktober 2026, die bestehende `AGENTS.md` für moderne Coding-Agenten zu optimieren und dazu ein Ticket zu erstellen, und auf die ausdrückliche Freigabe dieser Planänderung in derselben Sitzung («Blueprint + Ticket») wird der neue Blueprint `AI6-054` aufgenommen. Er verdichtet `AGENTS.md` auf dauerhaft gültige, nicht aus Code, Plan oder Konfiguration ableitbare Regeln, entfernt den veralteten Repositoryzustand und erhält die Abschnittsnummern §1 bis §11, auf die Prompts, Tickets und Nachweise verweisen. Ein gesonderter Entscheidungsantrag entfällt, weil die Freigabe unmittelbar im Auftrag erteilt wurde. Requirements, Architektur, Template, Produktcode und bestehende Tickets ändern sich nicht. Der Backlog wächst von 59 auf 60 Blueprints; §14.1, §15.8, §16 und §21 werden nachgeführt.
 
 **Revision V1.7.15:** Auf ausdrückliche menschliche Freigabe vom 19. Oktober 2026 («Setzte das neue Ticket Format um.») wird die empfohlene Option 1 aus `docs/AI6-053_TICKET_PROMPT_SMART_TICKETS_ENTSCHEIDUNGSANTRAG.md` aufgenommen. Der neue Blueprint `AI6-053` ersetzt das bisherige Ticket-Prompt-Tool unter `ticket-prompt/` durch einen Hinweis auf die eigenständige lokale Anwendung Smart Tickets, die AI6 über ihr Profil `ai6` bedient. Das Verzeichnis bleibt mit `ticket-prompt/README.md` bestehen, sodass `.dockerignore`, `pint.json` und die daran gebundenen Tests unverändert gelten. `ai/prompts/` und `tools/` bleiben erhalten, solange Smart Tickets den Master-Prompt und den Ticketvalidator verwendet; ihre spätere Entfernung ist mit einer Änderung dieses Profils abzustimmen. Produktcode, Promptkatalog, `/prompts/help`, der Legacy-Leser und bestehende Tickets ändern sich nicht. Die Ausschlüsse in `AI6-037`, `AI6-038` und `AI6-052` bleiben als Historie unverändert. Der Backlog wächst von 58 auf 59 Blueprints; §14.1, §15.8, §16 und §21 werden nachgeführt.
 
@@ -1307,6 +1309,7 @@ Erscheint eine neuere Major-, Minor- oder Patchversion einer dieser drei Laufzei
 57. AI6-051 — Git-Repositories im SHA-1- und SHA-256-Objektformat unterstützen
 58. AI6-052 — Schaltbarer Gastzugang zu manuellen Prompt-Tools
 59. AI6-053 — Altes Ticket-Prompt-Tool durch Hinweis auf Smart Tickets ersetzen
+60. AI6-054 — AGENTS.md für moderne Coding-Agenten straffen
 ```
 
 Die Reihenfolge ist eine gültige Topologie, aber nicht jede unabhängige Arbeit muss künstlich seriell erfolgen. Innerhalb eines Meilensteins dürfen nur Tickets parallel entwickelt werden, deren `depends_on` vollständig erfüllt ist und die nicht denselben noch instabilen Vertrag definieren.
@@ -4186,6 +4189,47 @@ Das bisherige Ticket-Prompt-Tool unter `ticket-prompt/` durch einen Hinweis auf 
 - Entfernung von `ai/prompts/` oder `tools/`, Abschaltung des Legacy-Lesers aus Phase B von `AI6-038`, Änderungen am Promptkatalog, an `/prompts/help` oder an Smart Tickets.
 - Korrektur bestehender Validatorfehler in `tickets/`.
 
+### AI6-054 — AGENTS.md für moderne Coding-Agenten straffen
+
+- **Initialstatus des späteren Detailtickets:** `todo`
+- **Risiko:** `medium`
+- **Kind:** `chore`
+- **Depends on:** keine
+- **Requirement-Refs:** `REV-009`
+- **Erwartete Module:** keine; ausschließlich die Instruktionsdatei `AGENTS.md`
+
+**Ziel**
+
+`AGENTS.md` auf die dauerhaft gültigen, nicht aus Code, Plan oder Konfiguration ableitbaren Arbeits-, Architektur- und Sicherheitsregeln verdichten, ohne eine bestehende Regel zu verlieren, eine neue zu erfinden oder eine Architekturentscheidung zu ändern.
+
+**Deliverables**
+
+- `AGENTS.md` enthält keinen datierten Repositoryzustand mehr — weder Frontier-Commit, Ticket- und Gatestände, Modulinventar noch Planrevisionshistorie; Status und Backlog verweisen auf die Ticketdateien, Git und `tickets/README.md`.
+- Die Abschnittsnummern §1 bis §11 einschließlich §3.1, §8.1 und §8.2 bleiben mit ihrem Thema erhalten, damit bestehende Verweise aus `ai/prompts/`, `tickets/` und `docs/` auflösbar bleiben.
+- Jede Regel der bisherigen Fassung bleibt erhalten, wird mit einer gleichwertigen zusammengefasst oder entfällt nur als veralteter Zustand, Begründung, Historie oder Dopplung; die Fehlerbildtabelle wird zu Prüfregeln verdichtet.
+- Zielumfang etwa 100 Zeilen, ohne wichtige Regeln einem Zeilenlimit zu opfern; `CLAUDE.md`, Template, Produktcode und Tests bleiben unverändert.
+
+**Akzeptanzvertrag**
+
+- Sicherheitsinvarianten, Vertrauensgrenze, Sprachgrenze, Scope- und Statusregeln, Gate-Ehrlichkeit, Git-Regeln und Prüfbefehle sind in der neuen Fassung vollständig enthalten.
+- Alle in der neuen Fassung genannten Pfade, Klassen, Methoden, Befehle sowie Plan- und Templateabschnitte existieren.
+- Verweise auf `AGENTS.md` §1 bis §11 in aktiven Prompts und in der Backlog-Ansicht zeigen weiterhin auf dasselbe Thema.
+- Kein Produktcode, keine Konfiguration und kein Test ändert sich; die bestehenden Prüfungen bleiben grün.
+
+**Mindestens zu erzeugende Testfälle**
+
+- Zeilen- und Bytevergleich alter gegen neue Fassung sowie Nachweis der Abschnittsüberschriften.
+- Existenznachweis aller in der neuen Fassung genannten Pfade, Klassen, Methoden und Befehle.
+- Verweisprüfung der `AGENTS.md`-Abschnittszitate in `ai/prompts/` und `tickets/README.md`.
+- `git diff --check`, Manifest-Driftcheck und Ticketvalidator ohne zusätzliche Fehler.
+- Menschlicher Regel-für-Regel-Abgleich alter gegen neue Fassung.
+
+**Nicht Teil dieses Tickets**
+
+- Änderungen an `CLAUDE.md`, an Requirements, am Template, an `ai/prompts/`, an Produktcode oder an Tests.
+- Nachführung historischer Abschnittsverweise in abgeschlossenen Tickets und Nachweisdokumenten.
+- Neue Regeln oder geänderte Architektur-, Sicherheits- oder Prozessentscheidungen.
+
 ---
 
 ## 16. Requirement-Traceability
@@ -4251,7 +4295,7 @@ Jede normative Requirement-ID muss mindestens einem Blueprint zugeordnet sein. M
 | `REV-006` | `AI6-024`, `AI6-025`, `AI6-043` |
 | `REV-007` | `AI6-026` |
 | `REV-008` | `AI6-027`, `AI6-028`, `AI6-050` |
-| `REV-009` | `AI6-024` |
+| `REV-009` | `AI6-024`, `AI6-054` |
 | `REV-010` | `AI6-043` |
 | `REV-011` | `AI6-011`, `AI6-012`, `AI6-040`, `AI6-043` |
 | `HUM-001` | `AI6-016`, `AI6-018`, `AI6-028`, `AI6-043` |
@@ -4413,7 +4457,7 @@ Der MVP ist erreicht, wenn:
 
 ## 21. Kurzbegründung der Ticketanzahl
 
-59 Tickets sind für den Funktionsumfang bewusst kleiner als die bisherigen zehn Pakete, aber keine künstlichen Mikrotickets. Jeder Blueprint bildet eine reviewbare Grenze: Datenvertrag, vertikaler Benutzerfluss oder sicherheitsrelevante technische Naht. Die fünf mit V1.7.0 ergänzten Blueprints folgen demselben Schnitt: zwei für den Review-only-Modus (Statusvertrag getrennt von Quellbindung und Bedienung), zwei für die neuen Provideradapter (je CLI ein eigenständig testbarer Adapter) und einer für die providerunabhängige Verifier-Orchestrierung. `AI6-044` ergänzt als eigener manueller Benutzerfluss ausschließlich die Clipboard-Bedienung des zentralen Promptkatalogs und bleibt von Provider- und Runwirkung getrennt. `AI6-045` folgt demselben Schnitt als sicherheitsrelevante technische Naht: Die Definition eines Checks und sein rollenrichtiger Vollzug sind getrennt reviewbar, weil der Vollzug eigene Container-, Mount- und Wartezustandsverträge berührt, die die Profildefinition nicht kennt. Ein Ticket darf während der Detailerzeugung weiter gesplittet werden, aber nur über eine explizite Planrevision; ein stilles Zusammenlegen mehrerer Blueprints ist nicht zulässig.
+60 Tickets sind für den Funktionsumfang bewusst kleiner als die bisherigen zehn Pakete, aber keine künstlichen Mikrotickets. Jeder Blueprint bildet eine reviewbare Grenze: Datenvertrag, vertikaler Benutzerfluss oder sicherheitsrelevante technische Naht. Die fünf mit V1.7.0 ergänzten Blueprints folgen demselben Schnitt: zwei für den Review-only-Modus (Statusvertrag getrennt von Quellbindung und Bedienung), zwei für die neuen Provideradapter (je CLI ein eigenständig testbarer Adapter) und einer für die providerunabhängige Verifier-Orchestrierung. `AI6-044` ergänzt als eigener manueller Benutzerfluss ausschließlich die Clipboard-Bedienung des zentralen Promptkatalogs und bleibt von Provider- und Runwirkung getrennt. `AI6-045` folgt demselben Schnitt als sicherheitsrelevante technische Naht: Die Definition eines Checks und sein rollenrichtiger Vollzug sind getrennt reviewbar, weil der Vollzug eigene Container-, Mount- und Wartezustandsverträge berührt, die die Profildefinition nicht kennt. Ein Ticket darf während der Detailerzeugung weiter gesplittet werden, aber nur über eine explizite Planrevision; ein stilles Zusammenlegen mehrerer Blueprints ist nicht zulässig.
 
 `AI6-048` ist eine ausdrücklich beauftragte Nachlieferung zur fehlenden Umsetzung von `AI6-042`. Adapter, Doctor, Testdouble und Smoke beweisen gemeinsam genau eine Providergrenze und werden nicht in parallele Implementierungen aufgeteilt. Die frühere Konfigurationslieferung bleibt erhalten; die in V1.7.14 ausdrücklich freigegebene Sessionprojektion erweitert nur diese vorhandene Providergrenze und konsumiert den bestehenden AgentProcessScope. Eine weitere Mount-/Namespacearchitektur gehört nicht dazu. Claude-Modellprofile aus `AI6-034` konsumieren erst danach diese eine Copilot-Naht.
 
@@ -4426,3 +4470,5 @@ Der MVP ist erreicht, wenn:
 Die in V1.7.13 ausdrücklich freigegebene Etappierung von `AI6-037` und `AI6-038` erhält deren veröffentlichte Lieferverträge und Evidenz-IDs. Promptzuordnung und erster V1-Pilot dürfen vor dem späteren Legacy-Migrationsnachweis geliefert werden; die verbleibenden Kriterien und Gates werden weder gestrichen noch als bestanden behandelt. Die Blueprintanzahl bleibt 58.
 
 `AI6-053` ist nach V1.7.15 eine eigene, produktcodefreie Repository-Bereinigung: Sie ersetzt ausschließlich das statusschreibende Alttool durch einen Hinweis auf Smart Tickets, damit nur noch eine gepflegte Fassung dieses Werkzeugs existiert. Sie gehört weder zur Promptzuordnung oder Migration aus `AI6-037` noch zum Legacy-Cutoff aus `AI6-038`, deren Ausschlüsse unverändert bleiben. Die Blueprintanzahl steigt damit auf 59.
+
+`AI6-054` ist nach V1.7.16 eine eigene, produktcodefreie Instruktionspflege: Sie ändert ausschließlich `AGENTS.md`, verdichtet vorhandene Regeln und bleibt von Requirements, Template, Prompts und Produktcode getrennt. Die Blueprintanzahl steigt damit auf 60.
